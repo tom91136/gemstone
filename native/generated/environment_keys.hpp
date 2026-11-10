@@ -6,6 +6,7 @@
 namespace gemstone::environment {
 inline constexpr char ContainerExe[] = "GEMSTONE_CONTAINER_EXE";
 inline constexpr char CudaCodeMode[] = "GEMSTONE_CUDA_CODE_MODE";
+inline constexpr char Device[] = "GEMSTONE_DEVICE";
 inline constexpr char DeviceCount[] = "GEMSTONE_DEVICE_COUNT";
 inline constexpr uint64_t DeviceCountDefault = 1;
 inline constexpr char ExecutionMaxInstructionCount[] = "GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT";

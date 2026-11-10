@@ -16,6 +16,7 @@
 #include <aspartame/vector.hpp>
 
 #include <environment_keys.hpp>
+#include <gemstone_device_presets.hpp>
 
 namespace gemstone::environment {
 
@@ -108,6 +109,17 @@ inline std::optional<std::string> unlisted(const char *name, const std::vector<s
   return rejected(name, raw, "one of " + (choices ^ mk_string(" ")));
 }
 
+inline std::optional<DevicePreset> selectedDevicePreset() {
+  const char *name = value(Device);
+  return name ? devicePreset(name) : std::nullopt;
+}
+
+inline std::optional<std::string_view> targetArch() {
+  if (const char *raw = value(TargetArch)) return std::string_view(raw);
+  if (const auto device = selectedDevicePreset()) return device->target;
+  return std::nullopt;
+}
+
 /** The first malformed setting shared by every shim; each shim adds the settings only it reads. */
 inline std::optional<std::string> invalid() {
   for (const char *name : {OpenclScanBufferPointersOn, SystemPagingOn, VulkanValidateAllocatorsOn})
@@ -123,6 +135,11 @@ inline std::optional<std::string> invalid() {
     }
   if (const char *raw = value(TimeoutScale); raw && !positiveThousandths(raw))
     return rejected(TimeoutScale, raw, PositiveThousandthsExpected);
+  if (const char *raw = value(Device); raw && !selectedDevicePreset())
+    return rejected(Device, raw, "a known device preset name");
+  if (const auto device = selectedDevicePreset())
+    if (const char *target = value(TargetArch); target && std::string_view(target) != device->target)
+      return rejected(TargetArch, target, std::string(device->target) + " for " + std::string(device->name));
   if (auto problem = unlisted(CudaCodeMode, {"ptx", "sass"})) return problem;
   if (auto problem = unlisted(ProfileName, {"amd", "nvidia", "intel", "llvmpipe", "rusticl-amd", "rusticl-intel", "rusticl-llvmpipe"}))
     return problem;

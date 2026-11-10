@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <gemstone/environment.hpp>
 #include <gemstone_amdgpu_target.hpp>
@@ -14,8 +15,17 @@ inline constexpr char DefaultTarget[] = "gfx900";
 
 /** The target presented by the virtual HSA/ HIP providers. */
 inline const char *targetArch() noexcept {
-  const char *value = gemstone::environment::value(gemstone::environment::TargetArch);
-  return value != nullptr && value[0] != '\0' ? value : DefaultTarget;
+  if (const char *value = gemstone::environment::value(gemstone::environment::TargetArch)) return value;
+  // preset targets are string literals, so data() is NUL-terminated
+  if (const auto device = gemstone::environment::selectedDevicePreset()) return device->target.data();
+  return DefaultTarget;
+}
+
+/** The selected device preset when it is the card of `target`. */
+inline std::optional<DevicePreset> targetPreset(std::string_view target) {
+  const auto device = gemstone::environment::selectedDevicePreset();
+  if (device && device->target == target) return device;
+  return std::nullopt;
 }
 
 struct TargetVersion {
@@ -45,10 +55,11 @@ inline TargetVersion targetVersion() noexcept { return targetVersion(targetArch(
 
 inline std::optional<std::string> invalidEnvironment() {
   if (auto problem = gemstone::environment::invalid()) return problem;
-  const char *value = gemstone::environment::value(gemstone::environment::TargetArch);
-  if (value && targetVersion(value).major == 0)
+  if (targetVersion(targetArch()).major != 0) return std::nullopt;
+  if (const char *value = gemstone::environment::value(gemstone::environment::TargetArch))
     return gemstone::environment::rejected(gemstone::environment::TargetArch, value, "a gfxNNN target");
-  return std::nullopt;
+  return gemstone::environment::rejected(gemstone::environment::Device, gemstone::environment::value(gemstone::environment::Device),
+                                         "a device preset with a gfxNNN target");
 }
 
 } // namespace gemstone::hsa

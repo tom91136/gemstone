@@ -44,6 +44,7 @@ object GenerateEnvironment {
     Vector(
       "GEMSTONE_CONTAINER_EXE"                   -> "",
       "GEMSTONE_CUDA_CODE_MODE"                  -> "",
+      "GEMSTONE_DEVICE"                          -> "",
       "GEMSTONE_DEVICE_COUNT"                    -> "1",
       "GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT" -> "",
       "GEMSTONE_EXECUTION_THREAD_COUNT"          -> "",

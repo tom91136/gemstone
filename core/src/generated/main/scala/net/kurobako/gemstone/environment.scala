@@ -6,6 +6,7 @@ import net.kurobako.gemstone.constraint.*
 object environment {
   val ContainerExe: String = "GEMSTONE_CONTAINER_EXE"
   val CudaCodeMode: String = "GEMSTONE_CUDA_CODE_MODE"
+  val Device: String = "GEMSTONE_DEVICE"
   val DeviceCount: String = "GEMSTONE_DEVICE_COUNT"
   val DeviceCountDefault: Long > 0 = 1L
   val ExecutionMaxInstructionCount: String = "GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT"

@@ -1216,7 +1216,7 @@ extern "C" hipError_t hipDeviceGetName(char *name, int length, hipDevice_t devic
 
 extern "C" hipError_t hipDeviceTotalMem(size_t *bytes, hipDevice_t device) {
   if (!bytes || !validDevice(device)) return remember(hipErrorInvalidValue);
-  *bytes = DeviceTotalMemoryBytes;
+  *bytes = gemstone::hsa::deviceModel().globalMemoryBytes;
   return remember(hipSuccess);
 }
 
@@ -1227,7 +1227,7 @@ extern "C" hipError_t hipMemGetInfo(size_t *free, size_t *total) {
   if (hsa_agent_get_info(gpuAgent(currentDevice), static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL), &available)
       != HSA_STATUS_SUCCESS)
     return remember(hipErrorInvalidDevice);
-  *total = DeviceTotalMemoryBytes;
+  *total = gemstone::hsa::deviceModel().globalMemoryBytes;
   *free = available;
   return remember(hipSuccess);
 }
@@ -1269,7 +1269,9 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeMaxThreadsPerMultiProcessor: *value = static_cast<int>(model.threadsPerProcessor()); break;
     case hipDeviceAttributeMultiprocessorCount: *value = static_cast<int>(model.processors()); break;
     case hipDeviceAttributeMaxSharedMemoryPerMultiprocessor: *value = static_cast<int>(model.groupMemoryPerProcessor()); break;
-    case hipDeviceAttributeTotalGlobalMem: *value = static_cast<int>(DeviceTotalMemoryBytes); break;
+    case hipDeviceAttributeTotalGlobalMem:
+      *value = static_cast<int>(std::min<size_t>(model.globalMemoryBytes, std::numeric_limits<int>::max()));
+      break;
     case hipDeviceAttributeUnifiedAddressing:
     case hipDeviceAttributeCanMapHostMemory:
     case hipDeviceAttributeHostNativeAtomicSupported:
@@ -1299,7 +1301,7 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   const std::string name = std::string("Gemstone ") + target;
   std::strncpy(properties->name, name.c_str(), sizeof(properties->name) - 1U);
   std::strncpy(properties->gcnArchName, target.c_str(), sizeof(properties->gcnArchName) - 1U);
-  properties->totalGlobalMem = DeviceTotalMemoryBytes;
+  properties->totalGlobalMem = model.globalMemoryBytes;
   properties->sharedMemPerBlock = DeviceSharedMemoryPerBlock;
   properties->regsPerBlock = static_cast<int>(model.registersPerProcessor());
   properties->warpSize = static_cast<int>(gemstone::hsa::waveSize());
@@ -1380,7 +1382,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   std::strncpy(reinterpret_cast<char *>(bytes + Name), name.c_str(), NameSize - 1);
   std::strncpy(reinterpret_cast<char *>(bytes + ArchName), target.c_str(), 255);
   const auto write = [bytes](size_t offset, auto value) { std::memcpy(bytes + offset, &value, sizeof(value)); };
-  write(TotalGlobalMem, DeviceTotalMemoryBytes);
+  write(TotalGlobalMem, model.globalMemoryBytes);
   write(SharedMemPerBlock, DeviceSharedMemoryPerBlock);
   write(WarpSize, static_cast<int>(gemstone::hsa::waveSize()));
   write(MaxThreadsPerBlock, int(MaxBlockThreads));

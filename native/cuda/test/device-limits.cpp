@@ -91,3 +91,58 @@ TEST_CASE("CUDA runtime device limits reach the context limit", "[cuda][limits]"
   CHECK(value == (size_t{32} << 20));
   CHECK(cudaDeviceGetLimit(nullptr, cudaLimitMallocHeapSize) == cudaErrorInvalidValue);
 }
+
+TEST_CASE("CUDA reports the multiprocessors, clocks, memory, bus and L2 of the selected device preset", "[cuda][limits]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 5080");
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_120");
+  REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  int multiprocessors = 0;
+  int clockRate = 0;
+  int memoryClockRate = 0;
+  int bus = 0;
+  int l2 = 0;
+  REQUIRE(cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&clockRate, cudaDevAttrClockRate, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&memoryClockRate, cudaDevAttrMemoryClockRate, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&bus, cudaDevAttrGlobalMemoryBusWidth, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&l2, cudaDevAttrL2CacheSize, 0) == cudaSuccess);
+  CHECK(multiprocessors == 84);
+  CHECK(clockRate == 2617000);
+  CHECK(memoryClockRate == 15000000);
+  CHECK(bus == 256);
+  CHECK(l2 == 64 * 1024 * 1024);
+
+  size_t bytes = 0;
+  REQUIRE(cuDeviceTotalMem_v2(&bytes, 0) == CUDA_SUCCESS);
+  CHECK(bytes == size_t{16} << 30);
+
+  cudaDeviceProp properties{};
+  REQUIRE(cudaGetDeviceProperties(&properties, 0) == cudaSuccess);
+  CHECK(properties.multiProcessorCount == 84);
+  CHECK(properties.totalGlobalMem == size_t{16} << 30);
+}
+
+TEST_CASE("CUDA device preset selects its target when GEMSTONE_TARGET_ARCH is unset", "[cuda][limits]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 5080");
+  REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  int major = 0;
+  int minor = 0;
+  int multiprocessors = 0;
+  REQUIRE(cudaDeviceGetAttribute(&major, cudaDevAttrComputeCapabilityMajor, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&minor, cudaDevAttrComputeCapabilityMinor, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&multiprocessors, cudaDevAttrMultiProcessorCount, 0) == cudaSuccess);
+  CHECK(major == 12);
+  CHECK(minor == 0);
+  CHECK(multiprocessors == 84);
+}
+
+TEST_CASE("CUDA rejects an unknown device preset at initialisation", "[cuda][limits]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 9999");
+  CHECK(cuInit(0) == CUDA_ERROR_NOT_INITIALIZED);
+}
+
+TEST_CASE("CUDA rejects a target that conflicts with the selected device preset", "[cuda][limits]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 5080");
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  CHECK(cuInit(0) == CUDA_ERROR_NOT_INITIALIZED);
+}

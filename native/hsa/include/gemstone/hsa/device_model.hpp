@@ -21,6 +21,7 @@ struct DeviceModel {
   uint32_t computeUnitsPerProcessor;
   uint32_t computeUnits;
   uint32_t clockMHz;
+  size_t globalMemoryBytes;
   bool imageInstructions;
   bool imageGatherLod;
 
@@ -49,15 +50,18 @@ inline DeviceModel deviceModel(std::string_view target) {
     if (unifiedRegisters) return 512U;
     return 256U;
   }();
-  const uint32_t perProcessor = rdna ? 2U : 1U;
+  const auto device = targetPreset(target);
+  // a preset counts compute units, so each one is a processor
+  const uint32_t perProcessor = rdna && !device ? 2U : 1U;
   return DeviceModel{
       .waveSize = wave,
       .simdsPerComputeUnit = simds,
       .wavesPerSimd = waves,
       .registersPerSimd = registers * wave,
       .computeUnitsPerProcessor = perProcessor,
-      .computeUnits = EmulatedProcessors * perProcessor,
-      .clockMHz = static_cast<uint32_t>(TimestampHz / 1'000'000),
+      .computeUnits = device ? static_cast<uint32_t>(device->multiprocessors) : EmulatedProcessors * perProcessor,
+      .clockMHz = device ? static_cast<uint32_t>(device->boostMhz) : static_cast<uint32_t>(TimestampHz / 1'000'000),
+      .globalMemoryBytes = device ? static_cast<size_t>(device->memoryBytes) : GlobalMemoryBytes,
       .imageInstructions = !target.starts_with("gfx94") && !target.starts_with("gfx95"),
       .imageGatherLod = !target.starts_with("gfx90a") && !target.starts_with("gfx94") && !target.starts_with("gfx95"),
   };

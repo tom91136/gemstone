@@ -285,8 +285,8 @@ std::optional<int> parsePtxTarget(std::string_view target) {
 }
 
 std::optional<int> configuredPtxVersion() {
-  const char *value = gemstone::environment::value(gemstone::environment::TargetArch);
-  return value && *value != '\0' ? parsePtxTarget(value) : std::nullopt;
+  const auto target = gemstone::environment::targetArch();
+  return target ? parsePtxTarget(*target) : std::nullopt;
 }
 
 gemstone::TargetMemory targetMemory() {
@@ -303,16 +303,33 @@ bool codeRequired(std::string_view mode) {
 bool sassCodeRequired() { return codeRequired("sass"); }
 
 bool environmentAccepted() {
-  auto problem = gemstone::environment::invalid();
-  const char *target = gemstone::environment::value(gemstone::environment::TargetArch);
-  if (!problem && target && !configuredPtxVersion())
-    problem = gemstone::environment::rejected(gemstone::environment::TargetArch, target, "a compute_NN or sm_NN target");
-  return gemstone::environment::accepted(problem);
+  using namespace gemstone::environment;
+  auto problem = invalid();
+  if (!problem && targetArch() && !configuredPtxVersion()) {
+    if (present(TargetArch)) problem = rejected(TargetArch, value(TargetArch), "a compute_NN or sm_NN target");
+    else problem = rejected(Device, value(Device), "a device preset with a compute_NN or sm_NN target");
+  }
+  return accepted(problem);
 }
 
 std::optional<std::pair<int, int>> computeCapability() {
   return configuredPtxVersion() ^ map([](int target) { return std::pair{target / 10, target % 10}; })
          ^ filter([](int major, int) { return major > 0; });
+}
+
+struct DeviceSpec {
+  int32_t multiprocessors;
+  int32_t clockRateKhz;
+  int32_t memoryClockRateKhz;
+  size_t totalGlobalMemoryBytes;
+};
+
+DeviceSpec deviceSpec() {
+  if (const auto device = gemstone::environment::selectedDevicePreset())
+    // the memory clock is the DDR clock, half the transfer rate
+    return {device->multiprocessors, device->boostMhz * 1000, device->memoryMTps * 500, static_cast<size_t>(device->memoryBytes)};
+  return {device_limits::MultiprocessorCount, device_limits::ClockRateKhz, device_limits::MemoryClockRateKhz,
+          device_limits::TotalGlobalMemoryBytes};
 }
 
 bool keplerDevice() {
@@ -2480,7 +2497,7 @@ CUresult cuDeviceGetByPCIBusId(CUdevice *device, const char *busId) {
 
 CUresult cuDeviceTotalMem_v2(size_t *bytes, CUdevice device) {
   if (!bytes || !validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
-  *bytes = device_limits::TotalGlobalMemoryBytes;
+  *bytes = deviceSpec().totalGlobalMemoryBytes;
   return CUDA_SUCCESS;
 }
 
@@ -2513,7 +2530,7 @@ CUresult cuDeviceGetProperties(CUdevprop *properties, CUdevice device) {
   properties->SIMDWidth = device_limits::WarpSize;
   properties->memPitch = device_limits::MaxPitch;
   properties->regsPerBlock = device_limits::MaxRegistersPerBlock;
-  properties->clockRate = device_limits::ClockRateKhz;
+  properties->clockRate = deviceSpec().clockRateKhz;
   properties->textureAlign = device_limits::TextureAlignment;
   return CUDA_SUCCESS;
 }
@@ -2882,7 +2899,7 @@ CUresult cuMemHostUnregister(void *pointer) {
 
 CUresult cuMemGetInfo_v2(size_t *freeBytes, size_t *totalBytes) {
   if (!freeBytes || !totalBytes) return CUDA_ERROR_INVALID_VALUE;
-  *totalBytes = device_limits::TotalGlobalMemoryBytes;
+  *totalBytes = deviceSpec().totalGlobalMemoryBytes;
   *freeBytes = *totalBytes - std::min<uint64_t>(deviceLedger.used(static_cast<uint32_t>(activeDevice())), *totalBytes);
   return CUDA_SUCCESS;
 }
@@ -4226,7 +4243,7 @@ CUresult cuOccupancyMaxActiveClusters(int *clusters, CUfunction function, const 
   const auto shared = static_cast<uint64_t>(config->sharedMemBytes) + static_cast<uint32_t>(staticBytes);
   if (shared > device_limits::MaxSharedMemoryPerBlockOptin) blocks = 0;
   else if (shared != 0) blocks = std::min(blocks, static_cast<int>(device_limits::MaxSharedMemoryPerMultiprocessor / shared));
-  *clusters = static_cast<int>(static_cast<uint64_t>(blocks) * device_limits::MultiprocessorCount / volume);
+  *clusters = static_cast<int>(static_cast<uint64_t>(blocks) * deviceSpec().multiprocessors / volume);
   return CUDA_SUCCESS;
 }
 
@@ -4252,7 +4269,7 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
       if (const auto status = occupancyMaxBlocks(&residentPerMultiprocessor, static_cast<int>(blockX * blockY * blockZ));
           status != CUDA_SUCCESS)
         return status;
-      const auto resident = static_cast<uint64_t>(residentPerMultiprocessor) * device_limits::MultiprocessorCount;
+      const auto resident = static_cast<uint64_t>(residentPerMultiprocessor) * deviceSpec().multiprocessors;
       if (static_cast<uint64_t>(gridX) * gridY * gridZ > resident) return CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE;
     }
     const uint64_t globalX = static_cast<uint64_t>(gridX) * blockX;
@@ -5001,6 +5018,7 @@ cudaError_t cudaDeviceGetLimit(size_t *value, cudaLimit limit) {
 cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int device) {
   if (!value || !validDevice(device)) return cudaErrorInvalidValue;
   using namespace device_limits;
+  const auto spec = deviceSpec();
   switch (attribute) {
     case cudaDevAttrMaxThreadsPerBlock: *value = MaxThreadsPerBlock; break;
     case cudaDevAttrMaxBlockDimX: *value = MaxBlockDimX; break;
@@ -5014,10 +5032,10 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrWarpSize: *value = WarpSize; break;
     case cudaDevAttrMaxPitch: *value = MaxPitch; break;
     case cudaDevAttrMaxRegistersPerBlock: *value = MaxRegistersPerBlock; break;
-    case cudaDevAttrClockRate: *value = ClockRateKhz; break;
+    case cudaDevAttrClockRate: *value = spec.clockRateKhz; break;
     case cudaDevAttrTextureAlignment: *value = TextureAlignment; break;
     case cudaDevAttrGpuOverlap: *value = 1; break;
-    case cudaDevAttrMultiProcessorCount: *value = MultiprocessorCount; break;
+    case cudaDevAttrMultiProcessorCount: *value = spec.multiprocessors; break;
     case cudaDevAttrKernelExecTimeout: *value = 0; break;
     case cudaDevAttrIntegrated: *value = 0; break;
     case cudaDevAttrCanMapHostMemory: *value = 1; break;
@@ -5037,7 +5055,7 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrPciBusId: *value = PciBusId + device; break;
     case cudaDevAttrPciDeviceId: *value = PciDeviceId; break;
     case cudaDevAttrTccDriver: *value = 0; break;
-    case cudaDevAttrMemoryClockRate: *value = MemoryClockRateKhz; break;
+    case cudaDevAttrMemoryClockRate: *value = spec.memoryClockRateKhz; break;
     case cudaDevAttrGlobalMemoryBusWidth: *value = targetMemory().busWidthBits; break;
     case cudaDevAttrL2CacheSize: *value = targetMemory().l2Bytes; break;
     case cudaDevAttrMaxThreadsPerMultiProcessor: *value = MaxThreadsPerMultiprocessor; break;
@@ -5121,9 +5139,10 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
 // The symbol is unversioned: older runtimes allocate shorter structures, so only the leading fields are written.
 cudaError_t cudaGetDeviceProperties(cudaDeviceProp *properties, int device) {
   if (!properties || !validDevice(device)) return cudaErrorInvalidValue;
+  const auto spec = deviceSpec();
   std::memset(properties, 0, offsetof(cudaDeviceProp, multiProcessorCount) + sizeof(properties->multiProcessorCount));
   std::memcpy(properties->name, DeviceName, sizeof(DeviceName));
-  properties->totalGlobalMem = device_limits::TotalGlobalMemoryBytes;
+  properties->totalGlobalMem = spec.totalGlobalMemoryBytes;
   properties->sharedMemPerBlock = device_limits::MaxSharedMemoryPerBlock;
   properties->regsPerBlock = device_limits::MaxRegistersPerBlock;
   properties->warpSize = device_limits::WarpSize;
@@ -5142,7 +5161,7 @@ cudaError_t cudaGetDeviceProperties(cudaDeviceProp *properties, int device) {
   properties->minor = capability->second;
   properties->textureAlignment = device_limits::TextureAlignment;
   properties->texturePitchAlignment = device_limits::TexturePitchAlignment;
-  properties->multiProcessorCount = device_limits::MultiprocessorCount;
+  properties->multiProcessorCount = spec.multiprocessors;
   return cudaSuccess;
 }
 

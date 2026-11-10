@@ -12,8 +12,11 @@
 #include <aspartame/vector.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <gemstone/test_support.hpp>
+
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "session.hpp"
+#include <environment_keys.hpp>
 
 using namespace aspartame;
 
@@ -708,4 +711,18 @@ TEST_CASE("OpenCL reports cl_khr_kernel_clock at every scope and its OpenCL C fe
     INFO(feature);
     CHECK((features ^ exists([&](const cl_name_version &entry) { return std::string(entry.name) == feature; })));
   }
+}
+
+TEST_CASE("OpenCL reports the compute units, clock and memory of the selected device preset", "[opencl][capability]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 5080");
+  auto *const root = gpu();
+  CHECK(info<cl_uint>(root, CL_DEVICE_MAX_COMPUTE_UNITS) == 84);
+  CHECK(info<cl_uint>(root, CL_DEVICE_MAX_CLOCK_FREQUENCY) == 2617);
+  CHECK(info<cl_ulong>(root, CL_DEVICE_GLOBAL_MEM_SIZE) == cl_ulong{16} << 30);
+}
+
+TEST_CASE("OpenCL rejects an unknown device preset at platform discovery", "[opencl][capability]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 9999");
+  cl_platform_id platform = nullptr;
+  CHECK(clGetPlatformIDs(1, &platform, nullptr) == CL_PLATFORM_NOT_FOUND_KHR);
 }

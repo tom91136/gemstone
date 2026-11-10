@@ -303,6 +303,23 @@ constexpr size_t Image3DMaxSize = 2048;
 constexpr size_t ImageMaxArraySize = 2048;
 constexpr size_t ImageMaxBufferSize = size_t{1} << 24;
 constexpr cl_uint PipeMaxPacketSize = 1024;
+
+cl_uint maxClockFrequency() {
+  const auto device = gemstone::environment::selectedDevicePreset();
+  return device ? static_cast<cl_uint>(device->boostMhz) : cl_uint{1000};
+}
+
+cl_ulong globalMemSize() {
+  const auto device = gemstone::environment::selectedDevicePreset();
+  return device ? static_cast<cl_ulong>(device->memoryBytes) : cl_ulong{0x80000000};
+}
+
+uint32_t computeUnitsOf(const _cl_device_id &device) {
+  if (device.parent) return device.computeUnits;
+  const auto preset = gemstone::environment::selectedDevicePreset();
+  return preset ? static_cast<uint32_t>(preset->multiprocessors) : RootComputeUnits;
+}
+
 namespace spirv_capability {
 constexpr cl_uint Addresses = 4, Linkage = 5, Kernel = 6, Vector16 = 7, Float16Buffer = 8, Float16 = 9, Float64 = 10, Int64 = 11,
                   Int64Atomics = 12, ImageBasic = 13, ImageReadWrite = 14, Pipes = 17, Groups = 18, DeviceEnqueue = 19, LiteralSampler = 20,
@@ -649,7 +666,10 @@ bool coveredBy(const _cl_device_id *device, cl_uint count, const cl_device_id *d
   return false;
 }
 
-uint32_t maxSubDevices(const _cl_device_id &device) { return device.computeUnits > 1 ? device.computeUnits : 0; }
+uint32_t maxSubDevices(const _cl_device_id &device) {
+  const auto units = computeUnitsOf(device);
+  return units > 1 ? units : 0;
+}
 
 struct PartitionLayout {
   std::vector<uint32_t> counts;
@@ -657,7 +677,7 @@ struct PartitionLayout {
 };
 
 cl_int layoutPartition(const _cl_device_id &parent, const cl_device_partition_property *properties, PartitionLayout &layout) {
-  const cl_device_partition_property units = parent.computeUnits;
+  const cl_device_partition_property units = computeUnitsOf(parent);
   switch (properties[0]) {
     case CL_DEVICE_PARTITION_EQUALLY: {
       if (properties[2] != 0) return CL_INVALID_VALUE;
@@ -1350,7 +1370,7 @@ CL_API_ENTRY cl_int CL_API_CALL clCreateSubDevices(cl_device_id value, const cl_
   if (!properties || (!devices && !created)) return CL_INVALID_VALUE;
   PartitionLayout layout;
   if (const auto status = layoutPartition(*parent, properties, layout); status != CL_SUCCESS) return status;
-  if (layout.counts.size() == 1 && layout.counts.front() == parent->computeUnits) return CL_DEVICE_PARTITION_FAILED;
+  if (layout.counts.size() == 1 && layout.counts.front() == computeUnitsOf(*parent)) return CL_DEVICE_PARTITION_FAILED;
   if (devices && count < layout.counts.size()) return CL_INVALID_VALUE;
   if (created) *created = static_cast<cl_uint>(layout.counts.size());
   if (!devices) return CL_SUCCESS;
@@ -1399,7 +1419,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_NUM_EUS_PER_SUB_SLICE_INTEL: return outputScalar(size, output, written, cl_uint{8});
     case CL_DEVICE_NUM_THREADS_PER_EU_INTEL: return outputScalar(size, output, written, cl_uint{7});
     case CL_DEVICE_FEATURE_CAPABILITIES_INTEL: return outputScalar(size, output, written, cl_device_feature_capabilities_intel{0});
-    case CL_DEVICE_MAX_COMPUTE_UNITS: return outputScalar(size, output, written, cl_uint{value->computeUnits});
+    case CL_DEVICE_MAX_COMPUTE_UNITS: return outputScalar(size, output, written, cl_uint{computeUnitsOf(*value)});
     case CL_DEVICE_MAX_WORK_ITEM_DIMENSIONS: return outputScalar(size, output, written, cl_uint{3});
     case CL_DEVICE_MAX_WORK_GROUP_SIZE: return outputScalar(size, output, written, MaxWorkGroupSize);
     case CL_DEVICE_MAX_WORK_ITEM_SIZES: return outputBytes(size, output, written, workSizes.data(), sizeof(workSizes));
@@ -1417,7 +1437,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_NATIVE_VECTOR_WIDTH_FLOAT:
     case CL_DEVICE_NATIVE_VECTOR_WIDTH_DOUBLE:
     case CL_DEVICE_NATIVE_VECTOR_WIDTH_HALF: return outputScalar(size, output, written, cl_uint{1});
-    case CL_DEVICE_MAX_CLOCK_FREQUENCY: return outputScalar(size, output, written, cl_uint{1000});
+    case CL_DEVICE_MAX_CLOCK_FREQUENCY: return outputScalar(size, output, written, maxClockFrequency());
     case CL_DEVICE_ADDRESS_BITS: return outputScalar(size, output, written, cl_uint{64});
     case CL_DEVICE_MAX_MEM_ALLOC_SIZE: return outputScalar(size, output, written, MaxMemAllocSize);
     case CL_DEVICE_MAX_READ_IMAGE_ARGS: return outputScalar(size, output, written, cl_uint{128});
@@ -1456,7 +1476,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_GLOBAL_MEM_CACHE_TYPE: return outputScalar(size, output, written, cl_uint{CL_NONE});
     case CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE: return outputScalar(size, output, written, cl_uint{64});
     case CL_DEVICE_GLOBAL_MEM_CACHE_SIZE: return outputScalar(size, output, written, cl_ulong{0});
-    case CL_DEVICE_GLOBAL_MEM_SIZE: return outputScalar(size, output, written, cl_ulong{0x80000000});
+    case CL_DEVICE_GLOBAL_MEM_SIZE: return outputScalar(size, output, written, globalMemSize());
     case CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE: return outputScalar(size, output, written, cl_ulong{0x10000});
     case CL_DEVICE_MAX_CONSTANT_ARGS: return outputScalar(size, output, written, cl_uint{8});
     case CL_DEVICE_LOCAL_MEM_TYPE: return outputScalar(size, output, written, cl_uint{CL_LOCAL});
@@ -5009,7 +5029,6 @@ void initialiseDispatch() {
       root.dispatch = &dispatch;
       root.platform = &platform;
       root.ordinal = index;
-      root.computeUnits = RootComputeUnits;
     }
     gemstone::opencl::populateDispatch(dispatch);
   });

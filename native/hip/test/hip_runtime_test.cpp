@@ -1173,6 +1173,70 @@ TEST_CASE("HIP occupancy reports a block size for a registered kernel", "[hip]")
   __hipUnregisterFatBinary(token);
 }
 
+TEST_CASE("HIP reports the multiprocessors, clock and memory of the selected device preset", "[hip]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
+  hipDeviceProp_tR0600 properties{};
+  REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
+  CHECK((properties.multiProcessorCount == 64));
+  CHECK((properties.clockRate == 2970000));
+  CHECK((properties.totalGlobalMem == size_t{16} << 30));
+  CHECK((properties.memoryBusWidth == 256));
+  CHECK((properties.l2CacheSize == 8 * 1024 * 1024));
+  int count = 0;
+  REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeMultiprocessorCount, 0) == hipSuccess));
+  CHECK((count == 64));
+  REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeClockRate, 0) == hipSuccess));
+  CHECK((count == 2970000));
+  REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeTotalGlobalMem, 0) == hipSuccess));
+  CHECK((count == std::numeric_limits<int>::max()));
+  size_t bytes = 0;
+  REQUIRE((hipDeviceTotalMem(&bytes, 0) == hipSuccess));
+  CHECK((bytes == size_t{16} << 30));
+}
+
+TEST_CASE("HIP device preset selects its target when GEMSTONE_TARGET_ARCH is unset", "[hip]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
+  hipDeviceProp_tR0600 properties{};
+  REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
+  CHECK((std::strcmp(properties.gcnArchName, "gfx1201") == 0));
+  CHECK((properties.warpSize == 32));
+}
+
+TEST_CASE("HIP occupancy follows the multiprocessors of the selected device preset", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
+  const auto bundle = offloadBundle(gemstone::hsa::test::codeObjectFixture(1, true, true));
+  const std::array<const void *, 3> wrapper{nullptr, bundle.data(), nullptr};
+  void **const token = __hipRegisterFatBinary(wrapper.data());
+  __hipRegisterFunction(token, reinterpret_cast<const void *>(&occupancyStub), nullptr, "add", 0, nullptr, nullptr, nullptr, nullptr,
+                        nullptr);
+  int minGridSize = 0;
+  int blockSize = 0;
+  REQUIRE(
+      (hipOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, reinterpret_cast<const void *>(&occupancyStub), 0, 0) == hipSuccess));
+  int blocksPerProcessor = 0;
+  REQUIRE((hipOccupancyMaxActiveBlocksPerMultiprocessor(&blocksPerProcessor, reinterpret_cast<const void *>(&occupancyStub), blockSize, 0)
+           == hipSuccess));
+  CHECK((minGridSize == blocksPerProcessor * 64));
+  __hipUnregisterFatBinary(token);
+}
+
+TEST_CASE("HIP rejects a device preset that has no AMD target", "[hip]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 5080");
+  hipDeviceProp_tR0600 properties{};
+  CHECK((hipGetDevicePropertiesR0600(&properties, 0) == hipErrorNotInitialized));
+  int count = 0;
+  CHECK((hipDeviceGetAttribute(&count, hipDeviceAttributeMultiprocessorCount, 0) == hipErrorNotInitialized));
+}
+
+TEST_CASE("HIP rejects a target that conflicts with the selected device preset", "[hip]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1030");
+  hipDeviceProp_tR0600 properties{};
+  CHECK((hipGetDevicePropertiesR0600(&properties, 0) == hipErrorNotInitialized));
+}
+
 TEST_CASE("HIP first-call launch child", "[.]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
