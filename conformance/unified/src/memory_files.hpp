@@ -24,7 +24,7 @@
 #endif
 
 inline std::vector<char> image([[maybe_unused]] std::string_view name) {
-  const auto select = [&] -> std::vector<char> {
+  const auto select = [&]() -> std::vector<char> {
 #ifdef UNIFIED_API_CUDA
     const char *code = std::getenv(conformance::environment::CudaCodeMode);
     if (code && std::string_view(code) == "sass") {
