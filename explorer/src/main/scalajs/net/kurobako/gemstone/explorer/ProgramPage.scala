@@ -55,6 +55,11 @@ object ProgramPage {
       case _                                 => None
     }
 
+    val summary = loaded.signal.combineWith(heat).map {
+      case (Some(program), Some((profile, _, top))) => Some(HeatView.summary(profile, top, program.listing.toOption))
+      case _                                        => None
+    }
+
     def target: Option[String] = targets(language.now()).now()
 
     def clear(): Unit = {
@@ -205,8 +210,7 @@ object ProgramPage {
                       span(cls := "text", line.text)
                     )
                   }
-                ),
-                profiled.map((profile, _, top) => HeatView.summary(profile, top, program.listing.toOption))
+                )
               )
             case (None, _, _, _, _, _) => div(cls := "empty", "Load a program to list its instructions.")
           }
@@ -219,6 +223,7 @@ object ProgramPage {
           }
         )
       ),
+      child <-- summary.map(_.getOrElse(emptyNode)),
       child <-- blocks.map(_.fold(emptyNode)(BlockAnalysisPanel.render)),
       div(
         cls := "timeline-pane",
