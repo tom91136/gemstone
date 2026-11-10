@@ -348,5 +348,10 @@ if(BUILD_TESTING)
     add_test(NAME "dso/${target}-exports"
       COMMAND "${CMAKE_COMMAND}" "-DNM=${CMAKE_NM}" "-DLIBRARY=$<TARGET_FILE:${target}>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckExports.cmake")
+    if(GEMSTONE_SYSROOT)
+      add_test(NAME "dso/${target}-package"
+        COMMAND "${CMAKE_COMMAND}" "-DREADELF=${CMAKE_READELF}" "-DLIBRARY=$<TARGET_FILE:${target}>"
+          "-DSYSROOT=${GEMSTONE_SYSROOT}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
+    endif()
   endforeach()
 endif()

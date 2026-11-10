@@ -6,7 +6,9 @@ set(CMAKE_CXX_COMPILER /opt/llvm/bin/clang++)
 set(CMAKE_AR /opt/llvm/bin/llvm-ar)
 set(CMAKE_RANLIB /opt/llvm/bin/llvm-ranlib)
 
-set(CMAKE_C_FLAGS_INIT "--target=x86_64-linux-gnu --sysroot=/opt/sysroot")
+set(GEMSTONE_SYSROOT /opt/sysroot)
+
+set(CMAKE_C_FLAGS_INIT "--target=x86_64-linux-gnu --sysroot=${GEMSTONE_SYSROOT}")
 set(CMAKE_CXX_FLAGS_INIT "${CMAKE_C_FLAGS_INIT} -nostdinc++ -isystem /opt/libcxx/include/c++/v1")
 
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -nostdlib++ -static-libgcc -Wl,-Bsymbolic -Wl,--exclude-libs,ALL")
