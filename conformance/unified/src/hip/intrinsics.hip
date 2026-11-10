@@ -440,8 +440,8 @@ TEST_CASE("intrinsics/hip/sub-dword", "[unified][intrinsics]") {
       const uint32_t a = byteOf(x, index);
       const uint32_t b = byteOf(y, index);
       u |= ((std::max(a, b) + (a * b) - (a >> 1)) & 0xffU) << (index * 8);
-      const int32_t p = static_cast<int8_t>(a);
-      const int32_t q = static_cast<int8_t>(b);
+      const int32_t p = +static_cast<int8_t>(a);
+      const int32_t q = +static_cast<int8_t>(b);
       c |= (static_cast<uint32_t>(std::min(p, q) + (p >> 2) + (p * q)) & 0xffU) << (index * 8);
     }
     for (int index = 0; index < 2; ++index) {

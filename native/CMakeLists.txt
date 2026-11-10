@@ -11,7 +11,7 @@ function(gemstone_project_target target)
   set_target_properties("${target}" PROPERTIES CXX_STANDARD 23 CXX_STANDARD_REQUIRED ON CXX_EXTENSIONS OFF)
   target_compile_options("${target}" PRIVATE
     "$<$<COMPILE_LANG_AND_ID:CXX,GNU,Clang>:-Wall;-Wextra;-Wpedantic;-Werror>"
-    "$<$<COMPILE_LANG_AND_ID:CXX,Clang>:-Wno-overlength-strings>")
+    "$<$<COMPILE_LANG_AND_ID:CXX,Clang>:-Wno-overlength-strings;-Wshift-sign-overflow>")
 endfunction()
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/generated")

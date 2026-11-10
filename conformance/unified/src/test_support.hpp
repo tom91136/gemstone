@@ -172,8 +172,8 @@ struct ReverseIndex {
 
 template <class T> struct WidePairValue {
   UNIFIED_HOST_DEVICE int64_t operator()(T left, T right) const {
-    const auto a = static_cast<int64_t>(left);
-    const auto b = static_cast<int64_t>(right);
+    const auto a = static_cast<int64_t>(+left);
+    const auto b = static_cast<int64_t>(+right);
     return (a * 3) + (b * 5) + (a * b * 7);
   }
 };

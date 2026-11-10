@@ -8,7 +8,6 @@ Checks: >
   -bugprone-multi-level-implicit-pointer-conversion,
   -bugprone-random-generator-seed,
   -bugprone-signed-bitwise,
-  -bugprone-signed-char-misuse,
   -bugprone-throwing-static-initialization,
   cert-dcl58-cpp,
   cert-err60-cpp,
