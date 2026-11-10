@@ -72,20 +72,22 @@ As in `cost-model.md`: test first, seen failing; `testOnly *` on the touched mod
 
 ## Findings from step 5
 
-`HardwareValidationSuite` holds 83 cases from the RTX 4060 Ti (sm_89) and the gfx1036. 15 fail the 25 percent tolerance and stay red until the model is fixed. The first run had 53. Fixed since then:
+`HardwareValidationSuite` holds 95 cases from the RTX 4060 Ti (sm_89) and the gfx1036. 10 fail the 25 percent tolerance and stay red until the model is fixed. The first run had 53 failures out of 83. Fixed since then:
 
 - Result latency is carried apart from the issue stall, and a variable-latency instruction is timed whenever a table latency exists.
 - SASS profiles record each instruction's own register use. AMDGPU profiles do not yet record any.
-- sm_89 FP64 is one pipe per multiprocessor, as architecture data.
+- sm_89 FP64 is one pipe per multiprocessor, as architecture data, with a probed dependent DFMA latency of 48 cycles.
 - Loads, stores, and shared memory are simulator resources.
 - A resource binds only at 0.9 pressure or more, with partition-local pressure scaled by active partitions.
 - gfx1036 vector FMA has a probed dependent latency of 8 cycles.
+- gfx1036 many-wave rates were measured again at 8, 16, and 32 waves. FP64 is flat at 8.0 lanes per cycle per WGP, which confirms the recorded rate. MUFU reaches 31.2 and is still rising at 32 waves, so the 32.0 estimate stays.
 
 Still red:
 
-- sm_89 `stream_dfma` (7 cases): no DFMA latency for sm_89, so the loops are withheld. A dependent-DFMA probe would supply it. The single-warp FP64 gap is also unmodelled.
-- gfx1036 single-wave issue (4 cases): a lone wave issues independent `v_fma_f32` every 2.7 to 3.25 cycles, against an LLVM issue cost of 1.
-- gfx1036 `stream_mufu` and `stream_dfma` (4 cases): the committed one- and two-wave cases contradict the earlier many-wave plateaus, so the rates stay until the many-wave cases are measured again and committed.
+- sm_89 `stream_dfma` with one warp (2 cases): the model binds on the FP64 pipe, and the measurement says the dependent path binds. The cycle cases pass.
+- gfx1036 single-wave and two-wave issue (5 cases: `chain_ffma` with 16 warps, and `stream_ffma` with one and two warps): a lone wave issues independent `v_fma_f32` slower than the model's issue cost. A probe measured 1.00 cycle per FMA over chain lengths of 16 to 64, recorded as `waveIssueCycles` but not yet read by the model, and that disagrees with the 26 cycles per iteration recorded for `stream_ffma` with one warp. The two measurements need reconciling before the model changes.
+- gfx1036 `stream_mufu` with one and two warps (3 cases): four waves measure 15.50 cycles against a many-wave plateau of about 8, so few waves are slower than the rate alone explains.
+- gfx1036 `stream_dfma` with two warps (1 case): measured 7.6 percent above the FP64 floor, which the header rule reads as FP64-bound where the expectation is the dependent path.
 
 ## Open decisions
 
