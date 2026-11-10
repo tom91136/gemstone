@@ -115,3 +115,4 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 - `clang-tidy` 23 reported 981 unique findings across nine checks. `bugprone-signed-bitwise` (417) and `readability-trailing-comma` (379) are disabled: the first flags shift amounts such as `size_t{8} << 20` and vendor API flags, and `clang-analyzer-core.BitwiseShift` already catches real shift errors. The other 185 are fixed.
 - The pre-commit hook calls `clang-format` from the toolchain image, so a distribution update stops blocking commits.
 - The floor check reports vendor routes and fails only for objects the suite compiles.
+- `cuda/sm_89/clang` stays off the sysroot for now. Its `libomp` is an Ubuntu 24.04 build that needs `GLIBC_2.38`, so its OpenMP programs cannot link against glibc 2.28. Each route records its floor in `artifact.toml`. Moving this route needs `libomp` and the offload runtime built against the sysroot in the `llvm-offload` stage.
