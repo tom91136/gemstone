@@ -40,6 +40,10 @@ As in `cost-model.md`. In addition, known-equivalent and known-different pairs (
 - Whole-kernel equivalence, loops, and control flow beyond a straight-line window.
 - Proving rendered semantics correct against hardware. The `semantics-check` lanes and conformance do that.
 
+## Limits
+
+- Floating-point sequences end as undecided at the solver, so the requirement that every mode is rendered holds only because nothing floating-point is proved. AMDGPU rounding modes are not rendered. Proving floating-point rewrites needs a check derived from each definition first.
+
 ## Open decisions
 
 - Solver: the project avoids new dependencies. Recommendation: print SMT-LIB text and run an external solver binary (Bitwuzla or Z3) found through the toolchain registry, with no JVM library dependency. The check is then unavailable where no solver is installed, and says so.
