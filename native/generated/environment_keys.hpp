@@ -4,6 +4,7 @@
 #include <cstdint>
 
 namespace gemstone::environment {
+inline constexpr char BitwuzlaExe[] = "GEMSTONE_BITWUZLA_EXE";
 inline constexpr char ContainerExe[] = "GEMSTONE_CONTAINER_EXE";
 inline constexpr char CudaCodeMode[] = "GEMSTONE_CUDA_CODE_MODE";
 inline constexpr char Device[] = "GEMSTONE_DEVICE";

@@ -42,6 +42,7 @@ object GenerateEnvironment {
   lazy val gemstone: Vector[Entry] = parse(
     "GEMSTONE",
     Vector(
+      "GEMSTONE_BITWUZLA_EXE"                    -> "",
       "GEMSTONE_CONTAINER_EXE"                   -> "",
       "GEMSTONE_CUDA_CODE_MODE"                  -> "",
       "GEMSTONE_DEVICE"                          -> "",

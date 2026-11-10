@@ -4,6 +4,7 @@ package net.kurobako.gemstone
 import net.kurobako.gemstone.constraint.*
 
 object environment {
+  val BitwuzlaExe: String = "GEMSTONE_BITWUZLA_EXE"
   val ContainerExe: String = "GEMSTONE_CONTAINER_EXE"
   val CudaCodeMode: String = "GEMSTONE_CUDA_CODE_MODE"
   val Device: String = "GEMSTONE_DEVICE"
