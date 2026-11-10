@@ -45,18 +45,18 @@ if spec is None or spec.loader is None:
 module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
-def operand(value, is_input, is_output):
+def operand(value, is_output):
     kind = value.base_type.name.removeprefix("aco_base_type_")
     return ",".join((kind, str(value.bit_size), str(value.num_components),
-                     "1" if is_input else "0", "1" if is_output else "0",
+                     "1" if is_output else "0",
                      "1" if value.fixed_reg.name != "not_fixed" else "0"))
 
 for name in sorted(module.instructions):
     instruction = module.instructions[name]
     if instruction.format.name.startswith("PSEUDO"):
         continue
-    operands = [operand(value, False, True) for value in instruction.definitions]
-    operands.extend(operand(value, True, False) for value in instruction.operands)
+    operands = [operand(value, True) for value in instruction.definitions]
+    operands.extend(operand(value, False) for value in instruction.operands)
     for generation in ("gfx6", "gfx7", "gfx8", "gfx9", "gfx10", "gfx11_7"):
         opcode = getattr(instruction.op, generation)
         if opcode >= 0:
@@ -66,7 +66,6 @@ for name in sorted(module.instructions):
   case class Operand(
       field: String,
       kind: String,
-      input: Boolean,
       output: Boolean,
       implicitOperand: Boolean,
       bits: Int
@@ -608,7 +607,7 @@ for name in sorted(module.instructions):
       if (DocumentedFormats(record.format))
         operands.fold {
           if (record.format == "DS" && record.name.contains("_src2_"))
-            record.copy(operands = Vector(Operand("ADDR", "VGPR", true, false, false, 32)))
+            record.copy(operands = Vector(Operand("ADDR", "VGPR", false, false, 32)))
           else if (FallbackFormats(record.format)) {
             val args   = record.operands.filterNot(_.implicitOperand)
             val fields = record.format match {
@@ -626,7 +625,7 @@ for name in sorted(module.instructions):
               )
             }
             record.copy(operands =
-              if (record.format == "VOPC") Operand("", "VCC", false, true, false, 64) +: mapped else mapped
+              if (record.format == "VOPC") Operand("", "VCC", true, false, 64) +: mapped else mapped
             )
           } else record
         }(value => record.copy(format = value.format, operands = value.operands))
@@ -822,7 +821,7 @@ for name in sorted(module.instructions):
       ).toVector
     }
     def arg(field: String, kind: String, bits: Int): Operand =
-      Operand(field, kind, !field.startsWith("VDST"), field.startsWith("VDST"), implicitOperand = false, bits)
+      Operand(field, kind, field.startsWith("VDST"), implicitOperand = false, bits)
     val existingByName = existing.groupBy(_.name).withDefaultValue(Vector.empty)
     val compares = records("VOPCInstructions.td", "VOPCX?_Real_gfx6_gfx7").filter(_._1.startsWith("v_cmps")).flatMap {
       case (name, opcode) =>
@@ -1496,7 +1495,6 @@ for name in sorted(module.instructions):
             Operand(
               field = optionalText(operand, "FieldName").getOrElse(""),
               kind = requiredText(operand, "OperandType").stripPrefix("OPR_"),
-              input = booleanAttribute(operand, "Input"),
               output = booleanAttribute(operand, "Output"),
               implicitOperand = booleanAttribute(operand, "IsImplicit"),
               bits = requiredText(operand, "OperandSize").toInt
@@ -1539,13 +1537,12 @@ for name in sorted(module.instructions):
         else
           Text.splitDelimited(columns(5), ';').map { encoded =>
             val fields = Text.splitDelimited(encoded, ',')
-            if (fields.size != 6) throw IllegalArgumentException(s"invalid ACO operand: $encoded")
+            if (fields.size != 5) throw IllegalArgumentException(s"invalid ACO operand: $encoded")
             Operand(
               "",
               fields(0),
               fields(3) == "1",
               fields(4) == "1",
-              fields(5) == "1",
               fields(1).toInt * fields(2).toInt
             )
           }
@@ -1556,7 +1553,7 @@ for name in sorted(module.instructions):
         if (!scalarFields || operand.implicitOperand) operand
         else if (operand.output) operand.copy(field = "SDST")
         else {
-          val source = operands.take(index).count(value => value.input && !value.implicitOperand)
+          val source = operands.take(index).count(value => !value.output && !value.implicitOperand)
           operand.copy(field = s"SSRC$source")
         }
       }
@@ -2019,7 +2016,7 @@ for name in sorted(module.instructions):
       schemas.map { operands =>
         "    " + operands.map { operand =>
           val field = if (operand.field.nonEmpty) stringIds(operand.field) else -1
-          s"[$field,${stringIds(operand.kind)},${operand.implicitOperand},${operand.bits},${operand.output},${operand.input}]"
+          s"[$field,${stringIds(operand.kind)},${operand.implicitOperand},${operand.bits},${operand.output}]"
         }.mkString("[", ",", "]")
       }.mkString(",\n"),
       "  ],",

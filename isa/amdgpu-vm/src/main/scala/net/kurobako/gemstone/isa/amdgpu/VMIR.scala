@@ -376,6 +376,23 @@ private object VMIR {
 
     /** gfx950's V_PRNG_B32, one step of its linear feedback shift register. */
     case PseudoRandom
+
+    /** The dwords the source register takes: a pair for the binary64 sources. */
+    def sourceWords: Int = this match {
+      case FrexpExponentF64 | I32FromF64 | U32FromF64 | F32FromF64 | FrexpMantissaF64 | ReciprocalF64 | TruncateF64 |
+          FloorF64 | FractionF64 | RoundNearestEvenF64 | ReciprocalSquareRootF64 | CeilF64 | SquareRootF64 |
+          ReciprocalClampF64 | ReciprocalSquareRootClampF64 => 2
+      case _ => 1
+    }
+
+    /** The dwords the destination register takes: a pair for the binary64 and paired results. */
+    def destWords: Int = this match {
+      case F64FromI32 | F64FromU32 | F64FromF32 | PairF32FromE4M3 | PairF32FromE5M2 | PairF32FromE4M3Fnuz |
+          PairF32FromE5M2Fnuz | FrexpMantissaF64 | ReciprocalF64 | TruncateF64 | FloorF64 | FractionF64 |
+          RoundNearestEvenF64 | ReciprocalSquareRootF64 | CeilF64 | SquareRootF64 | ReciprocalClampF64 |
+          ReciprocalSquareRootClampF64 => 2
+      case _ => 1
+    }
   }
 
   /** The legacy forms multiply under DX9 rules, a zero times anything +0; the lighting multiply does too, unless its

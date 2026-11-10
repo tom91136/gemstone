@@ -137,13 +137,11 @@ class ProfileSuite extends Suite {
     val result = run(
       """v_lshlrev_b32 v1, 2, v0
         |v_add_u32 v2, v1, v3
-        |v_fmac_f32 v5, v1, v2
         |global_load_dwordx2 v[4:5], v1, s[2:3]
         |global_store_dwordx2 v1, v[4:5], s[2:3]""".stripMargin
     )
     assertEquals(uses(result, "v_lshlrev_b32"), Vector(RegisterUse(Vec("v0"), Vec("v1"))))
     assertEquals(uses(result, "v_add_u32"), Vector(RegisterUse(Vec("v1", "v3"), Vec("v2"))))
-    assertEquals(uses(result, "v_fmac_f32"), Vector(RegisterUse(Vec("v1", "v2"), Vec("v5"))))
     assertEquals(
       uses(result, "global_load_dwordx2"),
       Vector(RegisterUse(Vec("s[2:3]", "v1"), Vec("v[4:5]"), Map("s[2:3]" -> 2, "v[4:5]" -> 2)))
@@ -151,6 +149,42 @@ class ProfileSuite extends Suite {
     assertEquals(
       uses(result, "global_store_dwordx2"),
       Vector(RegisterUse(Vec("s[2:3]", "v1", "v[4:5]"), Vec.empty, Map("s[2:3]" -> 2, "v[4:5]" -> 2)))
+    )
+  }
+
+  test("an accumulating instruction reads its destination") {
+    val result = run("v_fmac_f32 v5, v1, v2\nv_mac_f32 v6, v1, v2")
+    assertEquals(uses(result, "v_fmac_f32"), Vector(RegisterUse(Vec("v1", "v2", "v5"), Vec("v5"))))
+    assertEquals(uses(result, "v_mac_f32"), Vector(RegisterUse(Vec("v1", "v2", "v6"), Vec("v6"))))
+  }
+
+  test("a legacy flat address without a scalar base is a register pair") {
+    val result = run(
+      """v_lshlrev_b32 v5, 2, v0
+        |v_add_u32 v3, s2, v5
+        |v_mov_b32 v4, s3
+        |flat_load_dword v6, v[3:4]""".stripMargin
+    )
+    assertEquals(
+      uses(result, "flat_load_dword"),
+      Vector(RegisterUse(Vec("v[3:4]"), Vec("v6"), Map("v[3:4]" -> 2)))
+    )
+  }
+
+  test("a scratch access with a scalar base reads no vector address") {
+    val result = run("s_mov_b32 s4, 24\nv_mov_b32 v2, 7\nscratch_store_dword off, v2, s4")
+    assertEquals(uses(result, "scratch_store_dword"), Vector(RegisterUse(Vec("s4", "v2"), Vec.empty)))
+  }
+
+  test("a global address with a scalar base is one register") {
+    val result = run(
+      "v_lshlrev_b32 v1, 2, v0\nglobal_load_dword v2, v1, s[2:3]",
+      target = gfx1030,
+      threads = 32
+    )
+    assertEquals(
+      uses(result, "global_load_dword"),
+      Vector(RegisterUse(Vec("s[2:3]", "v1"), Vec("v2"), Map("s[2:3]" -> 2)))
     )
   }
 

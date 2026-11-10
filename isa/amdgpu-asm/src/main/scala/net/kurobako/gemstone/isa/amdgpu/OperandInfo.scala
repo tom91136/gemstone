@@ -7,6 +7,5 @@ case class OperandInfo(
     kind: OperandKind,
     implicitOperand: Boolean,
     bits: Int >= 0,
-    input: Boolean,
     output: Boolean = false
 )

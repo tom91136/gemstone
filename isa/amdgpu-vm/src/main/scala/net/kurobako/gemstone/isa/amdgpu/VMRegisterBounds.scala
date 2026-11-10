@@ -73,21 +73,7 @@ private object VMRegisterBounds {
         span(i.dest, shape.outputRegisters) && source(i.srcA, shape.aRegisters) &&
         source(i.srcB, shape.bRegisters) && source(i.srcC, if (shape.sparse) 1 else shape.outputRegisters) &&
         i.controls.scales.forall(scales => source(scales.a, 1) && source(scales.b, 1))
-      case i: Instruction.VConvert => i.operation match {
-          case VectorConvertOperation.F64FromI32 | VectorConvertOperation.F64FromU32 |
-              VectorConvertOperation.F64FromF32 | VectorConvertOperation.PairF32FromE4M3 |
-              VectorConvertOperation.PairF32FromE5M2 | VectorConvertOperation.PairF32FromE4M3Fnuz |
-              VectorConvertOperation.PairF32FromE5M2Fnuz => span(i.dest, 2)
-          case VectorConvertOperation.FrexpExponentF64 | VectorConvertOperation.I32FromF64 |
-              VectorConvertOperation.U32FromF64 | VectorConvertOperation.F32FromF64 => source(i.src)
-          case VectorConvertOperation.FrexpMantissaF64 | VectorConvertOperation.ReciprocalF64 |
-              VectorConvertOperation.TruncateF64 | VectorConvertOperation.FloorF64 |
-              VectorConvertOperation.FractionF64 | VectorConvertOperation.RoundNearestEvenF64 |
-              VectorConvertOperation.ReciprocalSquareRootF64 | VectorConvertOperation.CeilF64 |
-              VectorConvertOperation.SquareRootF64 | VectorConvertOperation.ReciprocalClampF64 |
-              VectorConvertOperation.ReciprocalSquareRootClampF64 => span(i.dest, 2) && source(i.src)
-          case _ => true
-        }
+      case i: Instruction.VConvert      => span(i.dest, i.operation.destWords) && source(i.src, i.operation.sourceWords)
       case i: Instruction.VTrigPreopF64 => span(i.dest, 2) && source(i.src)
       case i: Instruction.Call          => scalarSpan(i.dest, 2)
       case i: Instruction.CallRelative  => scalarSpan(i.dest, 2)

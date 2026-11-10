@@ -104,7 +104,7 @@ class GenerateAMDGPUISASuite extends Suite {
   test("metadata catalogue JSON interns strings and schemas with stable offsets") {
     import GenerateAMDGPUISA.*
     val operands =
-      Vector(Operand("vdst", "VGPR", input = false, output = true, implicitOperand = false, bits = 32))
+      Vector(Operand("vdst", "VGPR", output = true, implicitOperand = false, bits = 32))
     val metadata = Vector(
       Vector(Instruction("v_add_f32", "GFX6", "VOP2", 17, operands, Vector("VALU"))),
       Vector(Instruction(

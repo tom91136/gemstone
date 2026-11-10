@@ -74,8 +74,7 @@ private object DualIssueCodec {
             Some(EncodingField.SSRC0),
             OperandKind.SRC,
             implicitOperand = false,
-            bits.unsafe[Int >= 0],
-            input = true
+            bits.unsafe[Int >= 0]
           ),
           target
         )
