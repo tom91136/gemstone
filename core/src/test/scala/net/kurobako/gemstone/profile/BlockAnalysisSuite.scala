@@ -89,6 +89,16 @@ class BlockAnalysisSuite extends Suite {
     assertEquals(loop.obj.get("cyclesPerIteration"), None)
   }
 
+  test("a variable latency instruction without a table latency withholds its block and says so") {
+    val variable = record(
+      Vec(0, 1, 2, 3),
+      index => if (index == 2) Some(Schedule.Encoded(3.unsafe[Int in 0 ~ 15], true)) else estimated(index)
+    )
+    val loop = region(report(variable), "k/loop@0x20")
+    assertEquals(loop("status").str, "withheld")
+    assert(loop("reason").str.contains("no table latency"))
+  }
+
   test("estimated latencies reach the output as estimates") {
     val source = region(report(record(Vec(0, 1, 2, 3))), "k/block@0x10")("source")
     assertEquals(source("kind").str, "estimate")

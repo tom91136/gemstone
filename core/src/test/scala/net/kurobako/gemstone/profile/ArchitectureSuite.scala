@@ -160,6 +160,19 @@ class ArchitectureSuite extends Suite {
     )
   }
 
+  test("sm_89 shares its fp64 pipe across partitions and its siblings inherit that") {
+    assertEquals(Architecture.sm89.sharedPipes.keySet, Set(Pipe.Fp64))
+    assertEquals(Architecture.sm89.sharedPipes(Pipe.Fp64).kind, "probed")
+    assertEquals(Architecture.sm86.sharedPipes.view.mapValues(_.kind).toMap, Map(Pipe.Fp64 -> "inherited"))
+    assertEquals(Architecture.sm90.sharedPipes, Map.empty[Pipe, Source])
+  }
+
+  test("gfx1036 fma dependent latency is the chain probe, and its siblings have none") {
+    assertEquals(Architecture.gfx1036.pipeLatency.view.mapValues(_.value).toMap, Map(Pipe.Fma -> 8))
+    assertEquals(Architecture.gfx1036.pipeLatency(Pipe.Fma).source.kind, "probed")
+    assertEquals(Architecture.gfx1030.pipeLatency, Map.empty[Pipe, Sourced[Int]])
+  }
+
   test("gfx1036 fp64 rate matches its probe") {
     assertMeasured(Architecture.gfx1036.throughput.fp64, 7.9996)
   }

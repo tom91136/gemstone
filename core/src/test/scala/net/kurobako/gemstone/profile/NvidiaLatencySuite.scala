@@ -50,4 +50,17 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.measured(90, Lds32), None)
     assertEquals(NvidiaLatency.measured(89, Fadd32), None)
   }
+
+  test("an instruction text names its producer by mnemonic, ignoring predicate and modifiers") {
+    assertEquals(NvidiaLatency.producer("@!P0 FFMA R9, R9, R0, c[0][0x180];"), Some(Ffma32))
+    assertEquals(NvidiaLatency.producer("IADD3.X R7, RZ, c[0][0x174], RZ, P0, !PT;"), Some(Iadd32))
+    assertEquals(NvidiaLatency.producer("MUFU.RCP R8, R8;"), Some(Rcp32))
+    assertEquals(NvidiaLatency.producer("MUFU.RSQ R8, R8;"), None)
+    assertEquals(NvidiaLatency.producer("ISETP.GE.AND P0, PT, R4, c[0][0x178], PT;"), None)
+  }
+
+  test("the multiprocessor version comes from an sm_ name only") {
+    assertEquals(NvidiaLatency.sm(Architecture.sm89), Some(89))
+    assertEquals(NvidiaLatency.sm(Architecture.gfx1036), None)
+  }
 }
