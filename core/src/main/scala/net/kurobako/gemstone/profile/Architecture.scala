@@ -102,8 +102,9 @@ object Architecture {
 
     /** The cycles of the nearest tier global loads are served from, and that tier. */
     def global: (Sourced[Double], ProfileReport.Tier) =
-      l1.map(_ -> ProfileReport.Tier.L1).orElse(l2.map(_ -> ProfileReport.Tier.L2)).getOrElse(dram ->
-        ProfileReport.Tier.Dram)
+      l1.map((_, ProfileReport.Tier.L1))
+        .orElse(l2.map((_, ProfileReport.Tier.L2)))
+        .getOrElse((dram, ProfileReport.Tier.Dram))
   }
 
   /** The device memory of the reference card a target's values describe, as the device reports it. */

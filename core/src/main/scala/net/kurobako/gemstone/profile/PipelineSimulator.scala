@@ -240,7 +240,8 @@ object PipelineSimulator {
     val window    = settle(0L, 0)
     val length    = window.length.toDouble
     val share     = active.toDouble / partitions
-    val resources = window.busy.collect { case (resource, cycles) if cycles > 0L => resource }.toVector.sortBy(ordinal)
+    val resources =
+      window.busy.collect { case (resource, cycles) if cycles > 0L => resource }.toVector.sortBy(ordinal(_))
     def local(resource: ProfileReport.Binding): Boolean = resource match {
       case ProfileReport.Binding.Arithmetic(pipe) => !architecture.sharedPipes.contains(pipe)
       case _                                      => false

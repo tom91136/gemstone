@@ -156,7 +156,7 @@ object BlockAnalysis {
       Architecture.Sourced(math.round(latency.value).toInt, latency.source)
     val producer = NvidiaLatency.producer(instruction.text)
     val sm       = NvidiaLatency.sm(architecture)
-    memoryTier(architecture, counters).map(whole)
+    memoryTier(architecture, counters).map(whole(_))
       .orElse(for {
         sm      <- sm
         p       <- producer
