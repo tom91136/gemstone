@@ -150,9 +150,14 @@ object GenerateExecutionRPC {
         }
       }.mkString("\n")
       val variants = alternatives.map(value => alternativeName(named.name, identifier(value.name))).mkString(", ")
+      // libc++ leaves variant comparisons unconstrained, so glaze's ordered check would hard-error on them
+      val comparisons = Vector("<", ">", "<=", ">=").map { operator =>
+        s"bool operator$operator(const ${named.name} &, const ${named.name} &) = delete;"
+      }.mkString("\n")
       s"""$cases
          |
-         |using ${named.name} = std::variant<$variants>;""".stripMargin
+         |using ${named.name} = std::variant<$variants>;
+         |$comparisons""".stripMargin
     case other => throw IllegalArgumentException(s"unnamed RPC definition: $other")
   }
 

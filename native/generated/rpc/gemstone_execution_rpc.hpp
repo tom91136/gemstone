@@ -298,6 +298,10 @@ struct RelocationSourceArgument {
 };
 
 using RelocationSource = std::variant<RelocationSourceMemory, RelocationSourceArgument>;
+bool operator<(const RelocationSource &, const RelocationSource &) = delete;
+bool operator>(const RelocationSource &, const RelocationSource &) = delete;
+bool operator<=(const RelocationSource &, const RelocationSource &) = delete;
+bool operator>=(const RelocationSource &, const RelocationSource &) = delete;
 
 struct PointerRelocation {
   RelocationSource source{};
@@ -487,6 +491,10 @@ struct GraphicsDescriptorCombined {
 };
 
 using GraphicsDescriptor = std::variant<GraphicsDescriptorImage, GraphicsDescriptorSampler, GraphicsDescriptorCombined>;
+bool operator<(const GraphicsDescriptor &, const GraphicsDescriptor &) = delete;
+bool operator>(const GraphicsDescriptor &, const GraphicsDescriptor &) = delete;
+bool operator<=(const GraphicsDescriptor &, const GraphicsDescriptor &) = delete;
+bool operator>=(const GraphicsDescriptor &, const GraphicsDescriptor &) = delete;
 
 struct DescriptorBinding {
   IntPositive0 argument{};
@@ -797,6 +805,10 @@ struct GraphicsCommandResolveAttachment {
 };
 
 using GraphicsCommand = std::variant<GraphicsCommandDraw, GraphicsCommandClearColour, GraphicsCommandClearDepthStencil, GraphicsCommandCopyImage, GraphicsCommandCopyBufferImage, GraphicsCommandBlit, GraphicsCommandResolve, GraphicsCommandResolveAttachment>;
+bool operator<(const GraphicsCommand &, const GraphicsCommand &) = delete;
+bool operator>(const GraphicsCommand &, const GraphicsCommand &) = delete;
+bool operator<=(const GraphicsCommand &, const GraphicsCommand &) = delete;
+bool operator>=(const GraphicsCommand &, const GraphicsCommand &) = delete;
 
 struct GraphicsSubmission {
   std::vector<GraphicsCommand> commands{};
@@ -892,6 +904,10 @@ struct ArgumentLocal {
 struct ArgumentDescriptor {};
 
 using Argument = std::variant<ArgumentScalar, ArgumentMemory, ArgumentLocal, ArgumentDescriptor>;
+bool operator<(const Argument &, const Argument &) = delete;
+bool operator>(const Argument &, const Argument &) = delete;
+bool operator<=(const Argument &, const Argument &) = delete;
+bool operator>=(const Argument &, const Argument &) = delete;
 
 struct ArgumentBuffer {
   AllocationId region{};
@@ -949,6 +965,10 @@ struct ExecutionFailureTimedOut {
 };
 
 using ExecutionFailure = std::variant<ExecutionFailureInvalidRequest, ExecutionFailureNotFound, ExecutionFailureUnsupported, ExecutionFailureFailed, ExecutionFailureInvalidProgram, ExecutionFailureInvalidConfiguration, ExecutionFailureOutOfResources, ExecutionFailureIllegalAddress, ExecutionFailureMisalignedAddress, ExecutionFailureIllegalInstruction, ExecutionFailureTrapped, ExecutionFailureAssertionFailed, ExecutionFailureTimedOut>;
+bool operator<(const ExecutionFailure &, const ExecutionFailure &) = delete;
+bool operator>(const ExecutionFailure &, const ExecutionFailure &) = delete;
+bool operator<=(const ExecutionFailure &, const ExecutionFailure &) = delete;
+bool operator>=(const ExecutionFailure &, const ExecutionFailure &) = delete;
 
 struct CompletionStatusPending {};
 struct CompletionStatusSucceeded {};
@@ -957,6 +977,10 @@ struct CompletionStatusFailed {
 };
 
 using CompletionStatus = std::variant<CompletionStatusPending, CompletionStatusSucceeded, CompletionStatusFailed>;
+bool operator<(const CompletionStatus &, const CompletionStatus &) = delete;
+bool operator>(const CompletionStatus &, const CompletionStatus &) = delete;
+bool operator<=(const CompletionStatus &, const CompletionStatus &) = delete;
+bool operator>=(const CompletionStatus &, const CompletionStatus &) = delete;
 
 struct DirtyRange {
   AllocationId allocation{};
