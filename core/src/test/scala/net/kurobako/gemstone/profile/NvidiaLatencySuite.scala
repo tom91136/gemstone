@@ -33,4 +33,21 @@ class NvidiaLatencySuite extends Suite {
     val expected = Architecture.Source.Compiled("ptxas", ptxas129, "sm_101")
     assertEquals(NvidiaLatency.fixed(101, Shl32).map(_.source), Some(expected))
   }
+
+  private val probed = Architecture.Source.Probed(
+    "clock64 dependent chain, median over 101 launches, one thread",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
+  test("sm_89 probed latencies carry the card, driver and toolkit") {
+    assertEquals(NvidiaLatency.measured(89, Lds32), Some(Architecture.Sourced(24.0, probed)))
+    assertEquals(NvidiaLatency.measured(89, Rcp32), Some(Architecture.Sourced(28.0, probed)))
+  }
+
+  test("probed latencies exist for sm_89 only") {
+    assertEquals(NvidiaLatency.measured(90, Lds32), None)
+    assertEquals(NvidiaLatency.measured(89, Fadd32), None)
+  }
 }

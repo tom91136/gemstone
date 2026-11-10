@@ -69,4 +69,16 @@ object NvidiaLatency {
       harvest <- harvests.get(sm)
       stall   <- harvest.stalls.get(producer)
     } yield Architecture.Sourced(stall, Architecture.Source.Compiled("ptxas", harvest.ptxas, s"sm_$sm"))
+
+  private val probed = Architecture.Source.Probed(
+    "clock64 dependent chain, median over 101 launches, one thread",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
+  private val measured89: Map[Producer, Double] = Map(Lds32 -> 24.00, Rcp32 -> 28.00)
+
+  def measured(sm: Int, producer: Producer): Option[Architecture.Sourced[Double]] =
+    if sm == 89 then measured89.get(producer).map(Architecture.Sourced(_, probed)) else None
 }
