@@ -24,26 +24,26 @@
 #endif
 
 inline std::vector<char> image([[maybe_unused]] std::string_view name) {
-  const auto select = [&]() -> std::vector<char> {
+  const auto select = [&] {
 #ifdef UNIFIED_API_CUDA
     const char *code = std::getenv(conformance::environment::CudaCodeMode);
     if (code && std::string_view(code) == "sass") {
-      if (name == "mma884.ptx") return {mma884_sass_image.begin(), mma884_sass_image.end()};
-      if (name == "exchange.ptx") return {exchange_sass_image.begin(), exchange_sass_image.end()};
-      if (name == "atomic.ptx") return {atomic_sass_image.begin(), atomic_sass_image.end()};
-      if (name == "fence.ptx") return {fence_sass_image.begin(), fence_sass_image.end()};
-      if (name == "contended.ptx") return {contended_sass_image.begin(), contended_sass_image.end()};
-      return {kernel_sass_image.begin(), kernel_sass_image.end()};
+      if (name == "mma884.ptx") return std::vector<char>{mma884_sass_image.begin(), mma884_sass_image.end()};
+      if (name == "exchange.ptx") return std::vector<char>{exchange_sass_image.begin(), exchange_sass_image.end()};
+      if (name == "atomic.ptx") return std::vector<char>{atomic_sass_image.begin(), atomic_sass_image.end()};
+      if (name == "fence.ptx") return std::vector<char>{fence_sass_image.begin(), fence_sass_image.end()};
+      if (name == "contended.ptx") return std::vector<char>{contended_sass_image.begin(), contended_sass_image.end()};
+      return std::vector<char>{kernel_sass_image.begin(), kernel_sass_image.end()};
     }
-    if (name == "mma884.ptx") return {mma884_ptx_image.begin(), mma884_ptx_image.end()};
-    if (name == "exchange.ptx") return {exchange_image.begin(), exchange_image.end()};
-    if (name == "atomic.ptx") return {atomic_image.begin(), atomic_image.end()};
-    if (name == "fence.ptx") return {fence_image.begin(), fence_image.end()};
-    if (name == "contended.ptx") return {contended_image.begin(), contended_image.end()};
+    if (name == "mma884.ptx") return std::vector<char>{mma884_ptx_image.begin(), mma884_ptx_image.end()};
+    if (name == "exchange.ptx") return std::vector<char>{exchange_image.begin(), exchange_image.end()};
+    if (name == "atomic.ptx") return std::vector<char>{atomic_image.begin(), atomic_image.end()};
+    if (name == "fence.ptx") return std::vector<char>{fence_image.begin(), fence_image.end()};
+    if (name == "contended.ptx") return std::vector<char>{contended_image.begin(), contended_image.end()};
 #elif defined(UNIFIED_API_OPENCL) || defined(UNIFIED_API_LEVELZERO)
-    if (name == "kernel64.spv") return {memory64_image.begin(), memory64_image.end()};
+    if (name == "kernel64.spv") return std::vector<char>{memory64_image.begin(), memory64_image.end()};
 #endif
-    return {memory_image.begin(), memory_image.end()};
+    return std::vector<char>{memory_image.begin(), memory_image.end()};
   };
   auto bytes = select();
   bytes.push_back(0);
