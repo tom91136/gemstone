@@ -108,7 +108,6 @@ constexpr size_t MultigridRecordBytes = 48;
 constexpr uint32_t MaxGridDimension = std::numeric_limits<int32_t>::max();
 constexpr uint32_t MaxGridDimensionYZ = std::numeric_limits<uint16_t>::max() + 1U;
 constexpr int MaxTexture2DGatherDimension = 32768;
-constexpr size_t DeviceTotalMemoryBytes = gemstone::hsa::GlobalMemoryBytes;
 constexpr size_t DeviceSharedMemoryPerBlock = gemstone::hsa::GroupMemoryBytes;
 
 bool traceHip(std::string_view category) { return gemstone::traceEnabled("hip", category); }
@@ -1170,7 +1169,7 @@ extern "C" hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
   if (limit >= hipLimitRange) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
   if (limit != hipLimitMallocHeapSize) return remember(hipErrorUnsupportedLimit);
-  if (value >= DeviceTotalMemoryBytes) return remember(hipErrorInvalidValue);
+  if (value >= gemstone::hsa::deviceModel().globalMemoryBytes) return remember(hipErrorInvalidValue);
   gemstone::hsa::setDeviceHeapLimit(value);
   return remember(hipSuccess);
 }

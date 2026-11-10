@@ -721,6 +721,12 @@ TEST_CASE("OpenCL reports the compute units, clock and memory of the selected de
   CHECK(info<cl_ulong>(root, CL_DEVICE_GLOBAL_MEM_SIZE) == cl_ulong{16} << 30);
 }
 
+TEST_CASE("OpenCL max allocation size meets the minimum for the memory of the selected device preset", "[opencl][capability]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce GTX 1080");
+  auto *const root = gpu();
+  CHECK(info<cl_ulong>(root, CL_DEVICE_MAX_MEM_ALLOC_SIZE) >= cl_ulong{2} << 30);
+}
+
 TEST_CASE("OpenCL rejects an unknown device preset at platform discovery", "[opencl][capability]") {
   const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 9999");
   cl_platform_id platform = nullptr;

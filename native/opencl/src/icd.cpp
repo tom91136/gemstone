@@ -314,6 +314,8 @@ cl_ulong globalMemSize() {
   return device ? static_cast<cl_ulong>(device->memoryBytes) : cl_ulong{0x80000000};
 }
 
+cl_ulong maxMemAllocSize() { return gemstone::environment::selectedDevicePreset() ? globalMemSize() / 4 : MaxMemAllocSize; }
+
 uint32_t computeUnitsOf(const _cl_device_id &device) {
   if (device.parent) return device.computeUnits;
   const auto preset = gemstone::environment::selectedDevicePreset();
@@ -1439,7 +1441,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_NATIVE_VECTOR_WIDTH_HALF: return outputScalar(size, output, written, cl_uint{1});
     case CL_DEVICE_MAX_CLOCK_FREQUENCY: return outputScalar(size, output, written, maxClockFrequency());
     case CL_DEVICE_ADDRESS_BITS: return outputScalar(size, output, written, cl_uint{64});
-    case CL_DEVICE_MAX_MEM_ALLOC_SIZE: return outputScalar(size, output, written, MaxMemAllocSize);
+    case CL_DEVICE_MAX_MEM_ALLOC_SIZE: return outputScalar(size, output, written, maxMemAllocSize());
     case CL_DEVICE_MAX_READ_IMAGE_ARGS: return outputScalar(size, output, written, cl_uint{128});
     case CL_DEVICE_MAX_WRITE_IMAGE_ARGS:
     case CL_DEVICE_MAX_READ_WRITE_IMAGE_ARGS: return outputScalar(size, output, written, cl_uint{64});
@@ -1978,7 +1980,7 @@ CL_API_ENTRY cl_mem CL_API_CALL clCreatePipe(cl_context value, cl_mem_flags flag
   if ((flags & ~(CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS)) != 0 || (properties && properties[0] != 0))
     return fail(error, CL_INVALID_VALUE);
   const size_t bytes = pipe::Packets + (size_t{packetSize} * packets);
-  if (packetSize == 0 || packetSize > PipeMaxPacketSize || packets == 0 || bytes > MaxMemAllocSize)
+  if (packetSize == 0 || packetSize > PipeMaxPacketSize || packets == 0 || bytes > maxMemAllocSize())
     return fail(error, CL_INVALID_PIPE_SIZE);
   cl_int status = CL_SUCCESS;
   auto allocation = allocate(bytes, &status);
@@ -2228,7 +2230,7 @@ cl_mem createImage(_cl_context *context, cl_mem_flags flags, const cl_image_form
   }
   shape.slicePitch = shape.rowPitch * imageHeight(*desc);
   const size_t bytes = shape.slicePitch * imageSlices(*desc);
-  if (bytes > MaxMemAllocSize) return fail(error, CL_INVALID_IMAGE_SIZE);
+  if (bytes > maxMemAllocSize()) return fail(error, CL_INVALID_IMAGE_SIZE);
   // Host data uses the caller's pitches; the device copy is tightly packed unless it aliases another object.
   const size_t hostRow = source || desc->image_row_pitch == 0 ? shape.rowPitch : desc->image_row_pitch;
   size_t hostSlice = source ? 0 : desc->image_slice_pitch;
@@ -2430,7 +2432,7 @@ CL_API_ENTRY cl_int CL_API_CALL clGetImageRequirementsInfoEXT(cl_context value, 
     case CL_IMAGE_REQUIREMENTS_SIZE_EXT: {
       const size_t elementSize = info->channels * info->channelBytes;
       const size_t bytes = desc->image_width * elementSize * imageHeight(*desc) * imageSlices(*desc);
-      return bytes > MaxMemAllocSize ? CL_INVALID_IMAGE_DESCRIPTOR : outputScalar(size, output, written, bytes);
+      return bytes > maxMemAllocSize() ? CL_INVALID_IMAGE_DESCRIPTOR : outputScalar(size, output, written, bytes);
     }
     case CL_IMAGE_REQUIREMENTS_ROW_PITCH_ALIGNMENT_EXT:
       return outputScalar(size, output, written, ImagePitchAlignment * size_t{info->channels * info->channelBytes});

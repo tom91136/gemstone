@@ -212,6 +212,29 @@ TEST_CASE("HSA charges allocations to the owning agent", "[hsa][multi-device]") 
   CHECK(available(gpus[1]) == untouched);
 }
 
+TEST_CASE("HSA sizes GPU pools and free memory from the selected device preset", "[hsa][multi-device]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
+  const Session session;
+  const auto [cpu, gpus] = agents();
+  REQUIRE(gpus.size() == 2);
+  const auto pool = globalPool(gpus[0]);
+  size_t total = 0;
+  REQUIRE(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &total) == HSA_STATUS_SUCCESS);
+  CHECK(total == size_t{16} << 30);
+  size_t maxAllocation = 0;
+  REQUIRE(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE, &maxAllocation) == HSA_STATUS_SUCCESS);
+  CHECK(maxAllocation == total);
+  CHECK(available(gpus[0]) > size_t{15} << 30);
+
+  const auto used = total - available(gpus[0]);
+  void *block = nullptr;
+  constexpr size_t size = size_t{1} << 20;
+  REQUIRE(hsa_amd_memory_pool_allocate(pool, size, 0, &block) == HSA_STATUS_SUCCESS);
+  CHECK(total - available(gpus[0]) == used + size);
+  CHECK(hsa_amd_memory_pool_free(block) == HSA_STATUS_SUCCESS);
+  CHECK(total - available(gpus[0]) == used);
+}
+
 TEST_CASE("HSA reports peer pools as reachable only through a grant", "[hsa][multi-device]") {
   const Session session;
   const auto [cpu, gpus] = agents();

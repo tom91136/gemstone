@@ -78,7 +78,7 @@ constexpr uint64_t GpuPool = 2;
 constexpr uint64_t GroupPool = 3;
 constexpr uint32_t QueueMinimum = 1;
 constexpr uint32_t QueueMaximum = 4096;
-constexpr uint64_t VirtualMemorySize = gemstone::hsa::GlobalMemoryBytes;
+uint64_t deviceMemoryBytes() { return gemstone::hsa::deviceModel().globalMemoryBytes; }
 constexpr uint32_t AllocationGranule = 4096;
 constexpr uint32_t TransferBatch = 64U * 1024U;
 // GCC stack spills form many short dirty intervals; bound extra reads between them.
@@ -1171,8 +1171,10 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
       copyName(value, uuid);
       return HSA_STATUS_SUCCESS;
     }
-    case HSA_AMD_AGENT_INFO_MEMORY_AVAIL:
-      return copyStatus(value, uint64_t(gpu ? VirtualMemorySize - std::min<uint64_t>(runtime.ledger.used(ordinal), VirtualMemorySize) : 0));
+    case HSA_AMD_AGENT_INFO_MEMORY_AVAIL: {
+      const uint64_t total = deviceMemoryBytes();
+      return copyStatus(value, uint64_t(gpu ? total - std::min<uint64_t>(runtime.ledger.used(ordinal), total) : 0));
+    }
     case HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY: return copyStatus(value, gpu ? gemstone::hsa::deviceModel().clockMHz : uint32_t(0));
     // A cooperative queue's dispatches keep every workgroup resident, with GWS resources where the ISA has them.
     case HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES: return copyStatus(value, gpu);
@@ -1331,8 +1333,8 @@ extern "C" hsa_status_t hsa_region_get_info(hsa_region_t region, hsa_region_info
   switch (attribute) {
     case HSA_REGION_INFO_SEGMENT: return copyStatus(value, HSA_REGION_SEGMENT_GLOBAL);
     case HSA_REGION_INFO_GLOBAL_FLAGS: return copyStatus(value, flags);
-    case HSA_REGION_INFO_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
-    case HSA_REGION_INFO_ALLOC_MAX_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
+    case HSA_REGION_INFO_SIZE: return copyStatus(value, size_t(deviceMemoryBytes()));
+    case HSA_REGION_INFO_ALLOC_MAX_SIZE: return copyStatus(value, size_t(deviceMemoryBytes()));
     case HSA_REGION_INFO_RUNTIME_ALLOC_ALLOWED: return copyStatus(value, true);
     case HSA_REGION_INFO_RUNTIME_ALLOC_GRANULE: return copyStatus(value, size_t(AllocationGranule));
     case HSA_REGION_INFO_RUNTIME_ALLOC_ALIGNMENT: return copyStatus(value, size_t(AllocationGranule));
@@ -2224,7 +2226,7 @@ hsa_status_t loadCodeObject(hsa_executable_t executableHandle, hsa_agent_t agent
     }
     for (const auto &[begin, end] : ranges) {
       void *address = nullptr;
-      if (end - begin > VirtualMemorySize
+      if (end - begin > deviceMemoryBytes()
           || allocate(runtime, GpuPool, end - begin, &address, true, handleOrdinal(agent.handle)) != HSA_STATUS_SUCCESS) {
         rollback();
         return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -2555,13 +2557,13 @@ extern "C" hsa_status_t hsa_amd_memory_pool_get_info(hsa_amd_memory_pool_t pool,
   switch (attribute) {
     case HSA_AMD_MEMORY_POOL_INFO_SEGMENT: return copyStatus(value, HSA_AMD_SEGMENT_GLOBAL);
     case HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS: return copyStatus(value, flags);
-    case HSA_AMD_MEMORY_POOL_INFO_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
+    case HSA_AMD_MEMORY_POOL_INFO_SIZE: return copyStatus(value, size_t(deviceMemoryBytes()));
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED: return copyStatus(value, true);
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE:
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT:
     case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE: return copyStatus(value, size_t(AllocationGranule));
     case HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL: return copyStatus(value, pool.handle == CpuPool);
-    case HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE: return copyStatus(value, size_t(VirtualMemorySize));
+    case HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE: return copyStatus(value, size_t(deviceMemoryBytes()));
     case HSA_AMD_MEMORY_POOL_INFO_LOCATION:
       return copyStatus(value, pool.handle == CpuPool ? HSA_AMD_MEMORY_POOL_LOCATION_CPU : HSA_AMD_MEMORY_POOL_LOCATION_GPU);
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
