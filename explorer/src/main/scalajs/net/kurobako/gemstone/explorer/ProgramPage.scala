@@ -45,6 +45,11 @@ object ProgramPage {
       case _ => None
     }
 
+    val flow = loaded.signal.combineWith(kernel.signal).map {
+      case (Some(program), name) => FlowView.flow(program.image, name).map(value => (program.image.language, value))
+      case _                     => Left("Load a program to draw its control flow.")
+    }
+
     def target: Option[String] = targets(language.now()).now()
 
     def clear(): Unit = {
@@ -199,6 +204,13 @@ object ProgramPage {
                 profiled.map((profile, _, top) => HeatView.summary(profile, top, program.listing.toOption))
               )
             case (None, _, _, _, _, _) => div(cls := "empty", "Load a program to list its instructions.")
+          }
+        ),
+        div(
+          cls := "pane flow",
+          child <-- flow.map {
+            case Left(message)                => div(cls := "empty", message)
+            case Right((flowLanguage, value)) => FlowView.render(flowLanguage, value)
           }
         )
       ),

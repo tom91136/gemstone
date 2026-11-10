@@ -241,6 +241,22 @@ object AMDGPUModel extends Model {
     program <- asm.Disassembler(TargetMode(target, TargetDefaults.waveSize(target))).decode(bytes).left.map(_.toString)
   } yield asm.Printer.render(program)
 
+  def controlFlow(image: Vec[Byte], function: String): Either[String, ControlFlow] = for {
+    name <- function.refine[NonEmpty[String]].left.map(_ => s"no AMDGPU kernel '$function'")
+    code <- CodeObject.decode(image).left.map(_.message.raw)
+    flow <- flowOf(code, name)
+  } yield flow
+
+  private def flowOf(code: CodeObject, name: NonEmpty[String]): Either[String, ControlFlow] = {
+    val program = LoadedProgram.load(code)
+    try program
+        .controlFlow(name)
+        .map { case (graph, offsets) => ControlFlow.of(graph, offset => offsets(offset).toLong) }
+        .left
+        .map(_.message.raw)
+    finally program.close()
+  }
+
   val assemblyExample: String = "v_add_f32 v0, v1, v2\ns_movk_i32 s5, 0xfffe\n"
   val binaryExample: String   = "01 05 00 06 fe ff 05 b0\n"
 

@@ -12,6 +12,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -287,6 +288,9 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
       case Some(other: LoadedProgram) => other.library(caller).map(Some(_))
       case _                          => Right(None)
     }
+
+  def controlFlow(name: NonEmpty[String]): Either[Fault, (ControlFlowGraph, Vec[Int])] =
+    compile(name).map { case (_, _, kernel) => (AMDGPUControlFlowGraph.of(kernel), kernel.instructionOffsets) }
 
   override def close(): Unit = leased.getAndSet(None).foreach(_.release())
 

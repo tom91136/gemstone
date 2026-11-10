@@ -11,10 +11,10 @@ import scala.collection.mutable
 private object SASSListing {
   def lines(image: Vec[Byte]): Either[String, Vec[ProgramLine]] =
     Cubin.decode(image).left.map(error => s"invalid cubin: $error").flatMap { module =>
-      Target.of(module.sm).flatMap { target =>
+      Target.of(module.sm).flatMap { _ =>
         val lines  = Vec.newBuilder[ProgramLine]
         val listed = module.kernels.foldLeft[Either[String, Unit]](Right(())) { (result, kernel) =>
-          result.flatMap(_ => append(lines, module, kernel, target))
+          result.flatMap(_ => append(lines, module, kernel))
         }
         listed.map(_ => lines.result())
       }
@@ -24,11 +24,10 @@ private object SASSListing {
   private def append(
       lines: mutable.Builder[ProgramLine, Vec[ProgramLine]],
       module: Cubin.Module,
-      kernel: Cubin.Kernel,
-      target: Target
+      kernel: Cubin.Kernel
   ): Either[String, Unit] = {
     val name = kernel.name.raw
-    CodeSection.decode(Vec.toArray(module.sections(kernel.section).bytes), target)
+    Cubin.function(module, kernel)
       .left.map(error => s"$name sm_${module.sm}: $error")
       .flatMap(_.instructions.foldLeft[Either[String, Unit]](Right(())) { (result, instruction) =>
         result.flatMap { _ =>

@@ -410,7 +410,7 @@ table {
 
 .program-panes {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   min-height: 0;
 }
@@ -422,7 +422,8 @@ table {
 }
 
 .program .pane textarea,
-.program .pane .lines {
+.program .pane .lines,
+.program .pane .flow-body {
   box-sizing: border-box;
   flex: 1;
   min-height: 0;
@@ -453,6 +454,36 @@ table {
 .program .lines .line.current {
   background: #fff2c2;
   outline: 1px solid #e3c46a;
+}
+
+.program .flow-body .block {
+  display: flex;
+  gap: 10px;
+  white-space: pre;
+  padding: 1px 0;
+}
+
+.program .flow-body .block .address {
+  color: #8a949d;
+  min-width: 120px;
+  user-select: none;
+}
+
+.program .flow-body .block.loop-header {
+  font-weight: 600;
+}
+
+.program .flow-body .block.loop-body {
+  background: #eef5fb;
+}
+
+.program .flow-body .block.open {
+  color: #8a949d;
+}
+
+.program .flow-body .loop {
+  white-space: pre;
+  padding: 1px 0;
 }
 
 .program .pane .listing-body {

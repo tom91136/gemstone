@@ -591,6 +591,15 @@ object SASSModel extends Model {
     text    <- Printer.print(program).left.map(_.message)
   } yield text
 
+  def controlFlow(image: Vec[Byte], function: String): Either[String, ControlFlow] = for {
+    module  <- Cubin.decode(image).left.map(_.raw)
+    kernel  <- module.kernels.find(_.name.raw == function).toRight(s"no SASS kernel '$function'")
+    decoded <- Cubin.function(module, kernel)
+  } yield ControlFlow.of(
+    SASSControlFlowGraph.of(module.sm, decoded),
+    index => decoded.instructions(index).address.raw.toLong
+  )
+
   val assemblyExample: String = "IADD3 R7, R7, 0x1, RZ;\nEXIT;\n"
   val binaryExample: String   = "/* 0x000000000000794d */ /* 0x000fea0003800000 */\n"
 

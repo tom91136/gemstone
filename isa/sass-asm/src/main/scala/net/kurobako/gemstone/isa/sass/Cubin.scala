@@ -567,6 +567,11 @@ object Cubin {
     } yield framed.bytes
   }
 
+  def function(module: Module, kernel: Kernel): Either[String, DecodedFunction] = for {
+    target  <- Target.of(module.sm)
+    section <- CodeSection.decode(Vec.toArray(module.sections(kernel.section).bytes), target)
+  } yield DecodedFunction(kernel.name.raw, section.instructions)
+
   def decode(image: Vec[Byte]): Either[NonEmpty[String], Module] = for {
     _      <- check(image.size <= MaximumImageSize, "cubin image exceeds 64 MiB")
     parsed <- elf.Image.parse(image)
