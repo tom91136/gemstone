@@ -70,6 +70,17 @@ As in `cost-model.md`: test first, seen failing; `testOnly *` on the touched mod
 - Whole-kernel runtime. The view covers a block or loop body, as LLVM MCA does.
 - Cross-multiprocessor effects, the L2 and fabric included.
 
+## Findings from step 5
+
+`HardwareValidationSuite` holds 83 cases from the RTX 4060 Ti (sm_89) and the gfx1036. 53 fail the 25 percent tolerance, and they stay red until the model is fixed. The causes:
+
+- `BlockAnalysis` withholds every loop with an instruction marked variable latency, even where a table latency exists.
+- Recorded register use is unusable: the SASS recorder keeps the first non-empty use for every instruction, and the AMDGPU VM never reports it. Dependency chains are invisible, so every loop looks issue-bound.
+- Latency comes from the compiler's issue stall or LLVM's issue cost, not result latency. Chains are under-predicted by about 30 percent on sm_89 and up to 84 percent on gfx1036.
+- sm_89 FP64 is one pipe per SM, not per partition: one warp takes 166 cycles where the model predicts 512.
+- Memory is not a simulator resource, so a load-bound loop cannot report loads as its limit.
+- gfx1036 MUFU and FP64 rates disagree with the measured plateaus (5.06 against 8.0, and 15.8 against 32 cycles).
+
 ## Open decisions
 
 - Whether the simulator also serves F4's dynamic replay, with the profile stream as input instead of a static block. Recommendation: yes, one model, so the two views cannot disagree.
