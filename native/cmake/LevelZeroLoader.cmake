@@ -19,6 +19,7 @@ function(gemstone_add_level_zero_loader)
   endif()
   add_custom_command(
     OUTPUT "${loader}" "${tracing}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -rf "${build}"
     COMMAND "${CMAKE_COMMAND}" -S "${source}" -B "${build}" -G Ninja -DCMAKE_MESSAGE_LOG_LEVEL=WARNING
       "-DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DCMAKE_BUILD_TYPE=Release"
