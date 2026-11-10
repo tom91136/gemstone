@@ -10,11 +10,10 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 
 ## Current state
 
-- Presets hold a name, a target, total memory, and memory data rate for six cards. `GEMSTONE_DEVICE` selects one, and an unknown name is an error.
+- Presets hold a name, a target, total memory, and memory data rate for six cards. `GEMSTONE_DEVICE` or `gemstone run --device` selects one, and an unknown name is an error.
 - CUDA, HIP, HSA, and OpenCL report the preset's name and memory, and allocation limits scale with it. Level Zero and Vulkan do not read the preset.
 - Multiprocessor count, clocks, bus width, and L2 size come from the target's reference card, not from the preset.
 - CUDA reports a fixed UUID and PCI bus, device, and domain numbers.
-- `gemstone run` has no `--device` option.
 - There is no NVML, ROCm SMI, or AMD SMI library. Level Zero has generated Sysman (`zes`) declarations and no implementation.
 - `rocminfo`, `clinfo`, `sycl-ls`, and `vulkaninfo` are not conformance cases, except for a Vulkan information workload.
 
@@ -40,7 +39,6 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 - Add multiprocessor count, clocks, bus width, and L2 per card, each checked against its source row as the existing columns are.
 - Launch capacity follows the reported multiprocessor count. Check the effect on `Pacing` residency and run time for large counts.
 - Level Zero and Vulkan report the preset.
-- Add `--device` to `gemstone run`. Naming a target that conflicts with the preset is an error.
 - Derive UUID and bus address from the device index in one generated place, used by every runtime.
 
 ### 2. Discovery tools
