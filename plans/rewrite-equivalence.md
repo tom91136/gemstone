@@ -1,6 +1,6 @@
 # Rewrite equivalence
 
-Status: proposed, not started. It supports `rewrite-search.md`, and it is useful on its own for checking the rendered semantics against each other.
+Status: step 1 is done. Step 2 compares single definitions, and sequences and step 3 are in progress. It supports `rewrite-search.md`, and it is useful on its own for checking the rendered semantics against each other.
 
 ## Goal
 
@@ -16,7 +16,7 @@ Decide whether two short straight-line sequences of SASS or AMDGPU instructions 
 
 ### 1. Differential filter
 
-- Run both sequences on generated register and memory states through the rendered Scala semantics. Generate edge values per operand type: zero, signs, NaN, infinities, denormals, and extremes.
+- Run both sequences on generated register and memory states through the VMs, one instruction at a time, using the `Reference` harness of `semantics-check`. Rendered definitions exist only as build-generated code, and `semantics-check` already compares them with the VMs. The executor is a parameter, so a rendered one can replace it. Generate edge values per operand type: zero, signs, NaN, infinities, denormals, and extremes.
 - Compare the live-out state. Any difference rejects the candidate with a counterexample.
 - This step decides nothing positive: surviving candidates go on to step 2.
 
