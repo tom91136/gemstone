@@ -20,6 +20,7 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   *
   * gfx1036: Ryzen 9 9950X3D integrated GPU (one WGP, 2 CUs, 2200 MHz), Linux 7.2.15 amdgpu, ROCm 7.2 hipcc, 2026-11-10,
   * 202 launches per case. Cases whose slowest-wave time varies more than 10 percent between launches are not listed.
+  * The MUFU and FP64 rows at 4, 8 and 16 warps run 8, 16 and 32 resident waves, all co-resident.
   *
   * The expected binding is `Path` when the case runs over 25 percent above the smallest cycles per iteration the card
   * reached with 1 to 32 resident warps, and otherwise the resource whose instruction count and rate give that smallest
@@ -71,7 +72,13 @@ class HardwareValidationSuite extends Suite {
     Measured("mixed_ldg", 2, 38.35, Some(Binding.Path)),
     Measured("mixed_ldg", 16, 5.29, Some(Binding.Issue)),
     Measured("reduce_tree", 1, 25.00, Some(Binding.Path)),
-    Measured("reduce_tree", 2, 12.50, Some(Binding.Path))
+    Measured("reduce_tree", 2, 12.50, Some(Binding.Path)),
+    Measured("stream_mufu", 4, 8.80, Some(Binding.Arithmetic(Pipe.Mufu))),
+    Measured("stream_mufu", 8, 8.42, Some(Binding.Arithmetic(Pipe.Mufu))),
+    Measured("stream_mufu", 16, 8.21, Some(Binding.Arithmetic(Pipe.Mufu))),
+    Measured("stream_dfma", 4, 32.10, Some(Binding.Arithmetic(Pipe.Fp64))),
+    Measured("stream_dfma", 8, 32.09, Some(Binding.Arithmetic(Pipe.Fp64))),
+    Measured("stream_dfma", 16, 32.08, Some(Binding.Arithmetic(Pipe.Fp64)))
   )
 
   private class State(

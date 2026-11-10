@@ -1170,11 +1170,20 @@ object Architecture {
     "ROCm 7.2 hipcc"
   )
 
+  private val gfx1036Issue = Source.Probed(
+    "independent v_fma_f32 chains of 16, 32 and 64 timed with clock64 on one wave, " +
+      "linear fit over chain count gives 1.00 cycle per FMA (2026-11-10, median of 202 launches each)",
+    "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
+    "Linux 7.2.15 amdgpu",
+    "ROCm 7.2 hipcc"
+  )
+
   val gfx1036: Architecture = rdna2Base.copy(
     name = "gfx1036",
     throughput = rdna2Base.throughput.copy(fp64 = Sourced(8.0, gfx1036Rate)),
     latency = rdnaProbeLatency(gfx1036Latency),
-    pipeLatency = Map(Pipe.Fma -> Sourced(8, gfx1036Chain))
+    pipeLatency = Map(Pipe.Fma -> Sourced(8, gfx1036Chain)),
+    waveIssueCycles = Some(Sourced(1.0, gfx1036Issue))
   )
 
   private def rdna2(name: String): Architecture =
@@ -1458,7 +1467,8 @@ case class Architecture(
     memory: Option[Architecture.Memory] = None,
     card: Option[Architecture.Card] = None,
     pipeLatency: Map[Pipe, Architecture.Sourced[Int]] = Map.empty,
-    sharedPipes: Map[Pipe, Architecture.Source] = Map.empty
+    sharedPipes: Map[Pipe, Architecture.Source] = Map.empty,
+    waveIssueCycles: Option[Architecture.Sourced[Double]] = None
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1504,7 +1514,8 @@ case class Architecture(
         sibling(latency.dram)
       ),
       pipeLatency = pipeLatency.view.mapValues(inherit(_)).toMap,
-      sharedPipes = sharedPipes.view.mapValues(_ => Architecture.Source.Inherited(this.name, basis)).toMap
+      sharedPipes = sharedPipes.view.mapValues(_ => Architecture.Source.Inherited(this.name, basis)).toMap,
+      waveIssueCycles = waveIssueCycles.map(inherit(_))
     )
   }
 

@@ -103,8 +103,19 @@ object NvidiaLatency {
     "CUDA 13.3"
   )
 
-  private val measured89: Map[Producer, Double] = Map(Lds32 -> 24.00, Rcp32 -> 28.00)
+  private val probedFma64 = Architecture.Source.Probed(
+    "clock64 dependent fma.rn.f64 chain, median over 6000 launches, one thread, 2026-11-10",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
+  private val measured89: Map[Producer, Architecture.Sourced[Double]] = Map(
+    Lds32 -> Architecture.Sourced(24.00, probed),
+    Rcp32 -> Architecture.Sourced(28.00, probed),
+    Fma64 -> Architecture.Sourced(48.01, probedFma64)
+  )
 
   def measured(sm: Int, producer: Producer): Option[Architecture.Sourced[Double]] =
-    if sm == 89 then measured89.get(producer).map(Architecture.Sourced(_, probed)) else None
+    if (sm == 89) measured89.get(producer) else None
 }
