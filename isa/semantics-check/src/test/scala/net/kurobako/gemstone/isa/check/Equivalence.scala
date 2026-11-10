@@ -159,10 +159,10 @@ object Equivalence {
     val definition = kase.definition
     val roots      = definition.body.iterator.map(_.term) ++ definition.requirements.iterator ++
       definition.results.iterator.map(_.value)
-    roots.flatMap(terms).flatMap(refusal).nextOption()
+    roots.flatMap(terms(_)).flatMap(refusal(_)).nextOption()
   }
 
-  private def terms(term: Term): Iterator[Term] = Iterator(term) ++ term.children.iterator.flatMap(terms)
+  private def terms(term: Term): Iterator[Term] = Iterator(term) ++ term.children.iterator.flatMap(terms(_))
 
   private def refusal(term: Term): Option[String] = term match {
     case Term.Context(contextType = contextType, method = method, result = result, effect = effect) =>

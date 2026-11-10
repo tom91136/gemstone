@@ -13,11 +13,11 @@ abstract class EquivalenceSuite[H, L <: Lookup](reference: Reference[H, L], case
     extends Suite {
   private val executor = Equivalence.vm(reference)
 
-  protected val a      = Operand.Location("a")
-  protected val b      = Operand.Location("b")
-  private val zero     = Operand.Immediate(0L)
-  private val one      = Operand.Immediate(1L)
-  private val negative = Operand.Immediate(0x80000000L)
+  protected val a: Operand = Operand.Location("a")
+  protected val b: Operand = Operand.Location("b")
+  private val zero         = Operand.Immediate(0L)
+  private val one          = Operand.Immediate(1L)
+  private val negative     = Operand.Immediate(0x80000000L)
 
   protected def sum(destination: String, left: Operand, right: Operand): Step
 
