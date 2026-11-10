@@ -8,7 +8,11 @@
 // the vendor declaration's type, so a name absent from the pinned headers fails to compile. GenerateNativeBindings emits
 // the inventories from the functions a facade does not list as implemented.
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#if defined(__GNUC__) && !defined(__clang__)
+#if defined(__clang__)
+  #if __has_warning("-Wattribute-alias")
+    #pragma GCC diagnostic ignored "-Wattribute-alias"
+  #endif
+#elif defined(__GNUC__)
   #pragma GCC diagnostic ignored "-Wattribute-alias"
   #pragma GCC diagnostic ignored "-Wmissing-attributes"
 #endif
