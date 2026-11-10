@@ -5,6 +5,7 @@ import java.io.DataOutputStream
 import java.io.IOException
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchObserver.*
@@ -24,6 +25,9 @@ object ProfileStream {
       schedule: Option[Schedule],
       pipe: Option[Pipe]
   ) derives CanEqual
+
+  /** The control flow of a launched kernel, with the address of each of its instructions. */
+  case class Graph(kernel: String, graph: ControlFlowGraph, offsets: Vec[Long])
 
   /** One issue: `unit` of `workgroup` ran `instruction` for `lanes`, indices within the workgroup, and `begins` as
     * [[ArchitecturalState.begins]].
@@ -47,7 +51,7 @@ object ProfileStream {
   }
 
   private val Magic   = 0x47454d50524f4631L
-  private val Version = 4
+  private val Version = 5
 
   private val spaces = Space.values
   private val kinds  = AccessKind.values
@@ -64,7 +68,8 @@ object ProfileStream {
         val instructions = Vec.fill(in.readInt())(readInstruction(in))
         val events       = Vec.fill(in.readInt())(readEvent(in, instructions))
         val records      = Array.fill(in.readInt())(in.readLong())
-        Right(ProfileStream(resources, instructions, events, records))
+        val graphs       = Vec.fill(in.readInt())(readGraph(in))
+        Right(ProfileStream(resources, instructions, events, records, graphs))
       }
     catch { case e: IOException => Left(s"truncated or unreadable profile stream: ${e.getMessage}") }
 
@@ -141,6 +146,37 @@ object ProfileStream {
     )
   }
 
+  private def readGraph(in: DataInputStream): Graph = {
+    val kernel  = in.readUTF()
+    val entry   = in.readInt()
+    val blocks  = Vec.fill(in.readInt())(readBlock(in))
+    val offsets = Vec.fill(in.readInt())(in.readLong())
+    Graph(kernel, ControlFlowGraph.fromBlocks(blocks, entry), offsets)
+  }
+
+  private def readBlock(in: DataInputStream): Block = {
+    val first      = in.readInt()
+    val last       = in.readInt()
+    val open       = in.readBoolean()
+    val successors = Vec.fill(in.readInt())(in.readInt())
+    Block(first, last, successors, open)
+  }
+
+  private def writeGraph(out: DataOutputStream, value: Graph): Unit = {
+    out.writeUTF(value.kernel)
+    out.writeInt(value.graph.entry)
+    out.writeInt(value.graph.blocks.size)
+    value.graph.blocks.foreach { block =>
+      out.writeInt(block.first)
+      out.writeInt(block.last)
+      out.writeBoolean(block.open)
+      out.writeInt(block.successors.size)
+      block.successors.foreach(out.writeInt(_))
+    }
+    out.writeInt(value.offsets.size)
+    value.offsets.foreach(out.writeLong(_))
+  }
+
   private def readCount(in: DataInputStream): Int >= 0 =
     in.readInt().refine[Int >= 0].getOrElse(throw IOException("negative count"))
 
@@ -168,8 +204,9 @@ object ProfileStream {
       resources: Option[KernelResources],
       instructions: Vec[Instruction],
       events: Vec[MachineEvent],
-      records: Array[Long]
-  ): ProfileStream = new ProfileStream(resources, instructions, events, records)
+      records: Array[Long],
+      graphs: Vec[Graph]
+  ): ProfileStream = new ProfileStream(resources, instructions, events, records, graphs)
 }
 
 /** A recorded launch: the static instructions it issued, the changes its units went through, located at those
@@ -181,7 +218,8 @@ class ProfileStream private (
     val resources: Option[KernelResources],
     val instructions: Vec[ProfileStream.Instruction],
     private val events: Vec[MachineEvent],
-    private val records: Array[Long]
+    private val records: Array[Long],
+    val graphs: Vec[ProfileStream.Graph]
 ) {
   import ProfileRecords.*
   import ProfileStream.*
@@ -305,6 +343,8 @@ class ProfileStream private (
     }
     out.writeInt(records.length)
     records.foreach(out.writeLong(_))
+    out.writeInt(graphs.size)
+    graphs.foreach(writeGraph(out, _))
     out.flush()
   }
 }

@@ -24,9 +24,11 @@ object ControlFlowGraph {
     }
     new ControlFlowGraph(blocks, firsts.lastIndexWhere(_ <= entry))
   }
+
+  def fromBlocks(blocks: Vec[Block], entry: Int): ControlFlowGraph = new ControlFlowGraph(blocks, entry)
 }
 
-class ControlFlowGraph private (val blocks: Vec[Block], entry: Int) {
+class ControlFlowGraph private (val blocks: Vec[Block], val entry: Int) {
   private val predecessors: Map[Int, Seq[Int]] =
     blocks.indices.flatMap(u => blocks(u).successors.map(v => (v, u))).groupMap(_._1)(_._2)
 

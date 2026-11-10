@@ -5,6 +5,7 @@ import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.concurrent.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchObserver.*
@@ -123,6 +124,7 @@ class ProfileRecorder extends LaunchObserver {
   private val instructions                                 = mutable.ArrayBuffer.empty[Instruction]
   private val located                                      = mutable.HashMap.empty[Fault.Location, Int]
   private val events                                       = mutable.ArrayBuffer.empty[MachineEvent]
+  private val flows                                        = mutable.LinkedHashMap.empty[String, Graph]
   @volatile private var resources: Option[KernelResources] = None
 
   private var last: Option[Buffer] = None
@@ -175,6 +177,11 @@ class ProfileRecorder extends LaunchObserver {
   }
 
   override def launched(resources: KernelResources): Unit = this.resources = Some(resources)
+
+  override def controlFlow(kernel: String, graph: => ControlFlowGraph, offsets: Vec[Long]): Unit =
+    lock.withLock {
+      if (!flows.contains(kernel)) flows(kernel) = Graph(kernel, graph, offsets)
+    }
 
   /** The first non-empty use an instruction reports stands for all its issues. */
   override def registers(issued: Long, use: => RegisterUse): Unit = {
@@ -237,6 +244,6 @@ class ProfileRecorder extends LaunchObserver {
       Array.copy(segment.records, segment.from, merged, written, segment.until - segment.from)
       written += segment.until - segment.from
     }
-    lock.withLock(ProfileStream(resources, Vec.from(instructions), Vec.from(events), merged))
+    lock.withLock(ProfileStream(resources, Vec.from(instructions), Vec.from(events), merged, Vec.from(flows.values)))
   }
 }

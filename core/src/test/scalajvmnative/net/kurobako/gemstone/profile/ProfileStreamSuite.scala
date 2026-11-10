@@ -6,6 +6,7 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
@@ -87,6 +88,20 @@ class ProfileStreamSuite extends Suite {
     assertEquals(read.map(replay(_)), Right(expected))
     assertEquals(read.map(_.instructions), Right(stream.instructions))
     assertEquals(read.map(_.instructions(0).use), Right(use))
+  }
+
+  test("the control flow of each launched kernel survives a round trip") {
+    val recorder = ProfileRecorder()
+    val graph    = ControlFlowGraph(Vec(Some(Vec(1)), Some(Vec(1, 2)), Some(Vec(3)), None), 0)
+    val offsets  = Vec[Long](0x10L, 0x18L, 0x20L, 0x28L)
+    recorder.controlFlow("k", graph, offsets)
+    val bytes = ByteArrayOutputStream()
+    recorder.stream.write(DataOutputStream(bytes))
+    val read = ProfileStream.read(DataInputStream(ByteArrayInputStream(bytes.toByteArray)))
+    assertEquals(
+      read.map(_.graphs.map(g => (g.kernel, g.graph.blocks, g.graph.entry, g.graph.loops, g.offsets))),
+      Right(Vec(("k", graph.blocks, graph.entry, graph.loops, offsets)))
+    )
   }
 
   test("the compiler schedule of each instruction survives a round trip") {

@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.vm
 
+import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.semantics.*
 import scala.annotation.unused
 
@@ -39,6 +41,11 @@ object LaunchObserver {
       second.registers(issued, once)
     }
     override def launched(resources: KernelResources): Unit = { first.launched(resources); second.launched(resources) }
+    override def controlFlow(kernel: String, graph: => ControlFlowGraph, offsets: Vec[Long]): Unit = {
+      lazy val once = graph
+      first.controlFlow(kernel, once, offsets)
+      second.controlFlow(kernel, once, offsets)
+    }
     override def access(lane: Int >= 0, space: Space, kind: AccessKind, address: Long, bytes: Int >= 0): Unit = {
       first.access(lane, space, kind, address, bytes)
       second.access(lane, space, kind, address, bytes)
@@ -111,6 +118,11 @@ trait LaunchObserver derives CanEqual {
 
   /** Called once before the launch issues anything, with what each of its workgroups holds on the device. */
   def launched(@unused resources: KernelResources): Unit = ()
+
+  /** Called once per launch of `kernel` before it issues, with its control flow and the address of each of its
+    * instructions as [[instruction]] reports them.
+    */
+  def controlFlow(@unused kernel: String, @unused graph: => ControlFlowGraph, @unused offsets: Vec[Long]): Unit = ()
 
   /** Called for each lane's access to memory in any space, between [[instruction]] for the issue that makes it and the
     * next. `lane` is the lane's index within its workgroup; `space` is the space the access resolved to, never
