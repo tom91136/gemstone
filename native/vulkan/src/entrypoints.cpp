@@ -3,6 +3,7 @@
 #include <cstring>
 #include <mutex>
 #include <new>
+#include <stdexcept>
 #include <string_view>
 
 #include "gemstone_vulkan_adapter.hpp"
@@ -92,6 +93,8 @@ VkResult createPipelines(VkDevice device, VkPipelineCache cache, uint32_t count,
       }
     } catch (const std::bad_alloc &) {
       result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    } catch (const std::invalid_argument &) {
+      result = VK_ERROR_FEATURE_NOT_PRESENT;
     }
   }
   return result;

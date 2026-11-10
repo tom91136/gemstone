@@ -164,6 +164,36 @@ int collectVulkanLibraries(dl_phdr_info *info, size_t, void *data) {
 } // namespace
 
 namespace {
+// Valid empty vertex entry point; gl_Position is deliberately absent.
+constexpr uint32_t EmptyVertexShader[]{0x07230203,
+                                       0x00010000,
+                                       0,
+                                       5,
+                                       0,
+                                       (2U << 16) | 17U,
+                                       1,
+                                       (3U << 16) | 14U,
+                                       0,
+                                       1,
+                                       (5U << 16) | 15U,
+                                       0,
+                                       3,
+                                       0x6e69616d,
+                                       0,
+                                       (2U << 16) | 19U,
+                                       1,
+                                       (3U << 16) | 33U,
+                                       2,
+                                       1,
+                                       (5U << 16) | 54U,
+                                       1,
+                                       3,
+                                       0,
+                                       2,
+                                       (2U << 16) | 248U,
+                                       4,
+                                       (1U << 16) | 253U,
+                                       (1U << 16) | 56U};
 struct DiscardPipeline {
   VkDevice device{};
   VkShaderModule module{};
@@ -172,40 +202,10 @@ struct DiscardPipeline {
   VkPipelineLayout layout{};
   VkPipeline pipeline{};
   explicit DiscardPipeline(TestDevice &runtime) : device(runtime.device) {
-    // Valid empty vertex entry point; gl_Position is deliberately absent.
-    const uint32_t shader[]{0x07230203,
-                            0x00010000,
-                            0,
-                            5,
-                            0,
-                            (2U << 16) | 17U,
-                            1,
-                            (3U << 16) | 14U,
-                            0,
-                            1,
-                            (5U << 16) | 15U,
-                            0,
-                            3,
-                            0x6e69616d,
-                            0,
-                            (2U << 16) | 19U,
-                            1,
-                            (3U << 16) | 33U,
-                            2,
-                            1,
-                            (5U << 16) | 54U,
-                            1,
-                            3,
-                            0,
-                            2,
-                            (2U << 16) | 248U,
-                            4,
-                            (1U << 16) | 253U,
-                            (1U << 16) | 56U};
     VkShaderModuleCreateInfo moduleInfo{};
     moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleInfo.codeSize = sizeof(shader);
-    moduleInfo.pCode = shader;
+    moduleInfo.codeSize = sizeof(EmptyVertexShader);
+    moduleInfo.pCode = EmptyVertexShader;
     REQUIRE(vkCreateShaderModule(device, &moduleInfo, nullptr, &module) == VK_SUCCESS);
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
@@ -4314,6 +4314,75 @@ TEST_CASE("Vulkan pipeline batches preserve partial success and roll back alloca
     for (size_t failAt = 0; failAt < allocationCount; ++failAt)
       create(failAt);
   }
+  vkDestroyShaderModule(runtime.device, module, nullptr);
+}
+
+TEST_CASE("Vulkan graphics pipelines return an error for out-of-range state", "[vulkan]") {
+  TestDevice const runtime;
+  VkShaderModuleCreateInfo moduleInfo{};
+  moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  moduleInfo.codeSize = sizeof(EmptyVertexShader);
+  moduleInfo.pCode = EmptyVertexShader;
+  VkShaderModule module{};
+  REQUIRE(vkCreateShaderModule(runtime.device, &moduleInfo, nullptr, &module) == VK_SUCCESS);
+  VkSubpassDescription subpass{};
+  subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+  VkRenderPassCreateInfo passInfo{};
+  passInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+  passInfo.subpassCount = 1;
+  passInfo.pSubpasses = &subpass;
+  VkRenderPass pass{};
+  REQUIRE(vkCreateRenderPass(runtime.device, &passInfo, nullptr, &pass) == VK_SUCCESS);
+  VkPipelineLayoutCreateInfo layoutInfo{};
+  layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  VkPipelineLayout layout{};
+  REQUIRE(vkCreatePipelineLayout(runtime.device, &layoutInfo, nullptr, &layout) == VK_SUCCESS);
+  VkPipelineShaderStageCreateInfo stage{};
+  stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+  stage.stage = VK_SHADER_STAGE_VERTEX_BIT;
+  stage.module = module;
+  stage.pName = "main";
+  VkPipelineInputAssemblyStateCreateInfo assembly{};
+  assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+  assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+  VkPipelineRasterizationStateCreateInfo raster{};
+  raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+  raster.polygonMode = VK_POLYGON_MODE_FILL;
+  raster.lineWidth = 1;
+  VkPipelineViewportStateCreateInfo viewport{};
+  viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+  viewport.viewportCount = 1;
+  viewport.scissorCount = 1;
+  VkPipelineMultisampleStateCreateInfo multisample{};
+  multisample.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+  multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+  VkPipelineDepthStencilStateCreateInfo depth{};
+  depth.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depth.depthTestEnable = VK_TRUE;
+  depth.depthCompareOp = VK_COMPARE_OP_LESS;
+  VkGraphicsPipelineCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+  info.stageCount = 1;
+  info.pStages = &stage;
+  info.pInputAssemblyState = &assembly;
+  info.pRasterizationState = &raster;
+  info.pViewportState = &viewport;
+  info.pMultisampleState = &multisample;
+  info.pDepthStencilState = &depth;
+  info.layout = layout;
+  info.renderPass = pass;
+  VkPipeline pipeline = VK_NULL_HANDLE;
+  SECTION("depth compare outside the enum range") { depth.depthCompareOp = static_cast<VkCompareOp>(0x7fffffff); }
+  SECTION("stencil compare outside the enum range") {
+    depth.stencilTestEnable = VK_TRUE;
+    depth.front.compareOp = static_cast<VkCompareOp>(0x7fffffff);
+  }
+  VkResult result{};
+  REQUIRE_NOTHROW(result = vkCreateGraphicsPipelines(runtime.device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline));
+  REQUIRE(result == VK_ERROR_FEATURE_NOT_PRESENT);
+  REQUIRE(pipeline == VK_NULL_HANDLE);
+  vkDestroyPipelineLayout(runtime.device, layout, nullptr);
+  vkDestroyRenderPass(runtime.device, pass, nullptr);
   vkDestroyShaderModule(runtime.device, module, nullptr);
 }
 
