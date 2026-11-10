@@ -79,6 +79,12 @@ class PipelineSimulatorSuite extends Suite {
     assertEquals(block.binding, Binding.Arithmetic(Pipe.Mufu))
   }
 
+  test("a pipe shared across partitions gives a lone subgroup its whole rate") {
+    assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 1).cyclesPerIteration, 16.0, 1e-9)
+    assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 48).cyclesPerIteration, 16.0, 1e-9)
+    assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Mufu))), subgroups = 1).cyclesPerIteration, 8.0, 1e-9)
+  }
+
   test("issue-bound stream runs at the issue width") {
     val block = run(Vec(op(), op(), op()), subgroups = 48)
     assert(block.steady)

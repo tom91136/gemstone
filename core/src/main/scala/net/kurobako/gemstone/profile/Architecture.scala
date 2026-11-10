@@ -561,6 +561,14 @@ object Architecture {
     "CUDA 13.3, nvcc"
   )
 
+  private val adaSharedFp64 = Source.Probed(
+    "stream_dfma loop timed with clock64: one warp reaches 1.5 lanes per cycle, three times the 0.5 of one " +
+      "partition's quarter of the 2 per multiprocessor (HardwareLoops stream_dfma, 2026-11-10)",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
   val sm89: Architecture = Architecture(
     "sm_89",
     Global(Sourced(32, cudaBestPractice89), Sourced(128, cudaBestPractice89)),
@@ -591,7 +599,8 @@ object Architecture {
       Some(Sourced(39.97, adaLatency)),
       Some(Sourced(269.46, adaLatency)),
       Sourced(628.29, adaLatency)
-    )
+    ),
+    sharedPipes = Map(Pipe.Fp64 -> adaSharedFp64)
   ).on(Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)))
 
   val sm86: Architecture = sm89
@@ -1438,7 +1447,8 @@ case class Architecture(
     latency: Architecture.Latency,
     memory: Option[Architecture.Memory] = None,
     card: Option[Architecture.Card] = None,
-    pipeLatency: Map[Pipe, Architecture.Sourced[Int]] = Map.empty
+    pipeLatency: Map[Pipe, Architecture.Sourced[Int]] = Map.empty,
+    sharedPipes: Map[Pipe, Architecture.Source] = Map.empty
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1483,7 +1493,8 @@ case class Architecture(
         latency.l2.map(sibling(_)),
         sibling(latency.dram)
       ),
-      pipeLatency = pipeLatency.view.mapValues(inherit(_)).toMap
+      pipeLatency = pipeLatency.view.mapValues(inherit(_)).toMap,
+      sharedPipes = sharedPipes.view.mapValues(_ => Architecture.Source.Inherited(this.name, basis)).toMap
     )
   }
 

@@ -114,11 +114,14 @@ object PipelineSimulator {
                   case None    => (0L, warp.position.toInt)
                 }
                 op.pipe.foreach { pipe =>
-                  val rate   = rates.rate(pipe)
-                  val cycles = math.ceil(op.lanes * partitions / rate.value).toLong
+                  val rate    = rates.rate(pipe)
+                  val shared  = architecture.sharedPipes.get(pipe)
+                  val sharers = if (shared.isDefined) math.min(partitions, subgroups) else partitions
+                  val cycles  = math.ceil(op.lanes * sharers / rate.value).toLong
                   busyUntil(pipe) = t + cycles
                   busyCycles(pipe) = busyCycles.getOrElse(pipe, 0L) + cycles
                   sources += rate.source
+                  shared.foreach(sources += _)
                 }
                 op.writes.foreach(r => warp.ready(r) = math.max(warp.ready.getOrElse(r, 0L), t + latency))
                 sources += op.latency.source
