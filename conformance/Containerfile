@@ -139,6 +139,11 @@ COPY --from=llvm-offload-archive llvm-offload.tar.zst /tmp/
 RUN zstd -dc --long=30 /tmp/llvm-offload.tar.zst | tar -xf - -C / \
     && rm /tmp/llvm-offload.tar.zst
 
+# Source for the relocatable OpenCL compiler subset. The runtime needs an
+# OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
+# SYCL toolchain uses keeps OpenCL artifacts self-contained.
+FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
+
 # The AlmaLinux 8 tree sets the glibc floor of native DSOs. It is the --sysroot for the native toolchain.
 FROM quay.io/almalinuxorg/almalinux@sha256:7596d3c7d159ec8e1df2b7d2b961db939de291a3e00c5e4d8f6a9d610b3b6d35 AS sysroot
 ARG RHEL_TRIPLE=x86_64-redhat-linux
@@ -210,6 +215,11 @@ RUN cmake -S /tmp/llvm-src/runtimes -B /tmp/runtimes-build -G Ninja \
     && ninja -C /tmp/runtimes-build -j16 install \
     && rm -rf /tmp/llvm-src /tmp/runtimes-build
 
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/clang /opt/intel/oneapi/compiler/latest/bin/compiler/clang
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-spirv /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-spirv
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-link /opt/intel/oneapi/compiler/latest/bin/compiler/llvm-link
+COPY --from=oneapi-opencl-compiler /opt/intel/oneapi/compiler/latest/lib/clang /opt/intel/oneapi/compiler/latest/lib/clang
+
 FROM jobserver-ninja AS cccl
 ARG CCCL_VERSION
 ARG CCCL_SHA256
@@ -218,11 +228,6 @@ RUN curl -fsSL "https://codeload.github.com/NVIDIA/cccl/tar.gz/refs/tags/v${CCCL
     && mkdir /opt/cccl \
     && tar -xzf /tmp/cccl.tar.gz --strip-components=1 -C /opt/cccl \
     && rm /tmp/cccl.tar.gz
-
-# Source for the relocatable OpenCL compiler subset. The runtime needs an
-# OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
-# SYCL toolchain uses keeps OpenCL artifacts self-contained.
-FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
 
 FROM ubuntu-build-base AS lint-kernel-stubs
 RUN d=/opt/intel/oneapi/compiler/latest/bin/compiler \
