@@ -735,10 +735,10 @@ TEST_CASE("OpenCL depth images hold UNORM_INT16 and FLOAT depths in 2D and 2D ar
   const size_t origin[] = {0, 0, 0};
   const size_t region[] = {3, 2, 1};
   REQUIRE((clEnqueueWriteImage(session.queue, image, CL_TRUE, origin, region, 0, 0, depths.data(), 0, nullptr, nullptr) == CL_SUCCESS));
-  const float half = 0.5F;
+  const std::array<float, 4> half{0.5F, 0.0F, 0.0F, 0.0F};
   const size_t corner[] = {2, 1, 0};
   const size_t one[] = {1, 1, 1};
-  REQUIRE((clEnqueueFillImage(session.queue, image, &half, corner, one, 0, nullptr, nullptr) == CL_SUCCESS));
+  REQUIRE((clEnqueueFillImage(session.queue, image, half.data(), corner, one, 0, nullptr, nullptr) == CL_SUCCESS));
   std::array<uint16_t, 6> read{};
   REQUIRE((clEnqueueReadImage(session.queue, image, CL_TRUE, origin, region, 0, 0, read.data(), 0, nullptr, nullptr) == CL_SUCCESS));
   CHECK(read == std::array<uint16_t, 6>{0, 1, 0x8000, 0xfffe, 0xffff, 0x8000});
