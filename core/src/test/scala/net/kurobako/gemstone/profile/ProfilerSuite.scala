@@ -200,6 +200,14 @@ class ProfilerSuite extends Suite {
     assertEquals(launch.profile.pressure, Some(Profile.Pressure(3, 2.0)))
   }
 
+  test("register names come in name order, whichever issue named them first") {
+    val launch = Launch()
+    launch.issue(0L, warp, use = RegisterUse(Vec("v1", "s0"), Vec("v2")))(_ => None)
+    launch.issue(0L, warp, begins = false, use = RegisterUse(Vec("v1"), Vec("s1")))(_ => None)
+    val use = launch.recorder.stream.instructions(0).use
+    assertEquals((use.reads, use.writes), (Vec("s0", "v1"), Vec("s1", "v2")))
+  }
+
   test("planned cycles add the stall of each issue the machine begins and nothing for the rest") {
     val launch = Launch()
     val stall  = Some(Schedule.Encoded(4.unsafe[Int in 0 ~ 15], writeBarrier = true))

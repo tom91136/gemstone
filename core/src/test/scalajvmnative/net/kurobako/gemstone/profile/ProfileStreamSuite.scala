@@ -87,7 +87,7 @@ class ProfileStreamSuite extends Suite {
     val read = ProfileStream.read(DataInputStream(ByteArrayInputStream(bytes.toByteArray)))
     assertEquals(read.map(replay(_)), Right(expected))
     assertEquals(read.map(_.instructions), Right(stream.instructions))
-    assertEquals(read.map(_.instructions(0).use), Right(use))
+    assertEquals(read.map(_.instructions(0).use), Right(use.copy(writes = Vec("%p1", "%r1"))))
   }
 
   test("a kernel reported lost keeps no control flow graph, even when reported again") {

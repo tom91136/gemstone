@@ -251,7 +251,9 @@ class ProfileRecorder extends LaunchObserver {
         reports(instruction) = reports.get(instruction).fold(use)(_.merge(use))
       })
       val described = instructions.zipWithIndex.map { (instruction, index) =>
-        reports.get(index).fold(instruction)(use => instruction.copy(use = use))
+        reports.get(index).fold(instruction) { use =>
+          instruction.copy(use = use.copy(reads = use.reads.sorted, writes = use.writes.sorted))
+        }
       }
       ProfileStream(resources, Vec.from(described), Vec.from(events), merged, Vec.from(flows.values))
     }
