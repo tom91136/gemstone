@@ -19,8 +19,8 @@ object ProfileReport {
 
   private def scheduled(profile: Profile): Boolean = profile.instructions.exists(_._1.schedule.nonEmpty)
 
-  private val encodedPlanning  = ("compiler encoding", "the compiler's encoded issue stalls")
-  private val modelledPlanning = ("LLVM scheduling model", "LLVM scheduling-model estimates")
+  val encodedPlanning: (String, String)  = ("compiler encoding", "the compiler's encoded issue stalls")
+  val modelledPlanning: (String, String) = ("LLVM scheduling model", "LLVM scheduling-model estimates")
 
   private def planning(profile: Profile): Vec[(String, String)] =
     profile.instructions.flatMap(_._1.schedule).map {
@@ -140,7 +140,7 @@ object ProfileReport {
     case L1, L2, Dram
   }
 
-  private def bindingName(binding: Binding): String = binding match {
+  def bindingName(binding: Binding): String = binding match {
     case Binding.Issue            => "issue"
     case Binding.LoadStore        => "load-store"
     case Binding.Shared           => "shared"

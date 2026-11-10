@@ -83,6 +83,54 @@ class BenchmarkRunnerSuite extends Suite {
     )
   }
 
+  test("analyse takes an architecture, an optional block label and a json flag") {
+    parse("analyse", "ptx-vector-add", "--architecture", "sm_89", "--block", "k/loop@0x20", "--json") match {
+      case BenchmarkRunner.Action.Analyse(options, _) =>
+        assertEquals(options.architecture.name, "sm_89")
+        assertEquals(options.block, Some("k/loop@0x20"))
+        assert(options.json)
+      case action => fail(s"unexpected action $action")
+    }
+    parse("analyse", "ptx-vector-add", "--architecture", "sm_89") match {
+      case BenchmarkRunner.Action.Analyse(options, _) =>
+        assertEquals(options.block, None)
+        assert(!options.json)
+      case action => fail(s"unexpected action $action")
+    }
+  }
+
+  test("analyse requires an architecture and rejects cases without a VM and conflicting streams") {
+    assert(BenchmarkRunner.command.parse(Vector("analyse", "ptx-vector-add")).isLeft)
+    assert(BenchmarkRunner.command.parse(Vector("analyse", "ptx-vector-add", "--architecture", "sm_99")).isLeft)
+    assert(BenchmarkRunner.command.parse(Vector("analyse", "journal-inspection", "--architecture", "sm_89")).isLeft)
+    assert(
+      BenchmarkRunner.command
+        .parse(Vector("analyse", "ptx-vector-add", "--architecture", "sm_89", "--stream", "a.bin", "--replay", "b.bin"))
+        .isLeft
+    )
+  }
+
+  test("analyse replays a recorded stream") {
+    assert(
+      BenchmarkRunner.command
+        .parse(Vector("analyse", "ptx-vector-add", "--architecture", "sm_89", "--replay", "a.bin"))
+        .isRight
+    )
+  }
+
+  test("analyse passes case arguments after a separator to the case") {
+    assert(
+      BenchmarkRunner.command
+        .parse(Vector("analyse", "--architecture", "sm_89", "nvidia-control-flow", "--", "--isa", "sass"))
+        .isRight
+    )
+    assert(
+      BenchmarkRunner.command
+        .parse(Vector("analyse", "--architecture", "sm_89", "nvidia-control-flow", "--", "--isa", "cuda"))
+        .isLeft
+    )
+  }
+
   test("results serialise measured work and keep unavailable allocation counts null") {
     val options = BenchmarkRunner.Options(2, 3, "ptx-vector-add", Vector.empty, true, false)
     val sample  = BenchmarkSample(9007199254740993L, 37L, Some(12345L), BenchmarkSample.AllocationScope.Workers)

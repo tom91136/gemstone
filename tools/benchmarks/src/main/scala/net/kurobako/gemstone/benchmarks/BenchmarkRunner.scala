@@ -37,10 +37,19 @@ object BenchmarkRunner {
       json: Option[Path]
   )
 
+  case class AnalyseOptions(
+      architecture: Architecture,
+      stream: Option[Path],
+      replay: Option[Path],
+      block: Option[String],
+      json: Boolean
+  )
+
   enum Action derives CanEqual {
     case List
     case Run(options: Options, benchmark: LaunchControl => BenchmarkSample)
     case Profile(options: ProfileOptions, benchmark: LaunchControl => BenchmarkSample)
+    case Analyse(options: AnalyseOptions, benchmark: LaunchControl => BenchmarkSample)
   }
 
   private val Top = 10
@@ -75,6 +84,20 @@ object BenchmarkRunner {
         Opts.arguments[String]("case-argument").orEmpty
       ).tupled.mapValidated { (name, architecture, stream, replay, json, arguments) =>
         selectProfile(name, architecture, stream, replay, json, arguments.toVector).toValidatedNel
+      }),
+      Command("analyse", "Analyse the basic blocks and loops of one launch of a benchmark case")((
+        Opts.argument[String]("case"),
+        Opts.option[String]("architecture", help = s"Architecture: $ArchitectureNames"),
+        Opts.option[String]("stream", help = "Write the profile stream to this file").map(Path.of(_)).orNone,
+        Opts.option[String](
+          "replay",
+          help = "Read a profile stream instead of running the case"
+        ).map(Path.of(_)).orNone,
+        Opts.option[String]("block", help = "Report only the region with this label").orNone,
+        Opts.flag("json", help = "Print the analysis as JSON").orFalse,
+        Opts.arguments[String]("case-argument").orEmpty
+      ).tupled.mapValidated { (name, architecture, stream, replay, block, json, arguments) =>
+        selectAnalyse(name, architecture, stream, replay, block, json, arguments.toVector).toValidatedNel
       })
     )
   )
@@ -96,19 +119,31 @@ object BenchmarkRunner {
           }
         }
       case Right(Action.Profile(options, benchmark)) =>
-        stream(options, benchmark) match {
+        stream(options.replay, benchmark) match {
           case Left(error) =>
             Console.err.println(error)
             sys.exit(1)
           case Right(recorded) =>
-            options.stream.foreach(path =>
-              Using.resource(DataOutputStream(BufferedOutputStream(Files.newOutputStream(path))))(recorded.write)
-            )
+            persist(options.stream, recorded)
             val profile = Profiler.run(recorded, options.architecture)
             Console.out.println(ProfileReport.summary(profile, Top))
             options.json.foreach(path =>
               Files.writeString(path, ProfileReport.jsonLines(profile).map(_ + "\n").mkString)
             )
+        }
+      case Right(Action.Analyse(options, benchmark)) =>
+        val analysed = stream(options.replay, benchmark).flatMap { recorded =>
+          persist(options.stream, recorded)
+          BlockAnalysis.of(recorded, options.architecture).flatMap(_.select(options.block))
+        }
+        analysed match {
+          case Left(error) =>
+            Console.err.println(error)
+            sys.exit(1)
+          case Right(regions) if options.json =>
+            Console.out.println(ujson.write(BlockAnalysisReport.json(regions), indent = 2))
+          case Right(regions) =>
+            Console.out.println(BlockAnalysisReport.text(regions))
         }
     }
   }
@@ -126,6 +161,20 @@ object BenchmarkRunner {
     Either.cond(recorded.instructions.nonEmpty, recorded, "case launched no kernel")
   }
 
+  private def selectCase(
+      name: String,
+      architecture: Option[String],
+      stream: Option[Path],
+      replay: Option[Path],
+      arguments: Vector[String]
+  ): Either[String, (Architecture, LaunchControl => BenchmarkSample)] =
+    for {
+      _         <- Either.cond(stream.isEmpty || replay.isEmpty, (), "--stream and --replay are exclusive")
+      entry     <- PlatformBenchmarks.find(name)
+      resolved  <- architectureFor(entry, architecture)
+      benchmark <- PlatformBenchmarks.parse(name, arguments)
+    } yield (resolved, benchmark)
+
   private def selectProfile(
       name: String,
       architecture: Option[String],
@@ -134,38 +183,49 @@ object BenchmarkRunner {
       json: Option[Path],
       arguments: Vector[String]
   ): Either[String, Action] =
-    for {
-      _         <- Either.cond(stream.isEmpty || replay.isEmpty, (), "--stream and --replay are exclusive")
-      entry     <- PlatformBenchmarks.find(name)
-      resolved  <- architectureFor(entry, architecture)
-      benchmark <- PlatformBenchmarks.parse(name, arguments)
-    } yield Action.Profile(ProfileOptions(resolved, stream, replay, json), benchmark)
+    selectCase(name, architecture, stream, replay, arguments).map { (resolved, benchmark) =>
+      Action.Profile(ProfileOptions(resolved, stream, replay, json), benchmark)
+    }
+
+  private def selectAnalyse(
+      name: String,
+      architecture: String,
+      stream: Option[Path],
+      replay: Option[Path],
+      block: Option[String],
+      json: Boolean,
+      arguments: Vector[String]
+  ): Either[String, Action] =
+    selectCase(name, Some(architecture), stream, replay, arguments).map { (resolved, benchmark) =>
+      Action.Analyse(AnalyseOptions(resolved, stream, replay, block, json), benchmark)
+    }
 
   private def architectureFor(
       entry: PlatformBenchmarks.Entry,
       requested: Option[String]
   ): Either[String, Architecture] =
-    requested match {
-      case Some(name) => Architecture.named(name).toRight(s"unknown architecture: $name")
-      case None       =>
-        entry.platform match {
-          case Some(Platform.Nvidia)   => Right(Architecture.nvidiaDefault)
-          case Some(Platform.Amdgpu)   => Right(Architecture.amdgpuDefault)
-          case Some(Platform.Portable) =>
-            Left(s"${entry.name} needs --architecture ($ArchitectureNames)")
-          case None => Left(s"${entry.name} runs no VM")
-        }
+    (entry.platform, requested) match {
+      case (None, _)                       => Left(s"${entry.name} runs no VM")
+      case (_, Some(name))                 => Architecture.named(name).toRight(s"unknown architecture: $name")
+      case (Some(Platform.Nvidia), None)   => Right(Architecture.nvidiaDefault)
+      case (Some(Platform.Amdgpu), None)   => Right(Architecture.amdgpuDefault)
+      case (Some(Platform.Portable), None) => Left(s"${entry.name} needs --architecture ($ArchitectureNames)")
     }
 
   private def stream(
-      options: ProfileOptions,
+      replay: Option[Path],
       benchmark: LaunchControl => BenchmarkSample
   ): Either[String, ProfileStream] =
-    options.replay match {
+    replay match {
       case Some(path) =>
         Using.resource(DataInputStream(BufferedInputStream(Files.newInputStream(path))))(ProfileStream.read(_))
       case None => record(benchmark)
     }
+
+  private def persist(file: Option[Path], recorded: ProfileStream): Unit =
+    file.foreach(path =>
+      Using.resource(DataOutputStream(BufferedOutputStream(Files.newOutputStream(path))))(recorded.write)
+    )
 
   def result(
       options: Options,
