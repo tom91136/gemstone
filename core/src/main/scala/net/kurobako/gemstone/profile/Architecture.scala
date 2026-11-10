@@ -1077,7 +1077,7 @@ object Architecture {
     sharedGranule = Sourced(512, llvm("getLdsDwGranularity"))
   )
 
-  val gfx1030: Architecture = Architecture(
+  private val rdna2Base: Architecture = Architecture(
     "gfx1030",
     Global(
       Sourced(
@@ -1119,6 +1119,8 @@ object Architecture {
     rdnaProbeLatency(Source.Estimate("gfx1036 probe on the Ryzen 9 9950X3D integrated GPU; gfx1030 not probed"))
   )
 
+  val gfx1030: Architecture = rdna2Base.on(Card("Radeon RX 6800", 256, 4096L, Some(512.0), Some(60), Some(2105)))
+
   private val gfx1036Rate = Source.Probed(
     "fma_f64 rate kernel, 8 chains, 1024 threads per WGP, median of 10 launches (Nextcloud probe kit)",
     "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
@@ -1132,9 +1134,9 @@ object Architecture {
     "HIP 7.1.52802, clang 20.0.0.rocm"
   )
 
-  val gfx1036: Architecture = gfx1030.copy(
+  val gfx1036: Architecture = rdna2Base.copy(
     name = "gfx1036",
-    throughput = gfx1030.throughput.copy(fp64 = Sourced(8.0, gfx1036Rate)),
+    throughput = rdna2Base.throughput.copy(fp64 = Sourced(8.0, gfx1036Rate)),
     latency = rdnaProbeLatency(gfx1036Latency)
   )
 
@@ -1145,7 +1147,8 @@ object Architecture {
         "chip mapping recalled from the Wikipedia Radeon RX 6000 series page, not read"
     )
 
-  val gfx1031: Architecture = rdna2("gfx1031")
+  val gfx1031: Architecture =
+    rdna2("gfx1031").on(Card("Radeon RX 6700 XT", 192, 3072L, Some(384.0), Some(40), Some(2581)))
   val gfx1032: Architecture = rdna2("gfx1032")
   val gfx1033: Architecture = rdna2("gfx1033")
   val gfx1034: Architecture = rdna2("gfx1034")
@@ -1155,7 +1158,7 @@ object Architecture {
     .derived("gfx1010", "RDNA1 shares the WGP, 128-byte L0 line, and LDS design with RDNA2")
     .copy(
       limits = rdnaLimits(80, 32768, 256, "gfx10.1"),
-      throughput = gfx1030.throughput.copy(
+      throughput = rdna2Base.throughput.copy(
         fp64 = Sourced(
           8.0,
           recalled(
@@ -1167,8 +1170,10 @@ object Architecture {
 
   private def rdna1(name: String): Architecture = gfx1010.derived(name, "same RDNA1 WGP as gfx1010")
 
-  val gfx1011: Architecture = rdna1("gfx1011")
-  val gfx1012: Architecture = rdna1("gfx1012")
+  val gfx1011: Architecture =
+    rdna1("gfx1011").on(Card("Radeon Pro 5600M", 2048, 4096L, Some(394.0), Some(40), Some(1035)))
+  val gfx1012: Architecture =
+    rdna1("gfx1012").on(Card("Radeon RX 5500 XT", 128, 2048L, Some(224.0), Some(22), Some(1845)))
   val gfx1013: Architecture = rdna1("gfx1013")
 
   private val rdna3Tensor = Source.Estimate(
@@ -1187,7 +1192,7 @@ object Architecture {
     .derived("gfx1150", "RDNA3.5 keeps the RDNA2 WGP, L0 line, and LDS; dual-issue FP32 and WMMA are added")
     .copy(
       limits = rdna3Limits(registers = 32768, granule = 512, generation = "gfx11.5"),
-      throughput = gfx1030.throughput.copy(
+      throughput = rdna2Base.throughput.copy(
         fma = Sourced(256.0, recalled(rdna3Isa)),
         fp64 = Sourced(4.0, rdna3Fp64),
         tensor = Sourced(512.0, rdna3Tensor)
@@ -1197,9 +1202,24 @@ object Architecture {
   private def rdna3(name: String, registers: Int, granule: Int, generation: String): Architecture =
     gfx1150.derived(name, "same RDNA3 family WGP as gfx1150").copy(limits = rdna3Limits(registers, granule, generation))
 
-  val gfx1100: Architecture = rdna3("gfx1100", registers = 49152, granule = 768, generation = "gfx11.0 with 1.5x VGPRs")
-  val gfx1101: Architecture = rdna3("gfx1101", registers = 49152, granule = 768, generation = "gfx11.0 with 1.5x VGPRs")
-  val gfx1102: Architecture = rdna3("gfx1102", registers = 32768, granule = 512, generation = "gfx11.0")
+  val gfx1100: Architecture = rdna3(
+    "gfx1100",
+    registers = 49152,
+    granule = 768,
+    generation = "gfx11.0 with 1.5x VGPRs"
+  ).on(Card("Radeon RX 7900 XTX", 384, 6144L, Some(960.0), Some(96), Some(2500)))
+  val gfx1101: Architecture = rdna3(
+    "gfx1101",
+    registers = 49152,
+    granule = 768,
+    generation = "gfx11.0 with 1.5x VGPRs"
+  ).on(Card("Radeon RX 7800 XT", 256, 4096L, Some(624.0), Some(60), Some(2430)))
+  val gfx1102: Architecture = rdna3(
+    "gfx1102",
+    registers = 32768,
+    granule = 512,
+    generation = "gfx11.0"
+  ).on(Card("Radeon RX 7600", 128, 2048L, Some(288.0), Some(32), Some(2655)))
   val gfx1103: Architecture = rdna3("gfx1103", registers = 32768, granule = 512, generation = "gfx11.0")
   val gfx1151: Architecture = rdna3("gfx1151", registers = 49152, granule = 768, generation = "gfx11.5 with 1.5x VGPRs")
   val gfx1152: Architecture = rdna3("gfx1152", registers = 32768, granule = 512, generation = "gfx11.5")

@@ -11,6 +11,13 @@ struct TargetMemory {
 };
 
 inline std::optional<TargetMemory> targetMemory(std::string_view target) noexcept {
+  if (target == "gfx1011") return TargetMemory{.busWidthBits = 2048, .l2Bytes = 4194304};
+  if (target == "gfx1012") return TargetMemory{.busWidthBits = 128, .l2Bytes = 2097152};
+  if (target == "gfx1030") return TargetMemory{.busWidthBits = 256, .l2Bytes = 4194304};
+  if (target == "gfx1031") return TargetMemory{.busWidthBits = 192, .l2Bytes = 3145728};
+  if (target == "gfx1100") return TargetMemory{.busWidthBits = 384, .l2Bytes = 6291456};
+  if (target == "gfx1101") return TargetMemory{.busWidthBits = 256, .l2Bytes = 4194304};
+  if (target == "gfx1102") return TargetMemory{.busWidthBits = 128, .l2Bytes = 2097152};
   if (target == "gfx1200") return TargetMemory{.busWidthBits = 128, .l2Bytes = 4194304};
   if (target == "gfx1201") return TargetMemory{.busWidthBits = 256, .l2Bytes = 8388608};
   if (target == "sm_100") return TargetMemory{.busWidthBits = 8192, .l2Bytes = 62914560};

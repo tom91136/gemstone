@@ -70,6 +70,7 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 ### 4. Memory, integer, and shift coverage
 
 - Run native `ctest` in one ASan and UBSan build (`-fsanitize=address,shift,signed-integer-overflow,bounds -fno-sanitize-recover=all`), in the image, as a CI job, so a report fails the test. Leak detection starts off, because the runtimes keep process-lifetime state on purpose. `~/polyregion/native/toolchains/linux-clang-amd64-asan.cmake` is the existing pattern.
+- A trial on this host showed what the job needs: `-shared-libsan`, because `-z defs` rejects shared libraries with the static runtime; CUDA test registration prepending to `LD_LIBRARY_PATH` instead of replacing it; and the ASan runtime first in the Level Zero test's `LD_PRELOAD`. With those in place every test passes.
 - Count `bugprone-signed-char-misuse` findings and find why `.clang-tidy` disables it, then enable it and fix them unless the count shows it is noise.
 - Add `-Wshift-sign-overflow` to the native flags. `clang-tidy` runs with `-w`, so compiler warnings come from the build.
 

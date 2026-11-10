@@ -26,6 +26,21 @@ class ArchitectureSuite extends Suite {
     assertEquals(Architecture.nvidiaDefault.memory, sm89.memory)
   }
 
+  test("rdna targets report the memory of a shipping card of their own silicon") {
+    Vec(
+      "gfx1011" -> (2048, 4L << 20),
+      "gfx1012" -> (128, 2L << 20),
+      "gfx1030" -> (256, 4L << 20),
+      "gfx1031" -> (192, 3L << 20),
+      "gfx1100" -> (384, 6L << 20),
+      "gfx1101" -> (256, 4L << 20),
+      "gfx1102" -> (128, 2L << 20)
+    ).foreach { (name, expected) =>
+      val memory = known(name).memory.getOrElse(fail(s"$name has no memory"))
+      assertEquals((memory.busWidthBits.value, memory.l2Bytes.value), expected)
+    }
+  }
+
   test("a target derived from a carded one carries no card of its own") {
     assertEquals(known("sm_86").memory, None)
     assertEquals(known("sm_86").throughput.dram, None)
