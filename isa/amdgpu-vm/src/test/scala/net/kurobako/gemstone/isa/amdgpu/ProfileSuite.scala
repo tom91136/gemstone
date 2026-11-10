@@ -58,7 +58,8 @@ class ProfileSuite extends Suite {
       wave64: Boolean = false,
       groupSegmentSize: Int >= 0 = 0,
       computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1,
-      dynamicSegmentBytes: Int >= 0 = 0
+      dynamicSegmentBytes: Int >= 0 = 0,
+      observed: Boolean = true
   ): Result = {
     val assembly = f"""s_mov_b32 s2, 0x${base & 0xffffffffL}%x
                       |s_mov_b32 s3, 0x${base >>> 32}%x
@@ -86,7 +87,8 @@ class ProfileSuite extends Suite {
     val memory = RegionMemory()
     memory.allocate(buffer, 16384)
     val recorder = ProfileRecorder()
-    val result   = executeKernel(compileKernel(source), task, memory, TaskControl(observer = Some(recorder)))
+    val result   =
+      executeKernel(compileKernel(source), task, memory, TaskControl(observer = Option.when(observed)(recorder)))
     assertEquals(result, Right(()))
     Result(recorder.stream)
   }
@@ -249,6 +251,25 @@ class ProfileSuite extends Suite {
     assertEquals(result, Right(()))
     assertEquals(recorder.stream.instructions.size, 2)
     assert(recorder.stream.instructions.forall(_.text.nonEmpty))
+  }
+
+  test("a launch records one control flow graph whose offsets join every issued address") {
+    val result = run("s_branch 1\ns_mov_b32 s4, 1")
+    val graphs = result.stream.graphs
+    assertEquals(graphs.map(_.kernel).toVector, Vector("kernel"))
+    val flow   = graphs.head
+    val issued = result.issues.toVector.flatMap(issue => result.stream.instructions(issue.instruction).address)
+    assert(issued.nonEmpty)
+    assert(issued.forall { address =>
+      val index = flow.offsets.indexOf(address)
+      index >= 0 && flow.graph.blocks.exists(block => block.first <= index && index <= block.last)
+    })
+  }
+
+  test("a launch without an observer runs and records no control flow") {
+    val result = run("s_branch 1\ns_mov_b32 s4, 1", observed = false)
+    assert(result.stream.graphs.isEmpty)
+    assert(result.issues.isEmpty)
   }
 
   test("a launch reports the descriptor's VGPR allocation and LDS for each target") {
