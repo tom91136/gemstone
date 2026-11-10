@@ -843,7 +843,13 @@ TEST_CASE("PTX-only artifacts warm every program's JIT cache unless an isolated 
                                          {.identity = "b", .program = "minibude", .timeoutSeconds = 10, .index = 1, .count = 3},
                                          {.identity = "c", .program = "unified", .timeoutSeconds = 10, .index = 2, .count = 3}};
   const auto metadata = [](std::string_view code) {
-    return ArtifactMetadata{.backend = "cuda", .architecture = "sm_80", .support = {}, .code = std::string(code), .supplements = {}};
+    return ArtifactMetadata{.backend = "cuda",
+                            .architecture = "sm_80",
+                            .support = {},
+                            .code = std::string(code),
+                            .glibc = {},
+                            .glibcxx = {},
+                            .supplements = {}};
   };
   CHECK(jitWarmupPrograms(metadata("ptx"), false, tests) == std::vector<std::string>{"minibude", "unified"});
   CHECK(jitWarmupPrograms(metadata("ptx"), true, tests).empty());

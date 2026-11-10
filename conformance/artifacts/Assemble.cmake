@@ -127,6 +127,7 @@ if(NOT DEFINED CONFORMANCE_KEEP_WORK)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ArtifactWork.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/Floor.cmake")
 
 set(work "${CONFORMANCE_WORK_DIRECTORY}")
 file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../dependencies.cmake" dependencies_digest)
@@ -227,7 +228,7 @@ execute_process(
     --target conformance-artifact
   COMMAND_ERROR_IS_FATAL ANY)
 
-function(write_metadata destination support)
+function(write_metadata destination support glibc glibcxx)
   set(supplements "")
   if(NOT CONFORMANCE_SUPPLEMENT_KEY STREQUAL "")
     set(supplements "\"${CONFORMANCE_SUPPLEMENT_KEY}\"")
@@ -238,9 +239,12 @@ function(write_metadata destination support)
     "architecture = \"${architecture}\"\n"
     "code = \"${artifact_code}\"\n"
     "support = \"${support}\"\n"
-    "supplements = [${supplements}]\n")
+    "supplements = [${supplements}]\n"
+    "glibc = \"${glibc}\"\n"
+    "glibcxx = \"${glibcxx}\"\n")
 endfunction()
 
+find_program(READELF readelf REQUIRED)
 find_program(patchelf patchelf REQUIRED)
 function(set_program_rpath root rpath)
   set(programs "${root}/conformance-device")
@@ -276,7 +280,8 @@ if(architecture)
     COMMAND "${CMAKE_COMMAND}" --install "${build}"
       --component architecture --prefix "${overlay}" --strip
     COMMAND_ERROR_IS_FATAL ANY)
-  write_metadata("${overlay}" "${CONFORMANCE_SUPPORT_KEY}")
+  conformance_floor("${overlay}" "$ENV{CONFORMANCE_SYSROOT}" glibc glibcxx)
+  write_metadata("${overlay}" "${CONFORMANCE_SUPPORT_KEY}" "${glibc}" "${glibcxx}")
   file(RELATIVE_PATH support_relative "${overlay}" "${support}")
   set(rpath "$ORIGIN/${support_relative}/lib")
   set(supplement "")
@@ -318,12 +323,13 @@ else()
     COMMAND "${CMAKE_COMMAND}" --install "${build}"
       --component architecture --prefix "${artifact}" --strip
     COMMAND_ERROR_IS_FATAL ANY)
+  conformance_floor("${artifact}" "$ENV{CONFORMANCE_SYSROOT}" glibc glibcxx)
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env "CONFORMANCE_RUNTIME_INPUT_DIR=${artifact}"
       "${CMAKE_COMMAND}" --install "${build}"
       --component support --prefix "${artifact}" --strip
     COMMAND_ERROR_IS_FATAL ANY)
-  write_metadata("${artifact}" "")
+  write_metadata("${artifact}" "" "${glibc}" "${glibcxx}")
   set_program_rpath("${artifact}" "$ORIGIN/lib")
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -DARTIFACT=${artifact}

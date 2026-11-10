@@ -64,6 +64,7 @@ struct Workload {
 struct ArtifactMetadata {
   std::string backend, architecture, support, code;
   std::string compiler = "vendor";
+  std::string glibc, glibcxx;
   std::vector<std::string> supplements;
 };
 struct CatchCase {
