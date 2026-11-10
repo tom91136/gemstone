@@ -207,7 +207,7 @@ object InstructionSemantics {
         Vec(Cubin.Kernel(Kernel, 0, base, 0, Vec.empty)),
         Vec.empty
       )
-      (statements, registerCount) <- VMCompiler.lowerKernel(
+      (statements, registerCount, _) <- VMCompiler.lowerKernel(
         module,
         module.kernels.head,
         Vec(function),

@@ -37,6 +37,7 @@ class DevicePrintfSuite extends Suite {
     val table    = Cubin.Section(symbols.index + 1, ".rel.text.printing", 9, 0, 16, symbols.index, text.index, entries)
     val module   = base.copy(sections = base.sections.updated(0, text) ++ Vec(strings, symbols, table))
     val compiled = VMCompiler.compile(module, module.kernels.head, Vec(DecodedFunction("printing", listing)))
+      .map(_.kernel)
       .fold(error => fail(error.raw), identity)
     val memory   = Memory()
     val template = memory.allocate(Vec.from((format + "\u0000").getBytes(StandardCharsets.UTF_8)))

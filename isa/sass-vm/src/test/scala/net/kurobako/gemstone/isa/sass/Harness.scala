@@ -198,7 +198,7 @@ object Harness extends munit.Assertions {
 
     def compile(parameters: Int*)(using munit.Location): Either[String, VMIR.Kernel] = {
       val image = module(Vec.from(parameters))
-      VMCompiler.compile(image, image.kernels.head, functions, text = text)
+      VMCompiler.compile(image, image.kernels.head, functions, text = text).map(_.kernel)
     }
 
     def run(

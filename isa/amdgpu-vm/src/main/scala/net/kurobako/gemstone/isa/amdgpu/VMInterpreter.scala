@@ -216,9 +216,10 @@ private object VMInterpreter {
     )
     LittleEndian.write(kernargAddress, packet, 40, 8)
     observer.observed(_.launched(resources(kernel, dispatch)))
-    observer.observed(
-      _.controlFlow(kernel.name.raw, AMDGPUControlFlowGraph.of(program), program.instructionOffsets.map(_.toLong))
-    )
+    if (peers eq PeerCode.Alone)
+      observer.observed(
+        _.controlFlow(kernel.name.raw, AMDGPUControlFlowGraph.of(program), program.instructionOffsets.map(_.toLong))
+      )
     val hostcall       = hostcallOffset.map(offset => HostcallBuffer(offset, HostcallListener(context.handler)))
     val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress, heap, hostcall)
     val slices         = CodeSlices(CodeSlice(program, program.jumpTable, dispatchMemory), peers, allocations)

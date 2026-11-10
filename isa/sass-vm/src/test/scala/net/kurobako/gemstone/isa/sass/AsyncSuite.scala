@@ -74,7 +74,9 @@ class AsyncSuite extends Suite {
     )
     for {
       program <-
-        VMCompiler.compile(cubin, cubin.kernels.head, Vec(function)).left.map(error => Fault.Unsupported(error))
+        VMCompiler.compile(cubin, cubin.kernels.head, Vec(function)).map(_.kernel).left.map(error =>
+          Fault.Unsupported(error)
+        )
       task <- KernelTask.validated(
         kernel.unsafe[NonEmpty[String]],
         LaunchGeometry.Dimensions(threads.unsafe[Int > 0], 1, 1),

@@ -270,7 +270,7 @@ class BarrierSuite extends Suite {
     val module  = kernel.module(Vec.empty)
     val shape   = LaunchGeometry.Dimensions(2, 1, 1)
     val compile = VMCompiler.compile(module, module.kernels.head.copy(requiredCluster = shape), kernel.functions)
-    assertEquals(compile.map(_.cluster), Right(Some(shape)))
+    assertEquals(compile.map(_.kernel.cluster), Right(Some(shape)))
   }
 
   test("sm_70 NANOSLEEP.WARP preserves following memory effects") {

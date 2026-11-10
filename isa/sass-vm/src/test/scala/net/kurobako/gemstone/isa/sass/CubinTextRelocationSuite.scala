@@ -87,6 +87,7 @@ class CubinTextRelocationSuite extends Suite {
   } test(s"sm_$sm text address halves resolve bound globals with addend $addend, binary=$binary") {
     val (module, function) = fixture(sm, addend, binary)
     val compiled           = VMCompiler.compile(module, module.kernels.head, Vec(function), Map(symbol -> address))
+      .map(_.kernel)
       .fold(error => fail(error.raw), identity)
     val memory = Memory()
     val output = memory.allocate(8L)
@@ -105,6 +106,7 @@ class CubinTextRelocationSuite extends Suite {
     test(s"sm_75 uniform address halves resolve bound globals with addend $addend") {
       val (module, function) = fixture(75, addend, uniform = true)
       val compiled           = VMCompiler.compile(module, module.kernels.head, Vec(function), Map(symbol -> address))
+        .map(_.kernel)
         .fold(error => fail(error.raw), identity)
       val memory = Memory()
       val output = memory.allocate(8L)
@@ -192,6 +194,7 @@ class CubinTextRelocationSuite extends Suite {
 
   private def runMalloc(module: Cubin.Module, listing: Vec[DecodedInstruction]): Vec[Long] = {
     val compiled = VMCompiler.compile(module, module.kernels.head, Vec(DecodedFunction("relocated", listing)))
+      .map(_.kernel)
       .fold(error => fail(error.raw), identity)
     val memory = Memory()
     val output = memory.allocate(8L)

@@ -9,7 +9,6 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
-import net.kurobako.gemstone.isa.nvidia.VMIR.*
 import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
@@ -27,7 +26,7 @@ object LoadedProgram {
     val globalRelocations: Either[Fault, Vec[Cubin.GlobalRelocation]] =
       Cubin.globalRelocations(module).left.map(Fault.InvalidProgram(_))
     val functions: Memo[NonEmpty[String], Either[Fault, Vec[DecodedFunction]]] = Memo()
-    val kernels: Memo[NonEmpty[String], Either[Fault, Kernel]]                 = Memo()
+    val kernels: Memo[NonEmpty[String], Either[Fault, VMCompiler.Compiled]]    = Memo()
   }
 }
 
@@ -51,7 +50,7 @@ class LoadedProgram(
   private val banks            = image.banks
   private val bank             = image.bank
   private val relocations      = image.relocations
-  private val compiled         = ConcurrentHashMap[NonEmpty[String], Kernel]()
+  private val compiled         = ConcurrentHashMap[NonEmpty[String], VMCompiler.Compiled]()
   private val bindings         = ConcurrentHashMap[NonEmpty[String], BoundGlobal]()
   private val relocated        = ConcurrentHashMap[Cubin.ConstantRelocation, (BoundGlobal, BoundGlobal)]()
   private val relocatedGlobals = ConcurrentHashMap[Cubin.GlobalRelocation, (BoundGlobal, BoundGlobal)]()
@@ -186,20 +185,20 @@ class LoadedProgram(
       kernel: Cubin.Kernel,
       functions: Vec[DecodedFunction],
       globalSymbols: Map[NonEmpty[String], GuestAddress]
-  ): Either[Fault, Kernel] =
+  ): Either[Fault, VMCompiler.Compiled] =
     for {
       resolved <- Cubin.relocateConstants(module, globalSymbols).left.map(Fault.InvalidProgram(_))
       lowered  <- VMCompiler.compile(resolved, kernel, functions, globalSymbols, text).left.map(Fault.InvalidProgram(_))
     } yield lowered
 
-  private def lowerBound(kernel: Cubin.Kernel, functions: Vec[DecodedFunction]): Either[Fault, Kernel] = {
+  private def lowerBound(kernel: Cubin.Kernel, functions: Vec[DecodedFunction]): Either[Fault, VMCompiler.Compiled] = {
     val globalSymbols = bindings.asScala.toVec.flatMap((global, bound) =>
       bound.memory.address(bound.binding.region, bound.binding.offset).toOption.map(global -> _)
     ).toMap
     relocateBoundConstants().flatMap(_ => relocateBoundGlobals()).flatMap(_ => lower(kernel, functions, globalSymbols))
   }
 
-  private def compile(name: NonEmpty[String]): Either[Fault, Kernel] =
+  private def compile(name: NonEmpty[String]): Either[Fault, VMCompiler.Compiled] =
     Option(compiled.get(name)).fold {
       module.kernels.find(_.name == name).toRight(Fault.NotFound(s"cubin kernel '$name' is not present")).flatMap {
         kernel =>
@@ -222,5 +221,11 @@ class LoadedProgram(
   override def build(name: NonEmpty[String]): Either[Fault, Unit] = compile(name).map(_ => ())
 
   override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
-    compile(task.kernelName).flatMap(VMKernelLaunch.execute(_, KernelLaunch(task, context, workgroups)))
+    compile(task.kernelName).flatMap { lowered =>
+      val observer: LaunchObserver | Null = context.control.observer.orNull
+      observer.observed(watcher =>
+        lowered.controlFlow.foreach(graph => watcher.controlFlow(task.kernelName.raw, graph(), lowered.offsets))
+      )
+      VMKernelLaunch.execute(lowered.kernel, KernelLaunch(task, context, workgroups))
+    }
 }

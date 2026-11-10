@@ -113,6 +113,7 @@ object NVIDIAControlFlowBenchmark {
     val module =
       Cubin.Module(sm = target.sm, sections = Vec(section, constants), kernels = Vec(entry), globals = Vec.empty)
     VMCompiler.compile(module, entry, Vec(DecodedFunction("control", decoded.instructions)))
+      .map(_.kernel)
       .fold(error => throw IllegalArgumentException(error), identity)
   }
 

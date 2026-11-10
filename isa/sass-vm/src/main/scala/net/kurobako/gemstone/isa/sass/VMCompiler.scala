@@ -7,6 +7,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.constraint.auto.*
+import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.nvidia.VMAssembler.Statement.*
 import net.kurobako.gemstone.isa.nvidia.VMIR.*
@@ -64,17 +65,19 @@ private object VMCompiler {
       })
     }
 
+  case class Compiled(kernel: VMIR.Kernel, offsets: Vec[Long], controlFlow: Option[() => ControlFlowGraph])
+
   def compile(
       module: Cubin.Module,
       kernel: Cubin.Kernel,
       functions: Vec[DecodedFunction],
       globalSymbols: Map[NonEmpty[String], GuestAddress] = Map.empty,
       text: SASSInstruction => Option[String] = _ => None
-  ): Either[NonEmpty[String], VMIR.Kernel] =
+  ): Either[NonEmpty[String], Compiled] =
     lowerKernel(module, kernel, functions, globalSymbols, text).left.map(_.message).flatMap {
-      (statements, registerCount) =>
-        VMAssembler.assemble(statements).map(_ -> registerCount)
-    }.map { (program, registerCount) =>
+      (statements, registerCount, function) =>
+        VMAssembler.assemble(statements).map(program => (program, registerCount, function))
+    }.map { (program, registerCount, function) =>
       val constants = module.sections.find(_.name == s".nv.constant0.${kernel.name}").fold(Vec.empty[Byte])(_.bytes)
       val block     = constants.slice(kernel.parameterBase, kernel.parameterBase.raw + kernel.parameterSize)
       // The slot names the explorer shows: the general and uniform banks this kernel addresses, in slot order.
@@ -82,7 +85,7 @@ private object VMCompiler {
       val names  = Vec.tabulate(layout.generalCount.raw + layout.uniformCount.raw) { slot =>
         layout.spelling(VMIR.Register(slot.unsafe[Int >= 0])).get.unsafe[NonEmpty[String]]
       }
-      VMIR.Kernel(
+      val ir = VMIR.Kernel(
         Entry(
           Routine(kernel.name, program, registerCount, VMRegisters.PredicateCount, registerNames = names),
           kernel.parameters.map(parameter =>
@@ -102,6 +105,11 @@ private object VMCompiler {
             instruction.modifiers.exists(_.name == "2CTA")
         )))(0x48L)
       )
+      Compiled(
+        ir,
+        function.instructions.map(_.address.raw.toLong),
+        Option.when(functions.size == 1)(() => SASSControlFlowGraph.of(module.sm, function))
+      )
     }
 
   /** The kernel's statements and the register slots its lanes need. */
@@ -111,7 +119,7 @@ private object VMCompiler {
       functions: Vec[DecodedFunction],
       boundSymbols: Map[NonEmpty[String], GuestAddress],
       text: SASSInstruction => Option[String] = _ => None
-  ): Either[Failure, (Vec[VMAssembler.Statement], Int >= 0)] = try {
+  ): Either[Failure, (Vec[VMAssembler.Statement], Int >= 0, DecodedFunction)] = try {
     val generation = Generation.of(module.sm)
     module.sections.filter(_.isRelocation).foreach { table =>
       if (Cubin.relocationEntries(table).isLeft) fail("invalid cubin relocations")
@@ -300,8 +308,8 @@ private object VMCompiler {
             lowerFrom(index + 1)
         }
     val zero = Value.Immediate(0L)
-    lowerFrom(0).toLeft(
-      Vec(
+    lowerFrom(0).toLeft {
+      val prologue = Vec(
         Execute(SetPredicate(
           VMRegisters.Predicate.True.slot,
           Comparison.Equal,
@@ -316,8 +324,9 @@ private object VMCompiler {
           zero,
           zero
         ))
-      ) ++ lowered.result() -> layout.registerCount(reductions.count)
-    )
+      ) ++ lowered.result()
+      (prologue, layout.registerCount(reductions.count), function)
+    }
   } catch {
     case error: VMTensorCompiler.NoProduct => Left(Failure.NoProduct(throwables.detail(error)))
     case NonFatal(error)                   => Left(Failure.Unsupported(throwables.detail(error)))

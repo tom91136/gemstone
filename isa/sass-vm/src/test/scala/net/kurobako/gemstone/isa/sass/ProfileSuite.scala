@@ -92,6 +92,46 @@ class ProfileSuite extends Suite {
     assert(Profiler.run(recorder.stream, Architecture.sm89).occupancy.isDefined)
   }
 
+  private def loaded(kernel: Harness.Kernel): LoadedProgram =
+    LoadedProgram(kernel.module(Vec(8)), Map(kernel.name -> kernel.functions), Workgroups.Sequential, Harness.text)
+
+  test("a launch records one control flow graph whose offsets join every issued address") {
+    val kernel = program(89, "S2R R0, SR_TID.X\nEXIT")
+    val memory = Memory()
+    val buffer = memory.allocate(Vec.fill(8)(0.toByte))
+    val task   = KernelTask.validated(
+      kernel.name,
+      LaunchGeometry.Dimensions(32, 1, 1),
+      LaunchGeometry.Dimensions(1, 1, 1),
+      Vec(KernelTask.Argument.Memory(buffer, 0L))
+    ).value
+    val recorder = ProfileRecorder()
+    val context  = TaskContext(memory, TaskControl(observer = Some(recorder)), _ => Right(()))
+    assertEquals(loaded(kernel).execute(task, context), Right(()))
+    val graphs = recorder.stream.graphs
+    assertEquals(graphs.map(_.kernel).toVector, Vector(kernel.name.raw))
+    val flow   = graphs.head
+    val issued = recorder.stream.instructions.toVector.flatMap(_.address)
+    assert(issued.nonEmpty)
+    assert(issued.forall { address =>
+      val index = flow.offsets.indexOf(address)
+      index >= 0 && flow.graph.blocks.exists(block => block.first <= index && index <= block.last)
+    })
+  }
+
+  test("a launch without an observer runs") {
+    val kernel = program(89, "S2R R0, SR_TID.X\nEXIT")
+    val memory = Memory()
+    val buffer = memory.allocate(Vec.fill(8)(0.toByte))
+    val task   = KernelTask.validated(
+      kernel.name,
+      LaunchGeometry.Dimensions(32, 1, 1),
+      LaunchGeometry.Dimensions(1, 1, 1),
+      Vec(KernelTask.Argument.Memory(buffer, 0L))
+    ).value
+    assertEquals(loaded(kernel).execute(task, TaskContext(memory, TaskControl(), _ => Right(()))), Right(()))
+  }
+
   test("LDGDEPBAR commits a group of the cp.async class and DEPBAR.LE SB0 waits until at most its count remains") {
     val kernel = program(89, "LDGDEPBAR;\nLDGDEPBAR;\nDEPBAR.LE SB0, 0x1;\nDEPBAR.LE SB0, 0x0;\nEXIT")
     val memory = Memory()
