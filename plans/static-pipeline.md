@@ -72,14 +72,20 @@ As in `cost-model.md`: test first, seen failing; `testOnly *` on the touched mod
 
 ## Findings from step 5
 
-`HardwareValidationSuite` holds 83 cases from the RTX 4060 Ti (sm_89) and the gfx1036. 53 fail the 25 percent tolerance, and they stay red until the model is fixed. The causes:
+`HardwareValidationSuite` holds 83 cases from the RTX 4060 Ti (sm_89) and the gfx1036. 15 fail the 25 percent tolerance and stay red until the model is fixed. The first run had 53. Fixed since then:
 
-- `BlockAnalysis` withholds every loop with an instruction marked variable latency, even where a table latency exists.
-- Recorded register use is unusable on AMDGPU: the VM never reports it, so dependency chains are invisible and every loop looks issue-bound. SASS now records each instruction's own reads and writes, merged over its issues. A SASS 64-bit operand is two 32-bit slots (for example R10 and R11), not one pair, until lowering changes.
-- Latency comes from the compiler's issue stall or LLVM's issue cost, not result latency. Chains are under-predicted by about 30 percent on sm_89 and up to 84 percent on gfx1036.
-- sm_89 FP64 is one pipe per SM, not per partition: one warp takes 166 cycles where the model predicts 512.
-- Memory is not a simulator resource, so a load-bound loop cannot report loads as its limit.
-- gfx1036 MUFU and FP64 rates disagree with the measured plateaus (5.06 against 8.0, and 15.8 against 32 cycles).
+- Result latency is carried apart from the issue stall, and a variable-latency instruction is timed whenever a table latency exists.
+- SASS profiles record each instruction's own register use. AMDGPU profiles do not yet record any.
+- sm_89 FP64 is one pipe per multiprocessor, as architecture data.
+- Loads, stores, and shared memory are simulator resources.
+- A resource binds only at 0.9 pressure or more, with partition-local pressure scaled by active partitions.
+- gfx1036 vector FMA has a probed dependent latency of 8 cycles.
+
+Still red:
+
+- sm_89 `stream_dfma` (7 cases): no DFMA latency for sm_89, so the loops are withheld. A dependent-DFMA probe would supply it. The single-warp FP64 gap is also unmodelled.
+- gfx1036 single-wave issue (4 cases): a lone wave issues independent `v_fma_f32` every 2.7 to 3.25 cycles, against an LLVM issue cost of 1.
+- gfx1036 `stream_mufu` and `stream_dfma` (4 cases): the committed one- and two-wave cases contradict the earlier many-wave plateaus, so the rates stay until the many-wave cases are measured again and committed.
 
 ## Open decisions
 
