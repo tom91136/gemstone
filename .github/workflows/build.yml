@@ -420,6 +420,16 @@ jobs:
         run: |
           git ls-files -z --cached --others --exclude-standard | xargs -0 touch -c -h -d "@$(git log -1 --format=%ct)"
           for archive in target/ci/*.tar.zst; do zstd -dc --long=30 "$archive" | tar -xf -; done
+      - name: Bitwuzla
+        run: |
+          release=$(sed -n 's/^set(conformance_bitwuzla_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          sha256=$(sed -n 's/^set(conformance_bitwuzla_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          archive=Bitwuzla-Linux-x86_64-static
+          curl -fsSL --retry 5 -o "$RUNNER_TEMP/bitwuzla.zip" \
+            "https://github.com/bitwuzla/bitwuzla/releases/download/$release/$archive.zip"
+          echo "$sha256  $RUNNER_TEMP/bitwuzla.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/bitwuzla.zip" -d "$RUNNER_TEMP/bitwuzla"
+          echo "GEMSTONE_BITWUZLA_EXE=$RUNNER_TEMP/bitwuzla/$archive/bin/bitwuzla" >> "$GITHUB_ENV"
       - run: sbt --server --batch 'tests${{ matrix.platform }}/testFull'
       - if: matrix.platform == 'JVM'
         run: sbt --server --batch 'gemstoneRun -- printenv GEMSTONE_RPC_ENDPOINT'
