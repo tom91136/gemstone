@@ -18,7 +18,8 @@ target_link_options(gemstone_opencl PRIVATE -Wl,-Bsymbolic)
 gemstone_require_abi_implementations(
   TARGET gemstone_opencl
   PLATFORM opencl
-  FORCE_INCLUDE)
+  FORCE_INCLUDE
+  EXPORT "cl[A-Z]*")
 set_target_properties(gemstone_opencl PROPERTIES
   OUTPUT_NAME OpenCL_gemstone
   VERSION 1

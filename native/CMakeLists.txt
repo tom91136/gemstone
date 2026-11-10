@@ -191,10 +191,10 @@ if(BUILD_TESTING)
 endif()
 
 function(gemstone_require_abi_implementations)
-  cmake_parse_arguments(ARG "FORCE_INCLUDE" "TARGET;PLATFORM" "" ${ARGN})
-  if(NOT ARG_TARGET OR NOT ARG_PLATFORM OR ARG_UNPARSED_ARGUMENTS)
+  cmake_parse_arguments(ARG "FORCE_INCLUDE" "TARGET;PLATFORM" "EXPORT" ${ARGN})
+  if(NOT ARG_TARGET OR NOT ARG_PLATFORM OR NOT ARG_EXPORT OR ARG_UNPARSED_ARGUMENTS)
     message(FATAL_ERROR
-      "gemstone_require_abi_implementations requires TARGET and PLATFORM")
+      "gemstone_require_abi_implementations requires TARGET, PLATFORM, and EXPORT")
   endif()
 
   set(generated_directory "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/generated/${ARG_PLATFORM}")
@@ -216,7 +216,12 @@ function(gemstone_require_abi_implementations)
     target_compile_options("${ARG_TARGET}" PRIVATE
       "$<$<COMPILE_LANG_AND_ID:CXX,Clang,GNU>:SHELL:-include ${public_header}>")
   endif()
-  target_link_options("${ARG_TARGET}" PRIVATE "LINKER:-z,defs" "LINKER:--exclude-libs,ALL")
+  list(JOIN ARG_EXPORT ";\n    " exported)
+  set(version_script "${CMAKE_CURRENT_BINARY_DIR}/${ARG_TARGET}.map")
+  file(GENERATE OUTPUT "${version_script}" CONTENT "{\n  global:\n    ${exported};\n  local:\n    *;\n};\n")
+  set_property(TARGET "${ARG_TARGET}" APPEND PROPERTY LINK_DEPENDS "${version_script}")
+  target_link_options("${ARG_TARGET}" PRIVATE "LINKER:-z,defs" "LINKER:--exclude-libs,ALL"
+    "LINKER:--version-script=${version_script}")
 endfunction()
 
 if(BUILD_TESTING)
@@ -340,5 +345,8 @@ if(BUILD_TESTING)
     add_test(NAME "dso/${target}-runpath"
       COMMAND "${CMAKE_COMMAND}" "-DREADELF=${CMAKE_READELF}" "-DLIBRARY=$<TARGET_FILE:${target}>"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckRunpath.cmake")
+    add_test(NAME "dso/${target}-exports"
+      COMMAND "${CMAKE_COMMAND}" "-DNM=${CMAKE_NM}" "-DLIBRARY=$<TARGET_FILE:${target}>"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckExports.cmake")
   endforeach()
 endif()

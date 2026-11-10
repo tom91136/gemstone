@@ -1,0 +1,6 @@
+execute_process(COMMAND "${NM}" -D --defined-only "${LIBRARY}" OUTPUT_VARIABLE symbols COMMAND_ERROR_IS_FATAL ANY)
+string(REGEX MATCHALL "[^\n]* _Z[^\n]*" mangled "${symbols}")
+if(mangled)
+  list(JOIN mangled "\n  " listing)
+  message(FATAL_ERROR "${LIBRARY} exports C++ symbols:\n  ${listing}")
+endif()

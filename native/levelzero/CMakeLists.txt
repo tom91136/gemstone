@@ -10,7 +10,8 @@ target_link_libraries(gemstone_levelzero PRIVATE gemstone_execution_client)
 gemstone_require_abi_implementations(
   TARGET gemstone_levelzero
   PLATFORM levelzero
-  FORCE_INCLUDE)
+  FORCE_INCLUDE
+  EXPORT "ze*")
 set_target_properties(gemstone_levelzero PROPERTIES
   OUTPUT_NAME ze_gemstone
   VERSION 1

@@ -19,7 +19,8 @@ target_link_libraries(gemstone_cuda PRIVATE
   m)
 gemstone_require_abi_implementations(
   TARGET gemstone_cuda
-  PLATFORM cuda)
+  PLATFORM cuda
+  EXPORT "cu*" "__cuda*")
 set_target_properties(gemstone_cuda PROPERTIES C_VISIBILITY_PRESET default CXX_VISIBILITY_PRESET default)
 if(BUILD_TESTING)
   add_executable(cuda_process_exit_test test/process-exit.cpp)

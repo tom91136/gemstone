@@ -21,7 +21,8 @@ target_link_libraries(gemstone_hip_runtime PRIVATE
 target_link_options(gemstone_hip_runtime PRIVATE "-Wl,-Bsymbolic")
 gemstone_require_abi_implementations(
   TARGET gemstone_hip_runtime
-  PLATFORM hip)
+  PLATFORM hip
+  EXPORT "hip*" "__hip*")
 
 if(BUILD_TESTING)
   gemstone_memory_client(hip gemstone_hip_runtime)

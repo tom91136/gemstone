@@ -25,7 +25,7 @@ gemstone_project_target(gemstone_vulkan)
 target_include_directories(gemstone_vulkan SYSTEM PRIVATE "${VULKAN_INCLUDE_DIR}")
 target_include_directories(gemstone_vulkan PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../generated/spirv")
 target_link_libraries(gemstone_vulkan PRIVATE gemstone_execution_client)
-gemstone_require_abi_implementations(TARGET gemstone_vulkan PLATFORM vulkan FORCE_INCLUDE)
+gemstone_require_abi_implementations(TARGET gemstone_vulkan PLATFORM vulkan FORCE_INCLUDE EXPORT "vk*")
 set_target_properties(gemstone_vulkan PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES

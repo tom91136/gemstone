@@ -39,7 +39,8 @@ target_link_libraries(gemstone_hsakmt PRIVATE gemstone_hsa_core gemstone_executi
 gemstone_require_abi_implementations(
   TARGET gemstone_hsakmt
   PLATFORM hsakmt
-  FORCE_INCLUDE)
+  FORCE_INCLUDE
+  EXPORT "hsaKmt*")
 
 add_library(gemstone_hsa_runtime SHARED
   src/runtime.cpp
@@ -54,7 +55,8 @@ target_link_libraries(gemstone_hsa_runtime PRIVATE gemstone_hsa_core gemstone_ex
 gemstone_require_abi_implementations(
   TARGET gemstone_hsa_runtime
   PLATFORM hsa
-  FORCE_INCLUDE)
+  FORCE_INCLUDE
+  EXPORT "hsa_*" "gemstone_hsa_*")
 
 if(BUILD_TESTING)
   gemstone_memory_client(hsa gemstone_hsa_runtime)
