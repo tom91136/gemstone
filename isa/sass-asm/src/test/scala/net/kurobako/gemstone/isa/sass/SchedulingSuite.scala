@@ -53,4 +53,28 @@ class SchedulingSuite extends Suite {
       Left("reserved scoreboard 6 in SASS control")
     )
   }
+
+  test("maxwell control of a fixed-latency producer") {
+    val expected = Scheduling(
+      6.unsafe[Int in 0 ~ 15],
+      yieldHint = true,
+      None,
+      None,
+      0x1.unsafe[Int in 0 ~ 0x3f],
+      0.unsafe[Int in 0 ~ 0xf]
+    )
+    assertEquals(Scheduling.decode(Generation.Maxwell, BigInt(0xff6) << 64), Right(Some(expected)))
+  }
+
+  test("volta control of a fixed-latency producer") {
+    val expected = Scheduling(
+      8.unsafe[Int in 0 ~ 15],
+      yieldHint = false,
+      None,
+      None,
+      0x1.unsafe[Int in 0 ~ 0x3f],
+      0.unsafe[Int in 0 ~ 0xf]
+    )
+    assertEquals(Scheduling.decode(Generation.Modern, BigInt(0xfe8) << 105), Right(Some(expected)))
+  }
 }

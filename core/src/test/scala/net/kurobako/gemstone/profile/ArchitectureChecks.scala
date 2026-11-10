@@ -20,6 +20,8 @@ object ArchitectureChecks {
       case Documented(document) if document.isBlank => Vec(s"${architecture.name}: blank document")
       case Published(citation, measured) if citation.isBlank || measured.isBlank =>
         Vec(s"${architecture.name}: blank citation")
+      case Compiled(compiler, version, target) if Vec(compiler, version, target).exists(_.isBlank) =>
+        Vec(s"${architecture.name}: blank compiler field")
       case Inherited(from, basis) if basis.isBlank || Architecture.named(from).isEmpty =>
         Vec(s"${architecture.name}: inherited from unknown $from or without a basis")
       case Estimate(basis) if basis.isBlank => Vec(s"${architecture.name}: blank estimate basis")

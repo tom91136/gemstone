@@ -27,6 +27,9 @@ object Architecture {
     /** Measured by a third party: `citation` names the publication, `measured` the hardware it measured. */
     case Published(citation: String, measured: String)
 
+    /** Read from the schedule that `compiler` `version` wrote for `target`, such as the stall counts of ptxas. */
+    case Compiled(compiler: String, version: String, target: String)
+
     /** Measured or documented for the target `from`, carried over here for the reason in `basis`. */
     case Inherited(from: String, basis: String)
 
@@ -39,6 +42,7 @@ object Architecture {
       case Probed(probe, card, driver, toolkit) => s"$probe on $card, driver $driver, $toolkit"
       case Documented(document)                 => document
       case Published(citation, measured)        => s"$citation, measured on $measured"
+      case Compiled(compiler, version, target)  => s"$compiler $version, target $target"
       case Inherited(from, basis)               => s"from $from, $basis"
       case Estimate(basis)                      => basis
     }

@@ -9,6 +9,7 @@ class ArchitectureSuite extends Suite {
   private val probed     = Source.Probed("probe", "card", "driver", "toolkit")
   private val documented = Source.Documented("document")
   private val published  = Source.Published("citation", "gpu")
+  private val compiled   = Source.Compiled("ptxas", "cuda_13.3.r13.3/compiler.38244171_0", "sm_90")
   private val inherited  = Source.Inherited("sm_89", "same multiprocessor")
   private val estimate   = Source.Estimate("basis")
 
@@ -54,8 +55,8 @@ class ArchitectureSuite extends Suite {
 
   test("sources order strongest first") {
     assertEquals(
-      Vec(estimate, inherited, published, documented, probed).sorted,
-      Vec(probed, documented, published, inherited, estimate)
+      Vec(estimate, inherited, compiled, published, documented, probed).sorted,
+      Vec(probed, documented, published, compiled, inherited, estimate)
     )
   }
 
@@ -68,13 +69,14 @@ class ArchitectureSuite extends Suite {
 
   test("each source names its kind") {
     assertEquals(
-      Vec(probed, documented, published, inherited, estimate).map(_.kind),
-      Vec("probed", "documented", "published", "inherited", "estimate")
+      Vec(probed, documented, published, compiled, inherited, estimate).map(_.kind),
+      Vec("probed", "documented", "published", "compiled", "inherited", "estimate")
     )
   }
 
   test("each source details its provenance") {
     assertEquals(published.detail, "citation, measured on gpu")
+    assertEquals(compiled.detail, "ptxas cuda_13.3.r13.3/compiler.38244171_0, target sm_90")
     assertEquals(inherited.detail, "from sm_89, same multiprocessor")
     assertEquals(estimate.detail, "basis")
   }

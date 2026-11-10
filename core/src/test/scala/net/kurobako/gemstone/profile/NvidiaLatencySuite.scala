@@ -1,0 +1,36 @@
+package net.kurobako.gemstone.profile
+
+import net.kurobako.gemstone.testing.*
+
+class NvidiaLatencySuite extends Suite {
+  import NvidiaLatency.Producer.*
+
+  private val ptxas129 = "cuda_12.9.r12.9/compiler.36037853_0"
+  private val ptxas133 = "cuda_13.3.r13.3/compiler.38244171_0"
+
+  test("a fixed latency is the stall of its adjacent consumer, sourced from the ptxas build") {
+    assertEquals(
+      NvidiaLatency.fixed(90, Fma64),
+      Some(Architecture.Sourced(8, Architecture.Source.Compiled("ptxas", ptxas133, "sm_90")))
+    )
+    assertEquals(
+      NvidiaLatency.fixed(50, Fadd32),
+      Some(Architecture.Sourced(6, Architecture.Source.Compiled("ptxas", ptxas129, "sm_50")))
+    )
+  }
+
+  test("producers that the stall counts do not determine have no value") {
+    assertEquals(NvidiaLatency.fixed(90, Fadd32), None)
+    assertEquals(NvidiaLatency.fixed(120, Ffma32), None)
+    assertEquals(NvidiaLatency.fixed(50, Imul32), None)
+    assertEquals(NvidiaLatency.fixed(70, I2f32), None)
+    assertEquals(NvidiaLatency.fixed(90, Ldg32), None)
+    assertEquals(NvidiaLatency.fixed(35, Fadd32), None)
+    assertEquals(NvidiaLatency.fixed(37, Fadd32), None)
+  }
+
+  test("sm_101 is harvested under the CUDA 12.9 ptxas") {
+    val expected = Architecture.Source.Compiled("ptxas", ptxas129, "sm_101")
+    assertEquals(NvidiaLatency.fixed(101, Shl32).map(_.source), Some(expected))
+  }
+}
