@@ -1064,7 +1064,7 @@ TEST_CASE("HIP symbol address and size resolve a registered device variable", "[
   fixture.expectGlobalBinding("arbitrary_data", 0, {5, 6, 7, 8, 9, 10, 11, 12});
   fixture.expectGlobalBinding("arbitrary_bss", 0, std::vector<uint8_t>(32));
   const auto bundle = offloadBundle(gemstone::hsa::test::variableObjectFixture());
-  const std::array<const void *, 2> wrapper{nullptr, bundle.data()};
+  const std::array<const void *, 3> wrapper{nullptr, bundle.data(), nullptr};
   void **const token = __hipRegisterFatBinary(wrapper.data());
   std::array<uint8_t, 8> dataHost{};
   std::array<uint8_t, 32> bssHost{};
@@ -1152,7 +1152,7 @@ TEST_CASE("HIP occupancy reports a block size for a registered kernel", "[hip]")
   const gemstone_test::RpcEnvironment environment(fixture);
   const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1150");
   const auto bundle = offloadBundle(gemstone::hsa::test::codeObjectFixture(1, true, true));
-  const std::array<const void *, 2> wrapper{nullptr, bundle.data()};
+  const std::array<const void *, 3> wrapper{nullptr, bundle.data(), nullptr};
   void **const token = __hipRegisterFatBinary(wrapper.data());
   __hipRegisterFunction(token, reinterpret_cast<const void *>(&occupancyStub), nullptr, "add", 0, nullptr, nullptr, nullptr, nullptr,
                         nullptr);
@@ -1178,7 +1178,7 @@ TEST_CASE("HIP first-call launch child", "[.]") {
   const gemstone_test::RpcEnvironment environment(fixture);
   const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1150");
   const auto bundle = offloadBundle(gemstone::hsa::test::codeObjectFixture(1, true, true));
-  const std::array<const void *, 2> wrapper{nullptr, bundle.data()};
+  const std::array<const void *, 3> wrapper{nullptr, bundle.data(), nullptr};
   void **const token = __hipRegisterFatBinary(wrapper.data());
   __hipRegisterFunction(token, reinterpret_cast<const void *>(&occupancyStub), nullptr, "add", 0, nullptr, nullptr, nullptr, nullptr,
                         nullptr);

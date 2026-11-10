@@ -246,7 +246,7 @@ TEST_CASE("HIP modules load onto the current device", "[hip][multi-device]") {
 
 TEST_CASE("HIP registered device variables live on the device that resolves them", "[hip][multi-device]") {
   const auto bundle = gemstone::hip::test::offloadBundle(gemstone::hsa::test::variableObjectFixture());
-  const std::array<const void *, 2> wrapper{nullptr, bundle.data()};
+  const std::array<const void *, 3> wrapper{nullptr, bundle.data(), nullptr};
   void **const token = __hipRegisterFatBinary(wrapper.data());
   std::array<uint8_t, 8> host{};
   std::array<char, 16> name{"arbitrary_data"};
