@@ -17,8 +17,8 @@ object Bitwuzla {
         .map(directory => Path.of(directory, "bitwuzla")).find(Files.isExecutable(_))
   }
 
-  def equivalence(left: Definition, right: Definition, limit: FiniteDuration): Verdict =
-    SmtBackend.equivalence(left, right) match {
+  def equivalence(left: Definition, right: Definition, memory: Boolean, limit: FiniteDuration): Verdict =
+    SmtBackend.equivalence(left, right, memory) match {
       case Left(reason) => Verdict.Undecided(reason)
       case Right(query) => executable.fold(Verdict.Unavailable)(solve(_, query, limit))
     }

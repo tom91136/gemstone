@@ -7,10 +7,17 @@ import scala.util.Failure
 import scala.util.Random
 import scala.util.Try
 
+object DifferentialSuite {
+
+  /** The inputs each definition runs on, which a proof reports as the differential coverage of its instructions. */
+  val Runs: Int = 64
+}
+
 /** Checks each definition against executing its instance on edge-biased random inputs: results must agree bit for bit,
   * except that any NaN matches any other, and so must the machine state.
   */
-abstract class DifferentialSuite[H, L <: Lookup](reference: Reference[H, L], runs: Int = 64) extends Suite {
+abstract class DifferentialSuite[H, L <: Lookup](reference: Reference[H, L], runs: Int = DifferentialSuite.Runs)
+    extends Suite {
   def check(
       instance: String,
       target: Option[String],

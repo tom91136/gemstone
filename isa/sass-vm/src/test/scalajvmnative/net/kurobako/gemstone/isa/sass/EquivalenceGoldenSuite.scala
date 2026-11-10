@@ -25,7 +25,7 @@ class EquivalenceGoldenSuite extends Suite {
 
   private def compare(left: String, right: String, operands: (String, String)*)(using munit.Location): Verdict = {
     assume(Bitwuzla.executable.isDefined, "no bitwuzla binary on GEMSTONE_BITWUZLA_EXE or PATH")
-    Bitwuzla.equivalence(definition(left, operands*), definition(right, operands*), 10.seconds)
+    Bitwuzla.equivalence(definition(left, operands*), definition(right, operands*), memory = false, 10.seconds)
   }
 
   private val registers = Vector("R0" -> "Rd", "R1" -> "Ra", "R2" -> "Rb", "R3" -> "Rc")

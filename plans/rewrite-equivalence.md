@@ -1,6 +1,6 @@
 # Rewrite equivalence
 
-Status: step 1 is done. Step 2 compares single definitions, and sequences and step 3 are in progress. It supports `rewrite-search.md`, and it is useful on its own for checking the rendered semantics against each other.
+Status: steps 1 and 2 are done, and so are sequence proofs and the coverage report of step 3 for integer and bitwise sequences (`Proof.prove` in `semantics-check`). Floating point stays with the filter and the solver reports it undecided, so mode completeness is not yet checked.
 
 ## Goal
 

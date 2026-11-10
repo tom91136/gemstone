@@ -50,8 +50,10 @@ object SmtBackend extends Backend {
 
   def source(definition: Definition): String = show(definition)
 
-  /** A query that is unsatisfiable exactly when `left` and `right` agree on every input where both encode. */
-  def equivalence(left: Definition, right: Definition): Either[String, String] = for {
+  /** A query that is unsatisfiable exactly when `left` and `right` agree on every input where both encode, on their
+    * final memory as well when `memory` is live-out.
+    */
+  def equivalence(left: Definition, right: Definition, memory: Boolean): Either[String, String] = for {
     l          <- encode(left, "l_")
     r          <- encode(right, "r_")
     parameters <- union(left.parameters, right.parameters)
@@ -59,7 +61,7 @@ object SmtBackend extends Backend {
   } yield {
     val spaces      = (l.accessed ++ r.accessed).toList
     val differences = pairs.map { case (a, b) => s"(distinct $a $b)" } ++
-      (l.stored.keys ++ r.stored.keys).toList.distinct.map(space =>
+      (if (memory) (l.stored.keys ++ r.stored.keys).toList.distinct else Nil).map(space =>
         s"(distinct ${finalOf(l, space)} ${finalOf(r, space)})"
       )
     val values = parameters.toList.map(parameter => symbol(parameter.name))

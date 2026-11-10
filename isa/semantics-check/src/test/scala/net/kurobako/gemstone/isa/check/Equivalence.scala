@@ -61,47 +61,22 @@ object Equivalence {
       left: Vec[Step],
       right: Vec[Step],
       liveOut: LiveOut,
-      runs: Int = 64
-  ): Verdict = validate(left.iterator ++ right.iterator, liveOut) match {
-    case _ if liveOut.memory && !reference.observesMemory => Verdict.Refused("memory is not observed on this ISA")
-    case Left(reason)                                     => Verdict.Refused(reason)
-    case Right(types)                                     =>
+      runs: Int = DifferentialSuite.Runs
+  ): Verdict = typed(reference, left, right, liveOut) match {
+    case Left(reason) => Verdict.Refused(reason)
+    case Right(types) =>
       val names  = types.keys.toVec.sorted
       val random = Random(0L)
 
-      def once(seed: Int): Outcome = {
-        val sampled      = names.map(name => (name, Edges.sample(types(name), random)))
-        val initial      = sampled.toMap
-        val leftHarness  = reference.harness(seed.toLong)
-        val rightHarness = reference.harness(seed.toLong)
-        (run(left, leftHarness, initial, executor), run(right, rightHarness, initial, executor)) match {
-          case (Left(_), Left(_))       => Outcome.Skipped
-          case (Left(reason), Right(_)) =>
-            Outcome.Differed(Counterexample(Difference.Refusal(Some(reason), None), sampled))
-          case (Right(_), Left(reason)) =>
-            Outcome.Differed(Counterexample(Difference.Refusal(None, Some(reason)), sampled))
-          case (Right(expected), Right(obtained)) =>
-            val value = liveOut.locations.collectFirst {
-              case location if !Edges.same(types(location))(expected(location), obtained(location)) =>
-                Difference.Value(location, expected(location), obtained(location))
-            }
-            val (leftState, rightState) = (reference.state(leftHarness), reference.state(rightHarness))
-            val memory                  = Option.when(liveOut.memory && !leftState.equals(rightState))(
-              Difference.Memory(leftState, rightState)
-            )
-            value.orElse(memory) match {
-              case Some(difference) => Outcome.Differed(Counterexample(difference, sampled))
-              case None             => Outcome.Agreed
-            }
-        }
-      }
-
       @tailrec def loop(seed: Int, executed: Int): Verdict =
         if (seed == runs) Verdict.NotRejected(executed)
-        else once(seed) match {
-          case Outcome.Skipped                  => loop(seed + 1, executed)
-          case Outcome.Agreed                   => loop(seed + 1, executed + 1)
-          case Outcome.Differed(counterexample) => Verdict.Rejected(counterexample)
+        else {
+          val sampled = names.map(name => (name, Edges.sample(types(name), random)))
+          compare(reference, executor, left, right, liveOut, types, sampled, seed) match {
+            case Outcome.Skipped                  => loop(seed + 1, executed)
+            case Outcome.Agreed                   => loop(seed + 1, executed + 1)
+            case Outcome.Differed(counterexample) => Verdict.Rejected(counterexample)
+          }
         }
 
       loop(0, 0) match {
@@ -110,7 +85,68 @@ object Equivalence {
       }
   }
 
-  private def validate(steps: Iterator[Step], liveOut: LiveOut): Either[String, Map[String, Type]] =
+  /** The sequences on `inputs`, locations not named holding zero, as the filter runs them. */
+  def replay[H, L <: Lookup](
+      reference: Reference[H, L],
+      executor: (Case, Vec[Long], H) => Either[String, Vec[Long]],
+      left: Vec[Step],
+      right: Vec[Step],
+      liveOut: LiveOut,
+      inputs: Map[String, Long]
+  ): Verdict = typed(reference, left, right, liveOut).map { types =>
+    val sampled = types.keys.toVec.sorted.map(name => (name, inputs.getOrElse(name, 0L)))
+    compare(reference, executor, left, right, liveOut, types, sampled, 0) match {
+      case Outcome.Skipped                  => Verdict.Undecided("the inputs do not run on both sequences")
+      case Outcome.Agreed                   => Verdict.NotRejected(1)
+      case Outcome.Differed(counterexample) => Verdict.Rejected(counterexample)
+    }
+  }.fold(Verdict.Refused(_), identity)
+
+  private def typed[H, L <: Lookup](
+      reference: Reference[H, L],
+      left: Vec[Step],
+      right: Vec[Step],
+      liveOut: LiveOut
+  ): Either[String, Map[String, Type]] =
+    if (liveOut.memory && !reference.observesMemory) Left("memory is not observed on this ISA")
+    else validate(left.iterator ++ right.iterator, liveOut)
+
+  private def compare[H, L <: Lookup](
+      reference: Reference[H, L],
+      executor: (Case, Vec[Long], H) => Either[String, Vec[Long]],
+      left: Vec[Step],
+      right: Vec[Step],
+      liveOut: LiveOut,
+      types: Map[String, Type],
+      sampled: Vec[(String, Long)],
+      seed: Int
+  ): Outcome = {
+    val initial      = sampled.toMap
+    val leftHarness  = reference.harness(seed.toLong)
+    val rightHarness = reference.harness(seed.toLong)
+    (run(left, leftHarness, initial, executor), run(right, rightHarness, initial, executor)) match {
+      case (Left(_), Left(_))       => Outcome.Skipped
+      case (Left(reason), Right(_)) =>
+        Outcome.Differed(Counterexample(Difference.Refusal(Some(reason), None), sampled))
+      case (Right(_), Left(reason)) =>
+        Outcome.Differed(Counterexample(Difference.Refusal(None, Some(reason)), sampled))
+      case (Right(expected), Right(obtained)) =>
+        val value = liveOut.locations.collectFirst {
+          case location if !Edges.same(types(location))(expected(location), obtained(location)) =>
+            Difference.Value(location, expected(location), obtained(location))
+        }
+        val (leftState, rightState) = (reference.state(leftHarness), reference.state(rightHarness))
+        val memory                  = Option.when(liveOut.memory && !leftState.equals(rightState))(
+          Difference.Memory(leftState, rightState)
+        )
+        value.orElse(memory) match {
+          case Some(difference) => Outcome.Differed(Counterexample(difference, sampled))
+          case None             => Outcome.Agreed
+        }
+    }
+  }
+
+  private[check] def validate(steps: Iterator[Step], liveOut: LiveOut): Either[String, Map[String, Type]] =
     steps.foldLeft[Either[String, Map[String, Type]]](Right(Map.empty))((types, step) =>
       types.flatMap(known => typings(step).flatMap(merge(known, _)))
     ).flatMap(types =>
@@ -120,7 +156,7 @@ object Equivalence {
       }
     )
 
-  private def typings(step: Step): Either[String, Vec[(String, Type)]] = {
+  private[check] def typings(step: Step): Either[String, Vec[(String, Type)]] = {
     val kase       = step.kase
     val definition = kase.definition
     if (definition.body.isEmpty && definition.results.isEmpty) Left(s"${kase.instance} has no definition")
@@ -145,7 +181,7 @@ object Equivalence {
   private def bound(names: Set[String], keys: Set[String]): Boolean =
     names.size == keys.size && names.subsetOf(keys)
 
-  private def merge(known: Map[String, Type], bindings: Vec[(String, Type)]): Either[String, Map[String, Type]] =
+  private[check] def merge(known: Map[String, Type], bindings: Vec[(String, Type)]): Either[String, Map[String, Type]] =
     bindings.foldLeft[Either[String, Map[String, Type]]](Right(known))((types, binding) =>
       types.flatMap(current =>
         current.get(binding._1) match {
@@ -162,7 +198,7 @@ object Equivalence {
     roots.flatMap(terms(_)).flatMap(refusal(_)).nextOption()
   }
 
-  private def terms(term: Term): Iterator[Term] = Iterator(term) ++ term.children.iterator.flatMap(terms(_))
+  private[check] def terms(term: Term): Iterator[Term] = Iterator(term) ++ term.children.iterator.flatMap(terms(_))
 
   private def refusal(term: Term): Option[String] = term match {
     case Term.Context(contextType = contextType, method = method, result = result, effect = effect) =>

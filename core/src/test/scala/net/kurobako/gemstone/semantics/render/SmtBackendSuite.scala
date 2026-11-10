@@ -59,19 +59,19 @@ class SmtBackendSuite extends Suite {
 
   test("a floating-point parameter is rejected before encoding") {
     val float = definition(Vec(("x", Type.Float(32))), Vec(("y", Type.Float(32), Term.Variable("x"))))
-    assert(SmtBackend.equivalence(float, float).isLeft)
+    assert(SmtBackend.equivalence(float, float, memory = false).isLeft)
   }
 
   test("division is rejected before encoding") {
     val quotient = definition(ab, Vec(("q", u32, Term.Binary("/u", Term.Variable("a"), Term.Variable("b")))))
-    assert(SmtBackend.equivalence(quotient, quotient).isLeft)
+    assert(SmtBackend.equivalence(quotient, quotient, memory = false).isLeft)
   }
 
   test("a commuted sum is a query asserting the results differ") {
     val left  = definition(ab, Vec(("s", u32, Term.Binary("+", Term.Variable("a"), Term.Variable("b")))))
     val right = definition(ab, Vec(("s", u32, Term.Binary("+", Term.Variable("b"), Term.Variable("a")))))
     assertEquals(
-      SmtBackend.equivalence(left, right),
+      SmtBackend.equivalence(left, right, memory = false),
       Right(
         """|(set-logic QF_ABV)
            |(set-option :produce-models true)
@@ -84,5 +84,45 @@ class SmtBackendSuite extends Suite {
            |(get-value (a b))""".stripMargin
       )
     )
+  }
+
+  private def storing(value: Term): Definition = Definition(
+    "f",
+    Vec(("a", u32)),
+    Vec.empty,
+    Vec.empty,
+    Vec(Definition.Statement(
+      Definition.Target.Effect,
+      Term.Context(
+        RenderMachine.Machine.contextType,
+        RenderMachine.Machine.context,
+        "store",
+        Vec(u32),
+        Vec(Term.Constant("Space.Global"), Term.Literal(0L), value),
+        Vec(None, None, None),
+        None,
+        effect = true
+      )
+    )),
+    Vec.empty
+  )
+
+  test("final memory is compared when it is live-out") {
+    val query = SmtBackend.equivalence(
+      storing(Term.Variable("a")),
+      storing(Term.Binary("+", Term.Variable("a"), Term.Literal(1L))),
+      memory = true
+    )
+    assert(query.exists(_.contains("(assert (distinct l_memory_Global_0 r_memory_Global_0))")), query.toString)
+  }
+
+  test("final memory is ignored when it is not live-out") {
+    val query = SmtBackend.equivalence(
+      storing(Term.Variable("a")),
+      storing(Term.Binary("+", Term.Variable("a"), Term.Literal(1L))),
+      memory = false
+    )
+    assert(query.exists(_.contains("(assert false)")), query.toString)
+    assert(query.exists(!_.contains("distinct")), query.toString)
   }
 }
