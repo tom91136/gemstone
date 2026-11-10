@@ -354,4 +354,9 @@ if(BUILD_TESTING)
           "-DSYSROOT=${GEMSTONE_SYSROOT}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
     endif()
   endforeach()
+  if(GEMSTONE_SYSROOT AND TARGET ze_loader)
+    add_test(NAME "dso/ze_loader-package"
+      COMMAND "${CMAKE_COMMAND}" "-DREADELF=${CMAKE_READELF}" "-DLIBRARY=$<TARGET_FILE:ze_loader>"
+        "-DSYSROOT=${GEMSTONE_SYSROOT}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
+  endif()
 endif()
