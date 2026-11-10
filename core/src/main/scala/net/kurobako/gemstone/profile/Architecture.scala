@@ -1388,7 +1388,7 @@ object Architecture {
   )
 
   /** One shipping card of a target's own silicon. A target without one has no device memory values. */
-  private case class Card(
+  case class Card(
       name: String,
       busWidthBits: Int,
       l2KiB: Long,
@@ -1418,7 +1418,8 @@ case class Architecture(
     limits: Architecture.Limits,
     throughput: Architecture.Throughput,
     latency: Architecture.Latency,
-    memory: Option[Architecture.Memory] = None
+    memory: Option[Architecture.Memory] = None,
+    card: Option[Architecture.Card] = None
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1477,6 +1478,7 @@ case class Architecture(
     )
     val source = Architecture.Source.Estimate(card.name)
     copy(
+      card = Some(card),
       throughput = throughput.copy(dram = dram),
       memory = Some(
         Architecture.Memory(
