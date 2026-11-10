@@ -130,6 +130,30 @@ class ProfileSuite extends Suite {
     )
   }
 
+  private def uses(result: Result, prefix: String): Vector[RegisterUse] =
+    result.issued(prefix).map(issue => result.stream.instructions(issue.instruction).use)
+
+  test("register reads and writes name each operand in ISA spelling with its width") {
+    val result = run(
+      """v_lshlrev_b32 v1, 2, v0
+        |v_add_u32 v2, v1, v3
+        |v_fmac_f32 v5, v1, v2
+        |global_load_dwordx2 v[4:5], v1, s[2:3]
+        |global_store_dwordx2 v1, v[4:5], s[2:3]""".stripMargin
+    )
+    assertEquals(uses(result, "v_lshlrev_b32"), Vector(RegisterUse(Vec("v0"), Vec("v1"))))
+    assertEquals(uses(result, "v_add_u32"), Vector(RegisterUse(Vec("v1", "v3"), Vec("v2"))))
+    assertEquals(uses(result, "v_fmac_f32"), Vector(RegisterUse(Vec("v1", "v2"), Vec("v5"))))
+    assertEquals(
+      uses(result, "global_load_dwordx2"),
+      Vector(RegisterUse(Vec("s[2:3]", "v1"), Vec("v[4:5]"), Map("s[2:3]" -> 2, "v[4:5]" -> 2)))
+    )
+    assertEquals(
+      uses(result, "global_store_dwordx2"),
+      Vector(RegisterUse(Vec("s[2:3]", "v1", "v[4:5]"), Vec.empty, Map("s[2:3]" -> 2, "v[4:5]" -> 2)))
+    )
+  }
+
   test("a scalar load reports one read from the wave's first lane") {
     val result = run("s_load_dwordx2 s[8:9], s[2:3], 0x10\ns_waitcnt lgkmcnt(0)")
     assertEquals(result.accesses.toVector, Vector(Access(0, Space.Global, AccessKind.Read, base + 0x10, 8)))

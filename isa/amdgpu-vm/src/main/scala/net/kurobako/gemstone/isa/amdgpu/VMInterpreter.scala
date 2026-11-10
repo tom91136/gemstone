@@ -473,6 +473,7 @@ private object VMInterpreter {
     private var skippedOperations  = program.skipped
     private var instructionIndices = program.instructionIndices
     private var instructionOffsets = program.instructionOffsets
+    private var registerUses       = program.registerUses
     private var jumps              = slice.jumps
     private var dispatchMemory     = slice.memory
     private val waveSize           = kernel.waveSize
@@ -778,6 +779,7 @@ private object VMInterpreter {
       skippedOperations = next.program.skipped
       instructionIndices = next.program.instructionIndices
       instructionOffsets = next.program.instructionOffsets
+      registerUses = next.program.registerUses
       jumps = next.jumps
       dispatchMemory = next.memory
       codeBase = next.base
@@ -4500,7 +4502,9 @@ private object VMInterpreter {
       currentIssue = issue
       observer.nn.instruction(location, View) match {
         case Left(fault) => fault
-        case Right(())   => null
+        case Right(())   =>
+          observer.observed(_.registers(issue, registerUses(instructionIndex)))
+          null
       }
     }
 

@@ -40,17 +40,18 @@ object Metadata {
   /** The interned encoding catalogue emitted by the AMDGPU generator. */
   case class Catalogue(
       strings: Vector[NonEmpty[String]],
-      schemas: Vector[Vector[(Int, Int, Boolean, Int, Boolean)]],
+      schemas: Vector[Vector[(Int, Int, Boolean, Int, Boolean, Boolean)]],
       encodings: Vector[Catalogue.Row],
       metadata: Vector[(Int, Int)]
   ) derives ReadWriter {
     private def decode: Vec[Metadata] = {
-      val operands = schemas.map(_.map { case (field, kind, implicitOperand, bits, output) =>
+      val operands = schemas.map(_.map { case (field, kind, implicitOperand, bits, output, input) =>
         OperandInfo(
           field = Option.when(field >= 0)(EncodingField.valueOf(strings(field))),
           kind = OperandKind.valueOf(strings(kind)),
           implicitOperand = implicitOperand,
           bits = bits.unsafe[Int >= 0],
+          input = input,
           output = output
         )
       }.toVec)

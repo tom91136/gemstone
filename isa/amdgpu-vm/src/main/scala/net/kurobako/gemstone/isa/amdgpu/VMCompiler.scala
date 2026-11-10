@@ -1254,11 +1254,12 @@ private object VMCompiler {
     VPkSubI16,
     VPkLshrrevB16
   )
-  private case class Decoded(operation: Instruction, size: Int)
+  private case class Decoded(operation: Instruction, size: Int, use: RegisterUse)
   case class DecodedProgram(
       operations: Vec[Instruction],
       instructionIndices: Map[Int, Int],
-      instructionOffsets: Vec[Int]
+      instructionOffsets: Vec[Int],
+      registerUses: Vec[RegisterUse]
   )
 
   /** Decode one instruction for decoder-focused tests without exposing the executable model publicly. */
@@ -1367,6 +1368,7 @@ private object VMCompiler {
     val stream     = CodeStream(bytes, mode)
     val ranges     = if (functionRanges.nonEmpty) functionRanges else Vec(0 -> bytes.length)
     val result     = Vec.newBuilder[(Int, Instruction)]
+    val uses       = Vec.newBuilder[RegisterUse]
     var rangeIndex = 0
     var failure    = Option.empty[NonEmpty[String]]
     while (rangeIndex < ranges.length && failure.isEmpty) {
@@ -1383,6 +1385,7 @@ private object VMCompiler {
           decode(stream, offset) match {
             case Right(decoded) if offset + decoded.size <= rangeEnd =>
               result += offset -> decoded.operation
+              uses += decoded.use
               offset += decoded.size
             case Right(_) =>
               failure = Some(s"instruction at byte $offset exceeds function range")
@@ -1419,7 +1422,7 @@ private object VMCompiler {
             resolved(operation, "call", offset, displacement)(Instruction.Call(dest, _))
           case other => Right(other)
         }
-      }.sequence.map(operations => DecodedProgram(operations, indices, decoded.map(_._1)))
+      }.sequence.map(operations => DecodedProgram(operations, indices, decoded.map(_._1), Vec.from(uses.result())))
     }
   }
 
@@ -1515,10 +1518,53 @@ private object VMCompiler {
     InstructionDecoder.dual(code, offset)
       .fold(
         InstructionDecoder.decode(code, offset).flatMap(machine =>
-          decodeMachine(machine, offset, mode).map(Decoded(_, machine.size))
+          decodeMachine(machine, offset, mode).map(Decoded(_, machine.size, registerUse(machine, target)))
         )
-      )(_.flatMap(dual => decodeVOPD(dual, target).map(Decoded(_, dual.size))))
+      )(_.flatMap(dual => decodeVOPD(dual, target).map(Decoded(_, dual.size, RegisterUse.empty))))
       .flatMap(decoded => VMRegisterBounds.validate(decoded.operation, mode.waveSize).map(_ => decoded))
+  }
+
+  private def registerUse(machine: InstructionDecoder.Decoded, target: Target): RegisterUse =
+    machine.encoding.operands.foldLeft(RegisterUse.empty)((use, operand) =>
+      use.merge(operandUse(machine, operand, target))
+    )
+
+  private def operandUse(machine: InstructionDecoder.Decoded, operand: OperandInfo, target: Target): RegisterUse =
+    if (operand.implicitOperand || operand.kind.acceptsAccumulator) RegisterUse.empty
+    else
+      operand.field.flatMap(registerOf(machine, _, operand.kind, target)) match {
+        case Some((bank, first)) =>
+          val offset = operand.field.exists(field => field == EncodingField.VADDR || field == EncodingField.ADDR)
+          val width  = if (offset && scalarBase(machine, target)) 1 else math.max(operand.bits, 32) / 32
+          val name   = if (width == 1) s"$bank$first" else s"$bank[$first:${first + width - 1}]"
+          RegisterUse(
+            reads = if (operand.input) Vec(name) else Vec.empty,
+            writes = if (operand.output) Vec(name) else Vec.empty,
+            units = if (width > 1) Map(name -> width) else Map.empty
+          )
+        case None => RegisterUse.empty
+      }
+
+  private def scalarBase(machine: InstructionDecoder.Decoded, target: Target): Boolean =
+    machine.contains(EncodingField.SADDR) && !absentScalarOffset(target)(machine(EncodingField.SADDR))
+
+  private def registerOf(
+      machine: InstructionDecoder.Decoded,
+      field: EncodingField,
+      kind: OperandKind,
+      target: Target
+  ): Option[(String, Int)] = {
+    val code = machine(field).toInt
+    if (kind.isVector) Some("v" -> code)
+    else if (kind.isSource || kind.isScalarSource)
+      vectorSource(field, code, None, target).toOption.flatMap {
+        case InstructionSource.VectorRegister(index)                => Some("v" -> index)
+        case InstructionSource.Scalar(index) if index < Fixed.VccLo => Some("s" -> index)
+        case _                                                      => None
+      }
+    else if (kind.isScalarRegister || kind.isScalarDestination || kind == OperandKind.SGPR)
+      Option.when(code < Fixed.VccLo)("s" -> code)
+    else None
   }
 
   /** Instructions with no effect execution observes: trace and performance markers, sleeps and wake-ups for sleeps that
@@ -4653,6 +4699,7 @@ private class VMCompiler {
       program.instructionIndices,
       program.instructionOffsets,
       entry,
+      program.registerUses,
       skippable(program.operations)
     )
 

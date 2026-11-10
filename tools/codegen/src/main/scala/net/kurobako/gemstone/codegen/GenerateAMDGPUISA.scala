@@ -2019,7 +2019,7 @@ for name in sorted(module.instructions):
       schemas.map { operands =>
         "    " + operands.map { operand =>
           val field = if (operand.field.nonEmpty) stringIds(operand.field) else -1
-          s"[$field,${stringIds(operand.kind)},${operand.implicitOperand},${operand.bits},${operand.output}]"
+          s"[$field,${stringIds(operand.kind)},${operand.implicitOperand},${operand.bits},${operand.output},${operand.input}]"
         }.mkString("[", ",", "]")
       }.mkString(",\n"),
       "  ],",

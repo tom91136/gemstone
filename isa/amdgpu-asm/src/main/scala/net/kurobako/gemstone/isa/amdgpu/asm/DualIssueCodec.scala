@@ -70,7 +70,13 @@ private object DualIssueCodec {
         Some((first + 256, None))
       case _ => OperandCodec.encode(
           operand,
-          OperandInfo(Some(EncodingField.SSRC0), OperandKind.SRC, implicitOperand = false, bits.unsafe[Int >= 0]),
+          OperandInfo(
+            Some(EncodingField.SSRC0),
+            OperandKind.SRC,
+            implicitOperand = false,
+            bits.unsafe[Int >= 0],
+            input = true
+          ),
           target
         )
     }

@@ -1614,6 +1614,7 @@ private object VMIR {
       val instructionIndices: Map[Int, Int],
       val instructionOffsets: Vec[Int],
       val entryInstruction: Int,
+      val registerUses: Vec[RegisterUse],
       // which instructions VSKIP skips, empty when the kernel never sets it
       val skipped: Vec[Boolean] = Vec.empty
   ) {
@@ -1642,7 +1643,7 @@ private object VMIR {
     lazy val jumpTable: Array[Either[Fault, Int]] = Array.tabulate(instructions.size + 1)(Right(_))
 
     def withSource(replacement: CodeObjectKernel): Kernel =
-      Kernel(replacement, instructions, instructionIndices, instructionOffsets, entryInstruction, skipped)
+      Kernel(replacement, instructions, instructionIndices, instructionOffsets, entryInstruction, registerUses, skipped)
 
     private val issueScale: Int = if (source.waveSize == 64 && isa.isRDNA) 2 else 1
 

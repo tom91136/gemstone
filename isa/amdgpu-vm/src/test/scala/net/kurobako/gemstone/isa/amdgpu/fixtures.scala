@@ -68,7 +68,14 @@ private object fixtures extends munit.Assertions {
   /** Lowered instructions laid out one dword apart, entered at the first. */
   def irKernel(operations: Vec[VMIR.Instruction], source: CodeObjectKernel = codeKernel()): VMIR.Kernel = {
     val offsets = Vec.tabulate(operations.size)(_ * 4)
-    VMIR.Kernel(source, operations, offsets.zipWithIndex.toMap, offsets, 0)
+    VMIR.Kernel(
+      source,
+      operations,
+      offsets.zipWithIndex.toMap,
+      offsets,
+      0,
+      Vec.fill(operations.size)(RegisterUse.empty)
+    )
   }
 
   def runIR(
