@@ -1161,10 +1161,19 @@ object Architecture {
     "HIP 7.1.52802, clang 20.0.0.rocm"
   )
 
+  private val gfx1036Chain = Source.Probed(
+    "chain_ffma loop of 8 dependent v_fma_f32 timed with clock64: 64 cycles per iteration of one resident wave, 8.0 " +
+      "each (HardwareLoops chain_ffma, 2026-11-10, median of 202 launches)",
+    "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
+    "Linux 7.2.15 amdgpu",
+    "ROCm 7.2 hipcc"
+  )
+
   val gfx1036: Architecture = rdna2Base.copy(
     name = "gfx1036",
     throughput = rdna2Base.throughput.copy(fp64 = Sourced(8.0, gfx1036Rate)),
-    latency = rdnaProbeLatency(gfx1036Latency)
+    latency = rdnaProbeLatency(gfx1036Latency),
+    pipeLatency = Map(Pipe.Fma -> Sourced(8, gfx1036Chain))
   )
 
   private def rdna2(name: String): Architecture =
