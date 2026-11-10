@@ -202,7 +202,7 @@ std::vector<std::string> deqpCaseNames(std::istream &input) {
   while (std::getline(input, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
     if (!line.starts_with("TEST: ")) continue;
-    auto name = line.substr(6);
+    const auto name = line.substr(6);
     if (!name.starts_with("dEQP-VK.") || !validIdentifier(name) || !names.insert(name).second)
       throw std::runtime_error("invalid or duplicate dEQP case: " + name);
   }
@@ -347,7 +347,7 @@ std::vector<profile::ResolvedTarget> uniqueRoutes(const std::vector<profile::Res
 static bool validArtifactKey(std::string_view value) {
   return !value.empty() && validIdentifier(value) && value.front() != '.' && value.front() != '_' && value.front() != '-';
 }
-static std::string cudaCode(const conformance::profile::ResolvedTarget &target) {
+static std::string_view cudaCode(const conformance::profile::ResolvedTarget &target) {
   const auto mode = target.environment ^ get_maybe(std::string(environment::CudaCodeMode)) ^ get_or_else(std::string{});
   return mode == "ptx" ? "ptx" : "fatbin";
 }
@@ -368,7 +368,7 @@ static ArtifactMetadata validateArtifact(const fs::path &artifact, const conform
   if (const auto error = glz::read_file_toml(metadata, file.string(), buffer); error)
     throw std::runtime_error("cannot read conformance artifact metadata " + file.string() + ":\n" + glz::format_error(error, buffer));
   const auto architecture = target.architecture.value_or("");
-  const auto code = target.backend == "cuda" ? cudaCode(target) : std::string{};
+  const auto code = target.backend == "cuda" ? std::string(cudaCode(target)) : std::string{};
   if (metadata.backend != target.backend || metadata.architecture != architecture || metadata.compiler != target.compiler
       || metadata.code != code)
     throw std::runtime_error("conformance artifact metadata does not match requested " + target.backend + ": " + file.string());
@@ -914,7 +914,7 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
   };
   // Interleave targets so every route makes progress from the start. A pending exclusive head holds back
   // other starts, so a stream of ordinary cases cannot starve it.
-  const auto claim = [&]() -> std::optional<std::pair<size_t, size_t>> {
+  const auto claim = [&] -> std::optional<std::pair<size_t, size_t>> {
     if (exclusiveActive) return std::nullopt;
     bool exclusivePending = false;
     for (size_t index = 0; index < targets.size(); ++index)

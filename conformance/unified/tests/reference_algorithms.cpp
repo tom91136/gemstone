@@ -426,8 +426,8 @@ private:
     const auto compare = [&](size_t left, size_t right) { return keys[left] < keys[right]; };
     if (stable) std::stable_sort(order.begin(), order.end(), compare);
     else std::sort(order.begin(), order.end(), compare);
-    auto [result_keys, result_values] = order ^ map([&](size_t index) { return std::pair{keys[index], values[index]}; }) ^ unzip();
-    return {std::move(result_keys), std::move(result_values)};
+    auto [resultKeys, resultValues] = order ^ map([&](size_t index) { return std::pair{keys[index], values[index]}; }) ^ unzip();
+    return {std::move(resultKeys), std::move(resultValues)};
   }
 };
 }} // namespace unified::test

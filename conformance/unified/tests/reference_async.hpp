@@ -68,7 +68,7 @@ public:
   template <class T> std::vector<T> asyncFutureChain(const std::vector<T> &input) {
     using namespace aspartame;
     auto first = std::async(std::launch::async, [input] { return input ^ map(support::Affine<T>{}); });
-    auto second = std::async(std::launch::async, [first = std::move(first)]() mutable { return first.get() ^ map(support::Square<T>{}); });
+    auto second = std::async(std::launch::async, [first = std::move(first)] mutable { return first.get() ^ map(support::Square<T>{}); });
     return second.get();
   }
 
@@ -76,7 +76,7 @@ public:
     using namespace aspartame;
     auto left = std::async(std::launch::async, [input] { return input ^ map(support::Affine<T>{}); });
     auto right = std::async(std::launch::async, [input] { return input ^ map(support::Square<T>{}); });
-    auto join = std::async(std::launch::async, [left = std::move(left), right = std::move(right)]() mutable {
+    auto join = std::async(std::launch::async, [left = std::move(left), right = std::move(right)] mutable {
       return left.get() | zip(right.get()) | map(support::Combine<T>{}) | to_vector();
     });
     return join.get();

@@ -46,8 +46,8 @@ public:
     std::vector<size_t> order(keys.size());
     std::iota(order.begin(), order.end(), 0);
     std::stable_sort(order.begin(), order.end(), [&](auto left, auto right) { return keys[left] < keys[right]; });
-    auto [result_keys, result_values] = order ^ map([&](size_t index) { return std::pair{keys[index], payload[index]}; }) ^ unzip();
-    return {std::move(result_keys), std::move(result_values)};
+    auto [resultKeys, resultValues] = order ^ map([&](size_t index) { return std::pair{keys[index], payload[index]}; }) ^ unzip();
+    return {std::move(resultKeys), std::move(resultValues)};
   }
 
   template <class T> std::vector<T> dependencyDiamond(const std::vector<T> &input) {

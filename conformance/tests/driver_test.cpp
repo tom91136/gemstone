@@ -634,7 +634,7 @@ TEST_CASE("a hung case is killed with its process tree on timeout or interruptio
   fs::create_directories(workloads);
   std::ofstream(workloads / "short.toml") << "specs = ['[hang],[pass]']\n";
   const auto reports = directory.path / "reports";
-  const auto pids = [&]() -> std::optional<std::array<int32_t, 3>> {
+  const auto pids = [&] -> std::optional<std::array<int32_t, 3>> {
     if (!fs::exists(reports)) return std::nullopt;
     for (const auto &entry : fs::recursive_directory_iterator(reports))
       if (entry.path().filename() == "hang.pids") {
@@ -925,7 +925,7 @@ TEST_CASE("Fire CLI validates options and preserves raw launcher arguments", "[d
   char dash[] = "--child-option";
   char *raw[]{program, run, flag, separator, command, space, dash};
   CHECK(launcherArguments(std::span<char *const>(raw, 7)) == std::vector<std::string>{"launcher", "two words", "--child-option"});
-  auto env = baseEnvironment();
+  const auto env = baseEnvironment();
   CHECK(runProcess({Driver.string(), "run", "--unknown-option"}, Fixture.parent_path(), env, 10s, {}, true).status != 0);
   CHECK(runProcess({Driver.string(), "run", "--launcher"}, Fixture.parent_path(), env, 10s, {}, true).status != 0);
 }
