@@ -139,12 +139,14 @@ private object AMDGPUInstances {
 
   /** Why no instance of an encoding can be written, where none can: an image instruction that LLVM does not define or
     * whose address counts the encoding cannot hold, a catalogue record without operands, a literal in place of an
-    * operand that takes none, or a sub-dword selection of a 64-bit move.
+    * operand that takes none, a sub-dword selection of a 64-bit move, or an SDWA destination in an accumulator.
     */
   def unwritable(mnemonic: String, value: Metadata.Encoding): Option[String] =
-    unshaped(mnemonic, value).orElse(operandless(mnemonic, value)).orElse(unliteral(value)).orElse(
-      unsubdword(mnemonic, value)
-    )
+    unshaped(mnemonic, value)
+      .orElse(operandless(mnemonic, value))
+      .orElse(unliteral(value))
+      .orElse(unsubdword(mnemonic, value))
+      .orElse(unaccumulated(value))
 
   /** Why the SDWA encoding of a 64-bit move cannot be written: SDWA selects bytes and words within a dword, and LLVM
     * defines no such variant of v_mov_b64.
@@ -154,6 +156,14 @@ private object AMDGPUInstances {
       "LLVM defines no SDWA variant of v_mov_b64, as SDWA selects bytes and words within a dword and the move takes " +
         "a register pair, so no toolchain writes it."
     )
+
+  private def unaccumulated(value: Metadata.Encoding): Option[String] = {
+    val accumulated = value.operands.exists(info => info.field.contains(EncodingField.VDST) && accumulator(info.kind))
+    Option.when(value.format.isSdwa && accumulated)(
+      "The catalogue writes an SDWA form with an ACCVGPR destination; LLVM rejects one on gfx90a, gfx940-942 and " +
+        "gfx950, so no toolchain writes it."
+    )
+  }
 
   /** Why the VM leaves out an encoding whose instances the assembler cannot write either, where it does: gfx1250's
     * tensor data mover, which copies tiles between global memory and LDS by descriptors in SGPRs.
@@ -521,16 +531,21 @@ private object AMDGPUInstances {
         )
       case _ if format.isSdwa =>
         val selections = SubDwordSelection.values.toVec.filter(_ != SubDwordSelection.DWord).map(_.assemblyName.raw)
+        val dwordDestination = explicit.forall(info => !info.field.contains(EncodingField.VDST) || count(info) == 1)
         def selected(field: EncodingField, name: String): Vec[Draft => Draft] =
           if (fields(field)) selections.map(selection => modifier(s"$name:$selection")) else Vec.empty[Draft => Draft]
-        Vec(
-          Some(Group(
-            required = false,
+        val destination =
+          if (!dwordDestination) Vec.empty[Draft => Draft]
+          else
             selected(EncodingField.DST_SEL, "dst_sel") ++
               (if (fields(EncodingField.DST_UNUSED)) Vec("UNUSED_SEXT", "UNUSED_PRESERVE").map(unused =>
                  modifier("dst_sel:WORD_0").andThen(modifier(s"dst_unused:$unused"))
                )
-               else Vec.empty[Draft => Draft]) ++
+               else Vec.empty[Draft => Draft])
+        Vec(
+          Some(Group(
+            required = false,
+            destination ++
               selected(EncodingField.SRC0_SEL, "src0_sel") ++ selected(EncodingField.SRC1_SEL, "src1_sel") ++
               sourceModifiers(
                 fields(EncodingField.SRC0_ABS),

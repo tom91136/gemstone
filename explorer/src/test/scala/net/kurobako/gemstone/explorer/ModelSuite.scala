@@ -394,6 +394,19 @@ class ModelSuite extends Suite {
     assert(instances("gfx1100", "v_dual_add_nc_u32", "VOPDXY").forall(_.startsWith("v_dual_mov_b32 v7, v14 :: ")))
   }
 
+  test("AMDGPU SDWA forms write only the selections LLVM takes for their destination") {
+    for {
+      target   <- Vec("gfx942", "gfx950")
+      mnemonic <- Vec("v_cvt_pk_f32_bf8", "v_cvt_pk_f32_fp8")
+    } {
+      val forms = instances(target, mnemonic, "VOP1_VOP_SDWA")
+      assertEquals(forms.filter(form => form.contains("dst_sel:") || form.contains("dst_unused:")), Vec.empty[String])
+      assert(forms.exists(_.contains(" src0_sel:")))
+    }
+    for (target <- Vec("gfx90a", "gfx942", "gfx950"))
+      assertEquals(instances(target, "v_accvgpr_mov_b32", "VOP1_VOP_SDWA"), Vec.empty[String])
+  }
+
   test("AMDGPU forms without a definition say why from the stage that stops their instances") {
     def reason(target: String, mnemonic: String, format: String): Unavailable = {
       val found = entry(AMDGPUModel, Some(target), mnemonic)
@@ -579,6 +592,13 @@ class ModelSuite extends Suite {
       Unavailable.NotModelled(
         "The catalogue writes a literal for its SRC_ACCVGPR operand, which takes only AGPRs; LLVM rejects one there, " +
           "so no toolchain writes it."
+      )
+    )
+    assertEquals(
+      reason("gfx942", "v_accvgpr_mov_b32", "VOP1_VOP_SDWA"),
+      Unavailable.NotModelled(
+        "The catalogue writes an SDWA form with an ACCVGPR destination; LLVM rejects one on gfx90a, gfx940-942 and " +
+          "gfx950, so no toolchain writes it."
       )
     )
     assert(reason("gfx1250", "tensor_load_to_lds", "VIMAGE") match {
