@@ -28,6 +28,9 @@ trait Reference[H, L <: Lookup] {
   /** The machine state an instruction may change, such as memory, to compare after both runs. */
   def state(harness: H): Any
 
+  /** Whether `state` reflects memory writes, so a memory live-out is comparable. */
+  def observesMemory: Boolean = true
+
   /** The inputs of a run of `instance`: the edge-biased `sampled` ones, or others where the instance reads operands
     * that are seldom meaningful at random, such as resource descriptors.
     */

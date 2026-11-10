@@ -14,7 +14,7 @@ object SASSGenerator {
 
   /** Each definition `target` describes once, but those that access memory, with the first instance that lowers to it.
     */
-  private def describe(target: String): Vec[Case] =
+  def describe(target: String): Vec[Case] =
     SASSModel.entries(Some(target)).flatMap(entry =>
       entry.forms.flatMap(form =>
         SASSModel.instances(Some(target), entry.mnemonic, form.name).toOption.toVec.flatten.flatMap(found =>

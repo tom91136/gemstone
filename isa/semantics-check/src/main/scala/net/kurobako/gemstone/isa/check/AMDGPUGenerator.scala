@@ -194,7 +194,7 @@ object AMDGPUGenerator {
     kept.result()
   }
 
-  private def cases(included: String => Boolean): Vec[Case] = {
+  def cases(included: String => Boolean): Vec[Case] = {
     val found   = described(included)
     val kept    = Vec.newBuilder[Case]
     val checked = mutable.Set.empty[String]

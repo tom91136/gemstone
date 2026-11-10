@@ -105,4 +105,6 @@ object PTXReference extends Reference[NvidiaHarness, Lookup.Registers] {
   }
 
   def state(harness: NvidiaHarness): Long = harness.seed
+
+  override def observesMemory: Boolean = false
 }
