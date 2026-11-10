@@ -18,15 +18,22 @@ done < <(git diff --cached --name-only --diff-filter=ACMR -z)
 failed=false
 
 if ((${#native[@]})); then
-  expected=$(sed -n 's/^set(conformance_clang_tools_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
-  actual=$(clang-format --version | sed -n 's/.*version \([0-9.]*\).*/\1/p')
-  if [[ "$actual" != "$expected" ]]; then
-    echo "pre-commit: clang-format $actual, CI formats with $expected" >&2
+  container=${GEMSTONE_CONTAINER_EXE:-podman}
+  image=$(cmake -P conformance/artifacts/NativeToolchain.cmake)
+  if ! "$container" image inspect "$image" >/dev/null 2>&1; then
+    echo "pre-commit: toolchain image $image is missing; build it with: sbt native/nativeToolchain" >&2
     exit 1
   fi
-  for path in "${native[@]}"; do
-    git show ":$path" | clang-format --dry-run --Werror --assume-filename="$path" >/dev/null || failed=true
-  done
+  identity=(--user "$(id -u):$(id -g)")
+  [[ "$(basename "$container")" == podman ]] && identity=(--userns keep-id "${identity[@]}")
+  staged=$(mktemp -d)
+  trap 'rm -rf "$staged"' EXIT
+  git checkout-index --prefix="$staged/" -- "${native[@]}"
+  "$container" run --rm --security-opt label=disable "${identity[@]}" \
+    --mount "type=bind,source=$PWD,target=$PWD,readonly" --mount "type=bind,source=$staged,target=/staged,readonly" \
+    --workdir "$PWD" "$image" sh -c \
+    'status=0; for path; do clang-format --dry-run --Werror --assume-filename="$path" < "/staged/$path" >/dev/null || status=1; done; exit $status' \
+    sh "${native[@]}" || failed=true
   $failed && echo "pre-commit: staged C/C++ is not clang-formatted; run: sbt native/format conformance/format" >&2
 fi
 
