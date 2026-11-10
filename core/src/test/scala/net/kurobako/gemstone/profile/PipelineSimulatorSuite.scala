@@ -17,8 +17,17 @@ class PipelineSimulatorSuite extends Suite {
       pipe: Option[Pipe] = None,
       reads: Vec[String] = Vec.empty,
       writes: Vec[String] = Vec.empty,
-      latency: Int = 1
-  ): Op = Op(pipe, 32, reads, writes, Architecture.Sourced(latency, documented), 1)
+      latency: Int = 1,
+      stall: Option[Int] = None
+  ): Op = Op(
+    pipe,
+    32,
+    reads,
+    writes,
+    Architecture.Sourced(latency, documented),
+    1,
+    stall.map(Architecture.Sourced(_, documented))
+  )
 
   private def run(body: Vec[Op], subgroups: Int): Block =
     PipelineSimulator.simulate(Architecture.sm89, occupancy(subgroups), Stream.repeat(body))
@@ -48,6 +57,19 @@ class PipelineSimulatorSuite extends Suite {
       first.map(e => (e.index, e.dispatch, e.issue, e.retire, e.stalls)),
       Vec((0, 0L, 0L, 4L, Map.empty[Stall, Long]), (1, 1L, 4L, 8L, Map(Stall.Dependency -> 3L)))
     )
+  }
+
+  test("issue stall delays the next issue and the result latency delays the dependent") {
+    val ops = Vec(
+      op(writes = Vec("r1"), latency = 6, stall = Some(2)),
+      op(stall = Some(3)),
+      op(reads = Vec("r1")),
+      op()
+    )
+    val block = PipelineSimulator.simulate(Architecture.sm89, occupancy(1), Stream.once(ops))
+    assertEquals(block.entries.map(_.issue), Vec(0L, 2L, 6L, 7L))
+    assertEquals(block.entries(1).stalls, Map(Stall.Scheduled -> 1L))
+    assertEquals(block.entries(2).stalls, Map(Stall.Scheduled -> 2L, Stall.Dependency -> 1L))
   }
 
   test("pipe-bound stream runs at the pipe rate") {

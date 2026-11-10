@@ -64,6 +64,32 @@ object NvidiaLatency {
     121 -> Harvest(ptxas133, Map(Fadd32 -> 4, Fmul32 -> 4, Imul32 -> 4, Iadd32 -> 5, Lop32 -> 5, I2f32 -> 5))
   )
 
+  private val mnemonics: Map[String, Producer] = Map(
+    "FADD"     -> Fadd32,
+    "FMUL"     -> Fmul32,
+    "FFMA"     -> Ffma32,
+    "IADD"     -> Iadd32,
+    "IADD3"    -> Iadd32,
+    "IMAD"     -> Imul32,
+    "LOP3"     -> Lop32,
+    "SHL"      -> Shl32,
+    "I2F"      -> I2f32,
+    "I2FP"     -> I2f32,
+    "DFMA"     -> Fma64,
+    "MUFU.RCP" -> Rcp32,
+    "LDG"      -> Ldg32,
+    "LDS"      -> Lds32
+  )
+
+  def producer(text: String): Option[Producer] = {
+    val opcode = text.trim.split("\\s+").dropWhile(_.startsWith("@")).headOption.getOrElse("")
+    val parts  = opcode.stripSuffix(";").split('.')
+    mnemonics.get(parts.take(2).mkString(".")).orElse(mnemonics.get(parts.head))
+  }
+
+  def sm(architecture: Architecture): Option[Int] =
+    Option.when(architecture.name.startsWith("sm_"))(architecture.name.drop(3).toIntOption).flatten
+
   def fixed(sm: Int, producer: Producer): Option[Architecture.Sourced[Int]] =
     for {
       harvest <- harvests.get(sm)

@@ -6,7 +6,7 @@ import scala.collection.mutable
 
 object PipelineSimulator {
   enum Stall derives CanEqual {
-    case Dependency, PipeBusy, IssueSlot
+    case Dependency, PipeBusy, IssueSlot, Scheduled
   }
 
   case class Op(
@@ -15,7 +15,8 @@ object PipelineSimulator {
       reads: Vec[String],
       writes: Vec[String],
       latency: Architecture.Sourced[Int],
-      issue: Int
+      issue: Int,
+      stall: Option[Architecture.Sourced[Int]] = None
   )
 
   object Stream {
@@ -62,12 +63,13 @@ object PipelineSimulator {
   private class Warp() {
     var position: Long                   = 0L
     var dispatch: Long                   = 0L
+    var next: Long                       = 0L
     var done: Boolean                    = false
     var stalls: Map[Stall, Long]         = Map.empty
     val ready: mutable.Map[String, Long] = mutable.Map.empty[String, Long]
   }
 
-  private type Signature = (Int, Vec[(Long, Map[String, Long])], Map[Pipe, Long])
+  private type Signature = (Int, Vec[(Long, Long, Map[String, Long])], Map[Pipe, Long])
 
   private case class Mark(time: Long, positions: Vec[Long], busy: Map[Pipe, Long], issued: Long)
 
@@ -102,9 +104,10 @@ object PipelineSimulator {
             case None     => warp.done = true
             case Some(op) =>
               val cost  = math.min(op.issue, slots)
+              val held  = warp.next > t
               val ready = op.reads.forall(r => warp.ready.getOrElse(r, 0L) <= t)
               val free  = op.pipe.forall(pipe => busyUntil.getOrElse(pipe, 0L) <= t)
-              if (ready && free && used + cost <= slots) {
+              if (!held && ready && free && used + cost <= slots) {
                 val latency              = op.latency.value.toLong
                 val (iteration, opIndex) = stream.period match {
                   case Some(p) => (warp.position / p, (warp.position % p).toInt)
@@ -119,15 +122,21 @@ object PipelineSimulator {
                 }
                 op.writes.foreach(r => warp.ready(r) = math.max(warp.ready.getOrElse(r, 0L), t + latency))
                 sources += op.latency.source
+                op.stall.foreach(stall => sources += stall.source)
                 timeline += Entry(index, iteration, opIndex, warp.dispatch, t, t + latency, warp.stalls)
                 warp.position += 1
+                warp.next = t + math.max(1, op.stall.fold(1)(_.value)).toLong
                 warp.dispatch = t + 1
                 warp.stalls = Map.empty
                 used += cost
                 issuedSlots += cost
                 next = (index + 1) % count
               } else {
-                val reason = if (!ready) Stall.Dependency else if (!free) Stall.PipeBusy else Stall.IssueSlot
+                val reason =
+                  if (held) Stall.Scheduled
+                  else if (!ready) Stall.Dependency
+                  else if (!free) Stall.PipeBusy
+                  else Stall.IssueSlot
                 warp.stalls = warp.stalls.updated(reason, warp.stalls.getOrElse(reason, 0L) + 1L)
               }
           }
@@ -139,7 +148,11 @@ object PipelineSimulator {
     @tailrec
     def settle(t: Long, start: Int): Window = stream.period match {
       case Some(p) =>
-        val key = (start, warps.map(warp => (warp.position % p, ahead(warp.ready, t))), ahead(busyUntil, t))
+        val key = (
+          start,
+          warps.map(warp => (warp.position % p, math.max(0L, warp.next - t), ahead(warp.ready, t))),
+          ahead(busyUntil, t)
+        )
         marks.get(key) match {
           case Some(mark) =>
             Window(

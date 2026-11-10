@@ -278,9 +278,8 @@ object ProfileReport {
         val loads                     = if (memory.keys.exists(_._2 == AccessKind.Read)) issues else 0.0
         val touchesShared             = memory.keys.exists(_._1 == Space.Shared)
         val touchesGlobal             = memory.keys.exists(_._1 == Space.Global)
-        val (globalTier, globalLevel) =
-          latency.l1.map(_ -> Tier.L1).orElse(latency.l2.map(_ -> Tier.L2)).getOrElse(latency.dram -> Tier.Dram)
-        val tiers = Vec(
+        val (globalTier, globalLevel) = latency.global
+        val tiers                     = Vec(
           Option.when(touchesShared)(latency.shared),
           Option.when(touchesGlobal)(globalTier)
         ).flatten

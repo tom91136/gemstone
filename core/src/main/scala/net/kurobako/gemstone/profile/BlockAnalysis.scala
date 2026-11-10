@@ -3,6 +3,7 @@ package net.kurobako.gemstone.profile
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.profile.PipelineSimulator.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 
 object BlockAnalysis {
@@ -74,7 +75,7 @@ object BlockAnalysis {
   }
 
   private def timing(profile: Profile, kind: Kind, slots: Vec[Slot], members: Vec[Member]): Either[String, Timing] = {
-    val lowered = slots.map { case (address, entry) => opOf(address, entry) }
+    val lowered = slots.map { case (address, entry) => opOf(profile.architecture, address, entry) }
     for {
       _     <- lowered.collectFirst { case Left(reason) => reason }.toLeft(())
       _     <- unevenAt(members).toLeft(())
@@ -95,25 +96,86 @@ object BlockAnalysis {
     Either.cond(cycles.isFinite && cycles > 0.0, block, "no finite positive cycle count")
   }
 
-  private def opOf(address: Long, entry: Option[Counted]): Either[String, Op] = entry match {
-    case None                          => Left(s"no profile entry at ${hex(address)}")
-    case Some((instruction, counters)) =>
-      latencyOf(address, instruction.schedule).map { latency =>
-        Op(instruction.pipe, lanesOf(counters), instruction.use.reads, instruction.use.writes, latency, 1)
-      }
+  private def opOf(architecture: Architecture, address: Long, entry: Option[Counted]): Either[String, Op] =
+    entry match {
+      case None                          => Left(s"no profile entry at ${hex(address)}")
+      case Some((instruction, counters)) =>
+        for {
+          schedule <- instruction.schedule.toRight(s"no schedule at ${hex(address)}")
+          latency  <- latencyOf(architecture, address, instruction, counters, schedule)
+        } yield Op(
+          instruction.pipe,
+          lanesOf(counters),
+          instruction.use.reads,
+          instruction.use.writes,
+          latency,
+          1,
+          Some(stallOf(schedule))
+        )
+    }
+
+  private def stallOf(schedule: Schedule): Architecture.Sourced[Int] = schedule match {
+    case encoded: Schedule.Encoded =>
+      val (from, basis) = ProfileReport.encodedPlanning
+      Architecture.Sourced(encoded.plannedCycles, Architecture.Source.Inherited(from, basis))
+    case estimated: Schedule.Estimated =>
+      val (_, basis) = ProfileReport.modelledPlanning
+      Architecture.Sourced(estimated.plannedCycles, Architecture.Source.Estimate(basis))
   }
 
-  private def latencyOf(address: Long, schedule: Option[Schedule]): Either[String, Architecture.Sourced[Int]] =
-    schedule match {
-      case None                            => Left(s"no schedule at ${hex(address)}")
-      case Some(Schedule.Encoded(_, true)) => Left(s"variable latency at ${hex(address)}")
-      case Some(encoded: Schedule.Encoded) =>
-        val (from, basis) = ProfileReport.encodedPlanning
-        Right(Architecture.Sourced(encoded.plannedCycles, Architecture.Source.Inherited(from, basis)))
-      case Some(estimated: Schedule.Estimated) =>
-        val (_, basis) = ProfileReport.modelledPlanning
-        Right(Architecture.Sourced(estimated.plannedCycles, Architecture.Source.Estimate(basis)))
-    }
+  private def memoryTier(
+      architecture: Architecture,
+      counters: Profile.Counters
+  ): Option[Architecture.Sourced[Double]] = {
+    val spaces = counters.memory.keys.map(_._1).toSet - Space.Constant
+    val tiers  = Vec(
+      Option.when(spaces.contains(Space.Shared))(architecture.latency.shared),
+      Option.when(spaces.contains(Space.Global))(architecture.latency.global._1)
+    ).flatten
+    tiers.maxByOption(_.value)
+  }
+
+  private def tableLatency(
+      architecture: Architecture,
+      instruction: ProfileStream.Instruction,
+      counters: Profile.Counters
+  ): Option[Architecture.Sourced[Int]] = {
+    def whole(latency: Architecture.Sourced[Double]) =
+      Architecture.Sourced(math.round(latency.value).toInt, latency.source)
+    val producer = NvidiaLatency.producer(instruction.text)
+    val sm       = NvidiaLatency.sm(architecture)
+    memoryTier(architecture, counters).map(whole)
+      .orElse(for {
+        sm      <- sm
+        p       <- producer
+        latency <- NvidiaLatency.measured(sm, p)
+      } yield whole(latency))
+      .orElse(for {
+        sm      <- sm
+        p       <- producer
+        latency <- NvidiaLatency.fixed(sm, p)
+      } yield latency)
+      .orElse(instruction.pipe.flatMap(architecture.pipeLatency.get))
+  }
+
+  private def latencyOf(
+      architecture: Architecture,
+      address: Long,
+      instruction: ProfileStream.Instruction,
+      counters: Profile.Counters,
+      schedule: Schedule
+  ): Either[String, Architecture.Sourced[Int]] = tableLatency(architecture, instruction, counters) match {
+    case Some(latency)                     => Right(latency)
+    case None if variableLatency(schedule) => Left(s"variable latency at ${hex(address)} has no table latency")
+    case None                              =>
+      val source = Architecture.Source.Estimate("no table latency; the planned issue cycles as a floor")
+      Right(Architecture.Sourced(schedule.plannedCycles, source))
+  }
+
+  private def variableLatency(schedule: Schedule): Boolean = schedule match {
+    case Schedule.Encoded(_, barrier) => barrier
+    case _                            => false
+  }
 
   private def lanesOf(counters: Profile.Counters): Int =
     math.round(counters.activeLanes.toDouble / math.max(1L, counters.issues).toDouble).toInt

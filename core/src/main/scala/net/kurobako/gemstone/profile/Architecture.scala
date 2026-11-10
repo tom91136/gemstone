@@ -98,7 +98,13 @@ object Architecture {
       l1: Option[Sourced[Double]],
       l2: Option[Sourced[Double]],
       dram: Sourced[Double]
-  ) derives CanEqual
+  ) derives CanEqual {
+
+    /** The cycles of the nearest tier global loads are served from, and that tier. */
+    def global: (Sourced[Double], ProfileReport.Tier) =
+      l1.map(_ -> ProfileReport.Tier.L1).orElse(l2.map(_ -> ProfileReport.Tier.L2)).getOrElse(dram ->
+        ProfileReport.Tier.Dram)
+  }
 
   /** The device memory of the reference card a target's values describe, as the device reports it. */
   case class Memory(busWidthBits: Sourced[Int], l2Bytes: Sourced[Long]) derives CanEqual
@@ -1431,7 +1437,8 @@ case class Architecture(
     throughput: Architecture.Throughput,
     latency: Architecture.Latency,
     memory: Option[Architecture.Memory] = None,
-    card: Option[Architecture.Card] = None
+    card: Option[Architecture.Card] = None,
+    pipeLatency: Map[Pipe, Architecture.Sourced[Int]] = Map.empty
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1475,7 +1482,8 @@ case class Architecture(
         latency.l1.map(inherit(_)),
         latency.l2.map(sibling(_)),
         sibling(latency.dram)
-      )
+      ),
+      pipeLatency = pipeLatency.view.mapValues(inherit(_)).toMap
     )
   }
 
