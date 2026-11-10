@@ -100,6 +100,13 @@ class PipelineSimulatorSuite extends Suite {
     }
   }
 
+  test("a partition pipe binds only once every partition has a subgroup") {
+    val stream = Vec(op(pipe = Some(Pipe.Mufu)), op(pipe = Some(Pipe.Mufu)))
+    assertEquals(run(stream, subgroups = 1).binding, Binding.Path)
+    assertEquals(run(stream, subgroups = 3).binding, Binding.Path)
+    assertEquals(run(stream, subgroups = 4).binding, Binding.Arithmetic(Pipe.Mufu))
+  }
+
   test("issue-bound stream runs at the issue width") {
     val block = run(Vec(op(), op(), op()), subgroups = 48)
     assert(block.steady)

@@ -85,6 +85,9 @@ object PipelineSimulator {
 
   private case class Claim(resource: ProfileReport.Binding, cycles: Long, sources: Vec[Architecture.Source])
 
+  // stalls leave small bubbles in a resource that still bounds the block
+  private val Saturated = 0.9
+
   private def ordinal(resource: ProfileReport.Binding): Int = resource match {
     case ProfileReport.Binding.Issue            => 0
     case ProfileReport.Binding.Arithmetic(pipe) => 1 + pipe.ordinal
@@ -236,16 +239,21 @@ object PipelineSimulator {
 
     val window    = settle(0L, 0)
     val length    = window.length.toDouble
+    val share     = active.toDouble / partitions
     val resources = window.busy.collect { case (resource, cycles) if cycles > 0L => resource }.toVector.sortBy(ordinal)
+    def local(resource: ProfileReport.Binding): Boolean = resource match {
+      case ProfileReport.Binding.Arithmetic(pipe) => !architecture.sharedPipes.contains(pipe)
+      case _                                      => false
+    }
     val pressure: Vec[(ProfileReport.Binding, Double)] =
-      (ProfileReport.Binding.Issue, window.issued / (slots * length)) +: Vec.from(resources).map(resource =>
-        (resource, window.busy(resource) / length)
+      (ProfileReport.Binding.Issue, window.issued / (slots * length) * share) +: Vec.from(resources).map(resource =>
+        (resource, window.busy(resource) / length * (if (local(resource)) share else 1.0))
       )
     val (top, peak) = pressure.maxBy(_._2)
     Block(
       entries = Vec.from(timeline),
       cyclesPerIteration = length / window.passes / math.min(partitions, subgroups),
-      binding = if (peak >= 1.0) top else ProfileReport.Binding.Path,
+      binding = if (peak >= Saturated) top else ProfileReport.Binding.Path,
       pressure = pressure,
       source = sources.max,
       steady = stream.period.isDefined

@@ -162,9 +162,21 @@ class HardwareValidationSuite extends Suite {
       )
   }
 
+  private def traffic(architecture: Architecture, row: Row): PipelineSimulator.Traffic =
+    if (loads(row)) PipelineSimulator.Traffic(sectors = 128.0 / architecture.global.sectorBytes.value, loads = 1.0)
+    else PipelineSimulator.Traffic.none
+
   private def simulated(architecture: Architecture, rows: Vec[Row], warps: Int): PipelineSimulator.Block = {
     val ops = rows.map(row =>
-      PipelineSimulator.Op(row.pipe, 32, row.reads, row.writes, tableLatency(architecture, row), 1)
+      PipelineSimulator.Op(
+        row.pipe,
+        32,
+        row.reads,
+        row.writes,
+        tableLatency(architecture, row),
+        1,
+        traffic = traffic(architecture, row)
+      )
     )
     PipelineSimulator.simulate(
       architecture,
