@@ -50,6 +50,11 @@ object ProgramPage {
       case _                     => Left("Load a program to draw its control flow.")
     }
 
+    val blocks = result.signal.combineWith(chosen.signal).map {
+      case (Some(found), Some(architecture)) => Some(BlockAnalysisView.model(found.stream, architecture))
+      case _                                 => None
+    }
+
     def target: Option[String] = targets(language.now()).now()
 
     def clear(): Unit = {
@@ -214,6 +219,7 @@ object ProgramPage {
           }
         )
       ),
+      child <-- blocks.map(_.fold(emptyNode)(BlockAnalysisPanel.render)),
       div(
         cls := "timeline-pane",
         child <-- liveness.signal.combineWith(trace.signal).map { (live, recorded) =>

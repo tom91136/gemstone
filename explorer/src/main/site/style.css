@@ -355,7 +355,7 @@ table {
 
 .program {
   display: grid;
-  grid-template-rows: auto auto minmax(180px, 1fr) auto auto;
+  grid-template-rows: auto auto minmax(180px, 1fr) auto auto auto;
   gap: 8px;
   height: calc(100vh - 70px);
   box-sizing: border-box;
@@ -581,6 +581,57 @@ table {
 
 .heat-cycles {
   font-weight: 600;
+}
+
+.program .blocks-summary {
+  max-height: 30vh;
+  overflow: auto;
+  border: 1px solid #d5dbe0;
+  background: #fff;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.program .blocks-summary h4,
+.program .blocks-summary h5,
+.program .blocks-summary p {
+  margin: 2px 0;
+}
+
+.program .blocks-summary .block-region {
+  margin: 6px 0;
+}
+
+.program .blocks-summary .block-row {
+  display: flex;
+  gap: 10px;
+  white-space: pre;
+  padding: 1px 0;
+  font-family: ui-monospace, monospace;
+}
+
+.program .blocks-summary .block-row .address {
+  color: #8a949d;
+  min-width: 120px;
+  user-select: none;
+}
+
+.program .blocks-summary .pressure th,
+.program .blocks-summary .pressure td {
+  text-align: left;
+  font-weight: normal;
+  padding: 0 16px 0 0;
+}
+
+.program .blocks-summary .caveat {
+  color: #8a5a00;
+}
+
+.program .blocks-summary .source-estimate {
+  color: #8a5a00;
+  font-style: italic;
+  border-left: 3px dashed #d9a441;
+  padding-left: 6px;
 }
 
 .timeline-pane {

@@ -27,41 +27,51 @@ object BlockAnalysisReport {
       s"    ${hex(member.address)} ${member.issues} issues  ${member.text.getOrElse("unknown")}"
     }
 
-  private def executedLines(members: Vec[Member], timing: Timing): Vec[String] = {
-    val block           = timing.block
+  def bottleneck(block: PipelineSimulator.Block): String = {
     val (busiest, peak) = block.pressure.maxBy(_._2)
     val peakText        = f"$peak%.2f"
-    val bottleneck      =
-      if (block.binding == ProfileReport.Binding.Path)
-        s"path, no resource saturated, busiest is ${bindingName(busiest)} at $peakText"
-      else s"${bindingName(block.binding)} at $peakText"
+    if (block.binding == ProfileReport.Binding.Path)
+      s"path, no resource saturated, busiest is ${bindingName(busiest)} at $peakText"
+    else s"${bindingName(block.binding)} at $peakText"
+  }
+
+  def unknownPipeLine(timing: Timing): Option[String] =
+    Option.when(timing.unknownPipes.nonEmpty) {
+      s"unknown pipe: ${timing.unknownPipes.map(hex).mkString(", ")}, simulated as issue only"
+    }
+
+  def timelineSpan(block: PipelineSimulator.Block): String = {
+    val last = firstIteration(block).map(_.retire).max
+    if (last > MaxCycles) s"first $MaxCycles of $last cycles" else s"$last cycles"
+  }
+
+  def timelineBar(entry: PipelineSimulator.Entry): String = {
+    val end = math.min(entry.retire, MaxCycles.toLong).toInt
+    (0 until end).map { cell =>
+      val cycle = cell.toLong
+      if (cycle < entry.dispatch) ' ' else if (cycle < entry.issue) '.' else '='
+    }.mkString
+  }
+
+  private def executedLines(members: Vec[Member], timing: Timing): Vec[String] = {
+    val block   = timing.block
     val cycles  = f"  cycles per iteration: ${block.cyclesPerIteration}%.2f"
-    val unknown =
-      if (timing.unknownPipes.isEmpty) Vec.empty[String]
-      else Vec(s"  unknown pipe: ${timing.unknownPipes.map(hex).mkString(", ")}, simulated as issue only")
+    val unknown = unknownPipeLine(timing).fold(Vec.empty[String])(line => Vec(s"  $line"))
     Vec(
       "  status: executed",
       cycles,
       s"  source: ${block.source.kind} (${block.source.detail})",
-      s"  bottleneck: $bottleneck"
+      s"  bottleneck: ${bottleneck(block)}"
     ) ++ unknown ++ timelineLines(members, block) ++ pressureLines(block)
   }
 
   private def timelineLines(members: Vec[Member], block: PipelineSimulator.Block): Vec[String] = {
-    val entries = firstIteration(block)
-    val last    = entries.map(_.retire).max
-    val span    = if (last > MaxCycles) s"first $MaxCycles of $last cycles" else s"$last cycles"
-    val rows    = entries.map { entry =>
-      val member = members(entry.index)
-      val end    = math.min(entry.retire, MaxCycles.toLong).toInt
-      val bar    = (0 until end).map { cell =>
-        val cycle = cell.toLong
-        if (cycle < entry.dispatch) ' ' else if (cycle < entry.issue) '.' else '='
-      }.mkString
+    val rows = firstIteration(block).map { entry =>
+      val member   = members(entry.index)
       val position = s"${entry.index.toString.padTo(3, ' ')} ${hex(member.address).padTo(6, ' ')}"
-      s"    $position |$bar| ${member.text.getOrElse("unknown")}"
+      s"    $position |${timelineBar(entry)}| ${member.text.getOrElse("unknown")}"
     }
-    Vec(s"  timeline (warp 0, iteration 0, $span):") ++ rows
+    Vec(s"  timeline (warp 0, iteration 0, ${timelineSpan(block)}):") ++ rows
   }
 
   private def pressureLines(block: PipelineSimulator.Block): Vec[String] = {
@@ -72,7 +82,7 @@ object BlockAnalysisReport {
     }
   }
 
-  private def firstIteration(block: PipelineSimulator.Block): Vec[PipelineSimulator.Entry] =
+  def firstIteration(block: PipelineSimulator.Block): Vec[PipelineSimulator.Entry] =
     block.entries.filter(entry => entry.warp == 0 && entry.iteration == 0L)
 
   private def regionJson(region: Region): ujson.Obj = {
