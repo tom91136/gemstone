@@ -253,6 +253,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/MiniappClosureTest.cmake")
     add_test(NAME conformance_jobserver
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/JobserverTest.cmake")
+    add_test(NAME conformance_floor
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/FloorTest.cmake")
   endif()
 
   add_executable(conformance_fixture tests/fixture.cpp)
