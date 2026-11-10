@@ -18,7 +18,8 @@ class PipelineSimulatorSuite extends Suite {
       reads: Vec[String] = Vec.empty,
       writes: Vec[String] = Vec.empty,
       latency: Int = 1,
-      stall: Option[Int] = None
+      stall: Option[Int] = None,
+      traffic: Traffic = Traffic.none
   ): Op = Op(
     pipe,
     32,
@@ -26,7 +27,8 @@ class PipelineSimulatorSuite extends Suite {
     writes,
     Architecture.Sourced(latency, documented),
     1,
-    stall.map(Architecture.Sourced(_, documented))
+    stall.map(Architecture.Sourced(_, documented)),
+    traffic
   )
 
   private def run(body: Vec[Op], subgroups: Int): Block =
@@ -83,6 +85,19 @@ class PipelineSimulatorSuite extends Suite {
     assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 1).cyclesPerIteration, 16.0, 1e-9)
     assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 48).cyclesPerIteration, 16.0, 1e-9)
     assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Mufu))), subgroups = 1).cyclesPerIteration, 8.0, 1e-9)
+  }
+
+  test("memory traffic occupies the sector, shared, and load resources") {
+    val cases = Vec(
+      (Traffic(sectors = 8.0), 2.0, Binding.LoadStore),
+      (Traffic(wavefronts = 3.0), 3.0, Binding.Shared),
+      (Traffic(loads = 1.0), 2.0, Binding.Loads)
+    )
+    cases.foreach { (traffic, cycles, binding) =>
+      val block = run(Vec(op(traffic = traffic)), subgroups = 48)
+      assertEqualsDouble(block.cyclesPerIteration, cycles, 1e-9)
+      assertEquals(block.binding, binding)
+    }
   }
 
   test("issue-bound stream runs at the issue width") {

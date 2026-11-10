@@ -5,6 +5,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.profile.PipelineSimulator.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchObserver.*
 
 object BlockAnalysis {
 
@@ -110,9 +111,20 @@ object BlockAnalysis {
           instruction.use.writes,
           latency,
           1,
-          Some(stallOf(schedule))
+          Some(stallOf(schedule)),
+          trafficOf(counters)
         )
     }
+
+  private def trafficOf(counters: Profile.Counters): Traffic = {
+    val memory = counters.memory.filterNot(_._1._1 == Space.Constant)
+    val issues = math.max(1L, counters.issues).toDouble
+    Traffic(
+      sectors = memory.values.map(_.sectors).sum / issues,
+      wavefronts = memory.values.map(_.wavefronts).sum / issues,
+      loads = if (memory.keys.exists(_._2 == AccessKind.Read)) 1.0 else 0.0
+    )
+  }
 
   private def stallOf(schedule: Schedule): Architecture.Sourced[Int] = schedule match {
     case encoded: Schedule.Encoded =>

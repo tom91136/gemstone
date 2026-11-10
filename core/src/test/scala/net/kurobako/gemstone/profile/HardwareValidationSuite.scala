@@ -4,9 +4,11 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.profile.HardwareLoops.Row
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
+import net.kurobako.gemstone.vm.LaunchObserver.*
 
 /** Cycles per iteration of loop kernels timed with `clock64` against the simulator. Each measured value is the median
   * over launches of the slowest resident warp's loop cycles, divided by iterations and resident warps, so it is the
@@ -90,6 +92,8 @@ class HardwareValidationSuite extends Suite {
   private def at(address: Long): Fault.Location =
     Fault.Location("k", Some("f"), Some(address.unsafe), Some(Coordinates(1, 2, 3)), Some(0.unsafe))
 
+  private def loads(row: Row): Boolean = row.text.startsWith("LDG") || row.text.startsWith("global_load")
+
   private def record(rows: Vec[Row], warps: Int, shared: Long): ProfileStream = {
     val recorder = ProfileRecorder()
     val last     = rows.size + 1
@@ -112,6 +116,10 @@ class HardwareValidationSuite extends Suite {
         recorder.instruction(at(offsets(index)), State(issued.toLong, row.text, Some(row.schedule), row.pipe)),
         Right(())
       )
+      if (loads(row))
+        (0 until 32).foreach(lane =>
+          recorder.access(lane.unsafe, Space.Global, AccessKind.Read, 0x100000L + 0x1000L * index + 4L * lane, 4.unsafe)
+        )
       recorder.registers(issued.toLong, RegisterUse(row.reads, row.writes))
     }
     recorder.stream

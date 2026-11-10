@@ -169,13 +169,13 @@ object ProfileReport {
       group.head.copy(cycles = group.map(_.cycles).sum, count = group.map(_.count).sum)
     })
 
-  private def sectorSourceOf(architecture: Architecture): Architecture.Source = Architecture.Source.weakest(
+  private[profile] def sectorSourceOf(architecture: Architecture): Architecture.Source = Architecture.Source.weakest(
     architecture.global.sectorBytes.source,
     architecture.global.lineBytes.source,
     architecture.throughput.loadStore.source
   )
 
-  private def conflictSourceOf(architecture: Architecture): Architecture.Source = Architecture.Source.weakest(
+  private[profile] def conflictSourceOf(architecture: Architecture): Architecture.Source = Architecture.Source.weakest(
     architecture.shared.count.source,
     architecture.shared.bankBytes.source,
     architecture.throughput.shared.source

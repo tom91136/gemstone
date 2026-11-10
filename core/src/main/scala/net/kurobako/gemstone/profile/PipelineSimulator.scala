@@ -9,6 +9,13 @@ object PipelineSimulator {
     case Dependency, PipeBusy, IssueSlot, Scheduled
   }
 
+  /** What an op asks of the memory system per issue: global sectors, shared wavefronts and warp load instructions. */
+  case class Traffic(sectors: Double = 0.0, wavefronts: Double = 0.0, loads: Double = 0.0)
+
+  object Traffic {
+    val none: Traffic = Traffic()
+  }
+
   case class Op(
       pipe: Option[Pipe],
       lanes: Int,
@@ -16,7 +23,8 @@ object PipelineSimulator {
       writes: Vec[String],
       latency: Architecture.Sourced[Int],
       issue: Int,
-      stall: Option[Architecture.Sourced[Int]] = None
+      stall: Option[Architecture.Sourced[Int]] = None,
+      traffic: Traffic = Traffic.none
   )
 
   object Stream {
@@ -69,11 +77,22 @@ object PipelineSimulator {
     val ready: mutable.Map[String, Long] = mutable.Map.empty[String, Long]
   }
 
-  private type Signature = (Int, Vec[(Long, Long, Map[String, Long])], Map[Pipe, Long])
+  private type Signature = (Int, Vec[(Long, Long, Map[String, Long])], Map[ProfileReport.Binding, Long])
 
-  private case class Mark(time: Long, positions: Vec[Long], busy: Map[Pipe, Long], issued: Long)
+  private case class Mark(time: Long, positions: Vec[Long], busy: Map[ProfileReport.Binding, Long], issued: Long)
 
-  private case class Window(length: Long, passes: Long, busy: Map[Pipe, Long], issued: Long)
+  private case class Window(length: Long, passes: Long, busy: Map[ProfileReport.Binding, Long], issued: Long)
+
+  private case class Claim(resource: ProfileReport.Binding, cycles: Long, sources: Vec[Architecture.Source])
+
+  private def ordinal(resource: ProfileReport.Binding): Int = resource match {
+    case ProfileReport.Binding.Issue            => 0
+    case ProfileReport.Binding.Arithmetic(pipe) => 1 + pipe.ordinal
+    case ProfileReport.Binding.LoadStore        => Pipe.values.length + 1
+    case ProfileReport.Binding.Shared           => Pipe.values.length + 2
+    case ProfileReport.Binding.Loads            => Pipe.values.length + 3
+    case ProfileReport.Binding.Path             => Pipe.values.length + 4
+  }
 
   private def ahead[K](times: mutable.Map[K, Long], now: Long): Map[K, Long] =
     times.view.collect { case (key, time) if time > now => key -> (time - now) }.toMap
@@ -86,12 +105,52 @@ object PipelineSimulator {
     val count       = (subgroups + partitions - 1) / partitions
     val slots       = math.max(1, (rates.issues.value / partitions).toInt)
     val warps       = Vec.fill(count)(Warp())
-    val busyUntil   = mutable.Map.empty[Pipe, Long]
-    val busyCycles  = mutable.Map.empty[Pipe, Long]
+    val active      = math.min(partitions, subgroups)
+    val busyUntil   = mutable.Map.empty[ProfileReport.Binding, Long]
+    val busyCycles  = mutable.Map.empty[ProfileReport.Binding, Long]
     val timeline    = mutable.ArrayBuffer.empty[Entry]
     val sources     = mutable.Set(rates.issues.source, architecture.limits.partitions.source)
     val marks       = mutable.Map.empty[Signature, Mark]
     var issuedSlots = 0L
+
+    def claim(
+        resource: ProfileReport.Binding,
+        demand: Double,
+        rate: Architecture.Sourced[Double],
+        sharers: Int,
+        also: Vec[Architecture.Source]
+    ): Option[Claim] =
+      Option.when(demand > 0.0 && rate.value > 0.0)(
+        Claim(resource, math.ceil(demand * sharers / rate.value).toLong, rate.source +: also)
+      )
+
+    def claims(op: Op): Vec[Claim] = Vec(
+      op.pipe.flatMap { pipe =>
+        val shared = architecture.sharedPipes.get(pipe)
+        claim(
+          ProfileReport.Binding.Arithmetic(pipe),
+          op.lanes.toDouble,
+          rates.rate(pipe),
+          if (shared.isDefined) active else partitions,
+          Vec.from(shared)
+        )
+      },
+      claim(
+        ProfileReport.Binding.LoadStore,
+        op.traffic.sectors,
+        rates.loadStore,
+        active,
+        Vec(ProfileReport.sectorSourceOf(architecture))
+      ),
+      claim(
+        ProfileReport.Binding.Shared,
+        op.traffic.wavefronts,
+        rates.shared,
+        active,
+        Vec(ProfileReport.conflictSourceOf(architecture))
+      ),
+      rates.loads.flatMap(claim(ProfileReport.Binding.Loads, op.traffic.loads, _, active, Vec.empty))
+    ).flatten
 
     def cycle(t: Long, start: Int): Int = {
       var used = 0
@@ -103,25 +162,21 @@ object PipelineSimulator {
           stream.op(warp.position) match {
             case None     => warp.done = true
             case Some(op) =>
-              val cost  = math.min(op.issue, slots)
-              val held  = warp.next > t
-              val ready = op.reads.forall(r => warp.ready.getOrElse(r, 0L) <= t)
-              val free  = op.pipe.forall(pipe => busyUntil.getOrElse(pipe, 0L) <= t)
+              val cost    = math.min(op.issue, slots)
+              val held    = warp.next > t
+              val ready   = op.reads.forall(r => warp.ready.getOrElse(r, 0L) <= t)
+              val demands = claims(op)
+              val free    = demands.forall(demand => busyUntil.getOrElse(demand.resource, 0L) <= t)
               if (!held && ready && free && used + cost <= slots) {
                 val latency              = op.latency.value.toLong
                 val (iteration, opIndex) = stream.period match {
                   case Some(p) => (warp.position / p, (warp.position % p).toInt)
                   case None    => (0L, warp.position.toInt)
                 }
-                op.pipe.foreach { pipe =>
-                  val rate    = rates.rate(pipe)
-                  val shared  = architecture.sharedPipes.get(pipe)
-                  val sharers = if (shared.isDefined) math.min(partitions, subgroups) else partitions
-                  val cycles  = math.ceil(op.lanes * sharers / rate.value).toLong
-                  busyUntil(pipe) = t + cycles
-                  busyCycles(pipe) = busyCycles.getOrElse(pipe, 0L) + cycles
-                  sources += rate.source
-                  shared.foreach(sources += _)
+                demands.foreach { demand =>
+                  busyUntil(demand.resource) = t + demand.cycles
+                  busyCycles(demand.resource) = busyCycles.getOrElse(demand.resource, 0L) + demand.cycles
+                  sources ++= demand.sources
                 }
                 op.writes.foreach(r => warp.ready(r) = math.max(warp.ready.getOrElse(r, 0L), t + latency))
                 sources += op.latency.source
@@ -161,7 +216,8 @@ object PipelineSimulator {
             Window(
               length = t - mark.time,
               passes = warps.zip(mark.positions).map((warp, before) => (warp.position - before) / p).sum,
-              busy = busyCycles.toMap.map((pipe, cycles) => pipe -> (cycles - mark.busy.getOrElse(pipe, 0L))),
+              busy =
+                busyCycles.toMap.map((resource, cycles) => resource -> (cycles - mark.busy.getOrElse(resource, 0L))),
               issued = issuedSlots - mark.issued
             )
           case None =>
@@ -178,12 +234,12 @@ object PipelineSimulator {
       case None => settle(t + 1, cycle(t, start))
     }
 
-    val window = settle(0L, 0)
-    val length = window.length.toDouble
-    val pipes  = Vec.from(Pipe.values).filter(pipe => window.busy.getOrElse(pipe, 0L) > 0L)
+    val window    = settle(0L, 0)
+    val length    = window.length.toDouble
+    val resources = window.busy.collect { case (resource, cycles) if cycles > 0L => resource }.toVector.sortBy(ordinal)
     val pressure: Vec[(ProfileReport.Binding, Double)] =
-      (ProfileReport.Binding.Issue, window.issued / (slots * length)) +: pipes.map(pipe =>
-        (ProfileReport.Binding.Arithmetic(pipe), window.busy(pipe) / length)
+      (ProfileReport.Binding.Issue, window.issued / (slots * length)) +: Vec.from(resources).map(resource =>
+        (resource, window.busy(resource) / length)
       )
     val (top, peak) = pressure.maxBy(_._2)
     Block(
