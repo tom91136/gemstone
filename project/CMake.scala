@@ -15,7 +15,8 @@ object CMake {
       arguments: Seq[String],
       log: String => Unit,
       buildTargets: Seq[String],
-      launcher: Seq[String]
+      launcher: Seq[String],
+      container: Option[ToolchainContainer] = None
   ): Path = {
     val configure = Seq("cmake", "-S", s"$source", "-B", s"$directory", "-G", "Ninja") ++
       Seq("-DCMAKE_MESSAGE_LOG_LEVEL=WARNING") ++ arguments
@@ -24,7 +25,7 @@ object CMake {
       !(directory / "CMakeCache.txt").isFile || !signature.isFile ||
       Files.readString(signature) != configure.mkString("\n")
     ) {
-      run(configure, source, log)
+      run(configure, source, log, container)
       val _ = Files.writeString(signature, configure.mkString("\n"))
     }
     run(
@@ -32,12 +33,13 @@ object CMake {
         (if (buildTargets.isEmpty) Seq.empty else "--target" +: buildTargets) ++
         Seq("--"),
       source,
-      log
+      log,
+      container
     )
     directory
   }
 
-  def test(directory: Path, log: String => Unit): Unit =
+  def test(directory: Path, log: String => Unit, container: Option[ToolchainContainer] = None): Unit =
     run(
       Seq(
         "ctest",
@@ -48,11 +50,18 @@ object CMake {
         s"${BuildEnvironment.threadCount}"
       ),
       directory,
-      log
+      log,
+      container
     )
 
-  private def run(command: Seq[String], directory: Path, log: String => Unit): Unit = {
-    val child  = Process(command, directory.toFile).run(ProcessLogger(log, log))
+  private def run(
+      command: Seq[String],
+      directory: Path,
+      log: String => Unit,
+      container: Option[ToolchainContainer]
+  ): Unit = {
+    val child =
+      Process(container.fold(command)(_.wrap(command, directory)), directory.toFile).run(ProcessLogger(log, log))
     val status =
       try child.exitValue()
       finally child.destroy()

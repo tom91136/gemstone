@@ -1,6 +1,6 @@
 # Native toolchain
 
-Status: in progress. Steps 1 and 2 are done locally.
+Status: in progress. Steps 1 and 2 are done locally. Step 3 is wired through sbt and CI; native `lint` still reports findings from the libc++ headers.
 
 ## Goal
 

@@ -67,7 +67,7 @@ jobs:
         name: Native tools
         timeout-minutes: 20
         # the conformance jobserver needs make >= 4.4 and ninja >= 1.13; LLVM is the release the conformance images pin,
-        # which matches the repository's formatting, rather than apt.llvm.org, which drops out often enough to fail runs
+        # rather than apt.llvm.org, which drops out often enough to fail runs
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends build-essential \
@@ -95,30 +95,26 @@ jobs:
             tar -xJf "$RUNNER_TEMP/llvm.tar.xz" --strip-components=1 -C "$llvm" "$@"
             rm "$RUNNER_TEMP/llvm.tar.xz"
           fi
-          tools_release=$(sed -n 's/^set(conformance_clang_tools_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
-          tools_sha256=$(sed -n 's/^set(conformance_clang_tools_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
-          llvm_tools="$tools/llvm-tools-$tools_release"
-          if [ ! -x "$llvm_tools/bin/clang-tidy" ]; then
-            archive="LLVM-$tools_release-Linux-X64"
-            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm-tools.tar.xz" \
-              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$tools_release/$archive.tar.xz"
-            echo "$tools_sha256  $RUNNER_TEMP/llvm-tools.tar.xz" | sha256sum --check --strict
-            mkdir -p "$llvm_tools"
-            set -- "$archive/lib/clang/${tools_release%%.*}/include"
-            for tool in clang-format clang-tidy run-clang-tidy clang-apply-replacements; do
-              set -- "$@" "$archive/bin/$tool"
-            done
-            tar -xJf "$RUNNER_TEMP/llvm-tools.tar.xz" --strip-components=1 -C "$llvm_tools" "$@"
-            rm "$RUNNER_TEMP/llvm-tools.tar.xz"
-          fi
           mkdir -p "$tools/bin"
           for tool in clang clang++ llvm-link; do
             ln -sf "$llvm/bin/$tool" "$tools/bin/$tool"
           done
-          for tool in clang-format clang-tidy run-clang-tidy clang-apply-replacements; do
-            ln -sf "$llvm_tools/bin/$tool" "$tools/bin/$tool"
-          done
           echo "$tools/bin" >> "$GITHUB_PATH"
+      - &toolchain-image-key
+        name: Native toolchain image key
+        id: toolchain-image-key
+        run: echo "key=$(cmake -P conformance/artifacts/NativeToolchain.cmake | sed 's/.*://')" >> "$GITHUB_OUTPUT"
+      - &toolchain-image
+        name: Restore native toolchain image
+        id: toolchain-image
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/native-toolchain
+          key: native-toolchain-${{ steps.toolchain-image-key.outputs.key }}
+      - &toolchain-image-load
+        name: Load native toolchain image
+        if: ${{ steps.toolchain-image.outputs.cache-hit == 'true' }}
+        run: zstd -dc --long=30 .cache/native-toolchain/image.tar.zst | docker load
       - &references
         name: Restore references
         id: references
@@ -148,6 +144,20 @@ jobs:
       - name: Compile
         if: ${{ !cancelled() }}
         run: sbt --server --batch Test/compile explorerJS/fullLinkJS native/build conformance/conformanceHost
+      - name: Export native toolchain image
+        if: ${{ !cancelled() && steps.toolchain-image.outputs.cache-hit != 'true' }}
+        run: |
+          tag=$(cat target/native/container/toolchain-image 2>/dev/null) || exit 0
+          docker image inspect "$tag" >/dev/null 2>&1 || exit 0
+          mkdir -p .cache/native-toolchain
+          docker save "$tag" | zstd -T0 -q -3 -f -o .cache/native-toolchain/image.tar.zst
+          ls -l .cache/native-toolchain
+      - name: Save native toolchain image
+        if: ${{ !cancelled() && steps.toolchain-image.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/native-toolchain
+          key: ${{ steps.toolchain-image.outputs.cache-primary-key }}
       - name: Download cache contents
         id: downloads
         if: always()
@@ -166,7 +176,7 @@ jobs:
           # sbt's disk cache links outputs into ~/.cache, which the unpacking jobs do not have
           pack() { tar -chf - "${@:2}" | zstd -T0 -q -12 --long=30 -f -o "target/ci/$1.tar.zst"; }
           mkdir -p target/ci
-          pack build target/native/build target/references/api-native target/references/level-zero \
+          pack build target/native/build target/native/container target/references/api-native target/references/level-zero \
             target/references/sass target/references/amdgpu/amd/xml target/conformance/host target/out/jvm
           ls -l target/ci
       - name: Upload
@@ -393,6 +403,9 @@ jobs:
       - *sbt
       - *tools-cache
       - *tools
+      - *toolchain-image-key
+      - *toolchain-image
+      - *toolchain-image-load
       - *references
       - *dependencies
       - &download-build
@@ -419,44 +432,21 @@ jobs:
     env:
       GEMSTONE_OFFLINE_ON: 1
     steps:
+      - *free-disk
       - *checkout
       - *java
+      - *sbt
       - *tools-cache
       - *tools
-      - uses: actions/cache@v6
-        with:
-          path: ~/.local/spirv
-          key: llvm-spirv-${{ hashFiles('conformance/artifacts/Toolchains.cmake') }}
-      - name: SPIR-V translator
-        timeout-minutes: 30
-        # the OpenCL shim links SPIR-V binaries and builds device-side enqueue through llvm-spirv, which ships no
-        # binaries; it must read the bitcode of the pinned clang, so it is built against the same LLVM release
-        run: |
-          spirv=~/.local/spirv
-          if [ ! -x "$spirv/bin/llvm-spirv" ]; then
-            release=$(sed -n 's/^set(conformance_clang_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
-            sha256=$(sed -n 's/^set(conformance_clang_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
-            archive="LLVM-$release-Linux-X64"
-            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm.tar.xz" \
-              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$release/$archive.tar.xz"
-            echo "$sha256  $RUNNER_TEMP/llvm.tar.xz" | sha256sum --check --strict
-            mkdir -p "$RUNNER_TEMP/llvm"
-            tar -xJf "$RUNNER_TEMP/llvm.tar.xz" --strip-components=1 -C "$RUNNER_TEMP/llvm" \
-              "$archive/bin" "$archive/include" "$archive/lib"
-            git clone -q --depth 1 --branch "v$release" https://github.com/KhronosGroup/SPIRV-LLVM-Translator.git \
-              "$RUNNER_TEMP/translator"
-            cmake -S "$RUNNER_TEMP/translator" -B "$RUNNER_TEMP/translator/build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-              -DLLVM_DIR="$RUNNER_TEMP/llvm/lib/cmake/llvm" -DLLVM_SPIRV_INCLUDE_TESTS=OFF
-            cmake --build "$RUNNER_TEMP/translator/build" --target llvm-spirv
-            install -D "$RUNNER_TEMP/translator/build/tools/llvm-spirv/llvm-spirv" "$spirv/bin/llvm-spirv"
-            rm -rf "$RUNNER_TEMP/llvm.tar.xz" "$RUNNER_TEMP/llvm" "$RUNNER_TEMP/translator"
-          fi
-          echo "$spirv/bin" >> "$GITHUB_PATH"
+      - *toolchain-image-key
+      - *toolchain-image
+      - *toolchain-image-load
+      - *references
       - *download-build
       - *unpack
       - run: |
           status=0
-          ctest --test-dir target/native/build --output-on-failure --parallel "$(nproc)" || status=1
+          sbt --server --batch native/test || status=1
           ctest --test-dir target/conformance/host --output-on-failure --parallel "$(nproc)" || status=1
           exit $status
 
@@ -465,11 +455,45 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
+      - *free-disk
       - *checkout
       - *java
       - *sbt
       - *tools-cache
       - *tools
+      - uses: actions/cache@v6
+        with:
+          path: ~/.local/lint-tools
+          key: lint-tools-${{ hashFiles('conformance/artifacts/Toolchains.cmake') }}
+      - name: Format and lint tools
+        timeout-minutes: 20
+        # the conformance host build is linted on the runner; native is linted in the toolchain image
+        run: |
+          tools=~/.local/lint-tools
+          tools_release=$(sed -n 's/^set(conformance_clang_tools_release \([0-9.]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          tools_sha256=$(sed -n 's/^set(conformance_clang_tools_release_sha256 \([0-9a-f]*\))$/\1/p' conformance/artifacts/Toolchains.cmake)
+          llvm_tools="$tools/llvm-tools-$tools_release"
+          if [ ! -x "$llvm_tools/bin/clang-tidy" ]; then
+            archive="LLVM-$tools_release-Linux-X64"
+            curl -fsSL --retry 5 --speed-limit 102400 --speed-time 60 -o "$RUNNER_TEMP/llvm-tools.tar.xz" \
+              "https://github.com/llvm/llvm-project/releases/download/llvmorg-$tools_release/$archive.tar.xz"
+            echo "$tools_sha256  $RUNNER_TEMP/llvm-tools.tar.xz" | sha256sum --check --strict
+            mkdir -p "$llvm_tools"
+            set -- "$archive/lib/clang/${tools_release%%.*}/include"
+            for tool in clang-format clang-tidy run-clang-tidy clang-apply-replacements; do
+              set -- "$@" "$archive/bin/$tool"
+            done
+            tar -xJf "$RUNNER_TEMP/llvm-tools.tar.xz" --strip-components=1 -C "$llvm_tools" "$@"
+            rm "$RUNNER_TEMP/llvm-tools.tar.xz"
+          fi
+          mkdir -p "$tools/bin"
+          for tool in clang-format clang-tidy run-clang-tidy clang-apply-replacements; do
+            ln -sf "$llvm_tools/bin/$tool" "$tools/bin/$tool"
+          done
+          echo "$tools/bin" >> "$GITHUB_PATH"
+      - *toolchain-image-key
+      - *toolchain-image
+      - *toolchain-image-load
       - *references
       - *dependencies
       - *download-build
@@ -538,6 +562,9 @@ jobs:
       - *sbt
       - *tools-cache
       - *tools
+      - *toolchain-image-key
+      - *toolchain-image
+      - *toolchain-image-load
       - *references
       - *dependencies
       - if: ${{ !env.ACT }}

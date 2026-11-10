@@ -32,8 +32,9 @@ built on core types (memories, workgroups, ELF images) live in core's test sourc
 ## Requirements
 
 JDK 25, sbt 2, CMake 3.25+, Ninja, Clang, `clang-format`, `clang-tidy`, a C++23 compiler, Python 3, and Podman (or
-Docker with `GEMSTONE_CONTAINER_EXE=docker`) for conformance and fixture builds. Downloads are cached in `.cache/`;
-`GEMSTONE_OFFLINE_ON=1` forbids them.
+Docker with `GEMSTONE_CONTAINER_EXE=docker`) for conformance and fixture builds. The `native/` tasks compile, test, and
+lint in the native toolchain image (`conformance/Containerfile`, stage `native-toolchain`), which `sbt native/build`
+builds on first use. Downloads are cached in `.cache/`; `GEMSTONE_OFFLINE_ON=1` forbids them.
 
 ## Build and test
 

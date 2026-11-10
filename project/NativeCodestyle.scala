@@ -15,16 +15,26 @@ object NativeCodestyle {
   private val TidyJobBytes       = 4L << 30
   private val DatabaseFile       = raw""""file"\s*:\s*"((?:[^"\\]|\\.)*)"""".r
 
-  def format(roots: Seq[Path]): Unit =
-    clangFormat(sources(roots), Seq("-i"), "clang-format failed")
+  def format(roots: Seq[Path], container: Option[ToolchainContainer] = None): Unit =
+    clangFormat(sources(roots), Seq("-i"), "clang-format failed", container)
 
-  def lint(roots: Seq[Path], database: Path, log: String => Unit): Unit = {
+  def lint(
+      roots: Seq[Path],
+      database: Path,
+      log: String => Unit,
+      container: Option[ToolchainContainer] = None
+  ): Unit = {
     val files = sources(roots)
-    clangFormat(files, Seq("--dry-run", "--Werror"), "sources are not clang-formatted; run format")
-    tidy(files, database.toAbsolutePath.normalize, log)
+    clangFormat(files, Seq("--dry-run", "--Werror"), "sources are not clang-formatted; run format", container)
+    tidy(files, database.toAbsolutePath.normalize, log, container)
   }
 
-  private def tidy(files: Seq[Path], database: Path, log: String => Unit): Unit = {
+  private def tidy(
+      files: Seq[Path],
+      database: Path,
+      log: String => Unit,
+      container: Option[ToolchainContainer]
+  ): Unit = {
     val units = DatabaseFile.findAllMatchIn(Files.readString(database.resolve("compile_commands.json")))
       .map(entry => Path.of(entry.group(1).replace("\\\\", "\\").replace("\\\"", "\"")).normalize).toSet
     val (checked, rest) = files.partition(units)
@@ -37,7 +47,8 @@ object NativeCodestyle {
           val output  = Vector.newBuilder[String]
           val command =
             Seq("clang-tidy", "--quiet", "--experimental-custom-checks", s"-p=$database", "--extra-arg=-w", s"$file")
-          val status = Process(command).!(ProcessLogger(output += _, output += _))
+          val status =
+            Process(container.fold(command)(c => c.wrap(command, c.root))).!(ProcessLogger(output += _, output += _))
           (status, output.result())
         }): Callable[(Int, Vector[String])]
       }.asJava).asScala.toVector.map(_.get)
@@ -55,9 +66,16 @@ object NativeCodestyle {
     }
   }
 
-  private def clangFormat(files: Seq[Path], options: Seq[String], failure: String): Unit =
-    if (files.nonEmpty && Process(Seq("clang-format") ++ options ++ files.map(_.toString)).! != 0)
+  private def clangFormat(
+      files: Seq[Path],
+      options: Seq[String],
+      failure: String,
+      container: Option[ToolchainContainer]
+  ): Unit = {
+    val command = Seq("clang-format") ++ options ++ files.map(_.toString)
+    if (files.nonEmpty && Process(container.fold(command)(c => c.wrap(command, c.root))).! != 0)
       throw MessageOnlyException(failure)
+  }
 
   private def extension(path: Path): Option[String] = {
     val name = path.getFileName.toString

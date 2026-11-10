@@ -45,6 +45,12 @@ set(conformance_native_toolchain_build_arguments
   --build-arg "LLVM_TOOLS_SOURCE_SHA256=${conformance_clang_tools_source_sha256}")
 set(conformance_bitwuzla_release 0.9.1)
 set(conformance_bitwuzla_release_sha256 057f1546ae2068df57beb178f3eeab1678f0e5f0c378787a05b7bb294617c9c6)
+set(conformance_native_toolchain_image
+  REPOSITORY localhost/conformance-native-toolchain
+  FILE "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile"
+  STAGE native-toolchain
+  BUILD_ARGUMENTS ${conformance_native_toolchain_build_arguments}
+  INPUTS "${CONFORMANCE_SOURCE_DIRECTORY}/.dockerignore")
 set(conformance_gcc_version 14)
 set(conformance_gcc_runtime_version 14.2.0)
 set(conformance_gcc_runtime_sha256 a7b39bc69cbf9e25826c5a60ab26477001f7c08d85cec04bc0e29cabed6f3cc9)

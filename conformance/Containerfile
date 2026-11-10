@@ -187,17 +187,23 @@ RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-$
     && echo "${LLVM_TOOLS_RELEASE_SHA256}  /tmp/llvm.tar.xz" | sha256sum --check --strict \
     && mkdir /opt/llvm \
     && tar -xJf /tmp/llvm.tar.xz --strip-components=1 -C /opt/llvm \
-    && rm /tmp/llvm.tar.xz
+    && rm /tmp/llvm.tar.xz \
+    && cd /opt/llvm/bin \
+    && keep="clang clang++ clang-${LLVM_TOOLS_RELEASE%%.*} clang-format clang-tidy clangd run-clang-tidy clang-apply-replacements \
+             lld ld.lld llvm-ar llvm-ranlib llvm-nm llvm-objdump llvm-readelf llvm-readobj llvm-objcopy llvm-strip llvm-cxxfilt" \
+    && for tool in *; do case " $keep " in *" $tool "*) ;; *) rm -f "$tool" ;; esac; done \
+    && rm -rf /opt/llvm/include /opt/llvm/share /opt/llvm/libexec \
+    && find /opt/llvm/lib -mindepth 1 -maxdepth 1 -not -name clang -not -name x86_64-unknown-linux-gnu -exec rm -rf {} +
 ENV PATH=/opt/llvm/bin:${PATH}
 COPY --from=sysroot /opt/sysroot /opt/sysroot
+# Hermetic static PIC libc++ keeps DSOs off the host libstdc++ and its locale registry.
 RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_TOOLS_RELEASE}/llvm-project-${LLVM_TOOLS_RELEASE}.src.tar.xz" \
        -o /tmp/llvm-src.tar.xz \
     && echo "${LLVM_TOOLS_SOURCE_SHA256}  /tmp/llvm-src.tar.xz" | sha256sum --check --strict \
     && mkdir /tmp/llvm-src \
     && tar -xJf /tmp/llvm-src.tar.xz --strip-components=1 -C /tmp/llvm-src \
-    && rm /tmp/llvm-src.tar.xz
-# Hermetic static PIC libc++ keeps DSOs off the host libstdc++ and its locale registry.
-RUN cmake -S /tmp/llvm-src/runtimes -B /tmp/runtimes-build -G Ninja \
+    && rm /tmp/llvm-src.tar.xz \
+    && cmake -S /tmp/llvm-src/runtimes -B /tmp/runtimes-build -G Ninja \
        -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/libcxx \
        -DCMAKE_C_COMPILER=/opt/llvm/bin/clang -DCMAKE_CXX_COMPILER=/opt/llvm/bin/clang++ \
        -DCMAKE_C_COMPILER_TARGET=x86_64-linux-gnu -DCMAKE_CXX_COMPILER_TARGET=x86_64-linux-gnu \

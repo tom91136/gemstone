@@ -125,11 +125,13 @@ lazy val conformanceJfr         = settingKey[Boolean]("Record the conformance em
 lazy val conformanceLintTargets = settingKey[Seq[String]]("Conformance lint targets; lint is all of them.")
 lazy val lintBackends           =
   taskKey[Unit]("Lint the conformance backends selected by conformanceLintTargets.")
-lazy val conformanceOffload      = taskKey[Unit]("Build the exported llvm-offload archive the CUDA Clang routes load.")
-lazy val conformanceHost         = taskKey[Path]("Built host conformance driver and its tests.")
-lazy val emulate                 = inputKey[Unit]("Run conformance through Gemstone.")
-lazy val nativeArtifact          = taskKey[Path]("Built native runtime directory.")
-lazy val nativeCompileDatabase   = taskKey[Path]("Configured CMake build directory with compile_commands.json.")
+lazy val conformanceOffload    = taskKey[Unit]("Build the exported llvm-offload archive the CUDA Clang routes load.")
+lazy val conformanceHost       = taskKey[Path]("Built host conformance driver and its tests.")
+lazy val emulate               = inputKey[Unit]("Run conformance through Gemstone.")
+lazy val nativeArtifact        = taskKey[Path]("Built native runtime directory.")
+lazy val nativeCompileDatabase = taskKey[Path]("Configured CMake build directory with compile_commands.json.")
+lazy val nativeToolchain       =
+  taskKey[ToolchainContainer]("Native toolchain image and the memory fixtures built beside it.")
 lazy val nativeSourceDirectories =
   settingKey[Seq[Path]]("C and C++ source trees governed by the native codestyle checks.")
 lazy val codestyleLint             = taskKey[Unit]("Lint the project's C and C++ sources.")
@@ -770,7 +772,25 @@ lazy val native = project.in(file("native"))
     name := "gemstone-native",
     nativeSourceDirectories +=
       (LocalRootProject / baseDirectory).value.toPath / "server/src/main/resources/scala-native",
+    nativeToolchain := Def.uncached(
+      ToolchainContainer.prepare(
+        (LocalRootProject / baseDirectory).value.toPath,
+        containerExecutable,
+        rocmVersion,
+        streams.value.log.info
+      )
+    ),
+    format        := Def.uncached(NativeCodestyle.format(nativeSourceDirectories.value, Some(nativeToolchain.value))),
+    codestyleLint := Def.uncached(
+      NativeCodestyle.lint(
+        nativeSourceDirectories.value,
+        nativeCompileDatabase.value,
+        streams.value.log.info(_),
+        Some(nativeToolchain.value)
+      )
+    ),
     nativeArtifact := Def.uncached {
+      val toolchain = nativeToolchain.value
       RunMain.main(
         codegenProject,
         s"$rootPackage.codegen.Codegen",
@@ -781,10 +801,11 @@ lazy val native = project.in(file("native"))
         source = baseDirectory.value.toPath,
         directory = (LocalRootProject / baseDirectory).value.toPath / "target/native/build",
         arguments = Seq(
+          s"-DCMAKE_TOOLCHAIN_FILE=${baseDirectory.value / "toolchains/linux-x86_64-libcxx.cmake"}",
           "-DBUILD_TESTING=ON",
           "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-          s"-DCONTAINER_EXECUTABLE=$containerExecutable",
-          s"-DROCM_VERSION=$rocmVersion",
+          s"-DGEMSTONE_PREBUILT_MEMORY_FIXTURES=${toolchain.fixtures}",
+          "-DGEMSTONE_OPENCL_COMPILER_DIRECTORY=/opt/intel/oneapi/compiler/latest/bin/compiler",
           s"-DCMAKE_BUILD_TYPE=${BuildEnvironment.buildType}",
           s"-DCUDA_INCLUDE_DIR=${references / "api-native/nvidia/cuda/include"}",
           s"-DHIP_INCLUDE_DIR=${references / "api-native/amd/hip/include"}",
@@ -795,12 +816,15 @@ lazy val native = project.in(file("native"))
           s"-DVULKAN_INCLUDE_DIR=${references / "api-native/khronos/vulkan/include"}",
           s"-DLEVEL_ZERO_SOURCE_DIR=${references / "level-zero"}"
         ),
-        log = streams.value.log.info
+        log = streams.value.log.info,
+        buildTargets = Seq.empty,
+        launcher = Seq.empty,
+        container = Some(toolchain)
       )
     },
     build       := nativeArtifact.value,
     Test / test := {
-      CMake.test(nativeArtifact.value, streams.value.log.info)
+      CMake.test(nativeArtifact.value, streams.value.log.info, Some(nativeToolchain.value))
       sbt.protocol.testing.TestResult.Passed
     },
     cleanFiles := Seq((LocalRootProject / baseDirectory).value / "target/native")
