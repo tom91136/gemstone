@@ -1,6 +1,6 @@
 # Device presets
 
-Status: proposed, not started. It follows the per-target memory values in `Architecture`, and it stays separate from the cost model.
+Status: steps 1 and 2 are done for name, target, memory, and memory data rate. CUDA, HIP, HSA, and OpenCL report the selected card, `GEMSTONE_DEVICE` selects it, and allocation limits follow its memory. The remaining items move to `machine-identity.md` step 1: multiprocessor count, clocks, bus width, and L2 per card, launch capacity from the multiprocessor count, Level Zero and Vulkan reporting, and `--device` on `gemstone run`.
 
 ## Goal
 
