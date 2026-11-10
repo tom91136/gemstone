@@ -90,6 +90,16 @@ class ProfileStreamSuite extends Suite {
     assertEquals(read.map(_.instructions(0).use), Right(use))
   }
 
+  test("a kernel reported lost keeps no control flow graph, even when reported again") {
+    val recorder = ProfileRecorder()
+    val graph    = ControlFlowGraph(Vec(Some(Vec(1)), Some(Vec(1, 2)), Some(Vec(3)), None), 0)
+    val offsets  = Vec[Long](0x10L, 0x18L, 0x20L, 0x28L)
+    recorder.controlFlow("k", graph, offsets)
+    recorder.controlFlowLost("k")
+    recorder.controlFlow("k", graph, offsets)
+    assert(recorder.stream.graphs.isEmpty)
+  }
+
   test("the control flow of each launched kernel survives a round trip") {
     val recorder = ProfileRecorder()
     val graph    = ControlFlowGraph(Vec(Some(Vec(1)), Some(Vec(1, 2)), Some(Vec(3)), None), 0)

@@ -125,6 +125,7 @@ class ProfileRecorder extends LaunchObserver {
   private val located                                      = mutable.HashMap.empty[Fault.Location, Int]
   private val events                                       = mutable.ArrayBuffer.empty[MachineEvent]
   private val flows                                        = mutable.LinkedHashMap.empty[String, Graph]
+  private val lost                                         = mutable.HashSet.empty[String]
   @volatile private var resources: Option[KernelResources] = None
 
   private var last: Option[Buffer] = None
@@ -180,8 +181,14 @@ class ProfileRecorder extends LaunchObserver {
 
   override def controlFlow(kernel: String, graph: => ControlFlowGraph, offsets: Vec[Long]): Unit =
     lock.withLock {
-      if (!flows.contains(kernel)) flows(kernel) = Graph(kernel, graph, offsets)
+      if (!flows.contains(kernel) && !lost.contains(kernel)) flows(kernel) = Graph(kernel, graph, offsets)
     }
+
+  override def controlFlowLost(kernel: String): Unit = lock.withLock {
+    lost += kernel
+    flows -= kernel
+    ()
+  }
 
   /** The first non-empty use an instruction reports stands for all its issues. */
   override def registers(issued: Long, use: => RegisterUse): Unit = {

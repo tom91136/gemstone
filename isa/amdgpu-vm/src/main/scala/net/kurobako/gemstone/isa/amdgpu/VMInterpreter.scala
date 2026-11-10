@@ -216,10 +216,9 @@ private object VMInterpreter {
     )
     LittleEndian.write(kernargAddress, packet, 40, 8)
     observer.observed(_.launched(resources(kernel, dispatch)))
-    if (peers eq PeerCode.Alone)
-      observer.observed(
-        _.controlFlow(kernel.name.raw, AMDGPUControlFlowGraph.of(program), program.instructionOffsets.map(_.toLong))
-      )
+    observer.observed(
+      _.controlFlow(kernel.name.raw, AMDGPUControlFlowGraph.of(program), program.instructionOffsets.map(_.toLong))
+    )
     val hostcall       = hostcallOffset.map(offset => HostcallBuffer(offset, HostcallListener(context.handler)))
     val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress, heap, hostcall)
     val slices         = CodeSlices(CodeSlice(program, program.jumpTable, dispatchMemory), peers, allocations)
@@ -773,6 +772,7 @@ private object VMInterpreter {
 
     // The wave carries its registers, EXEC and stack into the code it enters, as a call does on hardware.
     private def enter(next: CodeSlice): Unit = {
+      if (next ne slices.origin) observer.observed(_.controlFlowLost(kernel.name.raw))
       slice = next
       operations = next.program.instructions
       skippedOperations = next.program.skipped

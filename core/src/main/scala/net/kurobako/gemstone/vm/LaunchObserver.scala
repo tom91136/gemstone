@@ -46,6 +46,10 @@ object LaunchObserver {
       first.controlFlow(kernel, once, offsets)
       second.controlFlow(kernel, once, offsets)
     }
+    override def controlFlowLost(kernel: String): Unit = {
+      first.controlFlowLost(kernel)
+      second.controlFlowLost(kernel)
+    }
     override def access(lane: Int >= 0, space: Space, kind: AccessKind, address: Long, bytes: Int >= 0): Unit = {
       first.access(lane, space, kind, address, bytes)
       second.access(lane, space, kind, address, bytes)
@@ -123,6 +127,11 @@ trait LaunchObserver derives CanEqual {
     * instructions as [[instruction]] reports them.
     */
   def controlFlow(@unused kernel: String, @unused graph: => ControlFlowGraph, @unused offsets: Vec[Long]): Unit = ()
+
+  /** Called when a wave of `kernel` enters code of another program, after which the addresses that launch reports no
+    * longer match its graph.
+    */
+  def controlFlowLost(@unused kernel: String): Unit = ()
 
   /** Called for each lane's access to memory in any space, between [[instruction]] for the issue that makes it and the
     * next. `lane` is the lane's index within its workgroup; `space` is the space the access resolved to, never

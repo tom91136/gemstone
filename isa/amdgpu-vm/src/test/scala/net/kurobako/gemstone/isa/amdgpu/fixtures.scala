@@ -86,14 +86,12 @@ private object fixtures extends munit.Assertions {
       task: KernelTask,
       memory: AddressSpace,
       control: TaskControl = TaskControl(),
-      workgroups: Workgroups = Workgroups.Sequential,
-      peers: PeerCode = PeerCode.Alone
+      workgroups: Workgroups = Workgroups.Sequential
   ): Either[Fault, Unit] =
     VMInterpreter.execute(
       kernel,
       KernelLaunch(task, TaskContext(memory, control, _ => Right(())), workgroups),
-      Vec.empty,
-      peers = peers
+      Vec.empty
     )
 
   def minimalCodeObject(globalPointer: Boolean = false): Array[Byte] =

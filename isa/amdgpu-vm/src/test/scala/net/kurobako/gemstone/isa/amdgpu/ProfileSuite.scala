@@ -59,8 +59,7 @@ class ProfileSuite extends Suite {
       groupSegmentSize: Int >= 0 = 0,
       computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1,
       dynamicSegmentBytes: Int >= 0 = 0,
-      observed: Boolean = true,
-      peers: PeerCode = PeerCode.Alone
+      observed: Boolean = true
   ): Result = {
     val assembly = f"""s_mov_b32 s2, 0x${base & 0xffffffffL}%x
                       |s_mov_b32 s3, 0x${base >>> 32}%x
@@ -93,8 +92,7 @@ class ProfileSuite extends Suite {
         compileKernel(source),
         task,
         memory,
-        TaskControl(observer = Option.when(observed)(recorder)),
-        peers = peers
+        TaskControl(observer = Option.when(observed)(recorder))
       )
     assertEquals(result, Right(()))
     Result(recorder.stream)
@@ -277,12 +275,6 @@ class ProfileSuite extends Suite {
     val result = run("s_branch 1\ns_mov_b32 s4, 1", observed = false)
     assert(result.stream.graphs.isEmpty)
     assert(result.issues.isEmpty)
-  }
-
-  test("a launch with a peer program runs and records no control flow") {
-    val result = run("s_branch 1\ns_mov_b32 s4, 1", peers = (_, _) => Right(None))
-    assert(result.issues.nonEmpty)
-    assert(result.stream.graphs.isEmpty)
   }
 
   test("a launch reports the descriptor's VGPR allocation and LDS for each target") {
