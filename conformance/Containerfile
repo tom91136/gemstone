@@ -22,7 +22,9 @@ ARG ROCM_VERSION
 ARG ROCM_DISTRIBUTION=noble
 
 # Mirrors answer 503 now and then, and a stage that loses a package fails the whole build, so
-# every apt and curl call in this file retries instead of giving up on the first error.
+# every apt and curl call in this file retries instead of giving up on the first error. apt does
+# not retry an index that changes size mid-sync on repositories without by-hash (NVIDIA's), so
+# apt-update starts over after a growing wait.
 FROM ${UBUNTU_IMAGE} AS network-config
 USER root
 RUN printf '%s\n' \
@@ -39,20 +41,30 @@ RUN printf '%s\n' \
       'retry-all-errors' \
       'retry-delay = 30' \
       'connect-timeout = 30' \
-    > /root/.curlrc
+    > /root/.curlrc \
+ && printf '%s\n' \
+      '#!/bin/sh' \
+      'for delay in 30 60 120 240 ""; do' \
+      '  apt-get update && exit 0' \
+      '  [ -n "$delay" ] || exit 1' \
+      '  rm -rf /var/lib/apt/lists/*' \
+      '  sleep "$delay"' \
+      'done' \
+    > /usr/local/bin/apt-update \
+ && chmod +x /usr/local/bin/apt-update
 ENV CURL_HOME=/root
 
 FROM network-config AS ubuntu-build-base
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes \
        binutils build-essential ca-certificates ccache cmake ninja-build patchelf python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # One static Ninja works across the different toolchain base distributions.
 FROM ubuntu-build-base AS jobserver-ninja
-RUN apt-get update && apt-get install --no-install-recommends --yes curl \
+RUN apt-update && apt-get install --no-install-recommends --yes curl \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL https://codeload.github.com/ninja-build/ninja/tar.gz/refs/tags/v1.13.2 -o /tmp/ninja.tar.gz \
     && echo "974d6b2f4eeefa25625d34da3cb36bdcebe7fbce40f4c16ac0835fd1c0cbae17  /tmp/ninja.tar.gz" | sha256sum --check --strict \
@@ -79,7 +91,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG LLVM_VERSION
 ARG LLVM_RELEASE
 ARG LLVM_RELEASE_SHA256
-RUN apt-get update && apt-get install --no-install-recommends --yes xz-utils \
+RUN apt-update && apt-get install --no-install-recommends --yes xz-utils \
     && rm -rf /var/lib/apt/lists/*
 RUN test "${LLVM_RELEASE%%.*}" = "${LLVM_VERSION}" \
     && curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE}/LLVM-${LLVM_RELEASE}-Linux-X64.tar.xz" \
@@ -109,7 +121,7 @@ FROM ubuntu-build-base AS llvm-offload
 ARG LLVM_VERSION
 ARG LLVM_RELEASE
 ARG LLVM_SOURCE_SHA256
-RUN apt-get update && apt-get install --no-install-recommends --yes xz-utils curl \
+RUN apt-update && apt-get install --no-install-recommends --yes xz-utils curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=llvm /llvm/ /
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
@@ -133,7 +145,7 @@ RUN cmake -S /tmp/llvm-src/llvm -B /tmp/llvm-offload-build -G Ninja -DCMAKE_BUIL
 
 # Takes the llvm-offload tree from a previous export when the llvm-offload-archive build context is supplied.
 FROM ubuntu-build-base AS llvm-offload-prebuilt
-RUN apt-get update && apt-get install --no-install-recommends --yes zstd \
+RUN apt-update && apt-get install --no-install-recommends --yes zstd \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=llvm-offload-archive llvm-offload.tar.zst /tmp/
 RUN zstd -dc --long=30 /tmp/llvm-offload.tar.zst | tar -xf - -C / \
@@ -180,7 +192,7 @@ FROM ubuntu-build-base AS native-toolchain
 ARG LLVM_TOOLS_RELEASE
 ARG LLVM_TOOLS_RELEASE_SHA256
 ARG LLVM_TOOLS_SOURCE_SHA256
-RUN apt-get update && apt-get install --no-install-recommends --yes xz-utils curl \
+RUN apt-update && apt-get install --no-install-recommends --yes xz-utils curl \
     && rm -rf /var/lib/apt/lists/*
 RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_TOOLS_RELEASE}/LLVM-${LLVM_TOOLS_RELEASE}-Linux-X64.tar.xz" \
        -o /tmp/llvm.tar.xz \
@@ -244,7 +256,7 @@ RUN d=/opt/intel/oneapi/compiler/latest/bin/compiler \
 
 FROM ubuntu-build-base AS toolchain-vulkan
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes \
        python3 python3-lxml pkg-config git libpng-dev zlib1g-dev libvulkan-dev glslc spirv-headers mesa-vulkan-drivers \
     && rm -rf /var/lib/apt/lists/*
@@ -254,7 +266,7 @@ COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/nin
 
 FROM ubuntu-build-base AS opencl-base
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes \
        ocl-icd-opencl-dev opencl-headers spirv-tools \
     && rm -rf /var/lib/apt/lists/*
@@ -283,9 +295,10 @@ FROM docker.io/library/ubuntu@sha256:61ebaa5cc23ca45450db85eac015435199ec569e28e
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
 COPY --from=network-config /etc/apt/apt.conf.d/80-retries /etc/apt/apt.conf.d/80-retries
+COPY --from=network-config /usr/local/bin/apt-update /usr/local/bin/apt-update
 COPY --from=network-config /root/.curlrc /root/.curlrc
 ENV CURL_HOME=/root
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes \
        binutils build-essential ca-certificates ccache cmake ninja-build patchelf python3 \
        libboost-all-dev libpng-dev libva-dev libze-dev \
@@ -302,7 +315,7 @@ FROM levelzero-base AS lint-levelzero
 ARG DEBIAN_FRONTEND=noninteractive
 COPY --from=lint-kernel-stubs /opt/intel/oneapi/compiler /opt/intel/oneapi/compiler
 # clang-tidy selects the newest GCC installation, and the base carries GCC 16's runtime without its C++ headers.
-RUN apt-get update && apt-get install --no-install-recommends --yes libstdc++-16-dev \
+RUN apt-update && apt-get install --no-install-recommends --yes libstdc++-16-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=llvm-tidy /llvm/ /
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
@@ -312,7 +325,7 @@ FROM ubuntu-build-base AS rocm-repository
 ARG DEBIAN_FRONTEND=noninteractive
 ARG ROCM_VERSION
 ARG ROCM_DISTRIBUTION
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes ca-certificates curl gpg \
     && install -d -m 0755 /etc/apt/keyrings \
     && curl -fsSL https://repo.radeon.com/rocm/rocm.gpg.key \
@@ -325,14 +338,14 @@ RUN apt-get update \
 
 FROM rocm-repository AS hip-base
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes hip-dev rocblas-dev rocprim-dev rocthrust-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes rocm-device-libs \
     && rm -rf /usr/include/hip \
     && rm -rf /var/lib/apt/lists/*
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes hipcub-dev rocrand-dev hiprand-dev rocfft-dev rocsparse-dev rocsolver-dev libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
@@ -360,7 +373,7 @@ COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/nin
 
 FROM rocm-repository AS hsa-base
 ARG DEBIAN_FRONTEND=noninteractive
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes hsa-rocr-dev hip-dev rocm-device-libs rocm-llvm \
     && rm -rf /var/lib/apt/lists/*
 ENV PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}" \
@@ -389,9 +402,10 @@ ARG CUDA_PACKAGE_VERSION
 ARG CMAKE_VERSION
 ARG CMAKE_LINUX_X86_64_SHA256
 COPY --from=network-config /etc/apt/apt.conf.d/80-retries /etc/apt/apt.conf.d/80-retries
+COPY --from=network-config /usr/local/bin/apt-update /usr/local/bin/apt-update
 COPY --from=network-config /root/.curlrc /root/.curlrc
 ENV CURL_HOME=/root
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes \
        binutils build-essential ca-certificates curl ninja-build patchelf xz-utils \
        cuda-nvcc-${CUDA_PACKAGE_VERSION} cuda-nvdisasm-${CUDA_PACKAGE_VERSION} cuda-cudart-dev-${CUDA_PACKAGE_VERSION} \
@@ -400,7 +414,7 @@ RUN apt-get update \
        libcusparse-dev-${CUDA_PACKAGE_VERSION} libcusolver-dev-${CUDA_PACKAGE_VERSION} \
     && rm -rf /var/lib/apt/lists/*
 # cuSPARSE and cuSOLVER link nvJitLink from CUDA 12 onwards
-RUN case "${CUDA_PACKAGE_VERSION}" in 11-*) ;; *) apt-get update \
+RUN case "${CUDA_PACKAGE_VERSION}" in 11-*) ;; *) apt-update \
     && apt-get install --no-install-recommends --yes libnvjitlink-dev-${CUDA_PACKAGE_VERSION} \
     && rm -rf /var/lib/apt/lists/* ;; esac
 # The conformance host harness needs C++23, while nvcc 11.8 needs GCC <= 11.
@@ -409,7 +423,7 @@ FROM ubuntu-build-base AS toolchain-cuda
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUDA_PACKAGE_VERSION
 COPY --from=cuda-sdk /usr/local/ /usr/local/
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes curl xz-utils g++-11 \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /usr/local/cuda \
@@ -435,7 +449,7 @@ COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/nin
 FROM cuda-sdk AS clang-cuda-headers
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUDA_PACKAGE_VERSION
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes libcurand-dev-${CUDA_PACKAGE_VERSION} \
     && mkdir /clang-cuda-headers \
     && cp /usr/local/cuda/include/curand*.h /clang-cuda-headers/ \
@@ -459,13 +473,13 @@ FROM ubuntu-build-base AS lint-clang-cuda
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUDA_PACKAGE_VERSION
 ARG LLVM_VERSION
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes curl gpg g++-11 \
     && curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/3bf863cc.pub \
        | gpg --dearmor -o /usr/share/keyrings/cuda.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/cuda.gpg] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/ /" \
        > /etc/apt/sources.list.d/cuda.list \
-    && apt-get update \
+    && apt-update \
     && apt-get install --no-install-recommends --yes \
        cuda-nvcc-${CUDA_PACKAGE_VERSION} cuda-cudart-dev-${CUDA_PACKAGE_VERSION} \
        cuda-nvdisasm-${CUDA_PACKAGE_VERSION} libcublas-dev-${CUDA_PACKAGE_VERSION} \
@@ -500,7 +514,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 ARG GCC_VERSION
 ARG GCC_RUNTIME_VERSION
 ARG GCC_RUNTIME_SHA256
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes gcc-${GCC_VERSION} curl xz-utils file \
     && rm -rf /var/lib/apt/lists/* \
     && test "$(gcc-${GCC_VERSION} -dumpfullversion)" = "${GCC_RUNTIME_VERSION}"
@@ -530,7 +544,7 @@ RUN curl -fsSL "https://gcc.gnu.org/pub/gcc/releases/gcc-${GCC_RUNTIME_VERSION}/
 FROM toolchain-cuda AS toolchain-gcc-cuda
 ARG DEBIAN_FRONTEND=noninteractive
 ARG GCC_VERSION
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes g++-${GCC_VERSION} gcc-${GCC_VERSION}-offload-nvptx libgomp-plugin-nvptx1 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=gcc-host-runtime /runtime/lib/ /usr/lib/x86_64-linux-gnu/
@@ -541,7 +555,7 @@ ENV CC=/usr/bin/gcc-${GCC_VERSION} CXX=/usr/bin/g++-${GCC_VERSION}
 FROM ubuntu-build-base AS toolchain-gcc-hsa
 ARG DEBIAN_FRONTEND=noninteractive
 ARG GCC_VERSION
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes g++-${GCC_VERSION} gcc-${GCC_VERSION}-offload-amdgcn libgomp-plugin-amdgcn1 libhsa-runtime-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=gcc-host-runtime /runtime/lib/ /usr/lib/x86_64-linux-gnu/
@@ -555,9 +569,10 @@ FROM ${SYCL_IMAGE} AS toolchain-sycl
 USER root
 ARG DEBIAN_FRONTEND=noninteractive
 COPY --from=network-config /etc/apt/apt.conf.d/80-retries /etc/apt/apt.conf.d/80-retries
+COPY --from=network-config /usr/local/bin/apt-update /usr/local/bin/apt-update
 COPY --from=network-config /root/.curlrc /root/.curlrc
 ENV CURL_HOME=/root
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes \
        binutils build-essential ca-certificates ccache cmake ninja-build patchelf \
        libdrm2 libhwloc15 libnuma1 libze1 python3 \
@@ -589,13 +604,13 @@ ARG ONEAPI_DPCPP_PACKAGE
 ARG ONEAPI_MKL_PACKAGE
 ARG ONEDPL_VERSION
 ARG ONEDPL_PACKAGE
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes curl gpg \
     && curl -fsSL https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
        | gpg --dearmor -o /usr/share/keyrings/intel.gpg \
     && echo "deb [signed-by=/usr/share/keyrings/intel.gpg] https://apt.repos.intel.com/oneapi all main" \
        > /etc/apt/sources.list.d/intel.list \
-    && apt-get update \
+    && apt-update \
     && apt-get install --no-install-recommends --yes \
        intel-oneapi-dpcpp-cpp-${ONEAPI_VERSION}=${ONEAPI_DPCPP_PACKAGE} \
        intel-oneapi-mkl-devel-${ONEAPI_VERSION}=${ONEAPI_MKL_PACKAGE} \
@@ -628,9 +643,10 @@ USER root
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NVHPC_VERSION
 COPY --from=network-config /etc/apt/apt.conf.d/80-retries /etc/apt/apt.conf.d/80-retries
+COPY --from=network-config /usr/local/bin/apt-update /usr/local/bin/apt-update
 COPY --from=network-config /root/.curlrc /root/.curlrc
 ENV CURL_HOME=/root
-RUN apt-get update \
+RUN apt-update \
     && apt-get install --no-install-recommends --yes \
        binutils build-essential ca-certificates ccache ninja-build patchelf \
     && rm -rf /var/lib/apt/lists/*
