@@ -67,7 +67,7 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_mufu", 1, 31.00, Some(Binding.Path)),
     Measured("stream_mufu", 2, 15.50, Some(Binding.Path)),
     Measured("stream_dfma", 1, 69.02, Some(Binding.Path)),
-    Measured("stream_dfma", 2, 34.51, Some(Binding.Path)),
+    Measured("stream_dfma", 2, 34.51, Some(Binding.Arithmetic(Pipe.Fp64))),
     Measured("mixed_ldg", 1, 76.72, Some(Binding.Path)),
     Measured("mixed_ldg", 2, 38.35, Some(Binding.Path)),
     Measured("mixed_ldg", 16, 5.29, Some(Binding.Issue)),
@@ -221,6 +221,22 @@ class HardwareValidationSuite extends Suite {
     }
   }
 
+  private def expectationsFollowRule(architecture: Architecture, cases: Vec[Measured]): Unit =
+    test(s"${architecture.name} expected bindings follow the 25 percent rule") {
+      val broken = cases.groupBy(_.kernel).values.flatMap { rows =>
+        val floor = rows.minBy(_.cycles)
+        floor.binding.filter(_ != Binding.Path).fold(Vec.empty[Measured]) { saturated =>
+          rows.filter { row =>
+            val expected = if (row.cycles > floor.cycles * (1 + tolerance)) Binding.Path else saturated
+            row.binding.exists(_ != expected)
+          }
+        }
+      }
+      assert(broken.isEmpty, broken.map(row => s"${row.kernel} with ${row.warps} warps").mkString(", "))
+    }
+
   register(Architecture.sm89, HardwareLoops.sm89, sm89Cases, sm89Shared)
   register(Architecture.gfx1036, HardwareLoops.gfx1036, gfx1036Cases, gfx1036Shared)
+  expectationsFollowRule(Architecture.sm89, sm89Cases)
+  expectationsFollowRule(Architecture.gfx1036, gfx1036Cases)
 }
