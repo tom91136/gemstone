@@ -64,7 +64,7 @@ class BlockAnalysisSuite extends Suite {
     val loop = region(json, "k/loop@0x20")
     assertEquals(loop("kind").str, "loop")
     assertEquals(loop("status").str, "executed")
-    assertEqualsDouble(loop("cyclesPerIteration").num, expected = 6.0, delta = 1e-9)
+    assertEqualsDouble(loop("cyclesPerIteration").num, expected = 14.0, delta = 1e-9)
     assertEquals(loop("binding").str, "path")
   }
 

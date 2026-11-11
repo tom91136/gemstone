@@ -570,6 +570,14 @@ object Architecture {
     "CUDA 13.3"
   )
 
+  private val adaRedirect = Source.Probed(
+    "FFMA loop sweep timed with clock64: 17.02 cycles per trip beyond the FFMA issues, of which 7 are " +
+      "loop-control holds, leaving 10 for the taken back-edge (2026-11-10)",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
   val sm89: Architecture = Architecture(
     "sm_89",
     Global(Sourced(32, cudaBestPractice89), Sourced(128, cudaBestPractice89)),
@@ -601,7 +609,8 @@ object Architecture {
       Some(Sourced(269.46, adaLatency)),
       Sourced(628.29, adaLatency)
     ),
-    sharedPipes = Map(Pipe.Fp64 -> adaSharedFp64)
+    sharedPipes = Map(Pipe.Fp64 -> adaSharedFp64),
+    branchRedirect = Some(Sourced(10, adaRedirect))
   ).on(Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)))
 
   val sm86: Architecture = sm89
@@ -1163,8 +1172,17 @@ object Architecture {
   )
 
   private val gfx1036Chain = Source.Probed(
-    "chain_ffma loop of 8 dependent v_fma_f32 timed with clock64: 64 cycles per iteration of one resident wave, 8.0 " +
-      "each (HardwareLoops chain_ffma, 2026-11-10, median of 202 launches)",
+    "dependent v_fma_f32 chains of 16, 32 and 64 timed with clock64 on one wave: 5.00 cycles per dependent op " +
+      "(2026-11-10, median of 201 launches each)",
+    "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
+    "Linux 7.2.15 amdgpu",
+    "ROCm 7.2 hipcc"
+  )
+
+  private val gfx1036Redirect = Source.Probed(
+    "s_cbranch_scc1 back-edge of the dependent v_fma_f32 chain timed with clock64: 19 cycles per trip beyond 5 per " +
+      "op at 16 or more ops, plus 2 cycles of scalar loop control before the last result lands, giving 21 " +
+      "(2026-11-10, median of 201 launches each)",
     "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
     "Linux 7.2.15 amdgpu",
     "ROCm 7.2 hipcc"
@@ -1182,8 +1200,9 @@ object Architecture {
     name = "gfx1036",
     throughput = rdna2Base.throughput.copy(fp64 = Sourced(8.0, gfx1036Rate)),
     latency = rdnaProbeLatency(gfx1036Latency),
-    pipeLatency = Map(Pipe.Fma -> Sourced(8, gfx1036Chain)),
-    waveIssueCycles = Some(Sourced(1.0, gfx1036Issue))
+    pipeLatency = Map(Pipe.Fma -> Sourced(5, gfx1036Chain)),
+    waveIssueCycles = Some(Sourced(1.0, gfx1036Issue)),
+    branchRedirect = Some(Sourced(21, gfx1036Redirect))
   )
 
   private def rdna2(name: String): Architecture =
@@ -1468,7 +1487,8 @@ case class Architecture(
     card: Option[Architecture.Card] = None,
     pipeLatency: Map[Pipe, Architecture.Sourced[Int]] = Map.empty,
     sharedPipes: Map[Pipe, Architecture.Source] = Map.empty,
-    waveIssueCycles: Option[Architecture.Sourced[Double]] = None
+    waveIssueCycles: Option[Architecture.Sourced[Double]] = None,
+    branchRedirect: Option[Architecture.Sourced[Int]] = None
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1515,7 +1535,8 @@ case class Architecture(
       ),
       pipeLatency = pipeLatency.view.mapValues(inherit(_)).toMap,
       sharedPipes = sharedPipes.view.mapValues(_ => Architecture.Source.Inherited(this.name, basis)).toMap,
-      waveIssueCycles = waveIssueCycles.map(inherit(_))
+      waveIssueCycles = waveIssueCycles.map(inherit(_)),
+      branchRedirect = branchRedirect.map(inherit(_))
     )
   }
 

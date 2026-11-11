@@ -168,7 +168,7 @@ class ArchitectureSuite extends Suite {
   }
 
   test("gfx1036 fma dependent latency is the chain probe, and its siblings have none") {
-    assertEquals(Architecture.gfx1036.pipeLatency.view.mapValues(_.value).toMap, Map(Pipe.Fma -> 8))
+    assertEquals(Architecture.gfx1036.pipeLatency.view.mapValues(_.value).toMap, Map(Pipe.Fma -> 5))
     assertEquals(Architecture.gfx1036.pipeLatency(Pipe.Fma).source.kind, "probed")
     assertEquals(Architecture.gfx1030.pipeLatency, Map.empty[Pipe, Sourced[Int]])
   }

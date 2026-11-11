@@ -72,24 +72,35 @@ As in `cost-model.md`: test first, seen failing; `testOnly *` on the touched mod
 
 ## Findings from step 5
 
-`HardwareValidationSuite` holds 95 cases from the RTX 4060 Ti (sm_89) and the gfx1036. 10 fail the 25 percent tolerance and stay red until the model is fixed. The first run had 53 failures out of 83. Fixed since then:
+`HardwareValidationSuite` compares the compiled loop path, and the table path where a loop has a variable-latency op, with `clock64` measurements from the RTX 4060 Ti (sm_89) and the gfx1036.
+
+The redirect applies to taken back-edges only. `Architecture.branchRedirect` is 10 cycles on sm_89 and 21 on gfx1036, both probed. `Op.backEdge` marks the op that closes a CFG back-edge: the last op of a latch in `BlockAnalysis`, and the last row of a table loop. Only those ops pay the redirect, combined with their stall hold by max. Straight blocks and loops without a back-edge op pay nothing. The gfx1036 value includes 2 cycles of scalar loop control, which the `s_add` and `s_cmp` holds may charge again, so up to 2 cycles per trip may be double counted. This is not resolved.
+
+The gfx1036 dependent `Fma` latency is 5 cycles, probed from dependent `v_fma_f32` chains of 16, 32 and 64 ops on one wave.
+
+Other current values:
 
 - Result latency is carried apart from the issue stall, and a variable-latency instruction is timed whenever a table latency exists.
-- SASS profiles record each instruction's own register use. AMDGPU profiles do not yet record any.
 - sm_89 FP64 is one pipe per multiprocessor, as architecture data, with a probed dependent DFMA latency of 48 cycles.
 - Loads, stores, and shared memory are simulator resources.
 - A resource binds only at 0.9 pressure or more, with partition-local pressure scaled by active partitions.
-- gfx1036 vector FMA has a probed dependent latency of 8 cycles.
 - gfx1036 many-wave rates were measured again at 8, 16, and 32 waves. FP64 is flat at 8.0 lanes per cycle per WGP, which confirms the recorded rate. MUFU reaches 31.2 and is still rising at 32 waves, so the 32.0 estimate stays.
 
-Still red:
+Red cases in `core` (4 failing tests of 849).
 
-- sm_89 `stream_dfma` with one warp (2 cases): the model binds on the FP64 pipe, and the measurement says the dependent path binds. The cycle cases pass.
-- gfx1036 single-wave and two-wave issue (5 cases: `chain_ffma` with 16 warps, and `stream_ffma` with one and two warps): a lone wave issues independent `v_fma_f32` slower than the model's issue cost. A probe measured 1.00 cycle per FMA over chain lengths of 16 to 64, recorded as `waveIssueCycles` but not yet read by the model, and that disagrees with the 26 cycles per iteration recorded for `stream_ffma` with one warp. The two measurements need reconciling before the model changes.
-- gfx1036 `stream_mufu` with one and two warps (3 cases): four waves measure 15.50 cycles against a many-wave plateau of about 8, so few waves are slower than the rate alone explains.
-- gfx1036 `stream_dfma` with two warps (1 case): measured 7.6 percent above the FP64 floor, which the header rule reads as FP64-bound where the expectation is the dependent path.
+- sm_89 `stream_dfma` with one warp (compiled and table binding): the model binds FP64 at pressure 1.000 (128 cycles per trip). The measurement is 166.51 cycles and binds on the dependent path. The 38.5 cycle residual is not modelled. The redirect adds nothing here, since the FP64 claim already covers it. A register-operand probe gives an intercept of 38.08 cycles per trip. No term is added for it. FP64 pressure falls below 0.9 only when the trip takes about 143 cycles, so the path would bind only then.
+- sm_89 `chain_ffma` with 16 warps (compiled binding): the model binds Path at issue pressure 0.880, below the 0.9 threshold, where Issue is expected. The cycles pass: the model period is 50 cycles against 48.3 implied by the measurement (3.02 * 16). The four warps' back-edge redirects fall in step, so their 10-cycle bubbles overlap instead of hiding one another. The window has 6 idle issue slots per period, against about 4.3 implied by hardware. Compiled-path stall holds on the loop-control ops (3 cycles each on IADD3 and ISETP) are also charged, which the table path does not do. Which of the two causes contributes more is not separated.
+- gfx1036 `stream_mufu` with four waves (compiled binding): the model binds Path at MUFU pressure 0.800. The cycles pass (10.0 against 8.8). With two warps per partition, round-robin issue phase-locks them: they take the MUFU pipe in turn and finish together, so their 21-cycle redirect tails coincide. The pipe idles for 16 of the 80 cycles in the window. Greedy-then-oldest issue would stagger the warps and give a 64-cycle period at pressure 1.0, which the simulator does not implement. Hardware falls between the two. The 21 cycles come from a dependent FMA chain, and the simulator does not show that they transfer to independent MUFU loops. The one-warp simulated period is 52 cycles, against about 62 implied by the measurement.
+
+Unit suites:
+
+- `ArchitectureSuite` asserts that the gfx1036 `pipeLatency` for `Fma` is 5.
+- `BlockAnalysisSuite` expects 14 cycles for its synthetic loop, whose conditional back-edge pays the 10-cycle sm_89 redirect.
 
 ## Open decisions
 
 - Whether the simulator also serves F4's dynamic replay, with the profile stream as input instead of a static block. Recommendation: yes, one model, so the two views cannot disagree.
 - The tolerance at which a target's results count as validated.
+- Issue order within a partition. Round-robin phase-locks the gfx1036 warps in the `stream_mufu` case. Whether hardware follows round-robin, greedy-then-oldest, or neither is not measured.
+- Whether the 21-cycle gfx1036 redirect applies to MUFU loops. Only a probe of a MUFU loop can decide it.
+- The sm_89 redirect of 10 cycles is derived as 17.02 minus 7 loop-control holds in the probe. The split has not been checked independently.

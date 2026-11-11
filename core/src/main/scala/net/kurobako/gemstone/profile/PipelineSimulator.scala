@@ -24,7 +24,8 @@ object PipelineSimulator {
       latency: Architecture.Sourced[Int],
       issue: Int,
       stall: Option[Architecture.Sourced[Int]] = None,
-      traffic: Traffic = Traffic.none
+      traffic: Traffic = Traffic.none,
+      backEdge: Boolean = false
   )
 
   object Stream {
@@ -184,9 +185,12 @@ object PipelineSimulator {
                 op.writes.foreach(r => warp.ready(r) = math.max(warp.ready.getOrElse(r, 0L), t + latency))
                 sources += op.latency.source
                 op.stall.foreach(stall => sources += stall.source)
+                val taken = architecture.branchRedirect.filter(_ => op.backEdge)
+                taken.foreach(redirect => sources += redirect.source)
                 timeline += Entry(index, iteration, opIndex, warp.dispatch, t, t + latency, warp.stalls)
                 warp.position += 1
-                warp.next = t + math.max(1, op.stall.fold(1)(_.value)).toLong
+                val hold = math.max(1, op.stall.fold(1)(_.value))
+                warp.next = t + taken.fold(hold)(redirect => math.max(hold, redirect.value)).toLong
                 warp.dispatch = t + 1
                 warp.stalls = Map.empty
                 used += cost

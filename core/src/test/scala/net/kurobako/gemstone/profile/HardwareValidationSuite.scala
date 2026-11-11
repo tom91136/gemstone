@@ -174,7 +174,7 @@ class HardwareValidationSuite extends Suite {
     else PipelineSimulator.Traffic.none
 
   private def simulated(architecture: Architecture, rows: Vec[Row], warps: Int): PipelineSimulator.Block = {
-    val ops = rows.map(row =>
+    val ops = rows.zipWithIndex.map { case (row, index) =>
       PipelineSimulator.Op(
         row.pipe,
         32,
@@ -182,9 +182,10 @@ class HardwareValidationSuite extends Suite {
         row.writes,
         tableLatency(architecture, row),
         1,
-        traffic = traffic(architecture, row)
+        traffic = traffic(architecture, row),
+        backEdge = index == rows.size - 1
       )
-    )
+    }
     PipelineSimulator.simulate(
       architecture,
       Some(Occupancy(1, warps, architecture.limits.subgroups.value, Map.empty)),

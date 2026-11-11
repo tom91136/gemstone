@@ -34,7 +34,7 @@ object BlockAnalysis {
   private type Lookup  = Map[(String, Long), Counted]
   private type Slot    = (Long, Option[Counted])
 
-  private case class Span(kind: Kind, header: Int, blocks: Vec[Int])
+  private case class Span(kind: Kind, header: Int, blocks: Vec[Int], latches: Vec[Int])
 
   def hex(address: Long): String = s"0x${java.lang.Long.toHexString(address)}"
 
@@ -51,10 +51,11 @@ object BlockAnalysis {
   private def regionsOf(profile: Profile, lookup: Lookup, graph: ProfileStream.Graph): Vec[Region] = {
     val cfg   = graph.graph
     val loops =
-      if (cfg.reducible) cfg.loops.map(loop => Span(Kind.Loop, loop.header, loop.body.sorted)) else Vec.empty[Span]
+      if (cfg.reducible) cfg.loops.map(loop => Span(Kind.Loop, loop.header, loop.body.sorted, loop.latches))
+      else Vec.empty[Span]
     val inLoop   = loops.flatMap(_.blocks).toSet
     val unlooped = cfg.blocks.indices.filterNot(inLoop.contains)
-    val straight = Vec.from(unlooped.map(block => Span(Kind.Block, block, Vec(block))))
+    val straight = Vec.from(unlooped.map(block => Span(Kind.Block, block, Vec(block), Vec.empty)))
     (loops ++ straight).sortBy(_.header).map(span => regionOf(profile, lookup, graph, span))
   }
 
@@ -67,16 +68,25 @@ object BlockAnalysis {
     val members = slots.map { case (address, entry) =>
       Member(address, entry.map(_._1.text), entry.fold(0L)(_._2.issues))
     }
+    val closing        = span.latches.map(block => graph.offsets(cfg.blocks(block).last)).toSet
     val label          = s"${graph.kernel}/${span.kind.name}@${hex(graph.offsets(cfg.blocks(span.header).first))}"
     val status: Status =
       if (!members.exists(_.issues > 0L)) Status.NotExecuted
       else if (!cfg.reducible) Status.Withheld("irreducible control flow")
-      else timing(profile, span.kind, slots, members).fold(Status.Withheld(_), Status.Executed(_))
+      else timing(profile, span.kind, slots, members, closing).fold(Status.Withheld(_), Status.Executed(_))
     Region(label, span.kind, graph.kernel, members, status)
   }
 
-  private def timing(profile: Profile, kind: Kind, slots: Vec[Slot], members: Vec[Member]): Either[String, Timing] = {
-    val lowered = slots.map { case (address, entry) => opOf(profile.architecture, address, entry) }
+  private def timing(
+      profile: Profile,
+      kind: Kind,
+      slots: Vec[Slot],
+      members: Vec[Member],
+      closing: Set[Long]
+  ): Either[String, Timing] = {
+    val lowered = slots.map { case (address, entry) =>
+      opOf(profile.architecture, address, entry, closing.contains(address))
+    }
     for {
       _     <- lowered.collectFirst { case Left(reason) => reason }.toLeft(())
       _     <- unevenAt(members).toLeft(())
@@ -97,7 +107,12 @@ object BlockAnalysis {
     Either.cond(cycles.isFinite && cycles > 0.0, block, "no finite positive cycle count")
   }
 
-  private def opOf(architecture: Architecture, address: Long, entry: Option[Counted]): Either[String, Op] =
+  private def opOf(
+      architecture: Architecture,
+      address: Long,
+      entry: Option[Counted],
+      backEdge: Boolean
+  ): Either[String, Op] =
     entry match {
       case None                          => Left(s"no profile entry at ${hex(address)}")
       case Some((instruction, counters)) =>
@@ -112,7 +127,8 @@ object BlockAnalysis {
           latency,
           1,
           Some(stallOf(schedule)),
-          trafficOf(counters)
+          trafficOf(counters),
+          backEdge
         )
     }
 
