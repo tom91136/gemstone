@@ -1,3 +1,6 @@
+# script mode has no cmake_minimum_required, and functions keep the policies of their definition
+cmake_policy(VERSION 3.25)
+
 function(read_elf_versions file defs_var needs_var)
   execute_process(COMMAND "${READELF}" -V "${file}" OUTPUT_VARIABLE text COMMAND_ERROR_IS_FATAL ANY)
   string(REPLACE "\n" ";" lines "${text}")
