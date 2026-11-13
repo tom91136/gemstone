@@ -22,6 +22,11 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   * 202 launches per case. Cases whose slowest-wave time varies more than 10 percent between launches are not listed.
   * The MUFU and FP64 rows at 4, 8 and 16 warps run 8, 16 and 32 resident waves, all co-resident.
   *
+  * The sweep and placement rows were measured on 2026-11-11 with 201 launches after 5 warm-ups: 4096 iterations per
+  * launch on sm_89 at host load average 11.8 to 32.7, and 1024 iterations per launch on gfx1036 in two workgroups per
+  * launch at host load average 6.9 to 8.6 on 32 threads. The gfx1036 values are shader cycles: `clock64` lowers to
+  * `s_memtime`, which counts `SHADER_CYCLES`.
+  *
   * The expected binding is `Path` when the case runs over 25 percent above the smallest cycles per iteration the card
   * reached with 1 to 32 resident warps, and otherwise the resource whose instruction count and rate give that smallest
   * value.
@@ -31,7 +36,13 @@ class HardwareValidationSuite extends Suite {
 
   private val tolerance = 0.25
 
-  private case class Measured(kernel: String, warps: Int, cycles: Double, binding: Option[Binding])
+  private case class Measured(
+      kernel: String,
+      warps: Int,
+      cycles: Double,
+      binding: Option[Binding],
+      placement: String = ""
+  )
 
   private val sm89Shared: Long    = 101376L
   private val gfx1036Shared: Long = 65536L
@@ -54,7 +65,44 @@ class HardwareValidationSuite extends Suite {
     Measured("mixed_ldg", 16, 8.00, Some(Binding.Loads)),
     Measured("reduce_tree", 1, 41.01, Some(Binding.Path)),
     Measured("reduce_tree", 4, 10.25, Some(Binding.Path)),
-    Measured("reduce_tree", 16, 5.75, Some(Binding.Issue))
+    Measured("reduce_tree", 16, 5.75, Some(Binding.Issue)),
+    Measured("stream_ffma_1", 1, 27.02, Some(Binding.Path)),
+    Measured("stream_ffma_1", 2, 13.51, Some(Binding.Path), "different SMSPs"),
+    Measured("stream_ffma_1", 2, 16.01, Some(Binding.Path), "same SMSP"),
+    Measured("stream_ffma_1", 4, 6.76, Some(Binding.Path), "slots 0-3"),
+    Measured("stream_ffma_1", 4, 8.01, Some(Binding.Path), "slots 0,4,8,12"),
+    Measured("stream_ffma_8", 1, 27.02, Some(Binding.Path)),
+    Measured("stream_ffma_8", 2, 13.51, Some(Binding.Path), "different SMSPs"),
+    Measured("stream_ffma_8", 2, 16.01, Some(Binding.Path), "same SMSP"),
+    Measured("stream_ffma_8", 4, 6.76, Some(Binding.Path), "slots 0-3"),
+    Measured("stream_ffma_8", 4, 12.61, Some(Binding.Path), "slots 0,4,8,12"),
+    Measured("stream_ffma_64", 1, 81.05, Some(Binding.Path)),
+    Measured("stream_dfma_1", 1, 61.02, Some(Binding.Path)),
+    Measured("stream_dfma_1", 2, 30.51, Some(Binding.Path), "different SMSPs"),
+    Measured("stream_dfma_1", 4, 19.01, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
+    Measured("stream_dfma_1", 4, 19.01, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_8", 1, 188.03, Some(Binding.Arithmetic(Pipe.Fp64))),
+    Measured("stream_dfma_8", 2, 152.02, Some(Binding.Arithmetic(Pipe.Fp64)), "different SMSPs"),
+    Measured("stream_dfma_8", 4, 152.01, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
+    Measured("stream_dfma_8", 4, 152.59, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_16", 1, 340.03, Some(Binding.Arithmetic(Pipe.Fp64))),
+    Measured("stream_dfma_reg_1", 1, 65.07, Some(Binding.Path)),
+    Measured("stream_dfma_reg_1", 2, 32.54, Some(Binding.Path), "different SMSPs"),
+    Measured("stream_dfma_reg_1", 4, 17.28, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
+    Measured("stream_dfma_reg_1", 4, 17.27, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_reg_8", 1, 166.08, Some(Binding.Path)),
+    Measured("stream_dfma_reg_8", 2, 128.04, Some(Binding.Arithmetic(Pipe.Fp64)), "different SMSPs"),
+    Measured("stream_dfma_reg_8", 4, 128.03, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
+    Measured("stream_dfma_reg_8", 4, 128.22, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_reg_16", 1, 294.08, Some(Binding.Arithmetic(Pipe.Fp64))),
+    Measured("chain_ffma_1", 1, 27.02, Some(Binding.Path)),
+    Measured("chain_ffma_16", 1, 71.03, Some(Binding.Path)),
+    Measured("chain_dfma_1", 1, 61.02, Some(Binding.Path)),
+    Measured("chain_dfma_8", 1, 384.02, Some(Binding.Path)),
+    Measured("chain_dfma_16", 1, 768.02, Some(Binding.Path)),
+    Measured("stream_mufu_1", 1, 28.01, Some(Binding.Path)),
+    Measured("stream_mufu_4", 1, 36.01, Some(Binding.Arithmetic(Pipe.Mufu))),
+    Measured("stream_mufu_16", 1, 137.01, Some(Binding.Arithmetic(Pipe.Mufu)))
   )
 
   private val gfx1036Cases = Vec(
@@ -78,7 +126,21 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_mufu", 16, 8.21, Some(Binding.Arithmetic(Pipe.Mufu))),
     Measured("stream_dfma", 4, 32.10, Some(Binding.Arithmetic(Pipe.Fp64))),
     Measured("stream_dfma", 8, 32.09, Some(Binding.Arithmetic(Pipe.Fp64))),
-    Measured("stream_dfma", 16, 32.08, Some(Binding.Arithmetic(Pipe.Fp64)))
+    Measured("stream_dfma", 16, 32.08, Some(Binding.Arithmetic(Pipe.Fp64))),
+    Measured("stream_ffma_1", 1, 13.01, Some(Binding.Path)),
+    Measured("stream_ffma_8", 1, 22.00, Some(Binding.Path)),
+    Measured("stream_ffma_8", 4, 6.20, Some(Binding.Path)),
+    Measured("stream_ffma_8", 8, 4.30, Some(Binding.Issue)),
+    Measured("stream_ffma_8", 16, 4.11, Some(Binding.Issue)),
+    Measured("stream_ffma_64", 1, 50.00, Some(Binding.Path)),
+    Measured("chain_ffma_1", 1, 13.01, Some(Binding.Path)),
+    Measured("chain_ffma_64", 1, 169.50, Some(Binding.Path)),
+    Measured("stream_mufu_1", 1, 11.00, Some(Binding.Path)),
+    Measured("stream_mufu_8", 1, 31.00, Some(Binding.Path)),
+    Measured("stream_mufu_16", 1, 46.50, Some(Binding.Path)),
+    Measured("stream_dfma_1", 1, 11.02, Some(Binding.Path)),
+    Measured("stream_dfma_4", 1, 39.52, Some(Binding.Path)),
+    Measured("stream_dfma_16", 1, 127.98, Some(Binding.Arithmetic(Pipe.Fp64)))
   )
 
   private class State(
@@ -199,8 +261,9 @@ class HardwareValidationSuite extends Suite {
       cases: Vec[Measured],
       shared: Long
   ): Unit = cases.foreach { measured =>
-    val rows   = loops(measured.kernel)
-    val name   = s"${architecture.name} ${measured.kernel} with ${measured.warps} warps per workgroup"
+    val rows = loops(measured.kernel)
+    val name = s"${architecture.name} ${measured.kernel} with ${measured.warps} warps per workgroup" +
+      (if (measured.placement.nonEmpty) s" (${measured.placement})" else "")
     val direct = rows.exists(variableLatency(_))
     test(s"$name: compiled loop cycles per iteration within 25 percent") {
       assertWithin(analysed(architecture, rows, measured.warps, shared).cyclesPerIteration, measured.cycles)
