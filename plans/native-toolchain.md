@@ -1,6 +1,6 @@
 # Native toolchain
 
-Status: in progress. Steps 1 to 5 are done, and step 6 has moved the Clang CUDA routes onto the sysroot. Step 7 has moved `conformance_clang_release` to 23.1.5; its Clang CUDA routes are red on emulator gaps, and conformance lint rejects inline assembly. Native `lint` still reports findings from the libc++ headers.
+Status: in progress. Steps 1 to 5 are done, and step 6 has moved the Clang CUDA routes onto the sysroot. Step 7 has moved `conformance_clang_release` to 23.1.5; the CUDA emulator now provides `cuMemGetAllocationGranularity`, so the OpenMP miniapps pass, and conformance lint accepts the deliberate inline assembly. Native `lint` still reports findings from the libc++ headers.
 
 ## Goal
 
@@ -89,8 +89,8 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 
 - Move `conformance_clang_release` separately, once the above is in place. It changes the compiler under test and rebuilds the Clang-route artifacts.
 - `conformance_clang_release` is 23.1.5, the same release as the tools pin. The release and source archives are verified against their SHA256, and the Clang-route artifacts and `llvm-offload` archive rebuild.
-- The bump is not green. The new offload runtime asks the CUDA emulator for `cuMemGetAllocationGranularity`, so the OpenMP offload miniapps report no device. SASS on sm_35, sm_50 and sm_60 also disagrees with the PTX path in `control/cuda/loops` and the `*_element` reductions.
-- clang-tidy 23 reports `portability-no-assembler` on the conformance tests' inline assembly and one `readability-redundant-lambda-parameter-list`.
+- The new offload runtime asks the CUDA emulator for `cuMemGetAllocationGranularity`; the native driver now returns it, and the OpenMP miniapps pass on all 34 Clang routes. SASS on sm_35, sm_50 and sm_60 still disagrees with the PTX path in `control/cuda/loops` and the `*_element` reductions.
+- clang-tidy 23's `portability-no-assembler` is off for the conformance unified sources, and the one `readability-redundant-lambda-parameter-list` finding is fixed.
 
 ## Checks
 
@@ -119,3 +119,4 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 - The pre-commit hook calls `clang-format` from the toolchain image, so a distribution update stops blocking commits.
 - The floor check reports vendor routes and fails only for objects the suite compiles.
 - `cuda/sm_89/clang` uses the sysroot. The `llvm-offload` stage builds `libomp` and the offload runtime with `--sysroot` and the sysroot's `gcc-toolset-15`, so `support-offload` needs `GLIBC_2.27` and `GLIBCXX_3.4.22`. The route records `glibc = "2.27"` and `glibcxx = "3.4.22"` in `artifact.toml`, and every object the suite compiles stays within the sysroot.
+- `portability-no-assembler` is disabled for the conformance unified sources only, because their inline PTX and SASS are the behaviour under test; the native drivers keep the check.

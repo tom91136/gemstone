@@ -4,13 +4,15 @@ InheritParentConfig: true
 # Device and host compilations see different code, and HIP's threadIdx is an object with static members, so the
 # const-parameter, static-member and static-access checks propose edits that break the other compilation or CUDA.
 # The shared suite headers also compile as C++17 for CUDA, so the C++20 library rewrites stay off, and
-# const-correctness cannot see writes through inline asm outputs.
+# const-correctness cannot see writes through inline asm outputs. The CUDA suites deliberately embed inline PTX and
+# SASS, so the assembler check does not apply here.
 Checks: >
   -clang-analyzer-*,
   -misc-const-correctness,
   -misc-include-cleaner,
   -modernize-use-ranges,
   -modernize-use-starts-ends-with,
+  -portability-no-assembler,
   -readability-container-contains,
   -readability-convert-member-functions-to-static,
   -readability-non-const-parameter,

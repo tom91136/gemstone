@@ -277,7 +277,7 @@ template <class Backend> void runScenario(Backend &backend, unsigned scenario) {
   } else if (scenario == 6) {
     pointerReplacement(backend);
   } else {
-    auto atomic = [&]<class Word>() {
+    auto atomic = [&]<class Word> {
       switch ((scenario - 7) % 4) {
         case 0:
         case 1: atomicPublication<Word>(backend, (scenario - 7) % 4 == 1); break;
