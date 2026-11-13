@@ -2902,6 +2902,15 @@ CUresult cuMemHostUnregister(void *pointer) {
   return freeMirror(reinterpret_cast<uintptr_t>(pointer), gemstone::MemoryOwnership::Borrowed).value_or(CUDA_ERROR_INVALID_VALUE);
 }
 
+CUresult cuMemGetAllocationGranularity(size_t *granularity, const CUmemAllocationProp *prop, CUmemAllocationGranularity_flags option) {
+  if (!granularity || !prop) return CUDA_ERROR_INVALID_VALUE;
+  if (option != CU_MEM_ALLOC_GRANULARITY_MINIMUM && option != CU_MEM_ALLOC_GRANULARITY_RECOMMENDED) return CUDA_ERROR_INVALID_VALUE;
+  if (prop->type != CU_MEM_ALLOCATION_TYPE_PINNED || prop->location.type != CU_MEM_LOCATION_TYPE_DEVICE || !validDevice(prop->location.id))
+    return CUDA_ERROR_INVALID_VALUE;
+  *granularity = size_t{2} << 20;
+  return CUDA_SUCCESS;
+}
+
 CUresult cuMemGetInfo_v2(size_t *freeBytes, size_t *totalBytes) {
   if (!freeBytes || !totalBytes) return CUDA_ERROR_INVALID_VALUE;
   *totalBytes = deviceSpec().totalGlobalMemoryBytes;
