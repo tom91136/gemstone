@@ -1,6 +1,6 @@
 # Native toolchain
 
-Status: in progress. Steps 1 to 5 are done. Steps 3 to 5 run in CI; native `lint` still reports findings from the libc++ headers.
+Status: in progress. Steps 1 to 5 are done, and step 6 has moved the Clang CUDA routes onto the sysroot. Steps 3 to 5 run in CI; native `lint` still reports findings from the libc++ headers.
 
 ## Goal
 
@@ -80,8 +80,9 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 
 ### 6. Conformance package
 
-- Move one compiler family at a time: plain Clang, then `icpx` and `hipcc`, then `nvcc`.
-- Add the per-route floor record, and keep `Verify.cmake`'s relocation test.
+- `cuda/sm_89/clang` uses the sysroot. The `llvm-offload` stage builds `libomp` and the offload runtime against it, and the Clang CUDA toolchain and lint stages set `CONFORMANCE_SYSROOT`. The route records `glibc = "2.27"` and `glibcxx = "3.4.22"` in `artifact.toml`; every object the suite compiles stays within the sysroot.
+- Move one compiler family at a time after plain Clang: `icpx` and `hipcc`, then `nvcc`.
+- Each route records its floor in `artifact.toml`, and `Verify.cmake`'s relocation test stays.
 - A route that cannot use the sysroot stays as it is, and the record shows its floor.
 
 ### 7. Compiler bump
@@ -114,4 +115,4 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 - `clang-tidy` 23 reported 981 unique findings across nine checks. `bugprone-signed-bitwise` (417) and `readability-trailing-comma` (379) are disabled: the first flags shift amounts such as `size_t{8} << 20` and vendor API flags, and `clang-analyzer-core.BitwiseShift` already catches real shift errors. The other 185 are fixed.
 - The pre-commit hook calls `clang-format` from the toolchain image, so a distribution update stops blocking commits.
 - The floor check reports vendor routes and fails only for objects the suite compiles.
-- `cuda/sm_89/clang` stays off the sysroot for now. Its `libomp` is an Ubuntu 24.04 build that needs `GLIBC_2.38`, so its OpenMP programs cannot link against glibc 2.28. Each route records its floor in `artifact.toml`. Moving this route needs `libomp` and the offload runtime built against the sysroot in the `llvm-offload` stage.
+- `cuda/sm_89/clang` uses the sysroot. The `llvm-offload` stage builds `libomp` and the offload runtime with `--sysroot` and the sysroot's `gcc-toolset-15`, so `support-offload` needs `GLIBC_2.27` and `GLIBCXX_3.4.22`. The route records `glibc = "2.27"` and `glibcxx = "3.4.22"` in `artifact.toml`, and every object the suite compiles stays within the sysroot.

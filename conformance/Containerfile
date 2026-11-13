@@ -99,46 +99,8 @@ RUN tar -xJf /tmp/llvm.tar.xz --strip-components=1 -C "/llvm/usr/lib/llvm-${LLVM
          ln -s "../lib/llvm-${LLVM_VERSION}/bin/${tool}" "/llvm/usr/bin/${tool}-${LLVM_VERSION}"; \
        done
 
-# The release archive carries libomp but no offload runtime. Build libomptarget, its CUDA plugin and the NVPTX device
-# runtime from the matching source release; only LLVM's support libraries are built besides them.
-FROM ubuntu-build-base AS llvm-offload
-ARG LLVM_VERSION
-ARG LLVM_RELEASE
-ARG LLVM_SOURCE_SHA256
-RUN apt-install xz-utils curl
-COPY --from=llvm /llvm/ /
-COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
-# The runtimes sub-builds take their compilers from the environment rather than from the cache
-ENV CC=/usr/lib/llvm-${LLVM_VERSION}/bin/clang CXX=/usr/lib/llvm-${LLVM_VERSION}/bin/clang++
-RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE}/llvm-project-${LLVM_RELEASE}.src.tar.xz" \
-       -o /tmp/llvm-src.tar.xz \
-    && echo "${LLVM_SOURCE_SHA256}  /tmp/llvm-src.tar.xz" | sha256sum --check --strict \
-    && mkdir /tmp/llvm-src \
-    && tar -xJf /tmp/llvm-src.tar.xz --strip-components=1 -C /tmp/llvm-src \
-    && rm /tmp/llvm-src.tar.xz
-RUN cmake -S /tmp/llvm-src/llvm -B /tmp/llvm-offload-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-       -DLLVM_ENABLE_PROJECTS= -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
-       -DLLVM_ENABLE_RUNTIMES="openmp;offload" -DLLVM_RUNTIME_TARGETS="default;nvptx64-nvidia-cuda" \
-       -DRUNTIMES_nvptx64-nvidia-cuda_LLVM_ENABLE_RUNTIMES=openmp -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
-       -DLIBOMPTARGET_PLUGINS_TO_BUILD=cuda \
-       -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_DOCS=OFF \
-       -DCMAKE_INSTALL_PREFIX=/llvm-offload/usr/lib/llvm-${LLVM_VERSION} \
-    && ninja -C /tmp/llvm-offload-build runtimes install-runtimes \
-    && rm -rf /tmp/llvm-src /tmp/llvm-offload-build
-
-# Takes the llvm-offload tree from a previous export when the llvm-offload-archive build context is supplied.
-FROM ubuntu-build-base AS llvm-offload-prebuilt
-RUN apt-install zstd
-COPY --from=llvm-offload-archive llvm-offload.tar.zst /tmp/
-RUN zstd -dc --long=30 /tmp/llvm-offload.tar.zst | tar -xf - -C / \
-    && rm /tmp/llvm-offload.tar.zst
-
-# Source for the relocatable OpenCL compiler subset. The runtime needs an
-# OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
-# SYCL toolchain uses keeps OpenCL artifacts self-contained.
-FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
-
-# The AlmaLinux 8 tree sets the glibc floor of native DSOs. It is the --sysroot for the native toolchain.
+# The AlmaLinux 8 tree sets the glibc floor of native DSOs. It is the --sysroot for the native toolchain and for the
+# Clang CUDA offload runtime.
 FROM quay.io/almalinuxorg/almalinux@sha256:7596d3c7d159ec8e1df2b7d2b961db939de291a3e00c5e4d8f6a9d610b3b6d35 AS sysroot
 ARG RHEL_TRIPLE=x86_64-redhat-linux
 ARG GNU_TRIPLE=x86_64-linux-gnu
@@ -169,6 +131,49 @@ RUN cd /opt/sysroot/usr/lib64 \
 RUN ln -sfn "${RHEL_TRIPLE}" "/opt/sysroot/usr/lib/gcc/${GNU_TRIPLE}" \
  && ln -sfn "${RHEL_TRIPLE}" "/opt/sysroot/usr/include/c++/8/${GNU_TRIPLE}"
 RUN chmod -R u+rwX /opt/sysroot
+
+# The release archive carries libomp but no offload runtime. Build libomptarget, its CUDA plugin and the NVPTX device
+# runtime from the matching source release against the sysroot; only LLVM's support libraries are built besides them.
+FROM ubuntu-build-base AS llvm-offload
+ARG LLVM_VERSION
+ARG LLVM_RELEASE
+ARG LLVM_SOURCE_SHA256
+RUN apt-install xz-utils curl
+COPY --from=llvm /llvm/ /
+COPY --from=sysroot /opt/sysroot /opt/sysroot
+COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
+# The runtimes sub-builds take their compilers from the environment rather than from the cache
+ENV CC=/usr/lib/llvm-${LLVM_VERSION}/bin/clang CXX=/usr/lib/llvm-${LLVM_VERSION}/bin/clang++
+RUN curl -fsSL "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_RELEASE}/llvm-project-${LLVM_RELEASE}.src.tar.xz" \
+       -o /tmp/llvm-src.tar.xz \
+    && echo "${LLVM_SOURCE_SHA256}  /tmp/llvm-src.tar.xz" | sha256sum --check --strict \
+    && mkdir /tmp/llvm-src \
+    && tar -xJf /tmp/llvm-src.tar.xz --strip-components=1 -C /tmp/llvm-src \
+    && rm /tmp/llvm-src.tar.xz
+RUN sysroot="--sysroot=/opt/sysroot --gcc-toolchain=/opt/sysroot/opt/rh/gcc-toolset-15/root/usr" \
+    && cmake -S /tmp/llvm-src/llvm -B /tmp/llvm-offload-build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+       -DLLVM_ENABLE_PROJECTS= -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
+       -DLLVM_ENABLE_RUNTIMES="openmp;offload" -DLLVM_RUNTIME_TARGETS="default;nvptx64-nvidia-cuda" \
+       -DRUNTIMES_nvptx64-nvidia-cuda_LLVM_ENABLE_RUNTIMES=openmp -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON \
+       -DLIBOMPTARGET_PLUGINS_TO_BUILD=cuda \
+       -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_DOCS=OFF \
+       -DCMAKE_C_FLAGS="$sysroot" -DCMAKE_CXX_FLAGS="$sysroot" \
+       "-DRUNTIMES_CMAKE_ARGS=-DCMAKE_C_FLAGS=$sysroot;-DCMAKE_CXX_FLAGS=$sysroot" \
+       -DCMAKE_INSTALL_PREFIX=/llvm-offload/usr/lib/llvm-${LLVM_VERSION} \
+    && ninja -C /tmp/llvm-offload-build runtimes install-runtimes \
+    && rm -rf /tmp/llvm-src /tmp/llvm-offload-build
+
+# Takes the llvm-offload tree from a previous export when the llvm-offload-archive build context is supplied.
+FROM ubuntu-build-base AS llvm-offload-prebuilt
+RUN apt-install zstd
+COPY --from=llvm-offload-archive llvm-offload.tar.zst /tmp/
+RUN zstd -dc --long=30 /tmp/llvm-offload.tar.zst | tar -xf - -C / \
+    && rm /tmp/llvm-offload.tar.zst
+
+# Source for the relocatable OpenCL compiler subset. The runtime needs an
+# OpenCL C to SPIR-V toolchain at execution time; bundling the same icpx the
+# SYCL toolchain uses keeps OpenCL artifacts self-contained.
+FROM ${SYCL_IMAGE} AS oneapi-opencl-compiler
 
 FROM ubuntu-build-base AS native-toolchain
 ARG LLVM_TOOLS_RELEASE
@@ -415,12 +420,14 @@ COPY --from=clang-cuda-headers /clang-cuda-headers/ /opt/cuda-clang-headers/
 ARG LLVM_VERSION
 COPY --from=llvm /llvm/ /
 COPY --from=llvm-offload-prebuilt /llvm-offload/ /
+COPY --from=sysroot /opt/sysroot /opt/sysroot
 COPY --from=cccl /opt/cccl /opt/cccl
 RUN ln -s /usr/bin/clang-${LLVM_VERSION} /usr/local/bin/clang \
     && ln -s /usr/bin/clang++-${LLVM_VERSION} /usr/local/bin/clang++
 ENV PATH=/usr/lib/llvm-${LLVM_VERSION}/bin:${PATH} \
     CC=/usr/local/bin/clang CXX=/usr/local/bin/clang++ CUDACXX=/usr/local/bin/clang++ \
-    CPATH=/opt/cuda-clang-headers:/opt/cccl/thrust:/opt/cccl/cub:/opt/cccl/libcudacxx/include:/usr/local/cuda/targets/x86_64-linux/include
+    CPATH=/opt/cuda-clang-headers:/opt/cccl/thrust:/opt/cccl/cub:/opt/cccl/libcudacxx/include:/usr/local/cuda/targets/x86_64-linux/include \
+    CONFORMANCE_SYSROOT=/opt/sysroot
 
 # The toolkit packages come from NVIDIA's repository, so the lint does not pull the SDK image, which carries the
 # whole toolkit; the rest mirrors toolchain-cuda and toolchain-clang-cuda.
@@ -441,6 +448,7 @@ RUN apt-install curl gpg g++-11 \
     && ln -s "cuda-$(echo "${CUDA_PACKAGE_VERSION}" | tr - .)" /usr/local/cuda
 COPY --from=cmake-release /opt/cmake /opt/cmake
 COPY --from=llvm /llvm/ /
+COPY --from=sysroot /opt/sysroot /opt/sysroot
 COPY --from=cccl /opt/cccl /opt/cccl
 RUN ln -s /usr/bin/clang-${LLVM_VERSION} /usr/local/bin/clang \
     && ln -s /usr/bin/clang++-${LLVM_VERSION} /usr/local/bin/clang++
@@ -450,7 +458,8 @@ ENV PATH="/opt/cmake/bin:/usr/local/cuda/bin:/usr/lib/llvm-${LLVM_VERSION}/bin:$
     CUDAToolkit_ROOT=/usr/local/cuda \
     CPATH=/opt/cccl/thrust:/opt/cccl/cub:/opt/cccl/libcudacxx/include:/usr/local/cuda/targets/x86_64-linux/include \
     LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib \
-    LD_LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib:/usr/local/cuda/compat
+    LD_LIBRARY_PATH=/usr/local/cuda/targets/x86_64-linux/lib:/usr/local/cuda/compat \
+    CONFORMANCE_SYSROOT=/opt/sysroot
 
 # Make toolkit runtimes discoverable by both the loader and CMake dependency scanning.
 RUN printf '%s\n' /usr/local/cuda/targets/x86_64-linux/lib \
