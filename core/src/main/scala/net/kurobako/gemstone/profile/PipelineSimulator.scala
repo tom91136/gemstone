@@ -121,14 +121,18 @@ object PipelineSimulator {
       stream: Stream,
       placement: Option[Placement] = None
   ): Block = {
-    val rates       = architecture.throughput
-    val partitions  = architecture.limits.partitions.value
-    val subgroups   = occupancy.fold(1)(_.subgroups)
-    val resident    = placement.getOrElse(Placement.even(subgroups, partitions)).warpsPerPartition
-    val count       = resident.maxOption.getOrElse(1)
-    val slots       = math.max(1, (rates.issues.value / partitions).toInt)
-    val warps       = Vec.fill(count)(Warp())
-    val active      = resident.count(_ > 0)
+    val rates      = architecture.throughput
+    val partitions = architecture.limits.partitions.value
+    val subgroups  = occupancy.fold(1)(_.subgroups)
+    val resident   = placement.getOrElse(Placement.even(subgroups, partitions)).warpsPerPartition
+    val count      = resident.maxOption.getOrElse(1)
+    val slots      = math.max(1, (rates.issues.value / partitions).toInt)
+    val warps      = Vec.fill(count)(Warp())
+    val active     = resident.count(_ > 0)
+    val order      = architecture.issueOrder.map(_.value).getOrElse(Architecture.IssueOrder.RoundRobin)
+    // A spread placement models the same waves on every active partition; their mix comes from
+    // several workgroups, so the single-partition age order is only applied when one is active.
+    val scheduled   = if active == 1 then order else Architecture.IssueOrder.RoundRobin
     val busyUntil   = mutable.Map.empty[ProfileReport.Binding, Long]
     val busyCycles  = mutable.Map.empty[ProfileReport.Binding, Long]
     val timeline    = mutable.ArrayBuffer.empty[Entry]
@@ -248,7 +252,8 @@ object PipelineSimulator {
             )
           case None =>
             marks(key) = Mark(t, warps.map(_.position), busyCycles.toMap, issuedSlots)
-            settle(t + 1, cycle(t, start))
+            val next = cycle(t, start)
+            settle(t + 1, if scheduled == Architecture.IssueOrder.OldestFirst then 0 else next)
         }
       case None if warps.forall(_.done) =>
         Window(
@@ -257,21 +262,18 @@ object PipelineSimulator {
           busy = busyCycles.toMap,
           issued = issuedSlots
         )
-      case None => settle(t + 1, cycle(t, start))
+      case None =>
+        val next = cycle(t, start)
+        settle(t + 1, if scheduled == Architecture.IssueOrder.OldestFirst then 0 else next)
     }
 
     val window    = settle(0L, 0)
     val length    = window.length.toDouble
-    val share     = active.toDouble / partitions
     val resources =
       window.busy.collect { case (resource, cycles) if cycles > 0L => resource }.toVector.sortBy(ordinal(_))
-    def local(resource: ProfileReport.Binding): Boolean = resource match {
-      case ProfileReport.Binding.Arithmetic(pipe) => !architecture.sharedPipes.contains(pipe)
-      case _                                      => false
-    }
     val pressure: Vec[(ProfileReport.Binding, Double)] =
-      (ProfileReport.Binding.Issue, window.issued / (slots * length) * share) +: Vec.from(resources).map(resource =>
-        (resource, window.busy(resource) / length * (if (local(resource)) share else 1.0))
+      (ProfileReport.Binding.Issue, window.issued / (slots * length)) +: Vec.from(resources).map(resource =>
+        (resource, window.busy(resource) / length)
       )
     val (top, peak) = pressure.maxBy(_._2)
     Block(

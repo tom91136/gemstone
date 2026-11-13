@@ -34,6 +34,14 @@ class PipelineSimulatorSuite extends Suite {
   private def run(body: Vec[Op], subgroups: Int): Block =
     PipelineSimulator.simulate(Architecture.sm89, occupancy(subgroups), Stream.repeat(body))
 
+  private def run(
+      architecture: Architecture,
+      body: Vec[Op],
+      warps: Int,
+      placement: Placement
+  ): Block =
+    PipelineSimulator.simulate(architecture, occupancy(warps), Stream.repeat(body), Some(placement))
+
   private def instruction(pipe: Option[Pipe]): ProfileStream.Instruction =
     ProfileStream.Instruction("kernel".unsafe[NonEmpty[String]], None, None, "op", RegisterUse.empty, None, pipe)
 
@@ -100,11 +108,22 @@ class PipelineSimulatorSuite extends Suite {
     }
   }
 
-  test("a partition pipe binds only once every partition has a subgroup") {
+  test("a partition pipe binds on its own partition whatever the others do") {
     val stream = Vec(op(pipe = Some(Pipe.Mufu)), op(pipe = Some(Pipe.Mufu)))
-    assertEquals(run(stream, subgroups = 1).binding, Binding.Path)
-    assertEquals(run(stream, subgroups = 3).binding, Binding.Path)
+    assertEquals(run(stream, subgroups = 1).binding, Binding.Arithmetic(Pipe.Mufu))
+    assertEquals(run(stream, subgroups = 3).binding, Binding.Arithmetic(Pipe.Mufu))
     assertEquals(run(stream, subgroups = 4).binding, Binding.Arithmetic(Pipe.Mufu))
+  }
+
+  test("a lone gfx1036 wave binds its partition's FP64 pipe") {
+    val block = run(
+      Architecture.gfx1036,
+      Vec(op(pipe = Some(Pipe.Fp64))),
+      warps = 1,
+      Placement(Vec(1, 0, 0, 0))
+    )
+    assertEqualsDouble(block.cyclesPerIteration, 16.0, 1e-9)
+    assertEquals(block.binding, Binding.Arithmetic(Pipe.Fp64))
   }
 
   test("two warps on one partition contend for issue slots while two partitions do not") {
@@ -125,8 +144,27 @@ class PipelineSimulatorSuite extends Suite {
       block.pressure.collectFirst { case (Binding.Issue, value) => value }.getOrElse(fail("no issue pressure"))
     assertEqualsDouble(together.cyclesPerIteration, expected = 4.0, delta = 1e-9)
     assertEqualsDouble(apart.cyclesPerIteration, expected = 2.0, delta = 1e-9)
-    assertEqualsDouble(issuePressure(together), expected = 0.25, delta = 1e-9)
-    assertEqualsDouble(issuePressure(apart), expected = 0.5, delta = 1e-9)
+    assertEqualsDouble(issuePressure(together), expected = 1.0, delta = 1e-9)
+    assertEqualsDouble(issuePressure(apart), expected = 1.0, delta = 1e-9)
+  }
+
+  test("gfx1036 gives the oldest wave on a partition priority") {
+    val body  = Vec.fill(8)(op(pipe = Some(Pipe.Mufu))) :+ op(stall = Some(21))
+    val block = run(Architecture.gfx1036, body, warps = 2, Placement(Vec(2, 0, 0, 0)))
+    assertEquals(block.entries.sortBy(_.issue).take(5).map(_.warp), Vec(0, 0, 0, 0, 0))
+  }
+
+  test("gfx1036 oldest-first reports the slowest wave") {
+    val body  = Vec.fill(4)(op())
+    val block = PipelineSimulator.simulate(
+      Architecture.gfx1036,
+      occupancy(2),
+      Stream.once(body),
+      Some(Placement(Vec(2, 0, 0, 0)))
+    )
+    val last = block.entries.groupBy(_.warp).view.mapValues(_.map(_.retire).max).toMap
+    assert(last(1) - last(0) >= 4, "the youngest wave must retire a whole body later")
+    assertEqualsDouble(block.cyclesPerIteration * 2, last(1).toDouble, 1e-9)
   }
 
   test("issue-bound stream runs at the issue width") {

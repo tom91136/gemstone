@@ -5,6 +5,16 @@ import net.kurobako.gemstone.string.*
 
 object Architecture {
 
+  /** How a partition's scheduler picks among its ready waves. */
+  enum IssueOrder derives CanEqual {
+
+    /** Each ready wave takes its turn, so equal waves progress together. */
+    case RoundRobin
+
+    /** The oldest ready wave issues first; younger waves take the slots it cannot use. */
+    case OldestFirst
+  }
+
   object Source {
 
     given Ordering[Source] = Ordering.by(_.ordinal)
@@ -1210,13 +1220,23 @@ object Architecture {
     "ROCm 7.2 hipcc"
   )
 
+  private val gfx1036IssueOrder = Source.Probed(
+    "same-SIMD wave placements with clock64: the oldest of 2, 4 and 8 waves keeps its lone MUFU, DFMA and FFMA " +
+      "rate while the youngest is 1.5 to 5.5 times slower, and delayed starts are not equalised " +
+      "(/var/tmp/gs/laneA2/notes.md, 2026-11-13, median of 201 launches each)",
+    "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
+    "Linux 7.2.15 amdgpu",
+    "ROCm 7.2 hipcc"
+  )
+
   val gfx1036: Architecture = rdna2Base.copy(
     name = "gfx1036",
     throughput = rdna2Base.throughput.copy(fp64 = Sourced(8.0, gfx1036Rate)),
     latency = rdnaProbeLatency(gfx1036Latency),
     pipeLatency = Map(Pipe.Fma -> Sourced(5, gfx1036Chain)),
     waveIssueCycles = Some(Sourced(1.0, gfx1036Issue)),
-    branchRedirect = Some(Sourced(21, gfx1036Redirect))
+    branchRedirect = Some(Sourced(21, gfx1036Redirect)),
+    issueOrder = Some(Sourced(Architecture.IssueOrder.OldestFirst, gfx1036IssueOrder))
   )
 
   private def rdna2(name: String): Architecture =
@@ -1502,7 +1522,8 @@ case class Architecture(
     pipeLatency: Map[Pipe, Architecture.Sourced[Int]] = Map.empty,
     sharedPipes: Map[Pipe, Architecture.Source] = Map.empty,
     waveIssueCycles: Option[Architecture.Sourced[Double]] = None,
-    branchRedirect: Option[Architecture.Sourced[Int]] = None
+    branchRedirect: Option[Architecture.Sourced[Int]] = None,
+    issueOrder: Option[Architecture.Sourced[Architecture.IssueOrder]] = None
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1551,7 +1572,8 @@ case class Architecture(
       pipeLatency = pipeLatency.view.mapValues(inherit(_)).toMap,
       sharedPipes = sharedPipes.view.mapValues(_ => Architecture.Source.Inherited(this.name, basis)).toMap,
       waveIssueCycles = waveIssueCycles.map(inherit(_)),
-      branchRedirect = branchRedirect.map(inherit(_))
+      branchRedirect = branchRedirect.map(inherit(_)),
+      issueOrder = issueOrder.map(inherit(_))
     )
   }
 

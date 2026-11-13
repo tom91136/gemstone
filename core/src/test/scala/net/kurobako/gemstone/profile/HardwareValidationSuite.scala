@@ -33,9 +33,10 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   * Placements follow slot mod 4 on sm_89 and `hw_id1` bits 9-8 on gfx1036; `same SMSP` and `same SIMD` put every warp
   * on one partition.
   *
-  * The expected binding is `Path` when the case runs over 25 percent above the smallest cycles per iteration the card
-  * reached with 1 to 32 resident warps, and otherwise the resource whose instruction count and rate give that smallest
-  * value.
+  * The expected binding is the partition-local resource, the issue slots or a non-shared pipe, when the placement
+  * leaves one wave set on a partition, or one wave on each active partition, and the case saturates it. A spread
+  * placement with several waves per partition is `Path` when the case runs over 25 percent above the smallest cycles
+  * per iteration the card reached with 1 to 32 resident warps, and otherwise the resource at that smallest value.
   */
 class HardwareValidationSuite extends Suite {
   import ProfileReport.Binding
@@ -77,7 +78,7 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_ffma", 1, 34.01, Some(Binding.Path)),
     Measured("stream_ffma", 4, 8.50, Some(Binding.Path)),
     Measured("stream_ffma", 16, 5.75, Some(Binding.Issue)),
-    Measured("stream_mufu", 1, 73.01, Some(Binding.Path)),
+    Measured("stream_mufu", 1, 73.01, Some(Binding.Arithmetic(Pipe.Mufu))),
     Measured("stream_mufu", 4, 18.25, Some(Binding.Arithmetic(Pipe.Mufu))),
     Measured("stream_mufu", 16, 16.00, Some(Binding.Arithmetic(Pipe.Mufu))),
     Measured("stream_dfma", 1, 166.51, Some(Binding.Path)),
@@ -136,7 +137,7 @@ class HardwareValidationSuite extends Suite {
     Measured("chain_ffma_8", 4, 11.88, Some(Binding.Issue), Some(same4)),
     Measured("chain_ffma_8", 8, 11.08, Some(Binding.Issue), Some(same8)),
     Measured("stream_ffma_8", 4, 12.91, Some(Binding.Path), Some(same4)),
-    Measured("stream_ffma_8", 8, 11.54, Some(Binding.Path), Some(same8))
+    Measured("stream_ffma_8", 8, 11.54, Some(Binding.Issue), Some(same8))
   )
 
   private val gfx1036Cases = Vec(
@@ -148,7 +149,7 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_ffma", 16, 5.33, Some(Binding.Issue)),
     Measured("stream_mufu", 1, 31.00, Some(Binding.Path)),
     Measured("stream_mufu", 2, 15.50, Some(Binding.Path)),
-    Measured("stream_dfma", 1, 69.02, Some(Binding.Path)),
+    Measured("stream_dfma", 1, 69.02, Some(Binding.Arithmetic(Pipe.Fp64))),
     Measured("stream_dfma", 2, 34.51, Some(Binding.Arithmetic(Pipe.Fp64))),
     Measured("mixed_ldg", 1, 76.72, Some(Binding.Path)),
     Measured("mixed_ldg", 2, 38.35, Some(Binding.Path)),
@@ -175,23 +176,23 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_dfma_1", 1, 11.02, Some(Binding.Path)),
     Measured("stream_dfma_4", 1, 39.52, Some(Binding.Path)),
     Measured("stream_dfma_16", 1, 127.98, Some(Binding.Arithmetic(Pipe.Fp64))),
-    Measured("stream_dfma_16_wide", 1, 255.98, Some(Binding.Path), Some(oneSimd)),
-    Measured("stream_dfma_16_wide", 2, 255.25, Some(Binding.Path), Some(sameSimd2)),
-    Measured("stream_dfma_16_wide", 4, 242.41, Some(Binding.Path), Some(sameSimd4)),
+    Measured("stream_dfma_16_wide", 1, 255.98, Some(Binding.Arithmetic(Pipe.Fp64)), Some(oneSimd)),
+    Measured("stream_dfma_16_wide", 2, 255.25, Some(Binding.Arithmetic(Pipe.Fp64)), Some(sameSimd2)),
+    Measured("stream_dfma_16_wide", 4, 242.41, Some(Binding.Arithmetic(Pipe.Fp64)), Some(sameSimd4)),
     Measured("stream_dfma_16_wide", 4, 63.99, Some(Binding.Arithmetic(Pipe.Fp64)), Some(eachSimd1)),
     Measured("stream_dfma_16_wide", 8, 63.81, Some(Binding.Arithmetic(Pipe.Fp64)), Some(eachSimd2)),
     Measured("stream_dfma_16_wide", 16, 60.62, Some(Binding.Arithmetic(Pipe.Fp64)), Some(eachSimd4)),
     Measured("stream_dfma_rate", 1, 63.99, Some(Binding.Arithmetic(Pipe.Fp64)), Some(oneSimd)),
     Measured("stream_mufu_16_wide", 1, 93.00, Some(Binding.Path), Some(oneSimd)),
-    Measured("stream_mufu_16_wide", 2, 71.34, Some(Binding.Path), Some(sameSimd2)),
-    Measured("stream_mufu_16_wide", 4, 67.78, Some(Binding.Path), Some(sameSimd4)),
-    Measured("stream_mufu_16_wide", 8, 65.77, Some(Binding.Path), Some(sameSimd8)),
+    Measured("stream_mufu_16_wide", 2, 71.34, Some(Binding.Arithmetic(Pipe.Mufu)), Some(sameSimd2)),
+    Measured("stream_mufu_16_wide", 4, 67.78, Some(Binding.Arithmetic(Pipe.Mufu)), Some(sameSimd4)),
+    Measured("stream_mufu_16_wide", 8, 65.77, Some(Binding.Arithmetic(Pipe.Mufu)), Some(sameSimd8)),
     Measured("stream_mufu_16_wide", 4, 23.25, Some(Binding.Path), Some(eachSimd1)),
     Measured("stream_mufu_16_wide", 8, 17.84, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd2)),
     Measured("stream_mufu_16_wide", 16, 16.97, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd4)),
     Measured("stream_mufu_16_wide", 32, 16.45, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd8)),
-    Measured("stream_ffma_8", 4, 10.86, Some(Binding.Path), Some(sameSimd4)),
-    Measured("stream_ffma_8", 8, 10.40, Some(Binding.Path), Some(sameSimd8))
+    Measured("stream_ffma_8", 4, 10.86, Some(Binding.Issue), Some(sameSimd4)),
+    Measured("stream_ffma_8", 8, 10.40, Some(Binding.Issue), Some(sameSimd8))
   )
 
   private class State(
@@ -356,12 +357,16 @@ class HardwareValidationSuite extends Suite {
   }
 
   private def expectationsFollowRule(architecture: Architecture, cases: Vec[Measured]): Unit =
-    test(s"${architecture.name} expected bindings follow the 25 percent rule") {
+    test(s"${architecture.name} spread bindings follow the 25 percent rule") {
       val broken = cases.groupBy(_.kernel).values.flatMap { rows =>
         val floor = rows.minBy(_.cycles)
         floor.binding.filter(_ != Binding.Path).fold(Vec.empty[Measured]) { saturated =>
           rows.filter { row =>
-            val expected = if (row.cycles > floor.cycles * (1 + tolerance)) Binding.Path else saturated
+            val spread   = row.placement.exists(at => at.warps.count(_ > 0) > 1 && at.warps.max > 1)
+            val expected =
+              if !spread then row.binding.getOrElse(Binding.Path)
+              else if (row.cycles > floor.cycles * (1 + tolerance)) Binding.Path
+              else saturated
             row.binding.exists(_ != expected)
           }
         }
