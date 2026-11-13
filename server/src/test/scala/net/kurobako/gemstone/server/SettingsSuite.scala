@@ -66,6 +66,20 @@ class SettingsSuite extends Suite {
     assert(Server.Settings.replay(Map.empty, profile(sys.runtime.availableProcessors() + 65)).isLeft)
   }
 
+  test("schedule setting accepts fixed and seeded random schedules") {
+    assertEquals(Server.Settings.fromEnvironment(Map.empty).map(_.schedule), Right(ConcurrencySchedule.Fixed))
+    assertEquals(
+      Server.Settings.fromEnvironment(Map(environment.Schedule -> "random:12")).toOption.flatMap(
+        _.schedule match {
+          case random: ConcurrencySchedule.Random => Some(random.seed)
+          case _                                  => None
+        }
+      ),
+      Some(12L)
+    )
+    assert(Server.Settings.fromEnvironment(Map(environment.Schedule -> "garbage")).isLeft)
+  }
+
   test("performance tracing follows scope tokens and ignores unrelated categories") {
     for (
       (value, expected) <- List(

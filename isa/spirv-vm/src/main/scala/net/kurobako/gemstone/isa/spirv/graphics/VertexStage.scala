@@ -65,7 +65,8 @@ private object VertexStage {
       draw: GraphicsDraw,
       memory: GraphicsAccess,
       handler: Event => Either[Fault, Unit],
-      program: VMProgram
+      program: VMProgram,
+      schedule: ConcurrencySchedule
   ): Output = {
     val indices  = mutable.ArrayBuffer.empty[Int]
     val segments = mutable.ArrayBuffer.empty[(Int, Int)]
@@ -125,7 +126,7 @@ private object VertexStage {
         }
       }
     }
-    val executor = ShaderExecutor(draw.vertex, memory, handler, program)
+    val executor = ShaderExecutor(draw.vertex, memory, handler, program, schedule)
     executor.execute(count, records)
     val outputs     = fields(draw.vertex, ShaderDirection.Output)
     val hasPosition = outputs.exists(_._2.builtin.exists(_.raw == BuiltIn.Position))

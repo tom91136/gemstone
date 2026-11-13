@@ -44,7 +44,8 @@ private[isa] object VMKernelLaunch {
           task.cluster,
           task.cooperative,
           heap,
-          context.handler
+          context.handler,
+          context.schedule
         )
     } yield ()
   }

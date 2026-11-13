@@ -54,7 +54,12 @@ private object DrawExecution {
   }
 }
 
-private class DrawExecution(memory: GraphicsAccess, workgroups: Workgroups, handler: Event => Either[Fault, Unit]) {
+private class DrawExecution(
+    memory: GraphicsAccess,
+    workgroups: Workgroups,
+    handler: Event => Either[Fault, Unit],
+    schedule: ConcurrencySchedule
+) {
   import ShaderRecords.*
   // Owned by one submission; no shader bytes or compiled state survive its completion.
   private val programs                          = mutable.Map.empty[Vec[Byte], VMProgram]
@@ -96,7 +101,7 @@ private class DrawExecution(memory: GraphicsAccess, workgroups: Workgroups, hand
         )
       }
       val prepared = draw.copy(vertex = prepare(draw.vertex), fragment = draw.fragment.map(prepare(_)))
-      val output   = VertexStage.execute(prepared, memory, handler, load(prepared.vertex.image))
+      val output   = VertexStage.execute(prepared, memory, handler, load(prepared.vertex.image), schedule)
       if (prepared.raster.discard || !output.hasPosition) 0L else fragments(prepared, output)
     } finally memory.releaseScratch()
 
@@ -164,7 +169,7 @@ private class DrawExecution(memory: GraphicsAccess, workgroups: Workgroups, hand
           }
         }
       }
-      val executor = ShaderExecutor(stage, memory, handler, load(stage.image))
+      val executor = ShaderExecutor(stage, memory, handler, load(stage.image), schedule)
       executor.execute(count, records)
     }
     val outputs = shader.toVector.flatMap(stage => fields(stage, ShaderDirection.Output))

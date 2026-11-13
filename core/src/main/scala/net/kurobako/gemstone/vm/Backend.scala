@@ -69,7 +69,10 @@ class TaskContext(
     val memory: AddressSpace,
     val control: TaskControl,
     val handler: Event => Either[Fault, Unit],
-    val programs: ProgramDirectory = ProgramDirectory.Empty
+    val programs: ProgramDirectory = ProgramDirectory.Empty,
+    val schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
 ) {
-  def withMemory(memory: AddressSpace): TaskContext = TaskContext(memory, control, handler, programs)
+  def withMemory(memory: AddressSpace): TaskContext = TaskContext(memory, control, handler, programs, schedule)
+  def withSchedule(schedule: ConcurrencySchedule): TaskContext =
+    TaskContext(memory, control, handler, programs, schedule)
 }

@@ -186,6 +186,35 @@ private[isa] object VMInterpreter {
       }
     }
 
+    def choose(schedule: ConcurrencySchedule): Cohort =
+      if (count <= 1) removeHead()
+      else {
+        val total  = count
+        val choice = schedule.choose(total)
+        if (choice == 0) removeHead() else removeAt(choice)
+      }
+
+    private def removeAt(choice: Int): Cohort = {
+      var seen   = -1
+      var i      = 0
+      var target = -1
+      while (i < order.size && target < 0) {
+        if (order(i).cohort ne null) { seen += 1; if (seen == choice) target = i }
+        if (target < 0) i += 1
+      }
+      if (target >= 0) {
+        val slot   = order.remove(target)
+        val cohort = slot.cohort.nn
+        if (slot.indexed) erase(find(key(cohort.pc, cohort.frame), tag(cohort.partition)))
+        slot.cohort = null
+        spare += slot
+        count -= 1
+        while (order.nonEmpty && (order.head.cohort eq null))
+          spare += order.removeHead()
+        cohort
+      } else removeHead()
+    }
+
     def removeHead(): Cohort = {
       var slot = order.removeHead()
       while (slot.cohort eq null) {
@@ -287,10 +316,18 @@ private[isa] object VMInterpreter {
       cluster: Option[Dimensions] = None,
       cooperative: Boolean = false,
       heap: Option[HeapRegion] = None,
-      handler: Event => Either[Fault, Unit] = _ => Right(())
+      handler: Event => Either[Fault, Unit] = _ => Right(()),
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
   ): Either[Fault, Unit] =
     parameterBlock(kernel.entry, arguments).flatMap { block =>
-      val device = VMDevice(DeviceHeap(memory), control, workgroups, handler = handler, heap = heap)
+      val device = VMDevice(
+        DeviceHeap(memory),
+        control,
+        workgroups,
+        handler = handler,
+        heap = heap,
+        schedule = schedule
+      )
       device.observer.observed(_.launched(resources(kernel, geometry, dynamicSharedBytes)))
       launch(kernel, geometry, block, device, dynamicSharedBytes, cluster, cooperative)
     }
@@ -590,6 +627,7 @@ private[isa] object VMInterpreter {
       cluster.nonEmpty
     )
     context.spin = SpinWatch((workgroup.laneCount + 31) >> 5, pace)
+    private val schedule     = device.schedule.forWorkgroup(group)
     private var live         = initialLive
     private val ready        = ReadyQueue()
     private var runningAhead = false
@@ -1360,7 +1398,7 @@ private[isa] object VMInterpreter {
         if (ready.isEmpty || stalled > ready.size || idle >= SpinBackoff) wake()
         if (ready.isEmpty) deadlock()
       }
-      var cohort = ready.removeHead()
+      var cohort = if (schedule eq ConcurrencySchedule.Fixed) ready.removeHead() else ready.choose(schedule)
       val frame  = cohort.frame
       frame.live = frame.live.intersect(live)
       val surviving = cohort.lanes.intersect(live)

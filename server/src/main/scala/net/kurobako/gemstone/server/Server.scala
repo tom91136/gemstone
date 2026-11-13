@@ -53,12 +53,14 @@ object Server {
         )
         record <- configuration.lookup(values, env.RecordFile)
           .fold[Either[String, Option[Path]]](Right(None))(paths.parse(env.RecordFile, _).map(Some(_)))
+        schedule <- ConcurrencySchedule.fromEnvironment(values)
       } yield Settings(
         limits = TaskControl.Limits(instructions),
         parallelism = workers.toIntExact,
         requestTimeoutMillis = (timeout * 1000L).toIntExact,
         record = record,
-        tracePerformance = configuration.lookup(values, env.TraceList).exists(configuration.traceEnabled(_, "perf"))
+        tracePerformance = configuration.lookup(values, env.TraceList).exists(configuration.traceEnabled(_, "perf")),
+        schedule = schedule
       )
     }
 
@@ -77,7 +79,8 @@ object Server {
       requestTimeoutMillis: Int > 0 = (env.RpcTimeoutSecondsDefault * 1000L).toIntExact,
       record: Option[Path] = None,
       tracePerformance: Boolean = false,
-      bind: Bind = Bind.Tcp()
+      bind: Bind = Bind.Tcp(),
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
   )
 
   /** Explicit settings keep startup independent of the process environment. */
@@ -114,7 +117,8 @@ object Server {
             executionContext = pool,
             parallelism = pool.parallelism,
             specialization = capabilities.specialization,
-            graphics = capabilities.graphics
+            graphics = capabilities.graphics,
+            schedule = settings.schedule
           ),
         client => journal.foreach(_.clientClosed(client))
       ))

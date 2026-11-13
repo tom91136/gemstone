@@ -13,7 +13,8 @@ private class ShaderExecutor(
     shader: GraphicsShader,
     memory: GraphicsAccess,
     handler: Event => Either[Fault, Unit],
-    program: VMProgram
+    program: VMProgram,
+    schedule: ConcurrencySchedule
 ) {
   private val descriptors = shader.arguments.map { argument =>
     val range = argument.getOrElse(throw IllegalArgumentException("shader descriptor was not prepared"))
@@ -25,7 +26,7 @@ private class ShaderExecutor(
     Vec(KernelTask.Argument.Memory(region, 0L, Some(size)))
   }
   private val relocations = shader.relocations
-  private val context     = TaskContext(memory, memory.control, handler)
+  private val context     = TaskContext(memory, memory.control, handler, schedule = schedule)
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def execute(count: Int >= 0, records: Array[Array[Byte]]): Unit = {
     require(!shader.fragmentQuads || count.raw % 4 == 0, "invalid shader invocation count")

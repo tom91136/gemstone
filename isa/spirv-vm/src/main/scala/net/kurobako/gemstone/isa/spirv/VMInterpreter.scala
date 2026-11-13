@@ -528,7 +528,15 @@ private object VMInterpreter {
         linearLocal += 1
       }
       if (hasCollectives || executions.nonEmpty)
-        runWorkgroup(program, timeline, ops, executions, groupState, control)
+        runWorkgroup(
+          program,
+          timeline,
+          ops,
+          executions,
+          groupState,
+          control,
+          context.schedule.forWorkgroup(group)
+        )
       else Right(())
     }
 
@@ -705,7 +713,8 @@ private object VMInterpreter {
   @SuppressWarnings(
     Array(
       "scalafix:DisableSyntax.var",
-      "scalafix:DisableSyntax.return"
+      "scalafix:DisableSyntax.return",
+      "scalafix:DisableSyntax.null"
     )
   )
   private def runWorkgroup(
@@ -714,21 +723,50 @@ private object VMInterpreter {
       ops: Array[Op],
       executions: mutable.ArrayBuffer[InvocationState],
       memory: MemoryState,
-      control: TaskControl
+      control: TaskControl,
+      schedule: ConcurrencySchedule
   ): Either[Fault, Unit] = {
+    val order = if (schedule eq ConcurrencySchedule.Fixed) null else Array.ofDim[Int](executions.size)
     while (executions.exists(!_.completed)) {
-      var index = 0
-      while (index < executions.size) {
-        val execution = executions(index)
-        if (
-          !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
-          execution.reconvergenceJoin.isEmpty
-        )
-          resumeInvocation(program, ops, execution, control) match {
-            case Left(error) => return Left(located(error, timeline, execution))
-            case Right(())   => ()
-          }
-        index += 1
+      if (order eq null) {
+        var index = 0
+        while (index < executions.size) {
+          val execution = executions(index)
+          if (
+            !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
+            execution.reconvergenceJoin.isEmpty
+          )
+            resumeInvocation(program, ops, execution, control) match {
+              case Left(error) => return Left(located(error, timeline, execution))
+              case Right(())   => ()
+            }
+          index += 1
+        }
+      } else {
+        val ordering = order.nn
+        var count    = 0
+        while (count < order.length) { ordering(count) = count; count += 1 }
+        var i = count - 1
+        while (i > 0) {
+          val j   = schedule.choose(i + 1)
+          val tmp = ordering(i)
+          ordering(i) = ordering(j)
+          ordering(j) = tmp
+          i -= 1
+        }
+        var step = 0
+        while (step < count) {
+          val execution = executions(ordering(step))
+          if (
+            !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
+            execution.reconvergenceJoin.isEmpty
+          )
+            resumeInvocation(program, ops, execution, control) match {
+              case Left(error) => return Left(located(error, timeline, execution))
+              case Right(())   => ()
+            }
+          step += 1
+        }
       }
       val hadPendingMemory = executions.exists(_.memoryPending)
       if (hadPendingMemory) {

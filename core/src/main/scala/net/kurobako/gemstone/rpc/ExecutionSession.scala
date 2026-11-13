@@ -133,7 +133,8 @@ class ExecutionSession(
     parallelism: Int > 0 = 1,
     specialization: Option[Backend.Specialization] = None,
     graphics: Option[GraphicsBackend] = None,
-    maxPrintEvents: Int > 0 = 16384
+    maxPrintEvents: Int > 0 = 16384,
+    schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
 ) extends AutoCloseable {
   import ExecutionSession.*
 
@@ -633,7 +634,8 @@ class ExecutionSession(
                     CompletionMemory(Storage, host, completion),
                     completion.control,
                     handleEvent(id, _),
-                    programs
+                    programs,
+                    schedule
                   )
                 )
                 host.retire(completion)

@@ -33,6 +33,7 @@ private object environmentKeys {
   val RpcEndpoint: String = "GEMSTONE_RPC_ENDPOINT"
   val RpcTimeoutSeconds: String = "GEMSTONE_RPC_TIMEOUT_SECONDS"
   val RpcTimeoutSecondsDefault: Long = 30L
+  val Schedule: String = "GEMSTONE_SCHEDULE"
   val SystemPagingOn: String = "GEMSTONE_SYSTEM_PAGING_ON"
   val TargetArch: String = "GEMSTONE_TARGET_ARCH"
   val TestCudaLibraryFile: String = "GEMSTONE_TEST_CUDA_LIBRARY_FILE"

@@ -42,7 +42,7 @@ class GraphicsRuntime(workgroups: Workgroups = Workgroups.Sequential) extends Gr
   override def execute(submission: GraphicsSubmission, context: TaskContext): Either[Fault, GraphicsStatistics] =
     GraphicsAccess.scoped(context.memory, context.control) { access =>
       val images = ImageOperations(access)
-      val draws  = DrawExecution(access, workgroups, context.handler)
+      val draws  = DrawExecution(access, workgroups, context.handler, context.schedule)
       val ranges = Vector.newBuilder[GraphicsRange]
       submission.commands.foreach(command =>
         GraphicsResources.foreach(command)(

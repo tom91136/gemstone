@@ -35,6 +35,7 @@ inline constexpr char RpcClientId[] = "GEMSTONE_RPC_CLIENT_ID";
 inline constexpr char RpcEndpoint[] = "GEMSTONE_RPC_ENDPOINT";
 inline constexpr char RpcTimeoutSeconds[] = "GEMSTONE_RPC_TIMEOUT_SECONDS";
 inline constexpr uint64_t RpcTimeoutSecondsDefault = 30;
+inline constexpr char Schedule[] = "GEMSTONE_SCHEDULE";
 inline constexpr char SystemPagingOn[] = "GEMSTONE_SYSTEM_PAGING_ON";
 inline constexpr char TargetArch[] = "GEMSTONE_TARGET_ARCH";
 inline constexpr char TestCudaLibraryFile[] = "GEMSTONE_TEST_CUDA_LIBRARY_FILE";

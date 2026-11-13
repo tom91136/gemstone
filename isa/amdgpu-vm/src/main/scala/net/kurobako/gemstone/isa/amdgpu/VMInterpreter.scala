@@ -222,10 +222,11 @@ private object VMInterpreter {
     val hostcall       = hostcallOffset.map(offset => HostcallBuffer(offset, HostcallListener(context.handler)))
     val dispatchMemory = VMDispatchMemory(kernel, kernarg, packet, allocations, memory, kernargAddress, heap, hostcall)
     val slices         = CodeSlices(CodeSlice(program, program.jumpTable, dispatchMemory), peers, allocations)
-    if (dispatch.cooperative) runResident(slices, dispatch, control, observer)
+    val schedule       = launch.context.schedule
+    if (dispatch.cooperative) runResident(slices, dispatch, control, observer, schedule)
     else
       Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group, pace) =>
-        runGroup(slices, dispatch, group, control, observer, pace)
+        runGroup(slices, dispatch, group, control, observer, pace, schedule.forWorkgroup(group))
       )
   }
 
@@ -254,7 +255,8 @@ private object VMInterpreter {
       slices: CodeSlices,
       dispatch: KernelTask,
       control: TaskControl,
-      observer: LaunchObserver | Null
+      observer: LaunchObserver | Null,
+      schedule: ConcurrencySchedule
   ): Either[Fault, Unit] =
     dispatch.geometry.groupTotal.refine[Long in 1L ~ 2147483647L] match {
       case Left(_) =>
@@ -264,16 +266,18 @@ private object VMInterpreter {
         val gws   = GlobalWaveSyncResources()
         // the HIP runtime sets resource 0 to a barrier of one wave per workgroup before each cooperative launch
         gws.initialise(0, total - 1L)
-        val groups = Array.tabulate[ResidentGroup | Null](total)(index =>
+        val groups = Array.tabulate[ResidentGroup | Null](total) { index =>
+          val group = dispatch.geometry.groupCoordinates(index.toLong.unsafe[Long >= 0])
           ResidentGroup(
             slices,
             dispatch,
-            dispatch.geometry.groupCoordinates(index.toLong.unsafe[Long >= 0]),
+            group,
             control,
             observer,
-            gws
+            gws,
+            schedule.forWorkgroup(group)
           )
-        )
+        }
         var remaining             = total
         var failure: Fault | Null = null
         while (remaining > 0 && failure == null) {
@@ -306,7 +310,8 @@ private object VMInterpreter {
       group: Coordinates,
       control: TaskControl,
       observer: LaunchObserver | Null,
-      gws: GlobalWaveSyncResources
+      gws: GlobalWaveSyncResources,
+      schedule: ConcurrencySchedule
   ) {
     private val program    = slices.origin.program
     private val kernel     = program.source
@@ -335,14 +340,50 @@ private object VMInterpreter {
     }
     private val finished = Array.fill(waveCount)(false)
     private val arrived  = Array.fill(waveCount)(false)
+    private val order    = if (schedule eq ConcurrencySchedule.Fixed) null else Array.ofDim[Int](waveCount)
 
     def advance(): Either[Fault, Residency] = {
       var failure: Fault | Null = null
       var progressed            = false
-      var waveIndex             = 0
-      while (waveIndex < waveCount && failure == null) {
-        if (!finished(waveIndex) && !arrived(waveIndex)) {
-          val wave = waves(waveIndex)
+      if (order eq null) {
+        var waveIndex = 0
+        while (waveIndex < waveCount && failure == null) {
+          if (!finished(waveIndex) && !arrived(waveIndex)) {
+            val wave = waves(waveIndex)
+            wave.run() match {
+              case Left(error)                 => failure = error
+              case Right(WaveBoundary.Barrier) =>
+                arrived(waveIndex) = true
+                progressed = true
+              case Right(WaveBoundary.End) =>
+                finished(waveIndex) = true
+                barriers.drop(waveIndex)
+                progressed = true
+              case Right(WaveBoundary.Suspended) => if (!wave.stalled) progressed = true
+            }
+          }
+          waveIndex += 1
+        }
+      } else {
+        val ordering = order.nn
+        var count    = 0
+        var w        = 0
+        while (w < waveCount) {
+          if (!finished(w) && !arrived(w)) { ordering(count) = w; count += 1 }
+          w += 1
+        }
+        var i = count - 1
+        while (i > 0) {
+          val j   = schedule.choose(i + 1)
+          val tmp = ordering(i)
+          ordering(i) = ordering(j)
+          ordering(j) = tmp
+          i -= 1
+        }
+        var step = 0
+        while (step < count && failure == null) {
+          val waveIndex = ordering(step)
+          val wave      = waves(waveIndex)
           wave.run() match {
             case Left(error)                 => failure = error
             case Right(WaveBoundary.Barrier) =>
@@ -354,8 +395,8 @@ private object VMInterpreter {
               progressed = true
             case Right(WaveBoundary.Suspended) => if (!wave.stalled) progressed = true
           }
+          step += 1
         }
-        waveIndex += 1
       }
       if (failure != null) Left(failure)
       else {
@@ -378,7 +419,8 @@ private object VMInterpreter {
       group: Coordinates,
       control: TaskControl,
       observer: LaunchObserver | Null,
-      pace: Pace
+      pace: Pace,
+      schedule: ConcurrencySchedule
   ): Either[Fault, Unit] = {
     val program    = slices.origin.program
     val kernel     = program.source
@@ -390,17 +432,75 @@ private object VMInterpreter {
     val barriers   = WorkgroupBarriers(waveCount, program.isa == ISA.CDNA5)
     // A wave can end before others reach a barrier in divergent control flow; it must not restart next round.
     val finished              = Array.ofDim[Boolean](waveCount)
+    val order                 = if (schedule eq ConcurrencySchedule.Fixed) null else Array.ofDim[Int](waveCount)
     var complete              = false
     var failure: Fault | Null = null
     while (!complete && failure == null) {
-      var waiting   = 0
-      var blocked   = 0
-      var live      = 0
-      var waveIndex = 0
-      while (waveIndex < waveCount && failure == null) {
-        if (!finished(waveIndex)) {
-          live += 1
-          val wave = waves(waveIndex) match {
+      var waiting = 0
+      var blocked = 0
+      var live    = 0
+      if (order eq null) {
+        var waveIndex = 0
+        while (waveIndex < waveCount && failure == null) {
+          if (!finished(waveIndex)) {
+            live += 1
+            val wave = waves(waveIndex) match {
+              case null =>
+                val start = waveIndex * waveSize
+                // The enclosing wave loop guarantees start < localCount; waveSize is 32 or 64.
+                val lanes = math.min(waveSize, localCount - start).unsafe[Int where Between[1, 64]]
+                WaveRun(
+                  slices,
+                  dispatch.geometry,
+                  group,
+                  start,
+                  lanes,
+                  lds,
+                  barriers,
+                  control,
+                  observer,
+                  null,
+                  pace
+                )
+              case started => started
+            }
+            wave.run() match {
+              case Left(error)                 => failure = error
+              case Right(WaveBoundary.Barrier) =>
+                waves(waveIndex) = wave
+                waiting += 1
+              case Right(WaveBoundary.Suspended) =>
+                waves(waveIndex) = wave
+                waiting += 1
+                if (wave.stalled) blocked += 1
+              case Right(WaveBoundary.End) =>
+                waves(waveIndex) = null
+                finished(waveIndex) = true
+                barriers.drop(waveIndex)
+            }
+          }
+          waveIndex += 1
+        }
+      } else {
+        val ordering = order.nn
+        var count    = 0
+        var w        = 0
+        while (w < waveCount) {
+          if (!finished(w)) { live += 1; ordering(count) = w; count += 1 }
+          w += 1
+        }
+        var i = count - 1
+        while (i > 0) {
+          val j   = schedule.choose(i + 1)
+          val tmp = ordering(i)
+          ordering(i) = ordering(j)
+          ordering(j) = tmp
+          i -= 1
+        }
+        var step = 0
+        while (step < count && failure == null) {
+          val waveIndex = ordering(step)
+          val wave      = waves(waveIndex) match {
             case null =>
               val start = waveIndex * waveSize
               // The enclosing wave loop guarantees start < localCount; waveSize is 32 or 64.
@@ -434,8 +534,8 @@ private object VMInterpreter {
               finished(waveIndex) = true
               barriers.drop(waveIndex)
           }
+          step += 1
         }
-        waveIndex += 1
       }
       if (failure == null)
         if (live == 0 || waiting == 0) complete = true

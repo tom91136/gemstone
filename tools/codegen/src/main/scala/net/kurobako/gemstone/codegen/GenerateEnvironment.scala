@@ -71,6 +71,7 @@ object GenerateEnvironment {
       "GEMSTONE_RPC_CLIENT_ID"                   -> "",
       "GEMSTONE_RPC_ENDPOINT"                    -> "",
       "GEMSTONE_RPC_TIMEOUT_SECONDS"             -> "30",
+      "GEMSTONE_SCHEDULE"                        -> "",
       "GEMSTONE_SYSTEM_PAGING_ON"                -> "",
       "GEMSTONE_TARGET_ARCH"                     -> "",
       "GEMSTONE_TEST_CUDA_LIBRARY_FILE"          -> "",

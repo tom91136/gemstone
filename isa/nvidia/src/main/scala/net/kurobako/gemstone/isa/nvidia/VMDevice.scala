@@ -13,7 +13,8 @@ private case class VMDevice(
     workgroups: Workgroups,
     gridWorkspace: Long = 0L,
     handler: Event => Either[Fault, Unit],
-    heap: Option[HeapRegion] = None
+    heap: Option[HeapRegion] = None,
+    schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
 ) {
   val observer: LaunchObserver | Null = control.observer.orNull
 }

@@ -50,8 +50,9 @@ private object fixtures extends munit.Assertions {
       task: KernelTask,
       memory: AddressSpace,
       control: TaskControl = TaskControl(),
-      handler: Event => Either[Fault, Unit] = _ => Right(())
-  ): Either[Fault, Unit] = program.execute(task, TaskContext(memory, control, handler))
+      handler: Event => Either[Fault, Unit] = _ => Right(()),
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
+  ): Either[Fault, Unit] = program.execute(task, TaskContext(memory, control, handler, schedule = schedule))
 
   def run(
       module: Module,

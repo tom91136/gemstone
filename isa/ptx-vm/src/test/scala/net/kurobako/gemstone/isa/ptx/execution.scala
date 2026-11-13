@@ -91,7 +91,8 @@ private object execution extends munit.Assertions {
       workgroups: Workgroups = Workgroups.Sequential,
       dynamicSharedBytes: Int >= 0 = 0,
       cluster: Option[Dimensions] = None,
-      cooperative: Boolean = false
+      cooperative: Boolean = false,
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
   ): Either[Fault, Unit] =
     VMInterpreter.execute(
       kernel,
@@ -102,6 +103,7 @@ private object execution extends munit.Assertions {
       workgroups,
       dynamicSharedBytes,
       cluster,
-      cooperative
+      cooperative,
+      schedule = schedule
     )
 }

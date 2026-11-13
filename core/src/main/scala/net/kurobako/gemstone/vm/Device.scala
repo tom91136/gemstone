@@ -7,7 +7,12 @@ import scala.jdk.CollectionConverters.*
 /** An in-process device for embedders: backends that load programs, one memory every launch runs against, and
   * synchronous launches. The caller owns and closes the programs it loads.
   */
-class Device(backends: BackendRegistry, memory: AddressSpace, limits: TaskControl.Limits = TaskControl.Limits.Default) {
+class Device(
+    backends: BackendRegistry,
+    memory: AddressSpace,
+    limits: TaskControl.Limits = TaskControl.Limits.Default,
+    schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
+) {
   def load(format: ProgramFormat, image: Vec[Byte]): Either[Fault, Backend.Program] = backends.load(format, image)
 
   /** Runs `task` to completion under a fresh instruction allowance, returning the events it raised. Parallel workgroups
@@ -25,7 +30,8 @@ class Device(backends: BackendRegistry, memory: AddressSpace, limits: TaskContro
       TaskContext(
         observer.fold(memory)(ObservedAddressSpace(memory, _)),
         TaskControl(limits, observer),
-        event => Right(events.add(event)).map(_ => ())
+        event => Right(events.add(event)).map(_ => ()),
+        schedule = schedule
       )
     ).map(_ => Vec.from(events.asScala))
   }
