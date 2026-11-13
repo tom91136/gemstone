@@ -35,6 +35,7 @@ inline constexpr char VulkanDeviceId[] = "CONFORMANCE_VULKAN_DEVICE_ID";
 inline constexpr char BuildProfile[] = "CONFORMANCE_BUILD_PROFILE";
 inline constexpr char ShardRouteList[] = "CONFORMANCE_SHARD_ROUTE_LIST";
 inline constexpr char SyclShardIndex[] = "CONFORMANCE_SYCL_SHARD_INDEX";
+inline constexpr char Sysroot[] = "CONFORMANCE_SYSROOT";
 
 // CMake truth values, matching Gemstone.
 inline std::optional<bool> boolean(std::string_view value) {

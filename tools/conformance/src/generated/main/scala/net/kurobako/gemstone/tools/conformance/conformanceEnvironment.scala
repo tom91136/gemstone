@@ -20,6 +20,7 @@ object conformanceEnvironment {
   val ShardRouteList: String = "CONFORMANCE_SHARD_ROUTE_LIST"
   val SupportDir: String = "CONFORMANCE_SUPPORT_DIR"
   val SyclShardIndex: String = "CONFORMANCE_SYCL_SHARD_INDEX"
+  val Sysroot: String = "CONFORMANCE_SYSROOT"
   val TargetArch: String = "CONFORMANCE_TARGET_ARCH"
   val TargetBackendName: String = "CONFORMANCE_TARGET_BACKEND_NAME"
   val TestName: String = "CONFORMANCE_TEST_NAME"
