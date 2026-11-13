@@ -1,6 +1,20 @@
 include_guard(GLOBAL)
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ContainerBuild.cmake")
 
+# Every file .dockerignore lets into the build context can reach an image, so each one keys every image tag.
+function(conformance_context_inputs output)
+  get_filename_component(context "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/.." ABSOLUTE)
+  set(inputs "${context}/.dockerignore")
+  file(STRINGS "${context}/.dockerignore" patterns REGEX "^![^/]+(/[^/]+)*$")
+  foreach(pattern IN LISTS patterns)
+    string(SUBSTRING "${pattern}" 1 -1 pattern)
+    file(GLOB matched "${context}/${pattern}")
+    list(APPEND inputs ${matched})
+  endforeach()
+  set(${output} ${inputs} PARENT_SCOPE)
+endfunction()
+conformance_context_inputs(conformance_context_inputs)
+
 set(conformance_cuda_11_8_architectures sm_35 sm_50 sm_60 sm_70)
 set(conformance_cuda_13_3_architectures sm_75 sm_80 sm_86 sm_87 sm_89 sm_90 sm_100 sm_103 sm_120
   sm_90a sm_100a sm_100f sm_103a sm_103f sm_120a sm_120f)
@@ -50,7 +64,7 @@ set(conformance_native_toolchain_image
   FILE "${CONFORMANCE_SOURCE_DIRECTORY}/Containerfile"
   STAGE native-toolchain
   BUILD_ARGUMENTS ${conformance_native_toolchain_build_arguments}
-  INPUTS "${CONFORMANCE_SOURCE_DIRECTORY}/.dockerignore")
+  INPUTS ${conformance_context_inputs})
 set(conformance_gcc_version 14)
 set(conformance_gcc_runtime_version 14.2.0)
 set(conformance_gcc_runtime_sha256 a7b39bc69cbf9e25826c5a60ab26477001f7c08d85cec04bc0e29cabed6f3cc9)
@@ -143,7 +157,7 @@ function(conformance_offload_archive output)
       CONTEXT "${CONFORMANCE_SOURCE_DIRECTORY}"
       STAGE llvm-offload
       BUILD_ARGUMENTS ${conformance_clang_build_arguments}
-      INPUTS "${CONFORMANCE_SOURCE_DIRECTORY}/.dockerignore"
+      INPUTS ${conformance_context_inputs}
       JOB_POOL container_build)
     get_property(archives GLOBAL PROPERTY CONFORMANCE_OFFLOAD_ARCHIVES)
     if(NOT archive IN_LIST archives)
@@ -207,7 +221,7 @@ function(conformance_toolchain backend architecture image_output dependency_outp
     endif()
   endif()
 
-  set(inputs "${CONFORMANCE_SOURCE_DIRECTORY}/.dockerignore")
+  set(inputs ${conformance_context_inputs})
   if(compiler STREQUAL "clang")
     if(cuda_package STREQUAL "11-8")
       set(cccl_version 2.8.2)
@@ -222,7 +236,6 @@ function(conformance_toolchain backend architecture image_output dependency_outp
     list(APPEND build_arguments --build-arg "GCC_VERSION=${conformance_gcc_version}"
       --build-arg "GCC_RUNTIME_VERSION=${conformance_gcc_runtime_version}"
       --build-arg "GCC_RUNTIME_SHA256=${conformance_gcc_runtime_sha256}")
-    list(APPEND inputs "${CONFORMANCE_SOURCE_DIRECTORY}/patches/libgomp-default-device.patch")
   endif()
   if(NOT compiler STREQUAL "vendor")
     string(APPEND key "-${compiler}")

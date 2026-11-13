@@ -69,8 +69,7 @@ jobs:
         # the conformance jobserver needs make >= 4.4 and ninja >= 1.13; LLVM is the release the conformance images pin,
         # rather than apt.llvm.org, which drops out often enough to fail runs
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends build-essential \
+          sudo conformance/apt-install build-essential \
             cmake libgc-dev liblz4-dev libzstd-dev zlib1g-dev python3 unzip xz-utils zstd
           tools=~/.local/tools
           if [ ! -x "$tools/bin/make" ] || [ ! -x "$tools/bin/ninja" ]; then

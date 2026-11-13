@@ -1,0 +1,13 @@
+#!/bin/sh
+# apt retries single requests, but a mirror mid-sync or a resolver outage fails a whole run for minutes, so the update
+# and install start over after a growing wait
+export DEBIAN_FRONTEND=noninteractive
+for delay in 30 60 120 240 ""; do
+  apt-get update -o APT::Update::Error-Mode=any \
+    && apt-get install --no-install-recommends --yes "$@" \
+    && rm -rf /var/lib/apt/lists/* \
+    && exit 0
+  [ -n "$delay" ] || exit 1
+  rm -rf /var/lib/apt/lists/*
+  sleep "$delay"
+done
