@@ -132,7 +132,7 @@ object PipelineSimulator {
     val order      = architecture.issueOrder.map(_.value).getOrElse(Architecture.IssueOrder.RoundRobin)
     // A spread placement models the same waves on every active partition; their mix comes from
     // several workgroups, so the single-partition age order is only applied when one is active.
-    val scheduled   = if active == 1 then order else Architecture.IssueOrder.RoundRobin
+    val scheduled   = if (active == 1) order else Architecture.IssueOrder.RoundRobin
     val busyUntil   = mutable.Map.empty[ProfileReport.Binding, Long]
     val busyCycles  = mutable.Map.empty[ProfileReport.Binding, Long]
     val timeline    = mutable.ArrayBuffer.empty[Entry]
@@ -253,7 +253,7 @@ object PipelineSimulator {
           case None =>
             marks(key) = Mark(t, warps.map(_.position), busyCycles.toMap, issuedSlots)
             val next = cycle(t, start)
-            settle(t + 1, if scheduled == Architecture.IssueOrder.OldestFirst then 0 else next)
+            settle(t + 1, if (scheduled == Architecture.IssueOrder.OldestFirst) 0 else next)
         }
       case None if warps.forall(_.done) =>
         Window(
@@ -264,7 +264,7 @@ object PipelineSimulator {
         )
       case None =>
         val next = cycle(t, start)
-        settle(t + 1, if scheduled == Architecture.IssueOrder.OldestFirst then 0 else next)
+        settle(t + 1, if (scheduled == Architecture.IssueOrder.OldestFirst) 0 else next)
     }
 
     val window    = settle(0L, 0)
