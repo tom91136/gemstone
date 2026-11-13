@@ -27,6 +27,12 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   * launch at host load average 6.9 to 8.6 on 32 threads. The gfx1036 values are shader cycles: `clock64` lowers to
   * `s_memtime`, which counts `SHADER_CYCLES`.
   *
+  * The 2026-11-13 probe rows were measured with 201 launches after 5 warm-ups: 4096 iterations per launch on sm_89 at
+  * host load average 30 to 36, and 1024 to 4096 iterations on gfx1036 at host load average 21 to 31. Those gfx1036 rows
+  * hold one workgroup per launch and divide by the warps listed, not the two workgroups the earlier gfx1036 rows hold.
+  * Placements follow slot mod 4 on sm_89 and `hw_id1` bits 9-8 on gfx1036; `same SMSP` and `same SIMD` put every warp
+  * on one partition.
+  *
   * The expected binding is `Path` when the case runs over 25 percent above the smallest cycles per iteration the card
   * reached with 1 to 32 resident warps, and otherwise the resource whose instruction count and rate give that smallest
   * value.
@@ -46,10 +52,20 @@ class HardwareValidationSuite extends Suite {
       placement: Option[At] = None
   )
 
-  private val split2  = At("different SMSPs", Vec(1, 1, 0, 0))
-  private val same2   = At("same SMSP", Vec(2, 0, 0, 0))
-  private val slots4  = At("slots 0-3", Vec(1, 1, 1, 1))
-  private val spread4 = At("slots 0,4,8,12", Vec(4, 0, 0, 0))
+  private val split2    = At("different SMSPs", Vec(1, 1, 0, 0))
+  private val same2     = At("same SMSP", Vec(2, 0, 0, 0))
+  private val same4     = At("same SMSP", Vec(4, 0, 0, 0))
+  private val same8     = At("same SMSP", Vec(8, 0, 0, 0))
+  private val slots4    = At("slots 0-3", Vec(1, 1, 1, 1))
+  private val spread4   = At("slots 0,4,8,12", Vec(4, 0, 0, 0))
+  private val oneSimd   = At("one SIMD", Vec(1, 0, 0, 0))
+  private val sameSimd2 = At("same SIMD", Vec(2, 0, 0, 0))
+  private val sameSimd4 = At("same SIMD", Vec(4, 0, 0, 0))
+  private val sameSimd8 = At("same SIMD", Vec(8, 0, 0, 0))
+  private val eachSimd1 = At("one per SIMD", Vec(1, 1, 1, 1))
+  private val eachSimd2 = At("two per SIMD", Vec(2, 2, 2, 2))
+  private val eachSimd4 = At("four per SIMD", Vec(4, 4, 4, 4))
+  private val eachSimd8 = At("eight per SIMD", Vec(8, 8, 8, 8))
 
   private val sm89Shared: Long    = 101376L
   private val gfx1036Shared: Long = 65536L
@@ -109,7 +125,18 @@ class HardwareValidationSuite extends Suite {
     Measured("chain_dfma_16", 1, 768.02, Some(Binding.Path)),
     Measured("stream_mufu_1", 1, 28.01, Some(Binding.Path)),
     Measured("stream_mufu_4", 1, 36.01, Some(Binding.Arithmetic(Pipe.Mufu))),
-    Measured("stream_mufu_16", 1, 137.01, Some(Binding.Arithmetic(Pipe.Mufu)))
+    Measured("stream_mufu_16", 1, 137.01, Some(Binding.Arithmetic(Pipe.Mufu))),
+    Measured("stream_mufu_16", 2, 128.43, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same2)),
+    Measured("stream_mufu_16", 4, 128.04, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same4)),
+    Measured("stream_mufu_16", 8, 128.01, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same8)),
+    Measured("stream_dfma_reg_2", 1, 81.01, Some(Binding.Path)),
+    Measured("stream_dfma_reg_4", 1, 113.01, Some(Binding.Path)),
+    Measured("loop_control", 1, 27.01, Some(Binding.Path)),
+    Measured("chain_ffma_8", 1, 39.01, Some(Binding.Path)),
+    Measured("chain_ffma_8", 4, 11.88, Some(Binding.Issue), Some(same4)),
+    Measured("chain_ffma_8", 8, 11.08, Some(Binding.Issue), Some(same8)),
+    Measured("stream_ffma_8", 4, 12.91, Some(Binding.Path), Some(same4)),
+    Measured("stream_ffma_8", 8, 11.54, Some(Binding.Path), Some(same8))
   )
 
   private val gfx1036Cases = Vec(
@@ -147,7 +174,24 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_mufu_16", 1, 46.50, Some(Binding.Path)),
     Measured("stream_dfma_1", 1, 11.02, Some(Binding.Path)),
     Measured("stream_dfma_4", 1, 39.52, Some(Binding.Path)),
-    Measured("stream_dfma_16", 1, 127.98, Some(Binding.Arithmetic(Pipe.Fp64)))
+    Measured("stream_dfma_16", 1, 127.98, Some(Binding.Arithmetic(Pipe.Fp64))),
+    Measured("stream_dfma_16_wide", 1, 255.98, Some(Binding.Path), Some(oneSimd)),
+    Measured("stream_dfma_16_wide", 2, 255.25, Some(Binding.Path), Some(sameSimd2)),
+    Measured("stream_dfma_16_wide", 4, 242.41, Some(Binding.Path), Some(sameSimd4)),
+    Measured("stream_dfma_16_wide", 4, 63.99, Some(Binding.Arithmetic(Pipe.Fp64)), Some(eachSimd1)),
+    Measured("stream_dfma_16_wide", 8, 63.81, Some(Binding.Arithmetic(Pipe.Fp64)), Some(eachSimd2)),
+    Measured("stream_dfma_16_wide", 16, 60.62, Some(Binding.Arithmetic(Pipe.Fp64)), Some(eachSimd4)),
+    Measured("stream_dfma_rate", 1, 63.99, Some(Binding.Arithmetic(Pipe.Fp64)), Some(oneSimd)),
+    Measured("stream_mufu_16_wide", 1, 93.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("stream_mufu_16_wide", 2, 71.34, Some(Binding.Path), Some(sameSimd2)),
+    Measured("stream_mufu_16_wide", 4, 67.78, Some(Binding.Path), Some(sameSimd4)),
+    Measured("stream_mufu_16_wide", 8, 65.77, Some(Binding.Path), Some(sameSimd8)),
+    Measured("stream_mufu_16_wide", 4, 23.25, Some(Binding.Path), Some(eachSimd1)),
+    Measured("stream_mufu_16_wide", 8, 17.84, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd2)),
+    Measured("stream_mufu_16_wide", 16, 16.97, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd4)),
+    Measured("stream_mufu_16_wide", 32, 16.45, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd8)),
+    Measured("stream_ffma_8", 4, 10.86, Some(Binding.Path), Some(sameSimd4)),
+    Measured("stream_ffma_8", 8, 10.40, Some(Binding.Path), Some(sameSimd8))
   )
 
   private class State(

@@ -414,6 +414,40 @@ object HardwareLoops {
       row("MUFU.RSQ R6, R6", "mufu", "R6", "R6", enc(8, false)),
       row("MUFU.RSQ R0, R0", "mufu", "R0", "R0", enc(1, false)),
       row("@!P0 BRA 0x1c0", "-", "P0", "", enc(5, false))
+    ),
+    "stream_dfma_reg_2" -> Vec(
+      row("IADD3 R0, R0, 0x1, RZ", "alu", "R0", "R0", enc(1, false)),
+      row("DFMA R12, R8, R12, R10", "fp64", "R8 R9 R12 R13 R10 R11", "R12 R13", enc(4, true)),
+      row("ISETP.GE.AND P0, PT, R0, c[0x0][0x160], PT", "alu", "R0", "P0", enc(4, false)),
+      row("DFMA R14, R8, R14, R10", "fp64", "R8 R9 R14 R15 R10 R11", "R14 R15", enc(1, true)),
+      row("@!P0 BRA 0x340", "-", "P0", "", enc(5, false))
+    ),
+    "stream_dfma_reg_4" -> Vec(
+      row("IADD3 R3, R3, 0x1, RZ", "alu", "R3", "R3", enc(1, false)),
+      row("DFMA R16, R8, R16, R12", "fp64", "R8 R9 R16 R17 R12 R13", "R16 R17", enc(4, true)),
+      row("ISETP.GE.AND P0, PT, R3, c[0x0][0x160], PT", "alu", "R3", "P0", enc(4, false)),
+      row("DFMA R18, R8, R18, R12", "fp64", "R8 R9 R18 R19 R12 R13", "R18 R19", enc(4, true)),
+      row("DFMA R20, R8, R20, R12", "fp64", "R8 R9 R20 R21 R12 R13", "R20 R21", enc(4, true)),
+      row("DFMA R14, R8, R14, R12", "fp64", "R8 R9 R14 R15 R12 R13", "R14 R15", enc(1, true)),
+      row("@!P0 BRA 0x3c0", "-", "P0", "", enc(5, false))
+    ),
+    "loop_control" -> Vec(
+      row("IADD3 R0, R0, 0x1, RZ", "alu", "R0", "R0", enc(1, false)),
+      row("ISETP.GE.AND P0, PT, R0, c[0x0][0x160], PT", "alu", "R0", "P0", enc(4, false)),
+      row("@!P0 BRA 0x2b0", "-", "P0", "", enc(5, false))
+    ),
+    "chain_ffma_8" -> Vec(
+      row("IADD3 R11, R11, 0x1, RZ", "alu", "R11", "R11", enc(1, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(4, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(4, false)),
+      row("ISETP.GE.AND P0, PT, R11, c[0x0][0x160], PT", "alu", "R11", "P0", enc(4, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(4, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(4, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(4, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(4, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(4, false)),
+      row("FFMA R0, R0, R3, c[0x0][0x174]", "fma", "R0 R3", "R0", enc(1, false)),
+      row("@!P0 BRA 0x2a0", "-", "P0", "", enc(5, false))
     )
   )
 
@@ -764,6 +798,57 @@ object HardwareLoops {
       row("s_add_i32 s0, s0, -1", "-", "s0", "s0 scc", est(1)),
       row("s_cmp_eq_u32 s0, 0", "-", "s0", "scc", est(1)),
       row("s_cbranch_scc0 -35", "-", "scc", "", est(1))
+    ),
+    "stream_dfma_16_wide" -> Vec(
+      row("v_fma_f64 v[1:2], v[1:2], v[33:34], v[35:36]", "fp64", "v1 v2 v33 v34 v35 v36", "v1 v2", est(1)),
+      row("v_fma_f64 v[3:4], v[3:4], v[33:34], v[35:36]", "fp64", "v3 v4 v33 v34 v35 v36", "v3 v4", est(1)),
+      row("v_fma_f64 v[5:6], v[5:6], v[33:34], v[35:36]", "fp64", "v5 v6 v33 v34 v35 v36", "v5 v6", est(1)),
+      row("v_fma_f64 v[7:8], v[7:8], v[33:34], v[35:36]", "fp64", "v7 v8 v33 v34 v35 v36", "v7 v8", est(1)),
+      row("v_fma_f64 v[9:10], v[9:10], v[33:34], v[35:36]", "fp64", "v9 v10 v33 v34 v35 v36", "v9 v10", est(1)),
+      row("v_fma_f64 v[11:12], v[11:12], v[33:34], v[35:36]", "fp64", "v11 v12 v33 v34 v35 v36", "v11 v12", est(1)),
+      row("v_fma_f64 v[13:14], v[13:14], v[33:34], v[35:36]", "fp64", "v13 v14 v33 v34 v35 v36", "v13 v14", est(1)),
+      row("v_fma_f64 v[15:16], v[15:16], v[33:34], v[35:36]", "fp64", "v15 v16 v33 v34 v35 v36", "v15 v16", est(1)),
+      row("v_fma_f64 v[17:18], v[17:18], v[33:34], v[35:36]", "fp64", "v17 v18 v33 v34 v35 v36", "v17 v18", est(1)),
+      row("v_fma_f64 v[19:20], v[19:20], v[33:34], v[35:36]", "fp64", "v19 v20 v33 v34 v35 v36", "v19 v20", est(1)),
+      row("v_fma_f64 v[21:22], v[21:22], v[33:34], v[35:36]", "fp64", "v21 v22 v33 v34 v35 v36", "v21 v22", est(1)),
+      row("v_fma_f64 v[23:24], v[23:24], v[33:34], v[35:36]", "fp64", "v23 v24 v33 v34 v35 v36", "v23 v24", est(1)),
+      row("v_fma_f64 v[25:26], v[25:26], v[33:34], v[35:36]", "fp64", "v25 v26 v33 v34 v35 v36", "v25 v26", est(1)),
+      row("v_fma_f64 v[27:28], v[27:28], v[33:34], v[35:36]", "fp64", "v27 v28 v33 v34 v35 v36", "v27 v28", est(1)),
+      row("v_fma_f64 v[29:30], v[29:30], v[33:34], v[35:36]", "fp64", "v29 v30 v33 v34 v35 v36", "v29 v30", est(1)),
+      row("v_fma_f64 v[31:32], v[31:32], v[33:34], v[35:36]", "fp64", "v31 v32 v33 v34 v35 v36", "v31 v32", est(1)),
+      row("s_add_i32 s0, s0, -1", "-", "s0", "s0 scc", est(1)),
+      row("s_cmp_eq_u32 s0, 0", "-", "s0", "scc", est(1)),
+      row("s_cbranch_scc0 -35", "-", "scc", "", est(1))
+    ),
+    "stream_dfma_rate" -> Vec(
+      row("v_fma_f64 v[1:2], v[1:2], v[9:10], v[11:12]", "fp64", "v1 v2 v9 v10 v11 v12", "v1 v2", est(1)),
+      row("v_fma_f64 v[3:4], v[3:4], v[9:10], v[11:12]", "fp64", "v3 v4 v9 v10 v11 v12", "v3 v4", est(1)),
+      row("v_fma_f64 v[5:6], v[5:6], v[9:10], v[11:12]", "fp64", "v5 v6 v9 v10 v11 v12", "v5 v6", est(1)),
+      row("v_fma_f64 v[7:8], v[7:8], v[9:10], v[11:12]", "fp64", "v7 v8 v9 v10 v11 v12", "v7 v8", est(1)),
+      row("s_add_i32 s0, s0, -1", "-", "s0", "s0 scc", est(1)),
+      row("s_cmp_eq_u32 s0, 0", "-", "s0", "scc", est(1)),
+      row("s_cbranch_scc0 -11", "-", "scc", "", est(1))
+    ),
+    "stream_mufu_16_wide" -> Vec(
+      row("v_rcp_f32 v2, v2", "mufu", "v2", "v2", est(1)),
+      row("v_rcp_f32 v3, v3", "mufu", "v3", "v3", est(1)),
+      row("v_rcp_f32 v4, v4", "mufu", "v4", "v4", est(1)),
+      row("v_rcp_f32 v5, v5", "mufu", "v5", "v5", est(1)),
+      row("v_rcp_f32 v6, v6", "mufu", "v6", "v6", est(1)),
+      row("v_rcp_f32 v7, v7", "mufu", "v7", "v7", est(1)),
+      row("v_rcp_f32 v8, v8", "mufu", "v8", "v8", est(1)),
+      row("v_rcp_f32 v9, v9", "mufu", "v9", "v9", est(1)),
+      row("v_rcp_f32 v10, v10", "mufu", "v10", "v10", est(1)),
+      row("v_rcp_f32 v11, v11", "mufu", "v11", "v11", est(1)),
+      row("v_rcp_f32 v12, v12", "mufu", "v12", "v12", est(1)),
+      row("v_rcp_f32 v17, v17", "mufu", "v17", "v17", est(1)),
+      row("v_rcp_f32 v15, v15", "mufu", "v15", "v15", est(1)),
+      row("v_rcp_f32 v16, v16", "mufu", "v16", "v16", est(1)),
+      row("v_rcp_f32 v14, v14", "mufu", "v14", "v14", est(1)),
+      row("v_rcp_f32 v13, v13", "mufu", "v13", "v13", est(1)),
+      row("s_add_i32 s0, s0, -1", "-", "s0", "s0 scc", est(1)),
+      row("s_cmp_eq_u32 s0, 0", "-", "s0", "scc", est(1)),
+      row("s_cbranch_scc0 -19", "-", "scc", "", est(1))
     )
   )
 
