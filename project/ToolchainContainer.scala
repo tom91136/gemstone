@@ -3,7 +3,13 @@ import java.nio.file.Path
 import scala.sys.process.Process
 
 /** The native toolchain image, which holds the compilers and sysroot the shipped libraries build with. */
-final case class ToolchainContainer(executable: String, image: String, root: Path, fixtures: Path) {
+final case class ToolchainContainer(
+    executable: String,
+    image: String,
+    root: Path,
+    fixtures: Path,
+    environment: Map[String, String] = Map.empty
+) {
   import Paths.*
 
   /** Runs the command in the image with the repository mounted at its host path, so paths in either agree. */
@@ -17,9 +23,9 @@ final case class ToolchainContainer(executable: String, image: String, root: Pat
         "--env",
         "HOME=/tmp",
         "--env",
-        s"CMAKE_BUILD_PARALLEL_LEVEL=${BuildEnvironment.threadCount}",
-        image
-      ) ++ command
+        s"CMAKE_BUILD_PARALLEL_LEVEL=${BuildEnvironment.threadCount}"
+      ) ++ environment.toSeq.flatMap((name, value) => Seq("--env", s"$name=$value")) ++
+      Seq(image) ++ command
 }
 
 object ToolchainContainer {

@@ -70,7 +70,7 @@ jobs:
         # rather than apt.llvm.org, which drops out often enough to fail runs
         run: |
           sudo conformance/apt-install build-essential \
-            cmake libgc-dev liblz4-dev libzstd-dev zlib1g-dev python3 unzip xz-utils zstd
+            cmake jq libgc-dev liblz4-dev libzstd-dev zlib1g-dev python3 unzip xz-utils zstd
           tools=~/.local/tools
           if [ ! -x "$tools/bin/make" ] || [ ! -x "$tools/bin/ninja" ]; then
             curl -fsSL https://ftp.gnu.org/gnu/make/make-4.4.1.tar.gz | tar -xz -C "$RUNNER_TEMP"
@@ -458,6 +458,41 @@ jobs:
           sbt --server --batch native/test || status=1
           ctest --test-dir target/conformance/host --output-on-failure --parallel "$(nproc)" || status=1
           exit $status
+
+  sanitize:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GEMSTONE_OFFLINE_ON: 1
+    steps:
+      - *free-disk
+      - *checkout
+      - *java
+      - *sbt
+      - *tools-cache
+      - *tools
+      - *toolchain-image-key
+      - *toolchain-image
+      - *toolchain-image-load
+      - *references
+      - *download-build
+      - *unpack
+      - run: sbt --server --batch native/sanitize
+
+  smoke:
+    needs: build
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - *checkout
+      - *tools-cache
+      - *tools
+      - *download-build
+      - *unpack
+      - run: native/test/almalinux8-smoke.sh target/native/build
 
   lint:
     needs: build

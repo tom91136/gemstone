@@ -43,7 +43,12 @@ if(BUILD_TESTING)
     endif()
   endforeach()
   if(_co_loaded_drivers)
-    list(JOIN _co_loaded_drivers ":" _co_loaded_preload)
+    list(JOIN _co_loaded_drivers ":" _co_loaded_drivers_preload)
+    set(_co_loaded_preload "")
+    if(GEMSTONE_SANITIZER_PRELOAD)
+      string(APPEND _co_loaded_preload "${GEMSTONE_SANITIZER_PRELOAD}:")
+    endif()
+    string(APPEND _co_loaded_preload "${_co_loaded_drivers_preload}")
     add_test(NAME level-zero/pipeline-with-co-loaded-drivers
       COMMAND gemstone_levelzero_smoke "Level Zero compute and copy engines pipeline through events")
     gemstone_set_tests_properties(level-zero/pipeline-with-co-loaded-drivers PROPERTIES TIMEOUT 60

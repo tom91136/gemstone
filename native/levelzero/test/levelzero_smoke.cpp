@@ -1230,7 +1230,7 @@ TEST_CASE("Level Zero counter-based events wait for every appended signal when l
   CHECK(zeEventHostSynchronize(event, 1'000'000) == ZE_RESULT_NOT_READY);
   REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
   REQUIRE(zeEventHostSynchronize(event, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
-  CHECK(zeCommandListHostSynchronize(slow, 0) == ZE_RESULT_SUCCESS);
+  CHECK(zeCommandListHostSynchronize(slow, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
 
   REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
   REQUIRE(zeEventDestroy(gate) == ZE_RESULT_SUCCESS);

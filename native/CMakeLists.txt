@@ -297,12 +297,14 @@ if(BUILD_TESTING)
     if(GEMSTONE_SYSROOT)
       add_test(NAME "dso/${target}-package"
         COMMAND "${CMAKE_COMMAND}" "-DREADELF=${CMAKE_READELF}" "-DLIBRARY=$<TARGET_FILE:${target}>"
-          "-DSYSROOT=${GEMSTONE_SYSROOT}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
+          "-DSYSROOT=${GEMSTONE_SYSROOT}" "-DSANITIZER_RUNTIME=${GEMSTONE_SANITIZER_PRELOAD}"
+          -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
     endif()
   endforeach()
   if(GEMSTONE_SYSROOT AND TARGET ze_loader)
     add_test(NAME "dso/ze_loader-package"
       COMMAND "${CMAKE_COMMAND}" "-DREADELF=${CMAKE_READELF}" "-DLIBRARY=$<TARGET_FILE:ze_loader>"
-        "-DSYSROOT=${GEMSTONE_SYSROOT}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
+        "-DSYSROOT=${GEMSTONE_SYSROOT}" "-DSANITIZER_RUNTIME=${GEMSTONE_SANITIZER_PRELOAD}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
   endif()
 endif()

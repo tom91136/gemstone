@@ -129,6 +129,7 @@ lazy val conformanceOffload    = taskKey[Unit]("Build the exported llvm-offload 
 lazy val conformanceHost       = taskKey[Path]("Built host conformance driver and its tests.")
 lazy val emulate               = inputKey[Unit]("Run conformance through Gemstone.")
 lazy val nativeArtifact        = taskKey[Path]("Built native runtime directory.")
+lazy val sanitize              = taskKey[Unit]("Build and test native with ASan and UBSan.")
 lazy val nativeCompileDatabase = taskKey[Path]("Configured CMake build directory with compile_commands.json.")
 lazy val nativeToolchain       =
   taskKey[ToolchainContainer]("Native toolchain image and the memory fixtures built beside it.")
@@ -754,6 +755,26 @@ lazy val conformanceTool = module(project.in(file("tools/conformance")))
     libraryDependencies += "com.monovore" %% "decline" % declineVersion
   )
 
+def nativeBuildArguments(root: Path, toolchain: ToolchainContainer, toolchainFile: Path): Seq[String] = {
+  val references = root / "target/references"
+  Seq(
+    s"-DCMAKE_TOOLCHAIN_FILE=$toolchainFile",
+    "-DBUILD_TESTING=ON",
+    "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+    s"-DGEMSTONE_PREBUILT_MEMORY_FIXTURES=${toolchain.fixtures}",
+    "-DGEMSTONE_OPENCL_COMPILER_DIRECTORY=/opt/intel/oneapi/compiler/latest/bin/compiler",
+    s"-DCMAKE_BUILD_TYPE=${BuildEnvironment.buildType}",
+    s"-DCUDA_INCLUDE_DIR=${references / "api-native/nvidia/cuda/include"}",
+    s"-DHIP_INCLUDE_DIR=${references / "api-native/amd/hip/include"}",
+    s"-DHSA_INCLUDE_DIR=${references / "api-native/amd/hsa/runtime/hsa-runtime/inc"}",
+    s"-DHSAKMT_INCLUDE_DIR=${references / "api-native/amd/hsa/libhsakmt/include"}",
+    s"-DLEVEL_ZERO_INCLUDE_DIR=${references / "api-native/oneapi/level-zero/include"}",
+    s"-DOPENCL_INCLUDE_DIR=${references / "api-native/khronos/opencl"}",
+    s"-DVULKAN_INCLUDE_DIR=${references / "api-native/khronos/vulkan/include"}",
+    s"-DLEVEL_ZERO_SOURCE_DIR=${references / "level-zero"}"
+  )
+}
+
 lazy val externalCodestyleSettings = Seq(
   nativeSourceDirectories := Seq(baseDirectory.value.toPath),
   nativeCompileDatabase   := Def.uncached(nativeArtifact.value),
@@ -796,25 +817,14 @@ lazy val native = project.in(file("native"))
         s"$rootPackage.codegen.Codegen",
         Def.task(Seq("prepare", "--root", s"${(LocalRootProject / baseDirectory).value}", "api-native", "level-zero"))
       ).value
-      val references = (LocalRootProject / baseDirectory).value.toPath / "target/references"
+      val root = (LocalRootProject / baseDirectory).value.toPath
       CMake.build(
         source = baseDirectory.value.toPath,
-        directory = (LocalRootProject / baseDirectory).value.toPath / "target/native/build",
-        arguments = Seq(
-          s"-DCMAKE_TOOLCHAIN_FILE=${baseDirectory.value / "toolchains/linux-x86_64-libcxx.cmake"}",
-          "-DBUILD_TESTING=ON",
-          "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-          s"-DGEMSTONE_PREBUILT_MEMORY_FIXTURES=${toolchain.fixtures}",
-          "-DGEMSTONE_OPENCL_COMPILER_DIRECTORY=/opt/intel/oneapi/compiler/latest/bin/compiler",
-          s"-DCMAKE_BUILD_TYPE=${BuildEnvironment.buildType}",
-          s"-DCUDA_INCLUDE_DIR=${references / "api-native/nvidia/cuda/include"}",
-          s"-DHIP_INCLUDE_DIR=${references / "api-native/amd/hip/include"}",
-          s"-DHSA_INCLUDE_DIR=${references / "api-native/amd/hsa/runtime/hsa-runtime/inc"}",
-          s"-DHSAKMT_INCLUDE_DIR=${references / "api-native/amd/hsa/libhsakmt/include"}",
-          s"-DLEVEL_ZERO_INCLUDE_DIR=${references / "api-native/oneapi/level-zero/include"}",
-          s"-DOPENCL_INCLUDE_DIR=${references / "api-native/khronos/opencl"}",
-          s"-DVULKAN_INCLUDE_DIR=${references / "api-native/khronos/vulkan/include"}",
-          s"-DLEVEL_ZERO_SOURCE_DIR=${references / "level-zero"}"
+        directory = root / "target/native/build",
+        arguments = nativeBuildArguments(
+          root,
+          toolchain,
+          baseDirectory.value.toPath / "toolchains/linux-x86_64-libcxx.cmake"
         ),
         log = streams.value.log.info,
         buildTargets = Seq.empty,
@@ -822,7 +832,31 @@ lazy val native = project.in(file("native"))
         container = Some(toolchain)
       )
     },
-    build       := nativeArtifact.value,
+    build    := nativeArtifact.value,
+    sanitize := Def.uncached {
+      val root      = (LocalRootProject / baseDirectory).value.toPath
+      val toolchain =
+        nativeToolchain.value.copy(environment = Map("ASAN_OPTIONS" -> "detect_leaks=0"))
+      RunMain.main(
+        codegenProject,
+        s"$rootPackage.codegen.Codegen",
+        Def.task(Seq("prepare", "--root", s"${(LocalRootProject / baseDirectory).value}", "api-native", "level-zero"))
+      ).value
+      val directory = CMake.build(
+        source = baseDirectory.value.toPath,
+        directory = root / "target/native/sanitize",
+        arguments = nativeBuildArguments(
+          root,
+          toolchain,
+          baseDirectory.value.toPath / "toolchains/linux-x86_64-libcxx-asan.cmake"
+        ),
+        log = streams.value.log.info,
+        buildTargets = Seq.empty,
+        launcher = Seq.empty,
+        container = Some(toolchain)
+      )
+      CMake.test(directory, streams.value.log.info, Some(toolchain))
+    },
     Test / test := {
       CMake.test(nativeArtifact.value, streams.value.log.info, Some(nativeToolchain.value))
       sbt.protocol.testing.TestResult.Passed

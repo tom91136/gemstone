@@ -43,8 +43,9 @@ if(BUILD_TESTING)
   target_link_libraries(cuda_execution_unavailable_smoke PRIVATE gemstone_cuda)
   gemstone_test_target(cuda_execution_unavailable_smoke)
   target_compile_options(cuda_execution_unavailable_smoke PRIVATE -Wno-deprecated-declarations)
-  add_test(NAME cuda/execution-boundary COMMAND ${CMAKE_COMMAND} -E env
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:gemstone_cuda>" $<TARGET_FILE:cuda_execution_unavailable_smoke>)
+  add_test(NAME cuda/execution-boundary COMMAND cuda_execution_unavailable_smoke)
+  gemstone_set_tests_properties(cuda/execution-boundary PROPERTIES
+    ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:gemstone_cuda>")
   add_executable(cuda_code_mode_test test/code-mode.cpp)
   target_include_directories(cuda_code_mode_test SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}")
   target_link_libraries(cuda_code_mode_test PRIVATE gemstone_cuda)
@@ -55,8 +56,9 @@ if(BUILD_TESTING)
   target_include_directories(cuda_tensor_map_test SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}")
   target_link_libraries(cuda_tensor_map_test PRIVATE gemstone_cuda)
   gemstone_test_target(cuda_tensor_map_test)
-  add_test(NAME cuda/tensor-map COMMAND ${CMAKE_COMMAND} -E env
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:gemstone_cuda>" $<TARGET_FILE:cuda_tensor_map_test>)
+  add_test(NAME cuda/tensor-map COMMAND cuda_tensor_map_test)
+  gemstone_set_tests_properties(cuda/tensor-map PROPERTIES
+    ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:gemstone_cuda>")
   add_executable(cuda_memcpy_rectangle_test test/memcpy-rectangle.cpp)
   target_include_directories(cuda_memcpy_rectangle_test SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}")
   target_link_libraries(cuda_memcpy_rectangle_test PRIVATE gemstone_cuda)
