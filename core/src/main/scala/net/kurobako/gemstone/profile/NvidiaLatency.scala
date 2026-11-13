@@ -118,4 +118,9 @@ object NvidiaLatency {
 
   def measured(sm: Int, producer: Producer): Option[Architecture.Sourced[Double]] =
     if (sm == 89) measured89.get(producer) else None
+
+  def operandRate(architecture: Architecture, text: String): Option[Architecture.Sourced[Double]] =
+    Option.when(producer(text).contains(Fma64) && text.contains("c[0"))(
+      architecture.throughput.fp64Constant
+    ).flatten
 }

@@ -38,17 +38,26 @@ object BlockAnalysis {
 
   def hex(address: Long): String = s"0x${java.lang.Long.toHexString(address)}"
 
-  def of(stream: ProfileStream, architecture: Architecture): Either[String, BlockAnalysis] =
+  def of(
+      stream: ProfileStream,
+      architecture: Architecture,
+      placement: Option[PipelineSimulator.Placement] = None
+  ): Either[String, BlockAnalysis] =
     if (stream.graphs.isEmpty) Left("stream has no control flow graphs, so there are no blocks to analyse")
     else {
       val profile        = Profiler.run(stream, architecture)
       val lookup: Lookup = profile.instructions.flatMap { case (instruction, counters) =>
         instruction.address.map(address => (instruction.kernel.raw, address.raw) -> (instruction, counters))
       }.toMap
-      Right(BlockAnalysis(stream.graphs.flatMap(graph => regionsOf(profile, lookup, graph))))
+      Right(BlockAnalysis(stream.graphs.flatMap(graph => regionsOf(profile, lookup, graph, placement))))
     }
 
-  private def regionsOf(profile: Profile, lookup: Lookup, graph: ProfileStream.Graph): Vec[Region] = {
+  private def regionsOf(
+      profile: Profile,
+      lookup: Lookup,
+      graph: ProfileStream.Graph,
+      placement: Option[PipelineSimulator.Placement]
+  ): Vec[Region] = {
     val cfg   = graph.graph
     val loops =
       if (cfg.reducible) cfg.loops.map(loop => Span(Kind.Loop, loop.header, loop.body.sorted, loop.latches))
@@ -56,10 +65,16 @@ object BlockAnalysis {
     val inLoop   = loops.flatMap(_.blocks).toSet
     val unlooped = cfg.blocks.indices.filterNot(inLoop.contains)
     val straight = Vec.from(unlooped.map(block => Span(Kind.Block, block, Vec(block), Vec.empty)))
-    (loops ++ straight).sortBy(_.header).map(span => regionOf(profile, lookup, graph, span))
+    (loops ++ straight).sortBy(_.header).map(span => regionOf(profile, lookup, graph, span, placement))
   }
 
-  private def regionOf(profile: Profile, lookup: Lookup, graph: ProfileStream.Graph, span: Span): Region = {
+  private def regionOf(
+      profile: Profile,
+      lookup: Lookup,
+      graph: ProfileStream.Graph,
+      span: Span,
+      placement: Option[PipelineSimulator.Placement]
+  ): Region = {
     val cfg   = graph.graph
     val slots = span.blocks.flatMap(block => cfg.blocks(block).first to cfg.blocks(block).last).map { index =>
       val address = graph.offsets(index)
@@ -73,7 +88,7 @@ object BlockAnalysis {
     val status: Status =
       if (!members.exists(_.issues > 0L)) Status.NotExecuted
       else if (!cfg.reducible) Status.Withheld("irreducible control flow")
-      else timing(profile, span.kind, slots, members, closing).fold(Status.Withheld(_), Status.Executed(_))
+      else timing(profile, span.kind, slots, members, closing, placement).fold(Status.Withheld(_), Status.Executed(_))
     Region(label, span.kind, graph.kernel, members, status)
   }
 
@@ -82,7 +97,8 @@ object BlockAnalysis {
       kind: Kind,
       slots: Vec[Slot],
       members: Vec[Member],
-      closing: Set[Long]
+      closing: Set[Long],
+      placement: Option[PipelineSimulator.Placement]
   ): Either[String, Timing] = {
     val lowered = slots.map { case (address, entry) =>
       opOf(profile.architecture, address, entry, closing.contains(address))
@@ -90,19 +106,24 @@ object BlockAnalysis {
     for {
       _     <- lowered.collectFirst { case Left(reason) => reason }.toLeft(())
       _     <- unevenAt(members).toLeft(())
-      block <- simulated(profile, kind, lowered.collect { case Right(op) => op })
+      block <- simulated(profile, kind, lowered.collect { case Right(op) => op }, placement)
     } yield Timing(block, slots.zip(lowered).collect { case ((address, _), Right(op)) if op.pipe.isEmpty => address })
   }
 
   private def unevenAt(members: Vec[Member]): Option[String] =
     members.find(_.issues != members.head.issues).map(member => s"uneven issue counts at ${hex(member.address)}")
 
-  private def simulated(profile: Profile, kind: Kind, ops: Vec[Op]): Either[String, PipelineSimulator.Block] = {
+  private def simulated(
+      profile: Profile,
+      kind: Kind,
+      ops: Vec[Op],
+      placement: Option[PipelineSimulator.Placement]
+  ): Either[String, PipelineSimulator.Block] = {
     val stream = kind match {
       case Kind.Block => PipelineSimulator.Stream.once(ops)
       case Kind.Loop  => PipelineSimulator.Stream.repeat(ops)
     }
-    val block  = PipelineSimulator.simulate(profile.architecture, profile.occupancy, stream)
+    val block  = PipelineSimulator.simulate(profile.architecture, profile.occupancy, stream, placement)
     val cycles = block.cyclesPerIteration
     Either.cond(cycles.isFinite && cycles > 0.0, block, "no finite positive cycle count")
   }
@@ -128,7 +149,8 @@ object BlockAnalysis {
           1,
           Some(stallOf(schedule)),
           trafficOf(counters),
-          backEdge
+          backEdge,
+          rate = NvidiaLatency.operandRate(architecture, instruction.text)
         )
     }
 

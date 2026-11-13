@@ -59,6 +59,16 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.producer("ISETP.GE.AND P0, PT, R4, c[0][0x178], PT;"), None)
   }
 
+  test("a constant-bank DFMA operand selects the probed constant-form rate") {
+    val constant = NvidiaLatency.operandRate(Architecture.sm89, "DFMA R6, R6, R4, c[0x0][0x178];")
+    assertEquals(constant.map(rate => 32.0 / rate.value), Some(19.0))
+    assertEquals(constant.map(_.source.kind), Some("probed"))
+    val shorthand = NvidiaLatency.operandRate(Architecture.sm89, "DFMA R9, R9, R0, c[0][0x180];")
+    assertEquals(shorthand.map(rate => 32.0 / rate.value), Some(19.0))
+    assertEquals(NvidiaLatency.operandRate(Architecture.sm89, "DFMA R20, R18, R20, R10"), None)
+    assertEquals(NvidiaLatency.operandRate(Architecture.gfx1036, "v_fma_f64 v[1:2], v[1:2], v[3:4], v[5:6]"), None)
+  }
+
   test("the multiprocessor version comes from an sm_ name only") {
     assertEquals(NvidiaLatency.sm(Architecture.sm89), Some(89))
     assertEquals(NvidiaLatency.sm(Architecture.gfx1036), None)

@@ -107,6 +107,28 @@ class PipelineSimulatorSuite extends Suite {
     assertEquals(run(stream, subgroups = 4).binding, Binding.Arithmetic(Pipe.Mufu))
   }
 
+  test("two warps on one partition contend for issue slots while two partitions do not") {
+    val body     = Vec(op(), op(), op(), op())
+    val together = PipelineSimulator.simulate(
+      Architecture.sm89,
+      occupancy(2),
+      Stream.repeat(body),
+      Some(Placement(Vec(2, 0, 0, 0)))
+    )
+    val apart = PipelineSimulator.simulate(
+      Architecture.sm89,
+      occupancy(2),
+      Stream.repeat(body),
+      Some(Placement(Vec(1, 1, 0, 0)))
+    )
+    def issuePressure(block: Block): Double =
+      block.pressure.collectFirst { case (Binding.Issue, value) => value }.getOrElse(fail("no issue pressure"))
+    assertEqualsDouble(together.cyclesPerIteration, expected = 4.0, delta = 1e-9)
+    assertEqualsDouble(apart.cyclesPerIteration, expected = 2.0, delta = 1e-9)
+    assertEqualsDouble(issuePressure(together), expected = 0.25, delta = 1e-9)
+    assertEqualsDouble(issuePressure(apart), expected = 0.5, delta = 1e-9)
+  }
+
   test("issue-bound stream runs at the issue width") {
     val block = run(Vec(op(), op(), op()), subgroups = 48)
     assert(block.steady)

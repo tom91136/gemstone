@@ -36,13 +36,20 @@ class HardwareValidationSuite extends Suite {
 
   private val tolerance = 0.25
 
+  private case class At(name: String, warps: Vec[Int])
+
   private case class Measured(
       kernel: String,
       warps: Int,
       cycles: Double,
       binding: Option[Binding],
-      placement: String = ""
+      placement: Option[At] = None
   )
+
+  private val split2  = At("different SMSPs", Vec(1, 1, 0, 0))
+  private val same2   = At("same SMSP", Vec(2, 0, 0, 0))
+  private val slots4  = At("slots 0-3", Vec(1, 1, 1, 1))
+  private val spread4 = At("slots 0,4,8,12", Vec(4, 0, 0, 0))
 
   private val sm89Shared: Long    = 101376L
   private val gfx1036Shared: Long = 65536L
@@ -67,33 +74,33 @@ class HardwareValidationSuite extends Suite {
     Measured("reduce_tree", 4, 10.25, Some(Binding.Path)),
     Measured("reduce_tree", 16, 5.75, Some(Binding.Issue)),
     Measured("stream_ffma_1", 1, 27.02, Some(Binding.Path)),
-    Measured("stream_ffma_1", 2, 13.51, Some(Binding.Path), "different SMSPs"),
-    Measured("stream_ffma_1", 2, 16.01, Some(Binding.Path), "same SMSP"),
-    Measured("stream_ffma_1", 4, 6.76, Some(Binding.Path), "slots 0-3"),
-    Measured("stream_ffma_1", 4, 8.01, Some(Binding.Path), "slots 0,4,8,12"),
+    Measured("stream_ffma_1", 2, 13.51, Some(Binding.Path), Some(split2)),
+    Measured("stream_ffma_1", 2, 16.01, Some(Binding.Path), Some(same2)),
+    Measured("stream_ffma_1", 4, 6.76, Some(Binding.Path), Some(slots4)),
+    Measured("stream_ffma_1", 4, 8.01, Some(Binding.Path), Some(spread4)),
     Measured("stream_ffma_8", 1, 27.02, Some(Binding.Path)),
-    Measured("stream_ffma_8", 2, 13.51, Some(Binding.Path), "different SMSPs"),
-    Measured("stream_ffma_8", 2, 16.01, Some(Binding.Path), "same SMSP"),
-    Measured("stream_ffma_8", 4, 6.76, Some(Binding.Path), "slots 0-3"),
-    Measured("stream_ffma_8", 4, 12.61, Some(Binding.Path), "slots 0,4,8,12"),
+    Measured("stream_ffma_8", 2, 13.51, Some(Binding.Path), Some(split2)),
+    Measured("stream_ffma_8", 2, 16.01, Some(Binding.Path), Some(same2)),
+    Measured("stream_ffma_8", 4, 6.76, Some(Binding.Path), Some(slots4)),
+    Measured("stream_ffma_8", 4, 12.61, Some(Binding.Path), Some(spread4)),
     Measured("stream_ffma_64", 1, 81.05, Some(Binding.Path)),
     Measured("stream_dfma_1", 1, 61.02, Some(Binding.Path)),
-    Measured("stream_dfma_1", 2, 30.51, Some(Binding.Path), "different SMSPs"),
-    Measured("stream_dfma_1", 4, 19.01, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
-    Measured("stream_dfma_1", 4, 19.01, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_1", 2, 30.51, Some(Binding.Path), Some(split2)),
+    Measured("stream_dfma_1", 4, 19.01, Some(Binding.Arithmetic(Pipe.Fp64)), Some(slots4)),
+    Measured("stream_dfma_1", 4, 19.01, Some(Binding.Arithmetic(Pipe.Fp64)), Some(spread4)),
     Measured("stream_dfma_8", 1, 188.03, Some(Binding.Arithmetic(Pipe.Fp64))),
-    Measured("stream_dfma_8", 2, 152.02, Some(Binding.Arithmetic(Pipe.Fp64)), "different SMSPs"),
-    Measured("stream_dfma_8", 4, 152.01, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
-    Measured("stream_dfma_8", 4, 152.59, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_8", 2, 152.02, Some(Binding.Arithmetic(Pipe.Fp64)), Some(split2)),
+    Measured("stream_dfma_8", 4, 152.01, Some(Binding.Arithmetic(Pipe.Fp64)), Some(slots4)),
+    Measured("stream_dfma_8", 4, 152.59, Some(Binding.Arithmetic(Pipe.Fp64)), Some(spread4)),
     Measured("stream_dfma_16", 1, 340.03, Some(Binding.Arithmetic(Pipe.Fp64))),
     Measured("stream_dfma_reg_1", 1, 65.07, Some(Binding.Path)),
-    Measured("stream_dfma_reg_1", 2, 32.54, Some(Binding.Path), "different SMSPs"),
-    Measured("stream_dfma_reg_1", 4, 17.28, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
-    Measured("stream_dfma_reg_1", 4, 17.27, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_reg_1", 2, 32.54, Some(Binding.Path), Some(split2)),
+    Measured("stream_dfma_reg_1", 4, 17.28, Some(Binding.Arithmetic(Pipe.Fp64)), Some(slots4)),
+    Measured("stream_dfma_reg_1", 4, 17.27, Some(Binding.Arithmetic(Pipe.Fp64)), Some(spread4)),
     Measured("stream_dfma_reg_8", 1, 166.08, Some(Binding.Path)),
-    Measured("stream_dfma_reg_8", 2, 128.04, Some(Binding.Arithmetic(Pipe.Fp64)), "different SMSPs"),
-    Measured("stream_dfma_reg_8", 4, 128.03, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0-3"),
-    Measured("stream_dfma_reg_8", 4, 128.22, Some(Binding.Arithmetic(Pipe.Fp64)), "slots 0,4,8,12"),
+    Measured("stream_dfma_reg_8", 2, 128.04, Some(Binding.Arithmetic(Pipe.Fp64)), Some(split2)),
+    Measured("stream_dfma_reg_8", 4, 128.03, Some(Binding.Arithmetic(Pipe.Fp64)), Some(slots4)),
+    Measured("stream_dfma_reg_8", 4, 128.22, Some(Binding.Arithmetic(Pipe.Fp64)), Some(spread4)),
     Measured("stream_dfma_reg_16", 1, 294.08, Some(Binding.Arithmetic(Pipe.Fp64))),
     Measured("chain_ffma_1", 1, 27.02, Some(Binding.Path)),
     Measured("chain_ffma_16", 1, 71.03, Some(Binding.Path)),
@@ -194,8 +201,14 @@ class HardwareValidationSuite extends Suite {
     recorder.stream
   }
 
-  private def analysed(architecture: Architecture, rows: Vec[Row], warps: Int, shared: Long): PipelineSimulator.Block =
-    BlockAnalysis.of(record(rows, warps, shared), architecture).fold(
+  private def analysed(
+      architecture: Architecture,
+      rows: Vec[Row],
+      warps: Int,
+      shared: Long,
+      placement: Option[PipelineSimulator.Placement]
+  ): PipelineSimulator.Block =
+    BlockAnalysis.of(record(rows, warps, shared), architecture, placement).fold(
       fail(_),
       _.regions.find(_.kind == BlockAnalysis.Kind.Loop).map(_.status) match {
         case Some(BlockAnalysis.Status.Executed(timing)) => timing.block
@@ -215,27 +228,37 @@ class HardwareValidationSuite extends Suite {
     case _                            => false
   }
 
-  private def tableLatency(architecture: Architecture, row: Row): Architecture.Sourced[Int] = row.schedule match {
-    case Schedule.Encoded(_, true) if row.text.startsWith("MUFU.RCP") =>
-      NvidiaLatency.measured(89, NvidiaLatency.Producer.Rcp32).fold(fail("no rcp latency"))(rcp =>
-        Architecture.Sourced(math.round(rcp.value).toInt, rcp.source)
-      )
-    case Schedule.Encoded(_, true) if row.text.startsWith("LDG") =>
-      architecture.latency.l1.fold(fail("no l1 latency"))(l1 =>
-        Architecture.Sourced(math.round(l1.value).toInt, l1.source)
-      )
-    case schedule =>
-      Architecture.Sourced(
-        schedule.plannedCycles,
-        Architecture.Source.Inherited("compiler encoding", "the compiler's encoded issue stalls")
-      )
+  private def tableLatency(architecture: Architecture, row: Row): Architecture.Sourced[Int] = {
+    def whole(latency: Architecture.Sourced[Double]) =
+      Architecture.Sourced(math.round(latency.value).toInt, latency.source)
+    val table = for {
+      sm       <- NvidiaLatency.sm(architecture)
+      producer <- NvidiaLatency.producer(row.text)
+      latency  <- NvidiaLatency.measured(sm, producer).map(whole(_)).orElse(NvidiaLatency.fixed(sm, producer))
+    } yield latency
+    table.getOrElse(row.schedule match {
+      case Schedule.Encoded(_, true) if row.text.startsWith("LDG") =>
+        architecture.latency.l1.fold(fail("no l1 latency"))(l1 =>
+          Architecture.Sourced(math.round(l1.value).toInt, l1.source)
+        )
+      case schedule =>
+        Architecture.Sourced(
+          schedule.plannedCycles,
+          Architecture.Source.Inherited("compiler encoding", "the compiler's encoded issue stalls")
+        )
+    })
   }
 
   private def traffic(architecture: Architecture, row: Row): PipelineSimulator.Traffic =
     if (loads(row)) PipelineSimulator.Traffic(sectors = 128.0 / architecture.global.sectorBytes.value, loads = 1.0)
     else PipelineSimulator.Traffic.none
 
-  private def simulated(architecture: Architecture, rows: Vec[Row], warps: Int): PipelineSimulator.Block = {
+  private def simulated(
+      architecture: Architecture,
+      rows: Vec[Row],
+      warps: Int,
+      placement: Option[PipelineSimulator.Placement]
+  ): PipelineSimulator.Block = {
     val ops = rows.zipWithIndex.map { case (row, index) =>
       PipelineSimulator.Op(
         row.pipe,
@@ -245,13 +268,15 @@ class HardwareValidationSuite extends Suite {
         tableLatency(architecture, row),
         1,
         traffic = traffic(architecture, row),
-        backEdge = index == rows.size - 1
+        backEdge = index == rows.size - 1,
+        rate = NvidiaLatency.operandRate(architecture, row.text)
       )
     }
     PipelineSimulator.simulate(
       architecture,
       Some(Occupancy(1, warps, architecture.limits.subgroups.value, Map.empty)),
-      PipelineSimulator.Stream.repeat(ops)
+      PipelineSimulator.Stream.repeat(ops),
+      placement
     )
   }
 
@@ -261,25 +286,26 @@ class HardwareValidationSuite extends Suite {
       cases: Vec[Measured],
       shared: Long
   ): Unit = cases.foreach { measured =>
-    val rows = loops(measured.kernel)
-    val name = s"${architecture.name} ${measured.kernel} with ${measured.warps} warps per workgroup" +
-      (if (measured.placement.nonEmpty) s" (${measured.placement})" else "")
+    val rows      = loops(measured.kernel)
+    val placement = measured.placement.map(at => PipelineSimulator.Placement(at.warps))
+    val name      = s"${architecture.name} ${measured.kernel} with ${measured.warps} warps per workgroup" +
+      measured.placement.fold("")(at => s" (${at.name})")
     val direct = rows.exists(variableLatency(_))
     test(s"$name: compiled loop cycles per iteration within 25 percent") {
-      assertWithin(analysed(architecture, rows, measured.warps, shared).cyclesPerIteration, measured.cycles)
+      assertWithin(analysed(architecture, rows, measured.warps, shared, placement).cyclesPerIteration, measured.cycles)
     }
     measured.binding.foreach { expected =>
       test(s"$name: compiled loop binding") {
-        assertEquals(analysed(architecture, rows, measured.warps, shared).binding, expected)
+        assertEquals(analysed(architecture, rows, measured.warps, shared, placement).binding, expected)
       }
     }
     if direct then {
       test(s"$name: table latency cycles per iteration within 25 percent") {
-        assertWithin(simulated(architecture, rows, measured.warps).cyclesPerIteration, measured.cycles)
+        assertWithin(simulated(architecture, rows, measured.warps, placement).cyclesPerIteration, measured.cycles)
       }
       measured.binding.foreach { expected =>
         test(s"$name: table latency binding") {
-          assertEquals(simulated(architecture, rows, measured.warps).binding, expected)
+          assertEquals(simulated(architecture, rows, measured.warps, placement).binding, expected)
         }
       }
     }

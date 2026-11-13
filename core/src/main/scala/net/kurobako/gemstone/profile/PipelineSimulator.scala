@@ -25,7 +25,8 @@ object PipelineSimulator {
       issue: Int,
       stall: Option[Architecture.Sourced[Int]] = None,
       traffic: Traffic = Traffic.none,
-      backEdge: Boolean = false
+      backEdge: Boolean = false,
+      rate: Option[Architecture.Sourced[Double]] = None
   )
 
   object Stream {
@@ -68,6 +69,18 @@ object PipelineSimulator {
       steady: Boolean
   )
 
+  object Placement {
+    def even(subgroups: Int, partitions: Int): Placement =
+      Placement(
+        Vec.tabulate(partitions)(partition =>
+          subgroups / partitions + (if (partition < subgroups % partitions) 1 else 0)
+        )
+      )
+  }
+
+  /** Resident warps on each partition, in partition order. */
+  case class Placement(warpsPerPartition: Vec[Int])
+
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class Warp() {
     var position: Long                   = 0L
@@ -102,14 +115,20 @@ object PipelineSimulator {
     times.view.collect { case (key, time) if time > now => key -> (time - now) }.toMap
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def simulate(architecture: Architecture, occupancy: Option[Occupancy], stream: Stream): Block = {
+  def simulate(
+      architecture: Architecture,
+      occupancy: Option[Occupancy],
+      stream: Stream,
+      placement: Option[Placement] = None
+  ): Block = {
     val rates       = architecture.throughput
     val partitions  = architecture.limits.partitions.value
     val subgroups   = occupancy.fold(1)(_.subgroups)
-    val count       = (subgroups + partitions - 1) / partitions
+    val resident    = placement.getOrElse(Placement.even(subgroups, partitions)).warpsPerPartition
+    val count       = resident.maxOption.getOrElse(1)
     val slots       = math.max(1, (rates.issues.value / partitions).toInt)
     val warps       = Vec.fill(count)(Warp())
-    val active      = math.min(partitions, subgroups)
+    val active      = resident.count(_ > 0)
     val busyUntil   = mutable.Map.empty[ProfileReport.Binding, Long]
     val busyCycles  = mutable.Map.empty[ProfileReport.Binding, Long]
     val timeline    = mutable.ArrayBuffer.empty[Entry]
@@ -134,7 +153,7 @@ object PipelineSimulator {
         claim(
           ProfileReport.Binding.Arithmetic(pipe),
           op.lanes.toDouble,
-          rates.rate(pipe),
+          op.rate.getOrElse(rates.rate(pipe)),
           if (shared.isDefined) active else partitions,
           Vec.from(shared)
         )
@@ -257,7 +276,7 @@ object PipelineSimulator {
     val (top, peak) = pressure.maxBy(_._2)
     Block(
       entries = Vec.from(timeline),
-      cyclesPerIteration = length / window.passes / math.min(partitions, subgroups),
+      cyclesPerIteration = length / window.passes / active,
       binding = if (peak >= Saturated) top else ProfileReport.Binding.Path,
       pressure = pressure,
       source = sources.max,

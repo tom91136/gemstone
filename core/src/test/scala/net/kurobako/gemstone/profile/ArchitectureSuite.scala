@@ -167,6 +167,13 @@ class ArchitectureSuite extends Suite {
     assertEquals(Architecture.sm90.sharedPipes, Map.empty[Pipe, Source])
   }
 
+  test("sm_89 charges the constant-bank DFMA interval its probe measured") {
+    val rate = Architecture.sm89.throughput.fp64Constant.getOrElse(fail("no constant fp64 rate"))
+    assertEqualsDouble(32.0 / rate.value, 19.0, 1e-9)
+    assertEquals(rate.source.kind, "probed")
+    assertEquals(Architecture.sm86.throughput.fp64Constant.map(_.source.kind), Some("inherited"))
+  }
+
   test("gfx1036 fma dependent latency is the chain probe, and its siblings have none") {
     assertEquals(Architecture.gfx1036.pipeLatency.view.mapValues(_.value).toMap, Map(Pipe.Fma -> 5))
     assertEquals(Architecture.gfx1036.pipeLatency(Pipe.Fma).source.kind, "probed")

@@ -79,7 +79,8 @@ object Architecture {
       loadStore: Sourced[Double],
       shared: Sourced[Double],
       loads: Option[Sourced[Double]] = None,
-      dram: Option[Sourced[Double]] = None
+      dram: Option[Sourced[Double]] = None,
+      fp64Constant: Option[Sourced[Double]] = None
   ) derives CanEqual {
     def rate(pipe: Pipe): Sourced[Double] = pipe match {
       case Pipe.Fma    => fma
@@ -562,6 +563,14 @@ object Architecture {
     "CUDA 13.3, nvcc"
   )
 
+  private val adaFp64Constant = Source.Probed(
+    "loop_stream_dfma sweep timed with clock64: 19.00 cycles per DFMA with a constant-bank addend against 16.00 " +
+      "with register operands at 8 and 16 DFMA per trip (2026-11-11, median of 201 launches)",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
   private val adaSharedFp64 = Source.Probed(
     "stream_dfma loop timed with clock64: one warp reaches 1.5 lanes per cycle, three times the 0.5 of one " +
       "partition's quarter of the 2 per multiprocessor (HardwareLoops stream_dfma, 2026-11-10)",
@@ -602,7 +611,12 @@ object Architecture {
       fp64 = guided("8.9")(2),
       tensor = Sourced(512.0, adaRate),
       loadStore = Sourced(4.0, adaPeak)
-    ).copy(shared = Sourced(1.0, adaPeak), mufu = Sourced(16.0, adaRate), loads = Some(Sourced(0.5, adaLoads))),
+    ).copy(
+      shared = Sourced(1.0, adaPeak),
+      mufu = Sourced(16.0, adaRate),
+      loads = Some(Sourced(0.5, adaLoads)),
+      fp64Constant = Some(Sourced(32.0 / 19.0, adaFp64Constant))
+    ),
     Latency(
       Sourced(24.00, adaLatency),
       Some(Sourced(39.97, adaLatency)),
@@ -1525,7 +1539,8 @@ case class Architecture(
         tensor = inherit(throughput.tensor),
         loadStore = inherit(throughput.loadStore),
         shared = inherit(throughput.shared),
-        loads = throughput.loads.map(inherit(_))
+        loads = throughput.loads.map(inherit(_)),
+        fp64Constant = throughput.fp64Constant.map(inherit(_))
       ),
       Architecture.Latency(
         inherit(latency.shared),
