@@ -1,6 +1,6 @@
 # Native toolchain
 
-Status: in progress. Steps 1 to 5 are done, and step 6 has moved the Clang CUDA routes onto the sysroot. Steps 3 to 5 run in CI; native `lint` still reports findings from the libc++ headers.
+Status: in progress. Steps 1 to 5 are done, and step 6 has moved the Clang CUDA routes onto the sysroot. Step 7 has moved `conformance_clang_release` to 23.1.5; its Clang CUDA routes are red on emulator gaps, and conformance lint rejects inline assembly. Native `lint` still reports findings from the libc++ headers.
 
 ## Goal
 
@@ -88,6 +88,9 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 ### 7. Compiler bump
 
 - Move `conformance_clang_release` separately, once the above is in place. It changes the compiler under test and rebuilds the Clang-route artifacts.
+- `conformance_clang_release` is 23.1.5, the same release as the tools pin. The release and source archives are verified against their SHA256, and the Clang-route artifacts and `llvm-offload` archive rebuild.
+- The bump is not green. The new offload runtime asks the CUDA emulator for `cuMemGetAllocationGranularity`, so the OpenMP offload miniapps report no device. SASS on sm_35, sm_50 and sm_60 also disagrees with the PTX path in `control/cuda/loops` and the `*_element` reductions.
+- clang-tidy 23 reports `portability-no-assembler` on the conformance tests' inline assembly and one `readability-redundant-lambda-parameter-list`.
 
 ## Checks
 

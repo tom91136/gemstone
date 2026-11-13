@@ -41,12 +41,12 @@ function(conformance_cuda_toolchain architecture image_output package_output sup
 endfunction()
 
 # Compiler variants retain the runtime API backend and have independent artifacts.
-set(conformance_clang_release 22.1.8)
-set(conformance_clang_release_sha256 df0e1ecf16caf3489a272a5eea4eec9b0d82878f6477fa309504f918a0006384)
+set(conformance_clang_release 23.1.5)
+set(conformance_clang_release_sha256 f72edb0b36580ece7f52e23858f00c18fad4e87395ea7ad05d7e55c39f8fc78a)
 set(conformance_clang_tools_release 23.1.5)
 set(conformance_clang_tools_release_sha256 f72edb0b36580ece7f52e23858f00c18fad4e87395ea7ad05d7e55c39f8fc78a)
 set(conformance_clang_tools_source_sha256 fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e)
-set(conformance_clang_source_sha256 922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888)
+set(conformance_clang_source_sha256 fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e)
 string(REGEX MATCH "^[0-9]+" conformance_clang_version "${conformance_clang_release}")
 set(conformance_clang_build_arguments
   --build-arg "LLVM_VERSION=${conformance_clang_version}"
