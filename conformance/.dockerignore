@@ -1,5 +1,6 @@
 **
 !Containerfile
 !patches/
+!patches/hip-device-lib-decls.patch
 !patches/libgomp-default-device.patch
 !apt-install

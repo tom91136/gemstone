@@ -337,6 +337,10 @@ COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/nin
 
 # ROCm's LLVM ships no clang-tidy; upstream parses HIP against the same ROCm tree.
 FROM hip-base AS lint-hip
+# ROCm 7.1.1 omits its device library declarations whenever Clang's HIP wrapper is included, and Clang 23 no longer
+# declares them all there.
+COPY patches/hip-device-lib-decls.patch /tmp/hip-device-lib-decls.patch
+RUN patch --batch --fuzz=0 -d /opt/rocm -p1 < /tmp/hip-device-lib-decls.patch
 COPY --from=llvm-tidy /llvm/ /
 COPY --from=jobserver-ninja /tmp/ninja-build/ninja /usr/local/bin/ninja
 COPY --from=jobserver-ninja /tmp/ninja-src/COPYING /usr/local/share/licenses/ninja/COPYING

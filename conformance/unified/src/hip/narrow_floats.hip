@@ -194,6 +194,12 @@ TEST_CASE("intrinsics/hip/eight-bit-floats", "[unified][intrinsics]") {
 namespace {
 using Bfloats2 = __bf16 __attribute__((ext_vector_type(2)));
 
+#if defined(__gfx950__) || defined(__GFX11__) || defined(__GFX12__)
+using BfloatBits2 = short __attribute__((ext_vector_type(2)));
+
+__device__ BfloatBits2 bfloatBits(Bfloats2 value) { return __builtin_bit_cast(BfloatBits2, value); }
+#endif
+
 // __builtin_amdgcn_fdot2_f32_bf16: v_dot2c_f32_bf16_e32 on gfx950, v_dot2_f32_bf16 on GFX11 and GFX12. Small integers
 // keep every product and sum exact, which gfx1100 to gfx1103 and gfx1150 to gfx1153 lose to their fixed-point accumulator.
 __global__ void bfloatDot([[maybe_unused]] const float *a, [[maybe_unused]] const float *b, [[maybe_unused]] float *out,
@@ -203,7 +209,7 @@ __global__ void bfloatDot([[maybe_unused]] const float *a, [[maybe_unused]] cons
 #if defined(__gfx950__) || defined(__GFX11__) || defined(__GFX12__)
   const Bfloats2 x = {static_cast<__bf16>(a[static_cast<size_t>(i) * 2]), static_cast<__bf16>(a[(static_cast<size_t>(i) * 2) + 1])};
   const Bfloats2 y = {static_cast<__bf16>(b[static_cast<size_t>(i) * 2]), static_cast<__bf16>(b[(static_cast<size_t>(i) * 2) + 1])};
-  out[i] = __builtin_amdgcn_fdot2_f32_bf16(x, y, out[i], false);
+  out[i] = __builtin_amdgcn_fdot2_f32_bf16(bfloatBits(x), bfloatBits(y), out[i], false);
   if (i == 0) *supported = 1;
 #endif
 }
