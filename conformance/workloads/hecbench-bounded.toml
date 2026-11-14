@@ -1,0 +1,3 @@
+# Short CI selection: small defaults and no input files.
+specs = ['*']
+include_programs = ['hecbench_assert', 'hecbench_bitpacking', 'hecbench_minimod', 'hecbench_overlap']

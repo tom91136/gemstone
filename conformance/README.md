@@ -161,13 +161,16 @@ vendor package are reported as unsupported. Large GEMM cases can exceed Gemstone
 | `opencl-cts-bounded` | OpenCL CTS without the exhaustive integer, half-store, image-size, and thread sweeps |
 | `sycl-cts-bounded` | SYCL CTS without the full-type `range_api` launch |
 | `miniapps` | Miniapps across the selected compiler routes |
+| `hecbench` | Every HeCBench CUDA benchmark that built into the artifact |
+| `hecbench-bounded` | Short HeCBench CUDA selection |
 
 The tiers nest: `short` < `long` < `xlong` < `all`, and each extends the previous. The TOML files in
 [workloads](workloads) define them: `extends` inherits a workload, supplied fields replace inherited ones, and an
 `add_` prefix (`add_levelzero_cases`, `add_exclude_programs`, ...) appends to the inherited list instead.
 `include_programs` and `exclude_programs` take program-name globs and exclusions win, `exclude_cases` takes case-identity
 globs dropped after discovery, `specs` filters Catch2 names, and `levelzero_cases` filters Google Test names. Targets
-without matching tests are omitted; an empty selection fails. `conformance run --dry-run` and
+without matching tests are omitted; an empty selection fails. HeCBench contributes only the benchmarks that built, so
+its workloads select from the programs listed in that artifact. `conformance run --dry-run` and
 `sbt conformance/emulate --dry-run` print the selected case count per route and program without running anything.
 
 Programs named `vendor_*` are the vendor suites (CUDA samples, libraries and CCCL; ROCm examples, rocPRIM, hipCUB, and

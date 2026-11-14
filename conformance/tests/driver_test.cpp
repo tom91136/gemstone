@@ -424,6 +424,72 @@ TEST_CASE("iteration workloads retain every miniapp", "[driver][workload-budget]
   }
 }
 
+TEST_CASE("HeCBench output classification separates verified and unverified runs", "[driver]") {
+  using conformance::driver::classifyHecbenchOutput;
+  using conformance::driver::HecbenchOutcome;
+  CHECK(classifyHecbenchOutput("result: PASS\n", false) == HecbenchOutcome::Pass);
+  CHECK(classifyHecbenchOutput("Test Passed\n", false) == HecbenchOutcome::Pass);
+  CHECK(classifyHecbenchOutput("Verification: FAIL\n", false) == HecbenchOutcome::Fail);
+  CHECK(classifyHecbenchOutput("PASS\nkernel FAILED\n", false) == HecbenchOutcome::Fail);
+  CHECK(classifyHecbenchOutput("Failed to open input\n", false) == HecbenchOutcome::Fail);
+  CHECK(classifyHecbenchOutput("elapsed 1.2 s\n", false) == HecbenchOutcome::Completion);
+  CHECK(classifyHecbenchOutput("", true) == HecbenchOutcome::TimeLimit);
+  CHECK(classifyHecbenchOutput("PASS\n", true) == HecbenchOutcome::TimeLimit);
+}
+
+TEST_CASE("hecbench workloads include the corpus and the bounded selection", "[driver][workload-budget]") {
+  RunOptions options;
+  options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
+  options.workload = "hecbench";
+  const auto full = loadWorkload(options);
+  options.workload = "hecbench-bounded";
+  const auto bounded = loadWorkload(options);
+  REQUIRE(!bounded.includePrograms.empty());
+  CHECK(full.includePrograms ^ exists([](const auto &pattern) { return conformance::globMatches(pattern, "hecbench_lud"); }));
+  for (const auto &pattern : bounded.includePrograms) {
+    CAPTURE(pattern);
+    CHECK(full.includePrograms ^ exists([&](const auto &full_pattern) { return conformance::globMatches(full_pattern, pattern); }));
+  }
+  CHECK(full.excludePrograms.empty());
+  CHECK(bounded.excludePrograms.empty());
+}
+
+TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") {
+  TemporaryDirectory directory;
+  const auto artifact = directory.path / "artifact";
+  const auto reports = directory.path / "reports";
+  fs::create_directories(artifact);
+  fs::create_directories(reports);
+  std::ofstream(artifact / "test-programs.txt") << "hecbench_demo\t2\thecbench\nhecbench_hang\t1\thecbench\n";
+  for (const auto &[name, body] : std::vector<std::pair<std::string, std::string>>{{"hecbench_demo", "#!/bin/sh\necho PASS\n"},
+                                                                                   {"hecbench_hang", "#!/bin/sh\nsleep 5\n"}}) {
+    const auto path = artifact / name;
+    std::ofstream(path) << body;
+    fs::permissions(path, fs::perms::owner_exec | fs::perms::owner_read, fs::perm_options::add);
+  }
+  Workload workload;
+  workload.specs = {"*"};
+  workload.includePrograms = {"hecbench_*"};
+  RunOptions options;
+  const auto tests = discoverCases(options, workload, artifact, {}, "cuda-sass/sm_89", reports);
+  REQUIRE(tests.size() == 2);
+  CHECK(tests[0].identity == "hecbench_demo");
+  CHECK(tests[0].program == "hecbench_demo");
+  CHECK(tests[0].timeoutSeconds == 2);
+  CHECK(tests[1].identity == "hecbench_hang");
+
+  ExecutionConfig configuration;
+  configuration.directory = artifact.string();
+  configuration.reportDirectory = (reports / "demo").string();
+  const auto passed = executeCase(configuration, tests[0]);
+  CHECK(passed.status == 0);
+  CHECK(passed.classification == "pass");
+  configuration.reportDirectory = (reports / "hang").string();
+  const auto limited = executeCase(configuration, tests[1]);
+  CHECK(limited.classification == "time limit");
+  CHECK(limited.status != 0);
+}
+
 TEST_CASE("Google Test inventories retain parameterised cases and reject duplicates", "[driver]") {
   const auto names = gtestCaseNames("Driver.\n  Opens\n  DISABLED_Old\nParam/Copy.\n  Case/0  # GetParam() = 8\n  Case/1\n", "levelzero");
   CHECK(names == std::vector<std::string>{"Driver.Opens", "Param/Copy.Case/0", "Param/Copy.Case/1"});
@@ -568,7 +634,7 @@ TEST_CASE("cases on one physical device run one at a time while other devices ru
       if (config.deviceLock) --active[config.device];
     }
     if (!config.deviceLock && test.index == 3) throw std::runtime_error("executor failure");
-    return CaseResult{.status = config.deviceLock ? 0 : SkipReturnCode, .output = {}, .message = {}};
+    return CaseResult{.status = config.deviceLock ? 0 : SkipReturnCode, .output = {}, .message = {}, .classification = {}};
   });
   CHECK(exclusive);
   CHECK(peak >= 2);
@@ -613,7 +679,7 @@ TEST_CASE("exclusive cases run with no other case running", "[driver]") {
       --running;
       if (exclusive) exclusiveRunning = false;
     }
-    return CaseResult{.status = 0, .output = {}, .message = {}};
+    return CaseResult{.status = 0, .output = {}, .message = {}, .classification = {}};
   });
   CHECK_FALSE(overlap);
   CHECK(exclusiveCases == 5);
@@ -892,7 +958,8 @@ TEST_CASE("JIT warm-up runs one unskipped case per program eagerly and fails tha
   warmUpJit(targets, 2, 2.0, [&](const ExecutionConfig &config, const ScheduledCase &test) {
     const std::scoped_lock lock(mutex);
     seen.emplace_back(config.reportDirectory, config.environment.at("CUDA_MODULE_LOADING"), test.identity, test.timeoutSeconds);
-    return CaseResult{.status = config.reportDirectory.contains("second") ? 1 : 0, .output = "boom\n", .message = "exit status 1"};
+    return CaseResult{
+        .status = config.reportDirectory.contains("second") ? 1 : 0, .output = "boom\n", .message = "exit status 1", .classification = {}};
   });
   REQUIRE(seen.size() == 2);
   for (const auto &[report, loading, identity, timeout] : seen) {

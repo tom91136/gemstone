@@ -94,6 +94,13 @@ function(conformance_verify_relocation artifact support supplement)
   file(STRINGS "${relocated_artifact}/test-programs.txt" programs)
   foreach(entry IN LISTS programs)
     string(REGEX REPLACE "\t.*$" "" program "${entry}")
+    if(entry MATCHES "\thecbench$")
+      if(NOT EXISTS "${relocated_artifact}/${program}")
+        file(REMOVE_RECURSE "${relocated_root}")
+        message(FATAL_ERROR "relocated HeCBench program is missing: ${program}")
+      endif()
+      continue()
+    endif()
     if(entry MATCHES "\tdeqp$")
       execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
         "${relocated_artifact}/${program}" --deqp-runmode=stdout-caselist --deqp-shadercache=disable

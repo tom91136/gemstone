@@ -18,7 +18,6 @@ set(CONFORMANCE_DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_CACHE}" CACHE PATH
 option(CONFORMANCE_OFFLINE "Use only cached dependencies; forbid network fetches" OFF)
 set(DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_CACHE}")
 set(DEPENDENCY_OFFLINE "${CONFORMANCE_OFFLINE}")
-include(dependencies.cmake)
 set(glaze_INSTALL OFF CACHE BOOL "" FORCE)
 set(MAGIC_ENUM_OPT_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(MAGIC_ENUM_OPT_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -39,6 +38,7 @@ set(ASPARTAME_ENABLE_BENCHMARK OFF CACHE BOOL "" FORCE)
 # budgets. The isolated launcher also applies the OpenCL CTS override per case.
 set(CONFORMANCE_TIMEOUT_UNIFIED 600)
 set(CONFORMANCE_TIMEOUT_MINIAPP 900)
+set(CONFORMANCE_TIMEOUT_HECBENCH 600)
 set(CONFORMANCE_TIMEOUT_CTS 240)
 # Full SYCL type matrices can put hundreds of variants in one Catch case.
 set(CONFORMANCE_TIMEOUT_SYCL_FULL 600)
@@ -162,6 +162,18 @@ endif()
 set(CMAKE_HIP_ARCHITECTURES "gfx908" CACHE STRING "AMDGPU architectures for unified, HSA, and miniapps")
 set(CONFORMANCE_MINIAPP_MODELS "" CACHE STRING
     "Optional semicolon-separated app:model miniapp selection")
+if(CONFORMANCE_BACKEND STREQUAL "cuda" AND CONFORMANCE_COMPILER STREQUAL "vendor"
+    AND CONFORMANCE_CUDA_CODE STREQUAL "fatbin")
+  set(conformance_hecbench_default ON)
+else()
+  set(conformance_hecbench_default OFF)
+endif()
+option(CONFORMANCE_BUILD_HECBENCH "Build the HeCBench CUDA benchmarks" ${conformance_hecbench_default})
+if(CONFORMANCE_BUILD_HECBENCH AND NOT (CONFORMANCE_BACKEND STREQUAL "cuda"
+    AND CONFORMANCE_COMPILER STREQUAL "vendor" AND CONFORMANCE_CUDA_CODE STREQUAL "fatbin"))
+  message(FATAL_ERROR "HeCBench requires the nvcc CUDA 13.3 fatbin route")
+endif()
+include(dependencies.cmake)
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
   list(LENGTH CMAKE_CUDA_ARCHITECTURES conformance_architecture_count)
 elseif(CONFORMANCE_BACKEND MATCHES "^(hip|hsa)$")
@@ -251,6 +263,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/TargetsTest.cmake")
     add_test(NAME conformance_miniapp_closure
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/MiniappClosureTest.cmake")
+    add_test(NAME conformance_hecbench
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/HecbenchTest.cmake")
     add_test(NAME conformance_jobserver
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/JobserverTest.cmake")
     add_test(NAME conformance_floor
@@ -386,7 +400,8 @@ if(CONFORMANCE_BACKEND STREQUAL "cuda" AND NOT CONFORMANCE_COMPILER STREQUAL "gc
   conformance_runtime_search_directory("${conformance_cuda_runtime_directory}")
   conformance_runtime_plugins(
     "${conformance_cuda_runtime_directory}/libcublas.so*"
-    "${conformance_cuda_runtime_directory}/libcublasLt.so*")
+    "${conformance_cuda_runtime_directory}/libcublasLt.so*"
+    "${conformance_cuda_runtime_directory}/libcudart.so*")
 elseif(CONFORMANCE_BACKEND MATCHES "^(hip|hsa)$")
   conformance_runtime_search_directory(/opt/rocm/lib)
   conformance_runtime_search_directory(/opt/rocm/lib64)
@@ -510,6 +525,10 @@ if(CONFORMANCE_BUILD_MINIAPPS AND
   add_subdirectory(miniapps)
   list(APPEND conformance_artifact_targets conformance_miniapps_artifact)
 endif()
+if(CONFORMANCE_BUILD_HECBENCH)
+  add_subdirectory(hecbench)
+  list(APPEND conformance_artifact_targets conformance_hecbench_artifact)
+endif()
 if(CONFORMANCE_BUILD_VENDOR AND CONFORMANCE_COMPILER STREQUAL "vendor"
     AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/${CONFORMANCE_BACKEND}.cmake")
   add_subdirectory(vendor)
@@ -521,9 +540,23 @@ if(conformance_test_programs)
   list(JOIN conformance_test_programs "\n" conformance_test_program_manifest)
   file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test-programs.txt"
     CONTENT "${conformance_test_program_manifest}\n")
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/test-programs.txt"
-    DESTINATION . COMPONENT architecture)
 endif()
+# HeCBench contributes only the programs that its keep-going build produced, so
+# its fragment is merged at install time.
+install(CODE "
+  set(manifest \"\")
+  if(EXISTS \"${CMAKE_CURRENT_BINARY_DIR}/test-programs.txt\")
+    file(READ \"${CMAKE_CURRENT_BINARY_DIR}/test-programs.txt\" manifest)
+  endif()
+  if(EXISTS \"\${CMAKE_INSTALL_PREFIX}/hecbench-test-programs.txt\")
+    file(READ \"\${CMAKE_INSTALL_PREFIX}/hecbench-test-programs.txt\" hecbench)
+    string(APPEND manifest \"\${hecbench}\")
+    file(REMOVE \"\${CMAKE_INSTALL_PREFIX}/hecbench-test-programs.txt\")
+  endif()
+  if(NOT manifest STREQUAL \"\")
+    file(WRITE \"\${CMAKE_INSTALL_PREFIX}/test-programs.txt\" \"\${manifest}\")
+  endif()
+" COMPONENT architecture)
 
 if(TARGET conformance_unit_tests)
   include("${catch2_SOURCE_DIR}/extras/Catch.cmake")

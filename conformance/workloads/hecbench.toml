@@ -1,0 +1,4 @@
+# Every HeCBench CUDA benchmark built from the pinned corpus. Classification
+# comes from each run's output.
+specs = ['*']
+include_programs = ['hecbench_*']

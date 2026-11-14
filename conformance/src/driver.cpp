@@ -440,6 +440,25 @@ Workload loadWorkload(const RunOptions &configuration) {
   if (workload.specs.empty()) throw std::invalid_argument("conformance workload needs at least one Catch test spec");
   return workload;
 }
+HecbenchOutcome classifyHecbenchOutput(std::string_view output, bool timedOut) {
+  if (timedOut) return HecbenchOutcome::TimeLimit;
+  static const std::regex failure(R"(\b(fail|failed|failure)\b)", std::regex::icase);
+  static const std::regex success(R"(\b(pass|passed)\b)", std::regex::icase);
+  const std::string text(output);
+  if (std::regex_search(text, failure)) return HecbenchOutcome::Fail;
+  if (std::regex_search(text, success)) return HecbenchOutcome::Pass;
+  return HecbenchOutcome::Completion;
+}
+
+std::string_view hecbenchOutcomeName(HecbenchOutcome outcome) {
+  switch (outcome) {
+    case HecbenchOutcome::Pass: return "pass";
+    case HecbenchOutcome::Fail: return "fail";
+    case HecbenchOutcome::Completion: return "completion";
+    case HecbenchOutcome::TimeLimit: return "time limit";
+  }
+  return "unknown";
+}
 static uint32_t parseTimeout(std::string_view value, const fs::path &manifest) {
   uint64_t result = 0;
   const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
@@ -465,7 +484,8 @@ static std::vector<TestProgram> testPrograms(const fs::path &artifact, const Wor
     const auto formatAt = line.find('\t', separator + 1);
     if (formatAt == std::string::npos) throw std::runtime_error("missing test program format: " + manifest.string());
     const auto format = line.substr(formatAt + 1);
-    if (format != "catch2" && format != "gtest" && format != "deqp") throw std::runtime_error("invalid test program format");
+    if (format != "catch2" && format != "gtest" && format != "deqp" && format != "hecbench")
+      throw std::runtime_error("invalid test program format");
     result.push_back({.name = std::move(name),
                       .path = std::move(path),
                       .timeoutSeconds = parseTimeout(std::string_view(line).substr(separator + 1, formatAt - separator - 1), manifest),
@@ -563,48 +583,53 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
   for (const auto &program : testPrograms(artifact, workload)) {
     const bool gtest = program.format == "gtest";
     const bool deqp = program.format == "deqp";
-    auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
-                         : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
+    const bool hecbench = program.format == "hecbench";
     std::vector<std::string> vulkanCases;
-    if (deqp) {
-      const auto archive = fs::path(environment.at(environment::SupportDir)) / "data/vulkan";
-      vulkanCases = workload.vulkanMustpass.empty() ? workload.vulkanCases
-                                                    : deqpMustpassCases(archive, workload.vulkanMustpass, workload.vulkanCases);
-      const auto path = reports / (program.name + "-discovery-cases.txt");
-      std::ofstream file(path, std::ios::binary | std::ios::trunc);
-      file << deqpExactCaseList(vulkanCases);
-      file.close();
-      if (!file) throw std::runtime_error("cannot write Vulkan CTS selection: " + path.string());
-      command = {program.path.string(), "--deqp-runmode=stdout-caselist", "--deqp-shadercache=disable",
-                 "--deqp-caselist-file=" + path.string(), "--deqp-archive-dir=" + archive.string()};
-    } else if (!gtest) {
-      command.push_back(catchSpec(workload.specs));
-    }
-    // dEQP inventories can exceed hundreds of megabytes. Spool them to disk
-    // and parse line by line instead of keeping a capped process capture.
-    const auto listingPath = reports / (program.name + "-discovery.log");
-    std::ofstream log;
-    if (deqp) {
-      log.open(listingPath, std::ios::binary | std::ios::trunc);
-      if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
-    }
-    const auto listing = runProcess(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
-                                    fmt::format("[{}/{} discovery] ", id, program.name), !deqp, deqp ? &log : nullptr);
-    if (deqp) {
-      log.close();
-      if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
-    }
-    if (listing.status != 0)
-      throw std::runtime_error(fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
-                                           deqp ? listingPath.string() : listing.error));
     std::vector<std::string> names;
-    if (deqp) {
-      std::ifstream input(listingPath);
-      names = deqpCaseNames(input);
-    } else if (gtest) {
-      names = gtestCaseNames(listing.output, program.name);
+    if (hecbench) {
+      names = {program.name};
     } else {
-      names = catchCaseNames(listing.output, program.name);
+      auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
+                           : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
+      if (deqp) {
+        const auto archive = fs::path(environment.at(environment::SupportDir)) / "data/vulkan";
+        vulkanCases = workload.vulkanMustpass.empty() ? workload.vulkanCases
+                                                      : deqpMustpassCases(archive, workload.vulkanMustpass, workload.vulkanCases);
+        const auto path = reports / (program.name + "-discovery-cases.txt");
+        std::ofstream file(path, std::ios::binary | std::ios::trunc);
+        file << deqpExactCaseList(vulkanCases);
+        file.close();
+        if (!file) throw std::runtime_error("cannot write Vulkan CTS selection: " + path.string());
+        command = {program.path.string(), "--deqp-runmode=stdout-caselist", "--deqp-shadercache=disable",
+                   "--deqp-caselist-file=" + path.string(), "--deqp-archive-dir=" + archive.string()};
+      } else if (!gtest) {
+        command.push_back(catchSpec(workload.specs));
+      }
+      // dEQP inventories can exceed hundreds of megabytes. Spool them to disk
+      // and parse line by line instead of keeping a capped process capture.
+      const auto listingPath = reports / (program.name + "-discovery.log");
+      std::ofstream log;
+      if (deqp) {
+        log.open(listingPath, std::ios::binary | std::ios::trunc);
+        if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
+      }
+      const auto listing = runProcess(launched(configuration.launcher, std::move(command)), artifact, environment, 10min,
+                                      fmt::format("[{}/{} discovery] ", id, program.name), !deqp, deqp ? &log : nullptr);
+      if (deqp) {
+        log.close();
+        if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
+      }
+      if (listing.status != 0)
+        throw std::runtime_error(fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
+                                             deqp ? listingPath.string() : listing.error));
+      if (deqp) {
+        std::ifstream input(listingPath);
+        names = deqpCaseNames(input);
+      } else if (gtest) {
+        names = gtestCaseNames(listing.output, program.name);
+      } else {
+        names = catchCaseNames(listing.output, program.name);
+      }
     }
     if (deqp) {
       const auto selected = vulkanCases ^ to<std::set>();
@@ -689,10 +714,13 @@ static bool profileSkipped(const ExecutionConfig &config, const ScheduledCase &t
 CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test) {
   if (!validName(test.program)) throw std::invalid_argument("invalid test program");
   if (profileSkipped(config, test))
-    return {.status = SkipReturnCode, .output = "SKIP " + test.identity + ": machine profile\n", .message = "machine profile"};
+    return {.status = SkipReturnCode,
+            .output = "SKIP " + test.identity + ": machine profile\n",
+            .message = "machine profile",
+            .classification = {}};
   if (const auto failure = config.jitFailures ^ get_maybe(test.program)) {
     auto message = fmt::format("JIT warm-up of {} failed: {}", test.program, *failure);
-    return {.status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message)};
+    return {.status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message), .classification = {}};
   }
   const auto environmentValue = [&](const char *key) -> std::string_view {
     const auto entry = config.environment.find(key);
@@ -711,13 +739,17 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
                           })
                         ^ filter([](std::string_view skip) { return !skip.empty(); });
     if (reason)
-      return {.status = SkipReturnCode, .output = fmt::format("SKIP {}: {}\n", test.identity, *reason), .message = std::string(*reason)};
+      return {.status = SkipReturnCode,
+              .output = fmt::format("SKIP {}: {}\n", test.identity, *reason),
+              .message = std::string(*reason),
+              .classification = {}};
   }
   const auto programs = testPrograms(config.directory, Workload{});
   const auto selected = programs ^ find_cref([&](const TestProgram &candidate) { return candidate.name == test.program; });
   if (!selected) throw std::runtime_error("test program absent from manifest");
   const bool gtest = selected->get().format == "gtest";
   const bool deqp = selected->get().format == "deqp";
+  const bool hecbench = selected->get().format == "hecbench";
   const auto &program = selected->get().path;
   std::vector<std::string> arguments;
   const auto report = fs::path(config.reportDirectory) / test.program / fmt::to_string(test.index);
@@ -725,7 +757,9 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   auto environment = config.environment;
   if (const auto devices = suiteCaseDeviceCount(test.program, test.identity); !devices.empty())
     environment[environment::DeviceCount] = std::string(devices);
-  if (deqp) {
+  if (hecbench) {
+    arguments = {program.string()};
+  } else if (deqp) {
     arguments = {program.string(),
                  "--deqp-case=" + test.identity,
                  "--deqp-log-filename=" + (report / "result.qpa").string(),
@@ -755,6 +789,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   auto status = process.status;
   std::string record;
   std::string reason;
+  std::string classification;
   if (status == 0 && deqp) {
     const auto result = deqpResult(readFile(report / "result.qpa"), test.identity);
     record = fmt::format("dEQP {}: {}\n", test.identity, result.statusCode);
@@ -772,20 +807,35 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     }
   }
   output.close();
-  if (status == SkipReturnCode && !gtest && !deqp) reason = catchSkipReason(readFile(outputPath));
+  if (hecbench) {
+    auto outcome = classifyHecbenchOutput(readFile(outputPath), process.timedOut);
+    if (status != 0 && outcome != HecbenchOutcome::TimeLimit) outcome = HecbenchOutcome::Fail;
+    classification = std::string(hecbenchOutcomeName(outcome));
+    switch (outcome) {
+      case HecbenchOutcome::Fail:
+        if (status == 0) status = 1;
+        reason = "output reports failure";
+        break;
+      case HecbenchOutcome::TimeLimit: reason = fmt::format("time limit after {} s", test.timeoutSeconds); break;
+      case HecbenchOutcome::Completion: reason = "completion only"; break;
+      case HecbenchOutcome::Pass: reason = "pass"; break;
+    }
+  }
+  if (status == SkipReturnCode && !gtest && !deqp && !hecbench) reason = catchSkipReason(readFile(outputPath));
   std::string message = std::move(reason);
   if (message.empty()) {
     message = process.timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
                                : fmt::format("exit status {}", status);
   }
+  if (!classification.empty()) record += fmt::format("hecbench: {}\n", classification);
   record += fmt::format("conformance: {}, full output: {}\n", message, outputPath.string());
-  return {.status = status, .output = std::move(record), .message = std::move(message)};
+  return {.status = status, .output = std::move(record), .message = std::move(message), .classification = std::move(classification)};
 }
 namespace {
 bool skipped(const CaseResult &result) { return result.status == SkipReturnCode; }
 bool failed(const CaseResult &result) { return result.status != 0 && !skipped(result); }
 const char *resultLabel(const CaseResult &result) {
-  if (result.status == 0) return "Passed";
+  if (result.status == 0) return result.classification == "completion" ? "Completed" : "Passed";
   return skipped(result) ? "Skipped" : "***Failed";
 }
 std::string failureMessage(const CaseResult &result) {
@@ -869,7 +919,7 @@ void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double time
           try {
             result = execute(config, warmup.test);
           } catch (const std::exception &error) {
-            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}};
+            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
           }
           const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - started;
           const bool usable = result.status == 0 || skipped(result);
@@ -956,7 +1006,7 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
           try {
             result = execute(target.config, test);
           } catch (const std::exception &error) {
-            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}};
+            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
           }
           result.elapsed = std::chrono::steady_clock::now() - begin;
           lock.lock();
@@ -1089,11 +1139,14 @@ int32_t run(RunOptions configuration) {
   writeJunit(reports / "junit.xml", results);
   const auto total = prepared ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
   const auto skips = results ^ count([](const CaseReport &report) { return skipped(report.result); });
+  const auto completion = results ^ count([](const CaseReport &report) { return report.result.classification == "completion"; });
+  const auto timeLimit = results ^ count([](const CaseReport &report) { return report.result.classification == "time limit"; });
   const auto failures = results | filter([](const CaseReport &report) { return failed(report.result); })
                         | map([](const CaseReport &report) { return &report; }) | to_vector();
-  std::cout << fmt::format("conformance: {} passed, {} skipped, {} failed, {} not run of {} cases in {:.1f} s\n",
-                           results.size() - static_cast<size_t>(skips) - failures.size(), skips, failures.size(), total - results.size(),
-                           total, std::chrono::duration<double>(std::chrono::steady_clock::now() - executed).count());
+  std::cout << fmt::format(
+      "conformance: {} passed ({} completion only), {} skipped, {} failed ({} time limit), {} not run of {} cases in {:.1f} s\n",
+      results.size() - static_cast<size_t>(skips) - failures.size(), completion, skips, failures.size(), timeLimit, total - results.size(),
+      total, std::chrono::duration<double>(std::chrono::steady_clock::now() - executed).count());
   for (const auto *report : failures)
     std::cout << "  failed: " << report->name << " (" << failureMessage(report->result) << ")\n";
   std::cout << "conformance JUnit report: " << (reports / "junit.xml").string() << '\n';

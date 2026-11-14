@@ -111,12 +111,17 @@ struct CaseResult {
   int32_t status = 0;
   // The full record and its one-line summary for failure and skip reports.
   std::string output, message;
+  // HeCBench-only outcome derived from the run's output.
+  std::string classification = {};
   std::chrono::duration<double> elapsed{};
 };
 struct DeqpResult {
   std::string statusCode;
   int32_t status;
 };
+enum class HecbenchOutcome { Pass, Fail, Completion, TimeLimit };
+HecbenchOutcome classifyHecbenchOutput(std::string_view output, bool timedOut);
+std::string_view hecbenchOutcomeName(HecbenchOutcome outcome);
 struct CaseReport {
   std::string name;
   CaseResult result;

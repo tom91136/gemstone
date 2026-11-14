@@ -115,3 +115,31 @@ pinned_dependency(oneapi_samples SOURCE_ONLY
 pinned_dependency(onedpl SOURCE_ONLY
   URL https://codeload.github.com/uxlfoundation/oneDPL/tar.gz/refs/tags/oneDPL-release-2022.13.0
   URL_HASH SHA256=d0524a3c896616335aef42d244cb331b31fec14cf7389cdd0e89c2e5b28ecf77)
+pinned_dependency(hecbench SOURCE_ONLY
+  URL https://codeload.github.com/zjin-lcf/HeCBench/tar.gz/4426c9fbdbb5e54b3776bf04a72774f8da4973b3
+  URL_HASH SHA256=8e22a15f75c2ff55d78dfde51d75ca5510e74d894abbdc8a74e9fc8117143a98)
+pinned_dependency(cxxopts SOURCE_ONLY
+  URL https://codeload.github.com/jarro2783/cxxopts/tar.gz/refs/tags/v3.3.1
+  URL_HASH SHA256=3bfc70542c521d4b55a46429d808178916a579b28d048bd8c727ee76c39e2072)
+pinned_dependency(hecbench_fmt SOURCE_ONLY
+  URL https://codeload.github.com/fmtlib/fmt/tar.gz/refs/tags/7.1.2
+  URL_HASH SHA256=4119a1c34dff91631e1d0a3707428f764f1ea22fe3cd5e70af5b4ccd5513831c)
+
+include("${CMAKE_CURRENT_LIST_DIR}/cmake/Hecbench.cmake")
+if(DEPENDENCY_CACHE_MODE STREQUAL "populate" OR CONFORMANCE_BUILD_HECBENCH)
+  if(EXISTS "${DEPENDENCY_CACHE}/hecbench/src/CMakeLists.txt")
+    hecbench_dvc_entries("${DEPENDENCY_CACHE}/hecbench" hecbench_dvc)
+    foreach(entry IN LISTS hecbench_dvc)
+      string(REPLACE "|" ";" fields "${entry}")
+      list(GET fields 0 md5)
+      list(GET fields 1 size)
+      list(GET fields 2 relative)
+      get_filename_component(filename "${relative}" NAME)
+      hecbench_dvc_url("${md5}" url)
+      pinned_dependency("hecbench_dvc_${md5}" DOWNLOAD_NO_EXTRACT YES
+        URL "${url}" URL_HASH "MD5=${md5}" SIZE "${size}" FILENAME "${filename}")
+    endforeach()
+  elseif(DEPENDENCY_CACHE_MODE STREQUAL "populate")
+    message(FATAL_ERROR "HeCBench source is missing from ${DEPENDENCY_CACHE}")
+  endif()
+endif()

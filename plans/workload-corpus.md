@@ -1,6 +1,6 @@
 # Workload corpus
 
-Status: proposed, not started. Its build and first runs do not wait for other plans. Triage uses `concurrency-checking.md` to separate races from emulator defects.
+Status: in progress. Step 1 is done for the CUDA nvcc 13.3 fatbin route. Its build and first runs do not wait for other plans. Triage uses `concurrency-checking.md` to separate races from emulator defects.
 
 ## Goal
 
@@ -19,13 +19,24 @@ Add HeCBench as a conformance source: a large set of real kernels in CUDA, HIP, 
 - Correctness comes from each benchmark's own output. A case passes when the output reports a pass and no failure. A benchmark that verifies nothing counts as a completion case and is reported apart. The split is derived from the output on every run, not kept as a list.
 - HeCBench maintains its miniBUDE and BabelStream ports apart from the upstream programs in `conformance/miniapps`. Both stay: the upstream programs cover more models, and the HeCBench copies are separate code to test.
 - Workloads follow the existing pattern: a bounded `hecbench-bounded` for CI and a full `hecbench`. Sharding uses the existing regex partition policy.
+- The corpus admits permissive and copyleft benchmarks. Each benchmark family's licence text is classified as permissive, copyleft, non-commercial, proprietary, or unknown. Non-commercial, proprietary, and unknown families are left out; unknown families are listed in the generated report for manual classification. The classification is generated from the licence files, not kept as a list of names.
 
 ## Steps
 
 ### 1. Build
 
-- Fetch and pin HeCBench, build every model on every route, and record which benchmarks fail to build and why. A build failure in the conformance compilers is reported, not patched around.
-- Check the licence of each benchmark taken from another project, and record any that differ from the repository's.
+Done for the CUDA nvcc 13.3 fatbin route at sm_89.
+
+- HeCBench is pinned at `4426c9fbdbb5e54b3776bf04a72774f8da4973b3` by SHA256 in `conformance/dependencies.cmake`. The 53 DVC archives that the CUDA benchmarks need are derived from the `.dvc` pointers at that commit (MD5, size, and path) and pinned by MD5 and size; 919,870,463 bytes compressed. cxxopts 3.3.1 and the fmt 7.1.2 source that `src/si-cuda` fetches are pinned by SHA256, so configure needs neither git nor network.
+- `conformance/hecbench` stages the pinned source, places the build-input archives, classifies every CUDA benchmark family by its licence text, and configures and builds the admitted targets with `ninja -k 0` in a nested build, one target per benchmark. The outer artifact carries only the binaries that built, plus a generated failure list with the first compiler error for each.
+- Every model and the other routes remain for later steps.
+
+Build results at this commit:
+
+- 559 CUDA benchmark directories are listed, 555 have a permissive or copyleft licence, and 554 are selected. 537 built.
+- 17 selected benchmarks did not build: diamond (`zlib.h` missing), heun (`cudnn.h` missing), minmax (`thrust::distance` is absent under CUDA 13.3), and 14 that configure skips because the image lacks their dependency: allreduce, ccl, halo-finder, miniWeather, moe-combine, pingpong, and sparkler (MPI); ge-spmm, gerbil, hbc, mmcsf, and warpsort (Boost); stsg (GDAL); xlqc (Eigen).
+- axhelm is not selected because the CUDA 13.3 image has no Fortran compiler; its BlasLapack archive is not staged. It is listed separately in the failure report.
+- Four families are left out by licence: cm (CC-BY-NC-3.0), vanGenuchten (Dhara non-commercial), complex (NVIDIA proprietary), and wedford (unknown, its licence file is only an apex URL). The generated classification over the 559 CUDA directories is 526 permissive, 29 copyleft, 2 non-commercial, 1 proprietary, and 1 unknown.
 
 ### 2. Run
 
@@ -60,6 +71,12 @@ Reconnaissance at HeCBench `4426c9fbdbb5e54b3776bf04a72774f8da4973b3`:
 - Licences: 134 benchmarks carry a licence other than BSD-3-Clause, 30 of them copyleft. cm and vanGenuchten are non-commercial, and complex is NVIDIA proprietary.
 - Run time: the yaml arguments that exist are sized for real GPUs (softmax, attention, jacobi). Several benchmarks without a yaml test need input files or arguments to run at all.
 
+Step 1 at the same commit:
+
+- Staging the three build-input DVC archives fixed sad, seam-carving, and testSNAP; they build. The remaining CUDA build failures are the 17 above.
+- The full `hecbench` workload discovers the 537 built programs on the same artifact. The first `hecbench-bounded` run through Gemstone on `cuda-sass/sm_89` selected assert, bitpacking, minimod, and overlap: 1 verified pass, 1 completion only, 2 failed, 0 skipped, and 0 time limit in 24.8 s. overlap passes, minimod completes without a pass or fail marker, assert fails because Gemstone does not implement device-side `assert`, and bitpacking prints FAIL for every size. The run exits non-zero because failures stay red.
+- A probe of larger defaults found page-rank passing in 266 s and overlap in 21 s; chemv, winograd, mdh, and laplace fail under emulation, with laplace failing its own verification after one iteration. Step 2 needs the yaml arguments, smaller inputs, or both before those can be bounded.
+
 ## Risks to confirm
 
 - HIP, SYCL, and OpenMP build times, measured rather than extrapolated from the CUDA count.
@@ -74,5 +91,4 @@ Reconnaissance at HeCBench `4426c9fbdbb5e54b3776bf04a72774f8da4973b3`:
 
 - Whether completion-only benchmarks are in the CI workload. Recommendation: yes, since a crash or a hang is still a failure, but reported apart from verified results.
 - Whether to compare results across models of the same benchmark where the benchmark does not verify itself. Recommendation: later, only for benchmarks whose output is deterministic.
-- Which licences the corpus admits. Recommendation: leave out non-commercial and proprietary benchmarks (cm, vanGenuchten, complex), detected from each directory's licence text rather than kept as a list, and admit copyleft ones, since the corpus builds and runs them and does not redistribute them.
 - How configure-time downloads are fed. Recommendation: pin the DVC archives and the cxxopts and fmt sources in the dependency cache, as for the other conformance sources, so the build needs neither git nor network.

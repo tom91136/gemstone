@@ -43,6 +43,14 @@ endforeach()
 if(NOT DEFINED MINIAPP_MODELS)
   set(MINIAPP_MODELS "")
 endif()
+if(NOT DEFINED BUILD_HECBENCH)
+  if(BACKEND STREQUAL "cuda" AND CONFORMANCE_COMPILER STREQUAL "vendor"
+      AND CONFORMANCE_CUDA_CODE STREQUAL "fatbin")
+    set(BUILD_HECBENCH ON)
+  else()
+    set(BUILD_HECBENCH OFF)
+  endif()
+endif()
 if(NOT DEFINED CONFORMANCE_SUPPORT_KEY)
   set(CONFORMANCE_SUPPORT_KEY support)
 endif()
@@ -139,7 +147,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/Floor.cmake")
 set(work "${CONFORMANCE_WORK_DIRECTORY}")
 file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../dependencies.cmake" dependencies_digest)
 set(configuration_signature
-  "${dependencies_digest}|${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
+  "${dependencies_digest}|${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${BUILD_HECBENCH}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
 prepare_work_directory("${work}" "${configuration_signature}")
 set(build "${work}/build")
 set(ENV{HOME} "${work}/home")
@@ -164,6 +172,7 @@ execute_process(
     -DCONFORMANCE_BUILD_UNIFIED=${BUILD_UNIFIED}
     -DCONFORMANCE_BUILD_CTS=${BUILD_CTS}
     -DCONFORMANCE_BUILD_MINIAPPS=${BUILD_MINIAPPS}
+    -DCONFORMANCE_BUILD_HECBENCH=${BUILD_HECBENCH}
     -DCONFORMANCE_HIP_ENABLE_ROCBLAS=${HIP_ENABLE_ROCBLAS}
     "-DCONFORMANCE_MINIAPP_MODELS=${MINIAPP_MODELS}"
     -DCMAKE_CUDA_ARCHITECTURES=${cuda_architecture}
