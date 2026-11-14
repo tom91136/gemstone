@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.spirv
 
 import fixtures.*
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -287,9 +288,9 @@ class ConcurrencyScheduleSuite extends Suite {
   }
 
   private class CountingRandom(seed: Long) extends ConcurrencySchedule.Random(seed) {
-    var launchSchedules                         = 0
+    val launchSchedules: AtomicInteger          = AtomicInteger()
     override def forLaunch: ConcurrencySchedule = {
-      launchSchedules += 1
+      launchSchedules.incrementAndGet()
       super.forLaunch
     }
   }
@@ -314,6 +315,6 @@ class ConcurrencyScheduleSuite extends Suite {
       Right(())
     )
     assertEquals(word(memory, region, 4), 1L)
-    assertEquals(schedule.launchSchedules, 1)
+    assertEquals(schedule.launchSchedules.get(), 1)
   }
 }

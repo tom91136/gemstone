@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
 import fixtures.*
+import java.util.concurrent.atomic.AtomicInteger
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -205,9 +206,9 @@ class ConcurrencyScheduleSuite extends Suite {
   }
 
   private class CountingRandom(seed: Long) extends ConcurrencySchedule.Random(seed) {
-    var launchSchedules                         = 0
+    val launchSchedules: AtomicInteger          = AtomicInteger()
     override def forLaunch: ConcurrencySchedule = {
-      launchSchedules += 1
+      launchSchedules.incrementAndGet()
       super.forLaunch
     }
   }
@@ -228,7 +229,7 @@ class ConcurrencyScheduleSuite extends Suite {
       Right(())
     )
     assertEquals(memory.getInt(out, 4), 2)
-    assertEquals(schedule.launchSchedules, 1)
+    assertEquals(schedule.launchSchedules.get(), 1)
   }
 
   test("a wave that blocks once then progresses is not reported as stalled") {
