@@ -292,8 +292,11 @@ private object LegacyAddressRewrite {
             true
         })
       case _: Form.Sel   => mods.isEmpty && args.size == 4 && isPredicateOperand(args.last)
-      case _: Form.Imnmx => mods.forall(_ == Instruction.Modifier.U32) && args.size == 4 &&
-        isPredicateOperand(args.last)
+      case _: Form.Imnmx =>
+        mods.forall(modifier =>
+          modifier == Instruction.Modifier.U32 || modifier == Instruction.Modifier.XHI ||
+            modifier == Instruction.Modifier.XLO
+        ) && args.size == 4 && isPredicateOperand(args.last)
       case _: Form.Icmp =>
         mods.forall(Comparisons + Instruction.Modifier.`U32`) && mods.count(Comparisons) == 1 && args.size == 4
       case _: Form.Iset =>
@@ -321,7 +324,8 @@ private object LegacyAddressRewrite {
         isRegisterDestination(output, Destination.ZeroWithCarry) &&
         (!OperandQueries.has(output, OperandSelector.CC) || isAdd(instruction) ||
           OperandQueries.is[Form.Iscadd](instruction.operation) ||
-          OperandQueries.is[Form.Iadd3](instruction.operation))
+          OperandQueries.is[Form.Iadd3](instruction.operation) ||
+          OperandQueries.is[Form.Imnmx](instruction.operation))
     ).flatMap(registerIndex(_))
   }
 

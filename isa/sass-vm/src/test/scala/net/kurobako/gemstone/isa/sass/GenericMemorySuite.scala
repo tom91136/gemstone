@@ -393,6 +393,17 @@ class GenericMemorySuite extends Suite {
     )
   }
 
+  for (sm <- Vec(50, 60))
+    test(s"sm_$sm an extended IMNMX condition code destination preserves a generic address predicate") {
+      check(
+        sm,
+        "LDC.64 R2, c[0x0][0x160]; MOV R4, 42; LEA R8.CC, R2, RZ; LEA.HI.X P0, R9, R2, RZ, R3; " +
+          "MOV32I R6, 0x1; MOV32I R7, 0x2; IMNMX.XHI R10.CC, R6, R7, PT; IMNMX.U32.XLO R11, R6, R7, PT; " +
+          "ST.E [R8], R4, P0; EXIT",
+        Vec(42)
+      )
+    }
+
   for (sm <- Vec(50, 60)) test(s"sm_$sm the auxiliary predicate proof follows calls and their returns") {
     check(
       sm,
