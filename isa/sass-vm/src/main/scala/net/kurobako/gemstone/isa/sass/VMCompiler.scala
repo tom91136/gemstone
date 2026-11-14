@@ -218,16 +218,22 @@ private object VMCompiler {
     val resumes = saved.keys.toVec.sorted.map(_ + 4)
     val targets = (addresses ++ resumes).sorted
     val returns = returnBases ++ resumes
+    def located(instruction: DecodedInstruction, reason: String): NonEmpty[String] =
+      s"${kernel.name}+0x${instruction.address.raw.toHexString} (sm_${module.sm}): ${(Vec(instruction.mnemonic.raw) ++ instruction.modifiers.map(_.name)).mkString(".")} ${instruction.operands.mkString(", ")}: $reason"
+        .unsafe[NonEmpty[String]]
     def lowerInstruction(instruction: DecodedInstruction): Either[Failure, Vec[VMAssembler.Statement]] =
+      LegacyControlFlow.unsupportedCondition(instruction) match {
+        case Some(modifier) =>
+          Left(Failure.Unsupported(
+            located(instruction, s"unsupported condition code ${modifier.name} on a legacy control-stack transfer")
+          ))
+        case None => lowerSupported(instruction)
+      }
+    def lowerSupported(instruction: DecodedInstruction): Either[Failure, Vec[VMAssembler.Statement]] =
       try {
         val setup      = legacyTokens.find(_.instruction.address == instruction.address)
         val syncSuffix = generation != Generation.Modern && instruction.modifiers.lastOption.contains(Modifier.S)
-        LegacyControlFlow.unsupportedCondition(instruction).foreach(modifier =>
-          throw IllegalArgumentException(
-            s"unsupported condition code ${modifier.name} on a legacy control-stack transfer"
-          )
-        )
-        val transfer = legacyControl.flatMap(_.transfer(instruction))
+        val transfer   = legacyControl.flatMap(_.transfer(instruction))
         // Some legacy entry points end with RET; EXIT despite having no call sites or return tokens. This terminal
         // entry epilogue ends the launch; it must not consume a device-call return address.
         val entryReturn = generation != Generation.Modern && returnBases.isEmpty && instruction.operands.isEmpty &&
@@ -334,12 +340,9 @@ private object VMCompiler {
         )
       } catch {
         case NonFatal(error) =>
-          val located =
-            s"${kernel.name}+0x${instruction.address.raw.toHexString} (sm_${module.sm}): ${(Vec(instruction.mnemonic.raw) ++ instruction.modifiers.map(_.name)).mkString(".")} ${instruction.operands.mkString(", ")}: ${error.getMessage}"
-              .unsafe[NonEmpty[String]]
           Left(error match {
-            case _: VMTensorCompiler.NoProduct => Failure.NoProduct(located)
-            case _                             => Failure.Unsupported(located)
+            case _: VMTensorCompiler.NoProduct => Failure.NoProduct(located(instruction, error.getMessage))
+            case _                             => Failure.Unsupported(located(instruction, error.getMessage))
           })
       }
     val lowered = Vec.newBuilder[VMAssembler.Statement]
