@@ -50,11 +50,20 @@ Add HeCBench as a conformance source: a large set of real kernels in CUDA, HIP, 
 - Every emulator defect found gets a reduced case in gemstone's own suites.
 - Failures stay red.
 
+## Findings
+
+Reconnaissance at HeCBench `4426c9fbdbb5e54b3776bf04a72774f8da4973b3`:
+
+- Input data: 57 benchmarks need DVC archives, 1.72 GB compressed in total (CUDA, HIP, and SYCL 1.72 GB, OpenMP 1.21 GB). The largest are diamond (658 MB), mpc (275 MB), and rsmt (194 MB). Some archives hold headers, so they are build inputs, not only run inputs. Seven benchmarks download data outside DVC, ge-spmm the largest at over 600 MB.
+- Build: the CMake configures every benchmark at once, and each `<name>-<model>` target builds alone. The CUDA model builds in 194 s on 8 cores, 538 of 544 targets. diamond and heun miss `zlib.h` and `cudnn.h`, minmax fails on `thrust::distance` under CUDA 13.3, and sad, seam-carving, and testSNAP need DVC headers. `src/si-cuda` fetches cxxopts and fmt with git at configure time.
+- Correctness: none of the 166 output patterns in `benchmarks.yaml` checks a result; all capture a timing or throughput value, and 342 entries have no test. 276 benchmarks print PASS or FAIL themselves, so the pass and fail signal comes from the output, as the design says.
+- Licences: 134 benchmarks carry a licence other than BSD-3-Clause, 30 of them copyleft. cm and vanGenuchten are non-commercial, and complex is NVIDIA proprietary.
+- Run time: the yaml arguments that exist are sized for real GPUs (softmax, attention, jacobi). Several benchmarks without a yaml test need input files or arguments to run at all.
+
 ## Risks to confirm
 
-- DVC data: which benchmarks need it and how large it is.
-- Build time for about 2000 programs across routes. The artifact cache must key per benchmark, so one change does not rebuild all of them.
-- Run time under emulation for benchmarks whose arguments assume a real GPU.
+- HIP, SYCL, and OpenMP build times, measured rather than extrapolated from the CUDA count.
+- Run times under emulation, which decide the bounded workload's arguments.
 
 ## Non-goals
 
@@ -65,3 +74,5 @@ Add HeCBench as a conformance source: a large set of real kernels in CUDA, HIP, 
 
 - Whether completion-only benchmarks are in the CI workload. Recommendation: yes, since a crash or a hang is still a failure, but reported apart from verified results.
 - Whether to compare results across models of the same benchmark where the benchmark does not verify itself. Recommendation: later, only for benchmarks whose output is deterministic.
+- Which licences the corpus admits. Recommendation: leave out non-commercial and proprietary benchmarks (cm, vanGenuchten, complex), detected from each directory's licence text rather than kept as a list, and admit copyleft ones, since the corpus builds and runs them and does not redistribute them.
+- How configure-time downloads are fed. Recommendation: pin the DVC archives and the cxxopts and fmt sources in the dependency cache, as for the other conformance sources, so the build needs neither git nor network.
