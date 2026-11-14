@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.spirv
 import fixtures.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
@@ -98,10 +99,10 @@ class ConcurrencyScheduleSuite extends Suite {
     OpFunctionEnd
   """
 
-  private val spinModule = spv"""
+  private def spinModule(localSize: Int = 1): Module = spv"""
     $openCL
     OpEntryPoint Kernel %main "spin" %workgroup
-    OpExecutionMode %main LocalSize 1 1 1
+    OpExecutionMode %main LocalSize $localSize 1 1
     OpDecorate %workgroup BuiltIn WorkgroupId
     %void = OpTypeVoid
     %bool = OpTypeBool
@@ -187,7 +188,7 @@ class ConcurrencyScheduleSuite extends Suite {
     for (seed <- 0L to 3L) {
       val memory  = RegionMemory()
       val region  = memory.allocate(8L)
-      val program = load(spinModule).value
+      val program = load(spinModule()).value
       assertEquals(
         execute(
           program,
@@ -206,8 +207,53 @@ class ConcurrencyScheduleSuite extends Suite {
     }
   }
 
+  private class FirstSetter extends LaunchObserver {
+    private var setterSeen       = false
+    var waiterBeforeSetter: Long = 0L
+
+    override def instruction(at: Fault.Location, state: ArchitecturalState): Either[Fault, Unit] = {
+      if (!setterSeen) {
+        if (at.workgroup.exists(_.x.raw == 1)) setterSeen = true
+        else waiterBeforeSetter += 1
+      }
+      Right(())
+    }
+  }
+
+  test("a seeded sweep bounds a workgroup to the same slice whatever its lane count") {
+    val slice = 64 * 1024
+    for {
+      localSize <- Vector(64, 1024)
+      seed      <- 0L to 7L
+    } {
+      val memory   = RegionMemory()
+      val region   = memory.allocate(8L)
+      val program  = load(spinModule(localSize)).value
+      val observer = FirstSetter()
+      val result   = execute(
+        program,
+        task(
+          "spin",
+          Vec(buffer(region, 0L, Some(8L))),
+          local = testDimensions(localSize.refine[Int > 0].value),
+          groups = testDimensions(2)
+        ),
+        memory,
+        control = TaskControl(TaskControl.Limits(2000000L), Some(observer)),
+        schedule = ConcurrencySchedule.Random(seed)
+      )
+      assertEquals(result, Right(()))
+      assert(
+        observer.waiterBeforeSetter <= slice,
+        s"local size $localSize, seed $seed: waiter ran ${observer.waiterBeforeSetter} instructions " +
+          s"before the setter, over the $slice instruction workgroup slice"
+      )
+      assertEquals(word(memory, region, 4), localSize.toLong)
+    }
+  }
+
   test("ReplayDevice reproduces a seeded launch") {
-    val image = ISA.encode(spinModule).value
+    val image = ISA.encode(spinModule()).value
     Using.resource(WorkerPool(1, minGroups = 1L, minWorkItems = 1L)) { pool =>
       val memory = ArrayMemory()
       val region = memory.allocate(8L)
@@ -251,7 +297,7 @@ class ConcurrencyScheduleSuite extends Suite {
   test("the launch order schedule is made once per launch, not once per sweep") {
     val memory   = RegionMemory()
     val region   = memory.allocate(8L)
-    val program  = load(spinModule).value
+    val program  = load(spinModule()).value
     val schedule = CountingRandom(7L)
     assertEquals(
       execute(

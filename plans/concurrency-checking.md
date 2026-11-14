@@ -53,6 +53,7 @@ Run a launch under a chosen, reproducible order of waves and workgroups, and rep
 ### 2. Seeded order across workgroups
 
 - Done: a `random:<seed>` schedule reports itself seeded, and NVIDIA, AMDGPU, and SPIR-V launches run every workgroup on the calling thread as retained state advanced one slice per schedule-chosen sweep, cooperative launches and cluster launches included. A sweep visits every unfinished workgroup once, so a spin on global memory cannot starve its setter and grid barriers progress; a sweep with no progress is a hang. `ReplayDevice` takes its schedule from the checkpoint, so a seeded checkpoint replays under the schedule that made it. The fixed schedule keeps today's dispatcher and order, and `Dispatch` itself stays fixed-only; the interpreters own seeded interleaving.
+- A seeded SPIR-V sweep spends one workgroup's charge budget across its invocations, so its slice stays bounded whatever the lane count.
 - Test: workgroup order changes with the seed and repeats under one seed, cooperative grid barriers and cross-workgroup spin waits complete under several seeds, and a seeded replay matches its launch.
 
 ### 3. Memory scheduling points and PCT

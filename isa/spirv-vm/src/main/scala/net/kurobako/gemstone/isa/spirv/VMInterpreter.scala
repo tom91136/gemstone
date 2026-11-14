@@ -683,7 +683,9 @@ private object VMInterpreter {
 
   /** Instructions run between budget charges; the shared allowance is charged after they execute. */
   private val ChargeInterval = 1024
-  private val SliceCharges   = 64
+
+  /** Charges one slice may spend, taken alone by a fixed-order invocation and shared by a seeded workgroup. */
+  private val SliceCharges = 64
 
   // The instruction loop exits as soon as the invocation completes, suspends, or faults. Executed instructions are
   // charged in batches so lanes do not contend on the shared allowance; a charge precedes every exit, so an exhausted
@@ -694,7 +696,8 @@ private object VMInterpreter {
       program: VMProgram,
       ops: Array[Op],
       execution: InvocationState,
-      control: TaskControl
+      control: TaskControl,
+      sliceCharges: Int = SliceCharges
   ): Either[Fault, Unit] = {
     val memory = execution.memory
     memory.helperInvocation = execution.helperInvocation
@@ -728,7 +731,7 @@ private object VMInterpreter {
         case Right(())   =>
           slices += 1
           // Lanes that run on, such as spin-waits, yield so other subgroups make independent forward progress.
-          if (slices == SliceCharges) { execution.preempted = true; return Right(()) }
+          if (slices == sliceCharges) { execution.preempted = true; return Right(()) }
       }
     }
     charge().flatMap(_ =>
@@ -793,7 +796,8 @@ private object VMInterpreter {
     }
   }
 
-  // One round of workgroup progress, resuming each runnable invocation once; GroupRun calls it per scheduling slice.
+  // One round of workgroup progress, resuming runnable invocations in the schedule's order until the workgroup's
+  // slice charges run out; GroupRun calls it per scheduling slice.
   @SuppressWarnings(
     Array(
       "scalafix:DisableSyntax.var",
@@ -812,19 +816,22 @@ private object VMInterpreter {
       order: Array[Int] | Null
   ): Either[Fault, Boolean] = {
     var progressed = false
+    var budget     = SliceCharges
     if (order eq null) {
       var index = 0
-      while (index < executions.size) {
+      while (index < executions.size && budget > 0) {
         val execution = executions(index)
         if (
           !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
           execution.reconvergenceJoin.isEmpty
         ) {
           progressed = true
-          resumeInvocation(program, ops, execution, control) match {
+          val before = execution.issued
+          resumeInvocation(program, ops, execution, control, budget) match {
             case Left(error) => return Left(located(error, timeline, execution))
             case Right(())   => ()
           }
+          budget -= ((execution.issued - before + ChargeInterval - 1) / ChargeInterval).toInt
         }
         index += 1
       }
@@ -841,19 +848,33 @@ private object VMInterpreter {
         i -= 1
       }
       var step = 0
-      while (step < count) {
+      while (step < count && budget > 0) {
         val execution = executions(ordering(step))
         if (
           !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
           execution.reconvergenceJoin.isEmpty
         ) {
           progressed = true
-          resumeInvocation(program, ops, execution, control) match {
+          val before = execution.issued
+          resumeInvocation(program, ops, execution, control, budget) match {
             case Left(error) => return Left(located(error, timeline, execution))
             case Right(())   => ()
           }
+          budget -= ((execution.issued - before + ChargeInterval - 1) / ChargeInterval).toInt
         }
         step += 1
+      }
+    }
+    if (budget == 0) {
+      // Lanes the slice did not reach have not reached their next convergence point.
+      var index = 0
+      while (index < executions.size) {
+        val execution = executions(index)
+        if (
+          !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
+          execution.reconvergenceJoin.isEmpty
+        ) execution.preempted = true
+        index += 1
       }
     }
     val hadPendingMemory = executions.exists(_.memoryPending)
