@@ -6,10 +6,16 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.TimeUnit
 import net.kurobako.gemstone.environment as env
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.*
 
-/** Equivalence through an external Bitwuzla process. The binary comes from `GEMSTONE_BITWUZLA_EXE`, else `PATH`. */
+/** Equivalence through an external Bitwuzla process. The binary comes from `GEMSTONE_BITWUZLA_EXE`, else `PATH`.
+  *
+  * The limit is `-T`: the CLI's `-t` timer thread can miss its wakeup and hold the process open for the whole limit.
+  */
 object Bitwuzla {
+
+  private val Allowance: FiniteDuration = 2.seconds
+
   def executable: Option[Path] = sys.env.get(env.BitwuzlaExe).filter(_.nonEmpty) match {
     case Some(path) => Some(Path.of(path)).filter(Files.isExecutable(_))
     case None       =>
@@ -23,14 +29,15 @@ object Bitwuzla {
       case Right(query) => executable.fold(Verdict.Unavailable)(solve(_, query, limit))
     }
 
-  private def solve(solver: Path, query: String, limit: FiniteDuration): Verdict = {
+  private[render] def solve(solver: Path, query: String, limit: FiniteDuration): Verdict = {
     val directory = Files.createTempDirectory("gemstone-equivalence")
     val input     = directory.resolve("query.smt2")
     val stdout    = directory.resolve("stdout.txt")
     val stderr    = directory.resolve("stderr.txt")
     try {
       Files.writeString(input, query, StandardCharsets.UTF_8)
-      val process = ProcessBuilder(solver.toString, "-m", "-t", limit.toMillis.toString, input.toString)
+      val budget  = (limit - Allowance.min(limit / 2)).toMillis
+      val process = ProcessBuilder(solver.toString, "-m", "-T", budget.toString, input.toString)
         .redirectOutput(stdout.toFile)
         .redirectError(stderr.toFile)
         .start()
