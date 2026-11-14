@@ -246,12 +246,42 @@ private object VMCompiler {
         }
         val never  = LegacyControlFlow.never(instruction)
         val branch = transfer.toVec.flatMap { token =>
-          val predication =
+          val guarded =
             instruction.guard.map(_ => ExecutionPredicate(VMRegisters.Predicate.Guard.slot, negated = false))
+          val (conditionStatements, predication) = LegacyControlFlow.condition(instruction) match {
+            case None           => (Vec.empty[VMAssembler.Statement], guarded)
+            case Some(inverted) =>
+              val zero = VMRegisters.temporaryPredicate(0)
+              val read = Execute(ReadConditionPredicate(zero, VMConditionCodes.Flag.Zero), None)
+              guarded match {
+                case None    => (Vec(read), Some(ExecutionPredicate(zero, negated = inverted)))
+                case Some(_) =>
+                  val flag         = VMRegisters.temporaryPredicate(1)
+                  val invertedFlag =
+                    if (inverted) Vec(Execute(PredicateUnary(flag, zero), None))
+                    else Vec.empty[VMAssembler.Statement]
+                  val combined = VMRegisters.temporaryPredicate(2)
+                  (
+                    Vec(read) ++ invertedFlag :+ Execute(
+                      PredicateBinary(
+                        PredicateOperation.And,
+                        combined,
+                        VMRegisters.Predicate.Guard.slot,
+                        if (inverted) flag else zero
+                      ),
+                      None
+                    ),
+                    Some(ExecutionPredicate(combined, negated = false))
+                  )
+              }
+          }
           val unwind = legacyControl.toVec.flatMap(_.unwound(instruction).map(enclosed =>
             Execute(Convergence(layout.barrier(enclosed.slot), ConvergenceAction.Break), predication)
           ))
-          unwind :+ VMAssembler.Statement.Branch(s"L${token.target.raw.toHexString}", predication)
+          conditionStatements ++ unwind :+ VMAssembler.Statement.Branch(
+            s"L${token.target.raw.toHexString}",
+            predication
+          )
         }
         val statements =
           if (never) Vec(Label(s"L${instruction.address.raw.toHexString}"))

@@ -135,6 +135,45 @@ class ControlFlowSuite extends Suite {
       )
     }
 
+    test(s"sm_$sm BRK.NEU breaks only the lanes whose condition code holds") {
+      check(
+        sm,
+        """S2R R0, SR_TID.X
+          |MOV R4, RZ
+          |PBK `(target)
+          |ISET.NE.U32.AND RZ.CC, R0, 0x7, PT
+          |BRK.NEU
+          |MOV R4, 1
+          |BRK
+          |target: LDC.64 R2, c[0x0][0x160]
+          |ISCADD R2.CC, R0, R2, 2
+          |IADD.X R3, RZ, R3
+          |STG.E [R2], R4
+          |EXIT""".stripMargin,
+        Vec.tabulate(32)(lane => if (lane == 7) 1 else 0)
+      )
+    }
+
+    test(s"sm_$sm a guarded BRK.NEU also requires its condition code") {
+      check(
+        sm,
+        """S2R R0, SR_TID.X
+          |MOV R4, RZ
+          |PBK `(target)
+          |ISETP.LT.AND P0, PT, R0, 16, PT
+          |ISET.NE.U32.AND RZ.CC, R0, 0x7, PT
+          |@P0 BRK.NEU
+          |MOV R4, 1
+          |BRK
+          |target: LDC.64 R2, c[0x0][0x160]
+          |ISCADD R2.CC, R0, R2, 2
+          |IADD.X R3, RZ, R3
+          |STG.E [R2], R4
+          |EXIT""".stripMargin,
+        Vec.tabulate(32)(lane => if (lane < 16 && lane != 7) 0 else 1)
+      )
+    }
+
     test(s"sm_$sm never-executed transfers outside any token region are ignored") {
       check(
         sm,

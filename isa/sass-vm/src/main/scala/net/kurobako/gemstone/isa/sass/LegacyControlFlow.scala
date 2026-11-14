@@ -26,6 +26,16 @@ private object LegacyControlFlow {
     case _                                                                      => None
   }
 
+  /** A legacy transfer's condition code, true when the comparison is inverted. `BRK.NEU` and friends test the zero flag
+    * the preceding `ISET` leaves, like `BRA CC.NEU`.
+    */
+  def condition(instruction: DecodedInstruction): Option[Boolean] =
+    instruction.modifiers.filterNot(_ == Instruction.Modifier.CC) match {
+      case Vec(Instruction.Modifier.EQ) | Vec(Instruction.Modifier.EQU) => Some(false)
+      case Vec(Instruction.Modifier.NE) | Vec(Instruction.Modifier.NEU) => Some(true)
+      case _                                                            => None
+    }
+
   def never(instruction: DecodedInstruction): Boolean =
     instruction.guard.exists(guard => OperandQueries.isNeverPredicate(guard.predicate))
 
@@ -167,7 +177,7 @@ private class LegacyControlFlow(instructions: Vec[DecodedInstruction]) {
           if (position < 0) throw IllegalArgumentException("legacy control-stack transfer has no enclosing setup")
           if (stack(position) == Divergent) inconsistent(index)
           follow(indices(tokens(stack(position))._2), stack.drop(position + 1))
-          if (instruction.guard.nonEmpty) next()
+          if (instruction.guard.nonEmpty || condition(instruction).nonEmpty) next()
         case _ =>
           instruction.operation.form match {
             case _: Form.Bra | _: Form.Jmp | _: Form.Pret => follow(
