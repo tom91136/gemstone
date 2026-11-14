@@ -222,7 +222,12 @@ private object VMCompiler {
       try {
         val setup      = legacyTokens.find(_.instruction.address == instruction.address)
         val syncSuffix = generation != Generation.Modern && instruction.modifiers.lastOption.contains(Modifier.S)
-        val transfer   = legacyControl.flatMap(_.transfer(instruction))
+        LegacyControlFlow.unsupportedCondition(instruction).foreach(modifier =>
+          throw IllegalArgumentException(
+            s"unsupported condition code ${modifier.name} on a legacy control-stack transfer"
+          )
+        )
+        val transfer = legacyControl.flatMap(_.transfer(instruction))
         // Some legacy entry points end with RET; EXIT despite having no call sites or return tokens. This terminal
         // entry epilogue ends the launch; it must not consume a device-call return address.
         val entryReturn = generation != Generation.Modern && returnBases.isEmpty && instruction.operands.isEmpty &&

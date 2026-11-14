@@ -26,9 +26,7 @@ private object VMControlCompiler {
   private val VoteModifiers             = Set(Modifier.ANY, Modifier.ALL, Modifier.EQ)
   private val BarrierReductionModifiers =
     Set(Modifier.RED, Modifier.OR, Modifier.AND, Modifier.POPC, Modifier.DEFER_BLOCKING)
-  private val ReturnModifiers          = Set(Modifier.ABS, Modifier.REL, Modifier.NODEC)
-  private val ConditionalExitModifiers = Set(Modifier.EQ, Modifier.EQU, Modifier.NE, Modifier.NEU)
-  private val NegatedExitModifiers     = Set(Modifier.NE, Modifier.NEU)
+  private val ReturnModifiers = Set(Modifier.ABS, Modifier.REL, Modifier.NODEC)
 
   def lower(using context: VMCompilationContext): Boolean = {
     import context.*
@@ -171,14 +169,12 @@ private object VMControlCompiler {
       case _: Form.Ret =>
         subroutineReturn()
         true
-      case _: Form.Exit
-          if legacy && operands.isEmpty && modifiers.size == 1 &&
-            ConditionalExitModifiers(modifiers.head) =>
-        guarded(
-          Return,
-          readConditionFlag(VMConditionCodes.Flag.Zero),
-          negated = NegatedExitModifiers(modifiers.head)
-        )
+      case _: Form.Exit if legacy && operands.isEmpty && modifiers.size == 1 =>
+        VMConditionCodeForms.zeroFlagCondition(modifiers.head) match {
+          case Some(negated) => guarded(Return, readConditionFlag(VMConditionCodes.Flag.Zero), negated = negated)
+          case None          =>
+            unsupported(s"unsupported legacy EXIT condition code ${modifiers.head.name}")
+        }
         true
       case _: Form.Exit =>
         requireModifiers(Set.empty)
@@ -189,18 +185,17 @@ private object VMControlCompiler {
         }
         true
       case _: Form.Bra | _: Form.Jmp
-          if legacy && modifiers.size == 2 && modifiers.head == Modifier.CC &&
-            PartialFunction.cond(modifiers.last) { case Modifier.EQ | Modifier.EQU | Modifier.NE | Modifier.NEU =>
-              true
-            } =>
-        requireOperands(1, "condition-code branch requires a target")
-        branch(
-          codeAddress(operands.head),
-          Some(ExecutionPredicate(
-            readConditionFlag(VMConditionCodes.Flag.Zero).slot,
-            PartialFunction.cond(modifiers.last) { case Modifier.NE | Modifier.NEU => true }
-          ))
-        )
+          if legacy && modifiers.size == 2 && modifiers.head == Modifier.CC =>
+        VMConditionCodeForms.zeroFlagCondition(modifiers.last) match {
+          case Some(negated) =>
+            requireOperands(1, "condition-code branch requires a target")
+            branch(
+              codeAddress(operands.head),
+              Some(ExecutionPredicate(readConditionFlag(VMConditionCodes.Flag.Zero).slot, negated = negated))
+            )
+          case None =>
+            unsupported(s"unsupported legacy branch condition code ${modifiers.last.name}")
+        }
         true
       case _: Form.Bra | _: Form.Jmp
           if !legacy && (modifiers == Vec(Modifier.DIV) || modifiers == Vec(Modifier.CONV)) =>

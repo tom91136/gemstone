@@ -154,6 +154,25 @@ class ControlFlowSuite extends Suite {
       )
     }
 
+    test(s"sm_$sm BRK.EQ breaks only the lanes whose condition code is equal") {
+      check(
+        sm,
+        """S2R R0, SR_TID.X
+          |MOV R4, RZ
+          |PBK `(target)
+          |ISET.EQ.U32.AND RZ.CC, R0, 0x7, PT
+          |BRK.EQ
+          |MOV R4, 1
+          |BRK
+          |target: LDC.64 R2, c[0x0][0x160]
+          |ISCADD R2.CC, R0, R2, 2
+          |IADD.X R3, RZ, R3
+          |STG.E [R2], R4
+          |EXIT""".stripMargin,
+        Vec.tabulate(32)(lane => if (lane == 7) 1 else 0)
+      )
+    }
+
     test(s"sm_$sm a guarded BRK.NEU also requires its condition code") {
       check(
         sm,
@@ -172,6 +191,24 @@ class ControlFlowSuite extends Suite {
           |EXIT""".stripMargin,
         Vec.tabulate(32)(lane => if (lane < 16 && lane != 7) 0 else 1)
       )
+    }
+
+    test(s"sm_$sm a legacy transfer with an unsupported condition code is rejected") {
+      val result = program(
+        sm,
+        """S2R R0, SR_TID.X
+          |MOV R4, RZ
+          |PBK `(target)
+          |ISET.NE.U32.AND RZ.CC, R0, 0x7, PT
+          |BRK.LT
+          |MOV R4, 1
+          |BRK
+          |target: MOV R5, R4
+          |EXIT""".stripMargin,
+        base = 0
+      ).compile()
+      assert(result.isLeft, result)
+      assert(result.left.exists(_.contains("unsupported condition code")), result)
     }
 
     test(s"sm_$sm never-executed transfers outside any token region are ignored") {

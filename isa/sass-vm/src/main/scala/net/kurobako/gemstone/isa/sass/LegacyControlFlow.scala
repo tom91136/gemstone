@@ -31,10 +31,22 @@ private object LegacyControlFlow {
     */
   def condition(instruction: DecodedInstruction): Option[Boolean] =
     instruction.modifiers.filterNot(_ == Instruction.Modifier.CC) match {
-      case Vec(Instruction.Modifier.EQ) | Vec(Instruction.Modifier.EQU) => Some(false)
-      case Vec(Instruction.Modifier.NE) | Vec(Instruction.Modifier.NEU) => Some(true)
-      case _                                                            => None
+      case Vec(modifier) => VMConditionCodeForms.zeroFlagCondition(modifier)
+      case _             => None
     }
+
+  private def explicitTransfer(instruction: DecodedInstruction): Boolean = instruction.operation.form match {
+    case _: Form.Brk | _: Form.Cont | _: Form.Sync => true
+    case _                                         => false
+  }
+
+  /** A condition code on a legacy transfer other than the zero-flag tests a transfer implements. */
+  def unsupportedCondition(instruction: DecodedInstruction): Option[Instruction.Modifier] =
+    if (!explicitTransfer(instruction)) None
+    else
+      instruction.modifiers.find(modifier =>
+        VMConditionCodeForms.isConditionCode(modifier) && VMConditionCodeForms.zeroFlagCondition(modifier).isEmpty
+      )
 
   def never(instruction: DecodedInstruction): Boolean =
     instruction.guard.exists(guard => OperandQueries.isNeverPredicate(guard.predicate))

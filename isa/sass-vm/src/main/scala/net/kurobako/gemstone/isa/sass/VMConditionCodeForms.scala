@@ -12,6 +12,38 @@ import scala.collection.mutable
   * instruction does not define become invalid rather than stale.
   */
 private object VMConditionCodeForms {
+
+  /** Every condition-code modifier, including the comparisons no legacy transfer implements. */
+  private val ConditionModifiers: Set[SASSInstruction.Modifier] = Set(
+    SASSInstruction.Modifier.EQ,
+    SASSInstruction.Modifier.EQU,
+    SASSInstruction.Modifier.NE,
+    SASSInstruction.Modifier.NEU,
+    SASSInstruction.Modifier.LT,
+    SASSInstruction.Modifier.LE,
+    SASSInstruction.Modifier.GT,
+    SASSInstruction.Modifier.GE,
+    SASSInstruction.Modifier.LTU,
+    SASSInstruction.Modifier.LEU,
+    SASSInstruction.Modifier.GTU,
+    SASSInstruction.Modifier.GEU,
+    SASSInstruction.Modifier.LU,
+    SASSInstruction.Modifier.LS,
+    SASSInstruction.Modifier.HI,
+    SASSInstruction.Modifier.HS,
+    SASSInstruction.Modifier.F,
+    SASSInstruction.Modifier.T
+  )
+
+  /** The zero flag a legacy condition code tests, true when the test is inverted. */
+  def zeroFlagCondition(modifier: SASSInstruction.Modifier): Option[Boolean] = modifier match {
+    case SASSInstruction.Modifier.EQ | SASSInstruction.Modifier.EQU => Some(false)
+    case SASSInstruction.Modifier.NE | SASSInstruction.Modifier.NEU => Some(true)
+    case _                                                          => None
+  }
+
+  def isConditionCode(modifier: SASSInstruction.Modifier): Boolean = ConditionModifiers(modifier)
+
   private def zeroDestination(operand: Option[Operand]): Boolean =
     operand.contains(Operand.Qualified(OperandQueries.Zero, Vec(OperandSelector.CC)))
 
