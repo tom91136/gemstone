@@ -116,8 +116,13 @@ TEST_CASE("CUDA reports the multiprocessors, clocks, memory, bus and L2 of the s
   REQUIRE(cuDeviceTotalMem_v2(&bytes, 0) == CUDA_SUCCESS);
   CHECK(bytes == size_t{16} << 30);
 
+  char name[64]{};
+  REQUIRE(cuDeviceGetName(name, sizeof(name), 0) == CUDA_SUCCESS);
+  CHECK(std::string(name) == "GeForce RTX 5080");
+
   cudaDeviceProp properties{};
   REQUIRE(cudaGetDeviceProperties(&properties, 0) == cudaSuccess);
+  CHECK(std::string(properties.name) == "GeForce RTX 5080");
   CHECK(properties.multiProcessorCount == 84);
   CHECK(properties.totalGlobalMem == size_t{16} << 30);
 }

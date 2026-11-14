@@ -142,3 +142,17 @@ TEST_CASE("Vulkan creates a logical device on each physical device", "[vulkan][m
   for (auto *const device : created)
     vkDestroyDevice(device, nullptr);
 }
+
+TEST_CASE("Vulkan reports the name and memory of the selected device preset", "[vulkan][multi-device]") {
+  const gemstone_test::Environment preset(gemstone::environment::Device, "GeForce RTX 5080");
+  const Instance context;
+  const auto physical = enumerate(context.instance);
+  VkPhysicalDeviceProperties properties{};
+  vkGetPhysicalDeviceProperties(physical[0], &properties);
+  CHECK(std::string(properties.deviceName) == "GeForce RTX 5080");
+
+  VkPhysicalDeviceMemoryProperties memory{};
+  vkGetPhysicalDeviceMemoryProperties(physical[0], &memory);
+  REQUIRE(memory.memoryHeapCount >= 1);
+  CHECK(memory.memoryHeaps[0].size == (VkDeviceSize{16} << 30));
+}

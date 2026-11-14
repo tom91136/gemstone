@@ -1205,9 +1205,16 @@ extern "C" hipError_t hipDeviceComputeCapability(int *major, int *minor, hipDevi
   return remember(hipSuccess);
 }
 
+namespace {
+std::string deviceName(std::string_view target) {
+  if (const auto device = gemstone::hsa::targetPreset(target)) return std::string(device->name);
+  return std::string("Gemstone ").append(target);
+}
+} // namespace
+
 extern "C" hipError_t hipDeviceGetName(char *name, int length, hipDevice_t device) {
   if (!name || length <= 0 || !validDevice(device)) return remember(hipErrorInvalidValue);
-  const std::string value = std::string("Gemstone ") + gemstone::hsa::targetArch();
+  const std::string value = deviceName(gemstone::hsa::targetArch());
   std::strncpy(name, value.c_str(), static_cast<size_t>(length));
   name[length - 1] = '\0';
   return remember(hipSuccess);
@@ -1260,6 +1267,7 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeMaxGridDimY:
     case hipDeviceAttributeMaxGridDimZ: *value = static_cast<int>(MaxGridDimensionYZ); break;
     case hipDeviceAttributeClockRate: *value = static_cast<int>(model.clockMHz * 1000U); break;
+    case hipDeviceAttributeMemoryClockRate: *value = static_cast<int>(model.memoryClockMHz * 1000U); break;
     case hipDeviceAttributeWallClockRate: *value = static_cast<int>(gemstone::hsa::TimestampHz / 1000U); break;
     case hipDeviceAttributeMaxRegistersPerBlock:
     case hipDeviceAttributeMaxRegistersPerMultiprocessor: *value = static_cast<int>(model.registersPerProcessor()); break;
@@ -1280,12 +1288,8 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributePageableMemoryAccess:
       *value = gemstone::environment::enabled(gemstone::environment::SystemPagingOn) ? 1 : 0;
       break;
-    case hipDeviceAttributeMemoryBusWidth:
-      *value = gemstone::targetMemory(gemstone::hsa::targetArch()).value_or(gemstone::TargetMemory{}).busWidthBits;
-      break;
-    case hipDeviceAttributeL2CacheSize:
-      *value = gemstone::targetMemory(gemstone::hsa::targetArch()).value_or(gemstone::TargetMemory{}).l2Bytes;
-      break;
+    case hipDeviceAttributeMemoryBusWidth: *value = model.busWidthBits; break;
+    case hipDeviceAttributeL2CacheSize: *value = model.l2Bytes; break;
     default: *value = 0; break;
   }
   return remember(hipSuccess);
@@ -1297,7 +1301,7 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   std::memset(properties, 0, sizeof(*properties));
   const auto model = gemstone::hsa::deviceModel();
   const std::string target = gemstone::hsa::targetArch();
-  const std::string name = std::string("Gemstone ") + target;
+  const std::string name = deviceName(target);
   std::strncpy(properties->name, name.c_str(), sizeof(properties->name) - 1U);
   std::strncpy(properties->gcnArchName, target.c_str(), sizeof(properties->gcnArchName) - 1U);
   properties->totalGlobalMem = model.globalMemoryBytes;
@@ -1315,14 +1319,13 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->maxGridSize[1] = MaxGridDimensionYZ;
   properties->maxGridSize[2] = MaxGridDimensionYZ;
   properties->clockRate = static_cast<int>(model.clockMHz * 1000U);
+  properties->memoryClockRate = static_cast<int>(model.memoryClockMHz * 1000U);
   const auto version = gemstone::hsa::targetVersion(target.c_str());
   properties->major = static_cast<int>(version.major);
   properties->minor = static_cast<int>(version.minor);
   properties->multiProcessorCount = static_cast<int>(model.processors());
-  if (const auto memory = gemstone::targetMemory(target)) {
-    properties->memoryBusWidth = memory->busWidthBits;
-    properties->l2CacheSize = memory->l2Bytes;
-  }
+  properties->memoryBusWidth = model.busWidthBits;
+  properties->l2CacheSize = model.l2Bytes;
   properties->pciBusID = device;
   properties->cooperativeLaunch = 1;
   properties->unifiedAddressing = 1;
@@ -1377,7 +1380,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   std::memset(bytes, 0, Size);
   const auto model = gemstone::hsa::deviceModel();
   const std::string target = gemstone::hsa::targetArch();
-  const std::string name = std::string("Gemstone ") + target;
+  const std::string name = deviceName(target);
   std::strncpy(reinterpret_cast<char *>(bytes + Name), name.c_str(), NameSize - 1);
   std::strncpy(reinterpret_cast<char *>(bytes + ArchName), target.c_str(), 255);
   const auto write = [bytes](size_t offset, auto value) { std::memcpy(bytes + offset, &value, sizeof(value)); };

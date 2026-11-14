@@ -716,9 +716,14 @@ TEST_CASE("OpenCL reports cl_khr_kernel_clock at every scope and its OpenCL C fe
 TEST_CASE("OpenCL reports the compute units, clock and memory of the selected device preset", "[opencl][capability]") {
   const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 5080");
   auto *const root = gpu();
+  char name[64]{};
+  REQUIRE(clGetDeviceInfo(root, CL_DEVICE_NAME, sizeof(name), name, nullptr) == CL_SUCCESS);
+  CHECK(std::string(name) == "GeForce RTX 5080");
   CHECK(info<cl_uint>(root, CL_DEVICE_MAX_COMPUTE_UNITS) == 84);
   CHECK(info<cl_uint>(root, CL_DEVICE_MAX_CLOCK_FREQUENCY) == 2617);
   CHECK(info<cl_ulong>(root, CL_DEVICE_GLOBAL_MEM_SIZE) == cl_ulong{16} << 30);
+  CHECK(info<cl_device_mem_cache_type>(root, CL_DEVICE_GLOBAL_MEM_CACHE_TYPE) == CL_READ_WRITE_CACHE);
+  CHECK(info<cl_ulong>(root, CL_DEVICE_GLOBAL_MEM_CACHE_SIZE) == 64ULL * 1024 * 1024);
 }
 
 TEST_CASE("OpenCL max allocation size meets the minimum for the memory of the selected device preset", "[opencl][capability]") {

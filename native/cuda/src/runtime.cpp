@@ -290,9 +290,16 @@ std::optional<int> configuredPtxVersion() {
 }
 
 gemstone::TargetMemory targetMemory() {
+  if (const auto device = gemstone::environment::selectedDevicePreset())
+    return {.busWidthBits = device->busWidthBits, .l2Bytes = device->l2Bytes};
   const auto target = configuredPtxVersion();
   return (target ? gemstone::targetMemory("sm_" + std::to_string(*target)) : std::nullopt)
       .value_or(gemstone::TargetMemory{.busWidthBits = device_limits::GlobalMemoryBusWidth, .l2Bytes = device_limits::L2CacheSize});
+}
+
+std::string_view deviceName() {
+  if (const auto device = gemstone::environment::selectedDevicePreset()) return device->name;
+  return DeviceName;
 }
 
 bool codeRequired(std::string_view mode) {
@@ -2483,7 +2490,7 @@ CUresult cuDeviceGetAttribute(int *value, CUdevice_attribute attribute, CUdevice
 }
 
 CUresult cuDeviceGetName(char *name, int length, CUdevice device) {
-  return validDevice(device) ? copyString(name, length, DeviceName) : CUDA_ERROR_INVALID_VALUE;
+  return validDevice(device) ? copyString(name, length, deviceName()) : CUDA_ERROR_INVALID_VALUE;
 }
 
 CUresult cuDeviceGetPCIBusId(char *busId, int length, CUdevice device) {
@@ -5154,8 +5161,9 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
 cudaError_t cudaGetDeviceProperties(cudaDeviceProp *properties, int device) {
   if (!properties || !validDevice(device)) return cudaErrorInvalidValue;
   const auto spec = deviceSpec();
+  const auto name = deviceName();
   std::memset(properties, 0, offsetof(cudaDeviceProp, multiProcessorCount) + sizeof(properties->multiProcessorCount));
-  std::memcpy(properties->name, DeviceName, sizeof(DeviceName));
+  std::memcpy(properties->name, name.data(), std::min(name.size(), sizeof(properties->name) - 1));
   properties->totalGlobalMem = spec.totalGlobalMemoryBytes;
   properties->sharedMemPerBlock = device_limits::MaxSharedMemoryPerBlock;
   properties->regsPerBlock = device_limits::MaxRegistersPerBlock;

@@ -1175,10 +1175,15 @@ TEST_CASE("HIP occupancy reports a block size for a registered kernel", "[hip]")
 
 TEST_CASE("HIP reports the multiprocessors, clock and memory of the selected device preset", "[hip]") {
   const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
+  char name[64]{};
+  REQUIRE((hipDeviceGetName(name, sizeof(name), 0) == hipSuccess));
+  CHECK((std::string(name) == "Radeon RX 9070 XT"));
   hipDeviceProp_tR0600 properties{};
   REQUIRE((hipGetDevicePropertiesR0600(&properties, 0) == hipSuccess));
+  CHECK((std::string(properties.name) == "Radeon RX 9070 XT"));
   CHECK((properties.multiProcessorCount == 64));
   CHECK((properties.clockRate == 2970000));
+  CHECK((properties.memoryClockRate == 10050000));
   CHECK((properties.totalGlobalMem == size_t{16} << 30));
   CHECK((properties.memoryBusWidth == 256));
   CHECK((properties.l2CacheSize == 8 * 1024 * 1024));
@@ -1187,6 +1192,12 @@ TEST_CASE("HIP reports the multiprocessors, clock and memory of the selected dev
   CHECK((count == 64));
   REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeClockRate, 0) == hipSuccess));
   CHECK((count == 2970000));
+  REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeMemoryClockRate, 0) == hipSuccess));
+  CHECK((count == 10050000));
+  REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeMemoryBusWidth, 0) == hipSuccess));
+  CHECK((count == 256));
+  REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeL2CacheSize, 0) == hipSuccess));
+  CHECK((count == 8 * 1024 * 1024));
   REQUIRE((hipDeviceGetAttribute(&count, hipDeviceAttributeTotalGlobalMem, 0) == hipSuccess));
   CHECK((count == std::numeric_limits<int>::max()));
   size_t bytes = 0;

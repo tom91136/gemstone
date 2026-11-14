@@ -44,6 +44,7 @@
 #include "gemstone/hsa/images.hpp"
 #include "gemstone/hsa/memory_copy.hpp"
 #include "gemstone/hsa/target.hpp"
+#include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/memory.hpp>
@@ -1159,9 +1160,10 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
     // properties during discovery even when it does not use them.
     case HSA_AMD_AGENT_INFO_CHIP_ID:
     case HSA_AMD_AGENT_INFO_DOMAIN:
+    case HSA_AMD_AGENT_INFO_ASIC_REVISION: return copyStatus(value, uint32_t(0));
     case HSA_AMD_AGENT_INFO_MEMORY_WIDTH:
-    case HSA_AMD_AGENT_INFO_ASIC_REVISION:
-    case HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY: return copyStatus(value, uint32_t(0));
+      return copyStatus(value, gpu ? static_cast<uint32_t>(gemstone::hsa::deviceModel().busWidthBits) : uint32_t(0));
+    case HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY: return copyStatus(value, gpu ? gemstone::hsa::deviceModel().memoryClockMHz : uint32_t(0));
     case HSA_AMD_AGENT_INFO_BDFID: return copyStatus(value, ordinal << 8);
     case HSA_AMD_AGENT_INFO_UUID: {
       char uuid[64] = "CPU-XX";
@@ -1178,7 +1180,15 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
     case HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES: return copyStatus(value, gpu);
     case HSA_AMD_AGENT_INFO_HDP_FLUSH:
       return copyStatus(value, hsa_amd_hdp_flush_t{.HDP_MEM_FLUSH_CNTL = nullptr, .HDP_REG_FLUSH_CNTL = nullptr});
-    case HSA_AMD_AGENT_INFO_PRODUCT_NAME: copyName(value, gpu ? gemstone::hsa::targetArch() : "Gemstone CPU"); return HSA_STATUS_SUCCESS;
+    case HSA_AMD_AGENT_INFO_PRODUCT_NAME: {
+      if (!gpu) {
+        copyName(value, "Gemstone CPU");
+        return HSA_STATUS_SUCCESS;
+      }
+      const auto preset = gemstone::hsa::targetPreset(gemstone::hsa::targetArch());
+      copyName(value, preset ? preset->name.data() : gemstone::hsa::targetArch());
+      return HSA_STATUS_SUCCESS;
+    }
     case HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY: return copyStatus(value, gemstone::hsa::TimestampHz);
     case HSA_AMD_AGENT_INFO_CACHELINE_SIZE: return copyStatus(value, uint32_t(64));
     case HSA_AMD_AGENT_INFO_DRIVER_NODE_ID: return copyStatus(value, gpu ? 1 + ordinal : 0);
@@ -1216,7 +1226,9 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
     case HSA_AGENT_INFO_QUEUE_TYPE: return copyStatus(value, hsa_queue_type32_t(HSA_QUEUE_TYPE_MULTI));
     case HSA_AGENT_INFO_NODE: return copyStatus(value, gpu ? 1 + ordinal : 0);
     case HSA_AGENT_INFO_DEVICE: return copyStatus(value, gpu ? HSA_DEVICE_TYPE_GPU : HSA_DEVICE_TYPE_CPU);
-    case HSA_AGENT_INFO_CACHE_SIZE: return copyStatus(value, std::array<uint32_t, 4>{gpu ? 16U * 1024U : 32U * 1024U, 0, 0, 0});
+    case HSA_AGENT_INFO_CACHE_SIZE:
+      return copyStatus(value, std::array<uint32_t, 4>{gpu ? 16U * 1024U : 32U * 1024U,
+                                                       gpu ? static_cast<uint32_t>(gemstone::hsa::deviceModel().l2Bytes) : 0U, 0, 0});
     case HSA_AGENT_INFO_ISA: return copyStatus(value, hsa_isa_t{(gpu ? GpuIsa : 0)});
     case HSA_AGENT_INFO_EXTENSIONS:
       if (gpu) return extensionMask(value);

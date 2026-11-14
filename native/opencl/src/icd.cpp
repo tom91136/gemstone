@@ -1475,9 +1475,15 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_MAX_SAMPLERS: return outputScalar(size, output, written, cl_uint{16});
     case CL_DEVICE_SINGLE_FP_CONFIG: return outputScalar(size, output, written, fp);
     case CL_DEVICE_HALF_FP_CONFIG: return outputScalar(size, output, written, fp);
-    case CL_DEVICE_GLOBAL_MEM_CACHE_TYPE: return outputScalar(size, output, written, cl_uint{CL_NONE});
+    case CL_DEVICE_GLOBAL_MEM_CACHE_TYPE:
+      return outputScalar(size, output, written,
+                          gemstone::environment::selectedDevicePreset() ? cl_device_mem_cache_type{CL_READ_WRITE_CACHE}
+                                                                        : cl_device_mem_cache_type{CL_NONE});
     case CL_DEVICE_GLOBAL_MEM_CACHELINE_SIZE: return outputScalar(size, output, written, cl_uint{64});
-    case CL_DEVICE_GLOBAL_MEM_CACHE_SIZE: return outputScalar(size, output, written, cl_ulong{0});
+    case CL_DEVICE_GLOBAL_MEM_CACHE_SIZE: {
+      const auto preset = gemstone::environment::selectedDevicePreset();
+      return outputScalar(size, output, written, preset ? static_cast<cl_ulong>(preset->l2Bytes) : cl_ulong{0});
+    }
     case CL_DEVICE_GLOBAL_MEM_SIZE: return outputScalar(size, output, written, globalMemSize());
     case CL_DEVICE_MAX_CONSTANT_BUFFER_SIZE: return outputScalar(size, output, written, cl_ulong{0x10000});
     case CL_DEVICE_MAX_CONSTANT_ARGS: return outputScalar(size, output, written, cl_uint{8});
@@ -1507,7 +1513,10 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_PREFERRED_PLATFORM_ATOMIC_ALIGNMENT:
     case CL_DEVICE_PREFERRED_GLOBAL_ATOMIC_ALIGNMENT:
     case CL_DEVICE_PREFERRED_LOCAL_ATOMIC_ALIGNMENT: return outputScalar(size, output, written, cl_uint{0});
-    case CL_DEVICE_NAME: return outputString(size, output, written, openclIdentity().deviceName);
+    case CL_DEVICE_NAME: {
+      const auto preset = gemstone::environment::selectedDevicePreset();
+      return outputString(size, output, written, preset ? std::string(preset->name) : std::string(openclIdentity().deviceName));
+    }
     case CL_DEVICE_VENDOR: return outputString(size, output, written, openclIdentity().vendor);
     case CL_DRIVER_VERSION: return outputString(size, output, written, "26.22.38646.6");
     case CL_DEVICE_PROFILE: return outputString(size, output, written, "FULL_PROFILE");

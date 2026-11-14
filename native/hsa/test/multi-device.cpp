@@ -217,6 +217,28 @@ TEST_CASE("HSA sizes GPU pools and free memory from the selected device preset",
   const Session session;
   const auto [cpu, gpus] = agents();
   REQUIRE(gpus.size() == 2);
+  char productName[64]{};
+  REQUIRE(hsa_agent_get_info(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), productName) == HSA_STATUS_SUCCESS);
+  CHECK(std::string(productName) == "Radeon RX 9070 XT");
+  uint32_t computeUnits = 0;
+  uint32_t clockMHz = 0;
+  uint32_t memoryClockMHz = 0;
+  uint32_t busWidth = 0;
+  std::array<uint32_t, 4> cacheSize{};
+  REQUIRE(hsa_agent_get_info(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &computeUnits)
+          == HSA_STATUS_SUCCESS);
+  REQUIRE(hsa_agent_get_info(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY), &clockMHz)
+          == HSA_STATUS_SUCCESS);
+  REQUIRE(hsa_agent_get_info(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY), &memoryClockMHz)
+          == HSA_STATUS_SUCCESS);
+  REQUIRE(hsa_agent_get_info(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_WIDTH), &busWidth) == HSA_STATUS_SUCCESS);
+  REQUIRE(hsa_agent_get_info(gpus[0], HSA_AGENT_INFO_CACHE_SIZE, cacheSize.data()) == HSA_STATUS_SUCCESS);
+  CHECK(computeUnits == 64);
+  CHECK(clockMHz == 2970);
+  CHECK(memoryClockMHz == 10050);
+  CHECK(busWidth == 256);
+  CHECK(cacheSize[1] == 8 * 1024 * 1024);
+
   const auto pool = globalPool(gpus[0]);
   size_t total = 0;
   REQUIRE(hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &total) == HSA_STATUS_SUCCESS);

@@ -20,6 +20,7 @@
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
+#include <environment_keys.hpp>
 
 using namespace aspartame;
 
@@ -2202,5 +2203,33 @@ TEST_CASE("Level Zero dynamic linking names an unresolved user symbol in the bui
 
   for (auto *module : modules)
     REQUIRE(zeModuleDestroy(module) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero reports the name, multiprocessors, clocks, memory, bus and L2 of the selected device preset", "[level-zero]") {
+  const gemstone_test::Environment preset(gemstone::environment::Device, "GeForce RTX 5080");
+  auto [driver, device, context] = createContext();
+  ze_device_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+  REQUIRE(zeDeviceGetProperties(device, &properties) == ZE_RESULT_SUCCESS);
+  CHECK(std::string(properties.name) == "GeForce RTX 5080");
+  CHECK(properties.coreClockRate == 2617);
+  CHECK(properties.maxMemAllocSize == (uint64_t{16} << 30));
+  CHECK(properties.numSlices * properties.numSubslicesPerSlice * properties.numEUsPerSubslice == 84);
+
+  uint32_t memoryCount = 1;
+  ze_device_memory_properties_t memory{};
+  memory.stype = ZE_STRUCTURE_TYPE_DEVICE_MEMORY_PROPERTIES;
+  REQUIRE(zeDeviceGetMemoryProperties(device, &memoryCount, &memory) == ZE_RESULT_SUCCESS);
+  CHECK(memory.totalSize == (uint64_t{16} << 30));
+  CHECK(memory.maxClockRate == 15000);
+  CHECK(memory.maxBusWidth == 256);
+
+  uint32_t cacheCount = 1;
+  ze_device_cache_properties_t cache{};
+  cache.stype = ZE_STRUCTURE_TYPE_DEVICE_CACHE_PROPERTIES;
+  REQUIRE(zeDeviceGetCacheProperties(device, &cacheCount, &cache) == ZE_RESULT_SUCCESS);
+  CHECK(cache.cacheSize == 64ULL * 1024 * 1024);
+
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }

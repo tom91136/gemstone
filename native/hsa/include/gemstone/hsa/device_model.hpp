@@ -5,6 +5,7 @@
 #include <string_view>
 
 #include "gemstone/hsa/target.hpp"
+#include <gemstone_target_memory.hpp>
 
 namespace gemstone::hsa {
 
@@ -21,6 +22,9 @@ struct DeviceModel {
   uint32_t computeUnitsPerProcessor;
   uint32_t computeUnits;
   uint32_t clockMHz;
+  uint32_t memoryClockMHz;
+  int32_t busWidthBits;
+  int32_t l2Bytes;
   size_t globalMemoryBytes;
   bool imageInstructions;
   bool imageGatherLod;
@@ -51,6 +55,7 @@ inline DeviceModel deviceModel(std::string_view target) {
     return 256U;
   }();
   const auto device = targetPreset(target);
+  const auto memory = gemstone::targetMemory(target).value_or(gemstone::TargetMemory{});
   // a preset counts compute units, so each one is a processor
   const uint32_t perProcessor = rdna && !device ? 2U : 1U;
   return DeviceModel{
@@ -61,6 +66,9 @@ inline DeviceModel deviceModel(std::string_view target) {
       .computeUnitsPerProcessor = perProcessor,
       .computeUnits = device ? static_cast<uint32_t>(device->multiprocessors) : EmulatedProcessors * perProcessor,
       .clockMHz = device ? static_cast<uint32_t>(device->boostMhz) : static_cast<uint32_t>(TimestampHz / 1'000'000),
+      .memoryClockMHz = device ? static_cast<uint32_t>(device->memoryMTps / 2) : 0U,
+      .busWidthBits = device ? device->busWidthBits : memory.busWidthBits,
+      .l2Bytes = device ? device->l2Bytes : memory.l2Bytes,
       .globalMemoryBytes = device ? static_cast<size_t>(device->memoryBytes) : GlobalMemoryBytes,
       .imageInstructions = !target.starts_with("gfx94") && !target.starts_with("gfx95"),
       .imageGatherLod = !target.starts_with("gfx90a") && !target.starts_with("gfx94") && !target.starts_with("gfx95"),

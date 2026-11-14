@@ -58,6 +58,7 @@ void fillProperties(VkPhysicalDeviceProperties *properties, uint32_t physicalOrd
       properties->vendorID = 0x10005;
     }
   }
+  if (const auto preset = gemstone::environment::selectedDevicePreset()) name = preset->name.data();
   std::snprintf(properties->deviceName, sizeof(properties->deviceName), "%s", name);
   fillDeviceUUID(properties->pipelineCacheUUID, physicalOrdinal);
   auto &limits = properties->limits;
@@ -161,8 +162,9 @@ void fillMemoryProperties(VkPhysicalDeviceMemoryProperties *properties) {
   properties->memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
                                              | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
   properties->memoryTypes[0].heapIndex = 0;
+  const auto preset = gemstone::environment::selectedDevicePreset();
   properties->memoryHeapCount = 1;
-  properties->memoryHeaps[0].size = VkDeviceSize{64} << 30;
+  properties->memoryHeaps[0].size = preset ? static_cast<VkDeviceSize>(preset->memoryBytes) : (VkDeviceSize{64} << 30);
   properties->memoryHeaps[0].flags = VK_MEMORY_HEAP_DEVICE_LOCAL_BIT;
 }
 

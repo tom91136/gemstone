@@ -679,8 +679,14 @@ ze_result_t ZE_APICALL deviceSubdevices(ze_device_handle_t, uint32_t *count, ze_
   return ZE_RESULT_SUCCESS;
 }
 
+uint64_t deviceMemorySize() {
+  if (const auto preset = gemstone::environment::selectedDevicePreset()) return static_cast<uint64_t>(preset->memoryBytes);
+  return DeviceMemorySize;
+}
+
 ze_result_t ZE_APICALL deviceProperties(ze_device_handle_t handle, ze_device_properties_t *properties) {
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto preset = gemstone::environment::selectedDevicePreset();
   const auto stype = properties->stype;
   auto *const next = properties->pNext;
   std::memset(properties, 0, sizeof(*properties));
@@ -693,21 +699,22 @@ ze_result_t ZE_APICALL deviceProperties(ze_device_handle_t handle, ze_device_pro
   properties->vendorId = 0x8086;
   properties->deviceId = 0x0001;
   properties->flags = ZE_DEVICE_PROPERTY_FLAG_INTEGRATED;
-  properties->coreClockRate = 1000;
-  properties->maxMemAllocSize = DeviceMemorySize;
+  properties->coreClockRate = preset ? static_cast<uint32_t>(preset->boostMhz) : 1000;
+  properties->maxMemAllocSize = deviceMemorySize();
   properties->maxHardwareContexts = 1024;
   properties->maxCommandQueuePriority = ZE_COMMAND_QUEUE_PRIORITY_PRIORITY_HIGH;
   properties->numThreadsPerEU = 8;
   properties->physicalEUSimdWidth = 8;
-  properties->numEUsPerSubslice = 8;
-  properties->numSubslicesPerSlice = 8;
+  properties->numEUsPerSubslice = preset ? 1 : 8;
+  properties->numSubslicesPerSlice = preset ? static_cast<uint32_t>(preset->multiprocessors) : 8;
   properties->numSlices = 1;
   properties->timerResolution = stype == ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2 ? 1000000000ULL : 1ULL;
   properties->timestampValidBits = 64;
   properties->kernelTimestampValidBits = 64;
   std::memcpy(properties->uuid.id, "GEMSTONE-SPIRV", 14);
   properties->uuid.id[ZE_MAX_DEVICE_UUID_SIZE - 1] = static_cast<uint8_t>(deviceOrdinal(cast<Device>(handle)));
-  std::strncpy(properties->name, "Gemstone Virtual SPIR-V GPU", ZE_MAX_DEVICE_NAME - 1);
+  const std::string_view name = preset ? preset->name : "Gemstone Virtual SPIR-V GPU";
+  std::memcpy(properties->name, name.data(), std::min(name.size(), size_t{ZE_MAX_DEVICE_NAME - 1}));
   return ZE_RESULT_SUCCESS;
 }
 
@@ -775,10 +782,11 @@ ze_result_t ZE_APICALL deviceMemory(ze_device_handle_t, uint32_t *count, ze_devi
   if (!properties) {
     *count = 1;
   } else if (*count != 0) {
+    const auto preset = gemstone::environment::selectedDevicePreset();
     properties[0].flags = 0;
-    properties[0].maxClockRate = 1000;
-    properties[0].maxBusWidth = 256;
-    properties[0].totalSize = DeviceMemorySize;
+    properties[0].maxClockRate = preset ? static_cast<uint32_t>(preset->memoryMTps / 2) : 1000;
+    properties[0].maxBusWidth = preset ? static_cast<uint32_t>(preset->busWidthBits) : 256;
+    properties[0].totalSize = deviceMemorySize();
     std::strncpy(properties[0].name, "Gemstone unified memory", ZE_MAX_DEVICE_NAME - 1);
     *count = 1;
   }
@@ -802,8 +810,9 @@ ze_result_t ZE_APICALL deviceCache(ze_device_handle_t, uint32_t *count, ze_devic
   if (!properties) {
     *count = 1;
   } else if (*count != 0) {
+    const auto preset = gemstone::environment::selectedDevicePreset();
     properties[0].flags = ZE_DEVICE_CACHE_PROPERTY_FLAG_USER_CONTROL;
-    properties[0].cacheSize = size_t{4} * 1024 * 1024;
+    properties[0].cacheSize = preset ? static_cast<size_t>(preset->l2Bytes) : size_t{4} * 1024 * 1024;
     *count = 1;
   }
   return ZE_RESULT_SUCCESS;
