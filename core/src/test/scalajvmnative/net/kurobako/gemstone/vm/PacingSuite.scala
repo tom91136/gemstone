@@ -143,4 +143,37 @@ class PacingSuite extends Suite {
     }
     assertEquals(result, Right(()))
   }
+
+  test("a launch with far more slots than groups keeps the running groups within the skew") {
+    val pacing = Pacing(4096)
+    pacing.engage()
+    val slowest         = pacing.join()
+    val (leader, steps) = stepping(pacing.join(), 5000)
+    Thread.sleep(Settle)
+    val ahead = steps.get()
+    assert(ahead <= Pacing.Skew + 1, ahead)
+    (0 until 5000).foreach(_ => slowest.step())
+    assert(finished(leader))
+    assertEquals(steps.get(), 5000)
+  }
+
+  test("groups joining and leaving while others run keep them within the skew of the slowest") {
+    val pacing = Pacing(4)
+    pacing.engage()
+    val slowest         = pacing.join()
+    val (leader, steps) = stepping(pacing.join(), 5000)
+    Thread.sleep(Settle)
+    val held = steps.get()
+    assert(held <= Pacing.Skew + 1, held)
+    (0 until 20).foreach { _ =>
+      val visitor = pacing.join()
+      (0 until 8).foreach(_ => visitor.step())
+      visitor.leave()
+    }
+    Thread.sleep(Settle)
+    assertEquals(steps.get(), held)
+    (0 until 5000).foreach(_ => slowest.step())
+    assert(finished(leader))
+    assertEquals(steps.get(), 5000)
+  }
 }

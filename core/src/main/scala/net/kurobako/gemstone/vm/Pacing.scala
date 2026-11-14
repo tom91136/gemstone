@@ -25,6 +25,17 @@ object Pacing {
   /** A launch whose work-groups run one at a time, which nothing has to pace. */
   val Unpaced: Pacing = Pacing(0)
 
+  // The clocks of the running groups are counted per level in a ring, so the lowest occupied level is a lower bound on
+  // the slowest published clock, found without scanning the slots. A group stays within a skew and a publish of that
+  // bound once it has read it, so the live levels stay closer together than the ring is long.
+  private val Levels    = 64
+  private val LevelMask = Levels - 1
+  // The floor and the number of groups registering at it share one word, so a group joining at the floor cannot
+  // slip below a floor that another thread raises at the same time.
+  private val JoinerBits = 20
+  private val JoinerMask = (1L << JoinerBits) - 1L
+  private val FloorStep  = 1L << JoinerBits
+
   private val current = PlatformConcurrency.threadLocal[Pace](() => Pace.Free)
 
   /** The pace of the work-group running on this thread, if any. */
@@ -44,15 +55,16 @@ object Pacing {
   * barrier, may assume they stay close. Until [[engage]] nothing waits, so data-parallel launches keep their
   * throughput.
   *
-  * Each running group publishes a step clock in its own slot. A group more than the skew ahead of the slowest running
-  * group waits for it, so the slowest group never waits and every waiting group resumes once it steps. A group that has
-  * not started, has finished, or is [[Pace.parked]] holds no slot clock and holds nobody back.
+  * Each running group publishes a step clock in its own slot and counts itself at that clock's level. The lowest
+  * occupied level bounds the slowest published clock from below, so a group within the skew of that bound pays two
+  * atomics for its check and never looks at the other slots. A group past the bound finds the slowest group with one
+  * scan and waits for it, so the slowest group never waits and every waiting group resumes once it steps. A group that
+  * has not started, has finished, or is [[Pace.parked]] holds no slot clock and holds nobody back.
   *
-  * A waiting group parks its thread after registering on the slot of the slowest other group, with the clock that slot
-  * must reach. Publishing a clock wakes the groups registered on that slot whose clock is reached, so a group that
-  * publishes while nobody waits on it pays one load, and [[Pace.parked]] and [[Pace.leave]] release everyone waiting on
-  * the group by publishing a clock past any target. A launch with no more groups than processors spins on that clock
-  * briefly first, since every group then has a processor and the wait is usually short.
+  * A waiting group parks its thread on the slowest other group's slot, with the clock that slot must reach. Publishing
+  * a clock wakes the groups parked on that slot whose clock is reached, so a group that publishes while nobody waits on
+  * it pays one load. A launch with no more groups than processors spins on that clock briefly first, since every group
+  * then has a processor and the wait is usually short.
   */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
 class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
@@ -60,12 +72,14 @@ class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
 
   @volatile private var active = false
   private val clocks           = AtomicLongArray(slots * Stride)
-  private val departed         = AtomicLong()
+  private val levels           = AtomicLongArray(Levels * Stride)
+  private val state            = AtomicLong(0L)
   private val waiting          = AtomicLongArray(slots * Stride)
   private val waitingOn        = AtomicLongArray(slots)
   private val waitingFor       = AtomicLongArray(slots)
   private val waiters          = Array.ofDim[PlatformConcurrency.Waiter](slots)
   private val spins            = if (slots <= PlatformConcurrency.processors()) Spins else 0
+  private val claiming         = AtomicLong(0L)
 
   locally {
     var slot = 0
@@ -84,57 +98,77 @@ class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
   def join(): Pace =
     if (slots <= 1) Pace.Free
     else {
-      val start = running()
-      var slot  = 0
-      while (slot < slots && !clocks.compareAndSet(slot * Stride, Vacant, start)) slot += 1
-      if (slot == slots) throw IllegalStateException(s"more than $slots work-groups of one launch run at once")
-      Pace(this, slot, slots, start)
+      state.getAndAdd(1L)
+      try {
+        val at   = floor
+        val slot = claim(at)
+        val _    = levels.getAndAdd((at & LevelMask).toInt * Stride, 1L)
+        Pace(this, slot, slots, level = at, clock = at)
+      } finally state.getAndAdd(-1L)
     }
 
-  /** A waiter registers, then reads the clock before it parks. The sequentially consistent store here, followed by the
-    * read of the waiter count, guarantees that either this group sees the registration or the waiter sees the clock.
+  /** Publishes a clock, which wakes the groups parked on this slot whose target it reaches. */
+  def publish(slot: Int, from: Long, to: Long): Unit = {
+    // The new level must be counted before the old one empties, or the bound could pass a moving group.
+    val _ = levels.getAndAdd((to & LevelMask).toInt * Stride, 1L)
+    val _ = levels.getAndAdd((from & LevelMask).toInt * Stride, -1L)
+    setClock(slot, to)
+  }
+
+  /** Stops counting a group that waits on the host rather than on the launch. */
+  def pause(slot: Int, from: Long): Unit = {
+    val _ = levels.getAndAdd((from & LevelMask).toInt * Stride, -1L)
+    setClock(slot, Parked)
+  }
+
+  /** Stops counting a group that has finished. */
+  def leave(slot: Int, from: Long): Unit = {
+    val _ = levels.getAndAdd((from & LevelMask).toInt * Stride, -1L)
+    setClock(slot, Vacant)
+  }
+
+  /** Starts counting a suspended group again, at the slowest clock if it fell behind meanwhile. */
+  def resume(slot: Int, clock: Long): Long = {
+    state.getAndAdd(1L)
+    try {
+      val at = math.max(clock, floor)
+      val _  = levels.getAndAdd((at & LevelMask).toInt * Stride, 1L)
+      setClock(slot, at)
+      at
+    } finally state.getAndAdd(-1L)
+  }
+
+  /** A lower bound on the clock of the slowest running group. Advances the floor over every level that no running group
+    * holds, one level for each pass, so the bound trails the slowest clock by at most one check.
     */
-  def publish(slot: Int, clock: Long): Unit = {
-    clocks.set(slot * Stride, clock)
-    if (waiting.get(slot * Stride) > 0L) wake(slot, clock)
-  }
-
-  private def wake(slot: Int, clock: Long): Unit = {
-    var waiter = 0
-    while (waiter < slots) {
-      if (waitingOn.get(waiter) == slot && waitingFor.get(waiter) <= clock) PlatformConcurrency.unpark(waiters(waiter))
-      waiter += 1
-    }
-  }
-
-  /** Records the clock a group leaves or suspends at, for the next group to start from when none else runs. */
-  def depart(clock: Long): Unit = {
-    var known = departed.get()
-    while (clock > known && !departed.compareAndSet(known, clock)) known = departed.get()
-  }
-
-  /** The clock of the slowest running group, or where the last group left off when none runs. */
   def running(): Long = {
-    var lowest = Parked
-    var slot   = 0
-    while (slot < slots) {
-      val clock = PlatformConcurrency.getAcquire(clocks, slot * Stride)
-      if (clock < lowest) lowest = clock
-      slot += 1
+    val from  = floor
+    var at    = from
+    var found = false
+    var empty = false
+    while (!found && !empty) {
+      val current = state.get()
+      val lowest  = current >>> JoinerBits
+      at = lowest
+      if (lowest - from >= Levels) empty = true
+      else if ((current & JoinerMask) != 0L) found = true
+      else if (levels.get((lowest & LevelMask).toInt * Stride) > 0L) found = true
+      else if (state.compareAndSet(current, current + FloorStep)) at = lowest + 1L
     }
-    if (lowest < Parked) lowest else departed.get()
+    at
   }
 
-  /** Waits until `clock` is within the skew of the slowest other running group. Returns the lowest clock of the running
-    * groups, which `clock` may be below.
+  /** Waits until `clock` is within the skew of the slowest other running group. Returns the clock of that group, which
+    * `clock` may be below. `seen` caches the clocks of the other slots for the caller, so only the slowest needs
+    * re-reading after the first scan.
     */
-  def await(slot: Int, clock: Long, seen: Array[Long]): Long = {
-    var at = slowest(slot, seen)
-    while (at >= 0 && clock - seen(at) > Skew) {
-      block(slot, at, clock - Skew)
-      at = slowest(slot, seen)
+  def awaitSlow(slot: Int, clock: Long, seen: Array[Long]): Long = {
+    var lowest = slowest(slot, seen)
+    while (lowest >= 0 && clock - seen(lowest) > Skew) {
+      block(slot, lowest, clock - Skew)
+      lowest = slowest(slot, seen)
     }
-    if (at < 0) clock else math.min(clock, seen(at))
+    if (lowest < 0) clock else math.min(clock, seen(lowest))
   }
 
   /** Waits until the clock of `slot` reaches `target`. The slot's group publishes a clock at or past the target when it
@@ -149,6 +183,10 @@ class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
     spun < spins
   }
 
+  /** A waiter registers for a target clock, then reads the clock before it parks. The sequentially consistent store of
+    * the clock, followed by the read of the waiter count, guarantees that either the publisher sees the registration or
+    * the waiter sees the clock.
+    */
   private def sleep(waiter: Int, slot: Int, target: Long): Unit = {
     waiters(waiter) = PlatformConcurrency.waiter()
     waitingFor.set(waiter, target)
@@ -160,6 +198,14 @@ class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
   }
 
   private def count(slot: Int, change: Long): Unit = { val _ = waiting.getAndAdd(slot * Stride, change) }
+
+  private def wake(slot: Int, clock: Long): Unit = {
+    var waiter = 0
+    while (waiter < slots) {
+      if (waitingOn.get(waiter) == slot && waitingFor.get(waiter) <= clock) PlatformConcurrency.unpark(waiters(waiter))
+      waiter += 1
+    }
+  }
 
   /** The slot of the other running group with the lowest clock, whose clock is then `seen(slot)`, or -1 when none runs.
     * A group's `seen` clocks never exceed the real ones, so only the slowest needs re-reading, and a slot seen vacant
@@ -192,21 +238,39 @@ class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
     }
     at
   }
+
+  private def setClock(slot: Int, clock: Long): Unit = {
+    clocks.set(slot * Stride, clock)
+    if (waiting.get(slot * Stride) > 0L) wake(slot, clock)
+  }
+
+  private def floor: Long = state.get() >>> JoinerBits
+
+  private def claim(start: Long): Int = {
+    var slot  = -1
+    var probe = 0
+    while (slot < 0 && probe < slots) {
+      val at = (claiming.getAndIncrement() % slots).toInt
+      if (clocks.compareAndSet(at * Stride, Vacant, start)) slot = at
+      probe += 1
+    }
+    if (slot < 0) throw IllegalStateException(s"more than $slots work-groups of one launch run at once")
+    slot
+  }
 }
 
-@SuppressWarnings(Array("scalafix:FilenameConventions.top-level-filename"))
 object Pace {
 
   /** The pace of a work-group that runs alone or alongside every other group on one thread. */
-  val Free: Pace = Pace(Pacing.Unpaced, slot = -1, slots = 0)
+  val Free: Pace = Pace(Pacing.Unpaced, slot = -1, slots = 0, level = 0L, clock = 0L)
 }
 
 /** One work-group's place in its launch's [[Pacing]]. Only the thread running the group uses it. */
 @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-class Pace(pacing: Pacing, slot: Int, slots: Int, private var clock: Long = 0L) {
-  private val seen   = Array.fill(slots)(Pacing.Vacant)
-  private var bound  = Long.MinValue
-  private var parked = 0
+class Pace(pacing: Pacing, slot: Int, slots: Int, private var level: Long, private var clock: Long) {
+  private lazy val seen = Array.fill(slots)(Pacing.Vacant)
+  private var bound     = Long.MinValue
+  private var parked    = 0
 
   def engaged: Boolean = pacing.engaged
 
@@ -221,9 +285,16 @@ class Pace(pacing: Pacing, slot: Int, slots: Int, private var clock: Long = 0L) 
 
   private def advance(): Unit = {
     clock += 1L
-    if ((clock & Pacing.Publishing) == 0L) pacing.publish(slot, clock)
-    if (clock > bound) { pacing.publish(slot, clock); bound = pacing.await(slot, clock, seen) + Pacing.Skew }
+    if (clock > bound) { publish(); bound = await() + Pacing.Skew }
+    else if ((clock & Pacing.Publishing) == 0L) publish()
   }
+
+  private def await(): Long = {
+    val at = pacing.running()
+    if (clock - at <= Pacing.Skew) math.min(clock, at) else pacing.awaitSlow(slot, clock, seen)
+  }
+
+  private def publish(): Unit = { pacing.publish(slot, level, clock); level = clock }
 
   /** Runs `blocking`, which waits on the host rather than on the launch, without holding the launch's other groups
     * back. The group rejoins at the slowest running group's clock if it fell behind meanwhile.
@@ -231,19 +302,18 @@ class Pace(pacing: Pacing, slot: Int, slots: Int, private var clock: Long = 0L) 
   def parked[A](blocking: => A): A =
     if (slot < 0) blocking
     else {
-      if (parked == 0) { pacing.depart(clock); pacing.publish(slot, Pacing.Parked) }
+      if (parked == 0) pacing.pause(slot, level)
       parked += 1
       try blocking
       finally {
         parked -= 1
         if (parked == 0) {
-          clock = math.max(clock, pacing.running())
+          clock = pacing.resume(slot, clock)
+          level = clock
           bound = Long.MinValue
-          java.util.Arrays.fill(seen, Pacing.Vacant)
-          pacing.publish(slot, clock)
         }
       }
     }
 
-  def leave(): Unit = if (slot >= 0) { pacing.depart(clock); pacing.publish(slot, Pacing.Vacant) }
+  def leave(): Unit = if (slot >= 0) pacing.leave(slot, level)
 }
