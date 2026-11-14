@@ -1,6 +1,8 @@
+#include <atomic>
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <thread>
 #include <utility>
 
 #include <catch2/catch_test_macros.hpp>
@@ -108,6 +110,19 @@ TEST_CASE("trace scopes and categories match exactly", "[rpc]") {
   }
   trace.set("rpc.memory");
   CHECK_FALSE(gemstone::traceEnabled("rpc"));
+}
+
+TEST_CASE("environment overrides do not race readers on runtime workers", "[rpc]") {
+  std::atomic_bool stopped{false};
+  std::thread reader([&] {
+    while (!stopped.load(std::memory_order_relaxed))
+      gemstone::traceEnabled("rpc", "environment-race");
+  });
+  for (unsigned index = 0; index < 20000; ++index) {
+    const gemstone_test::Environment trace(TraceList, "rpc.environment-race");
+  }
+  stopped.store(true, std::memory_order_relaxed);
+  reader.join();
 }
 
 TEST_CASE("RPC client environment rejects invalid signed identities", "[rpc]") {

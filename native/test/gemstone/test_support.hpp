@@ -7,6 +7,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -38,6 +39,7 @@ class Environment {
   std::optional<std::string> previous;
 
   static int assign(const char *name, const char *value) {
+    std::scoped_lock const guard(gemstone::environment::detail::environmentLock);
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     if (value) return ::setenv(name, value, 1);
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
@@ -46,7 +48,7 @@ class Environment {
 
 public:
   Environment(const char *name, const char *value) : name(name) {
-    if (const auto *existing = std::getenv(name)) previous = existing;
+    previous = gemstone::environment::text(name);
     if (assign(name, value) != 0) throw std::runtime_error("cannot configure test environment: " + this->name);
   }
   Environment(const Environment &) = delete;
@@ -69,23 +71,23 @@ inline unsigned availableThreadCount() {
 }
 
 inline uint64_t positiveSetting(const char *name, uint64_t fallback) {
-  const char *raw = gemstone::environment::value(name);
+  const auto raw = gemstone::environment::value(name);
   if (!raw) return fallback;
-  const auto parsed = gemstone::environment::positiveInteger(raw);
+  const auto parsed = gemstone::environment::positiveInteger(*raw);
   if (!parsed || *parsed > std::numeric_limits<uint32_t>::max())
-    throw std::invalid_argument(gemstone::environment::rejected(name, raw, "a positive integer"));
+    throw std::invalid_argument(gemstone::environment::rejected(name, *raw, "a positive integer"));
   return *parsed;
 }
 
 /** Deadlines suit a 32-thread host; fewer threads stretch them up to fourfold, and the scale multiplies the result. */
 inline double timeoutFactor() {
   const auto threads = positiveSetting(gemstone::environment::ThreadCount, availableThreadCount());
-  const char *raw = gemstone::environment::value(gemstone::environment::TimeoutScale);
+  const auto raw = gemstone::environment::value(gemstone::environment::TimeoutScale);
   const auto thousandths =
-      raw ? gemstone::environment::positiveThousandths(raw) : std::optional<uint64_t>(gemstone::environment::TimeoutScaleDefault * 1000);
+      raw ? gemstone::environment::positiveThousandths(*raw) : std::optional<uint64_t>(gemstone::environment::TimeoutScaleDefault * 1000);
   if (!thousandths)
-    throw std::invalid_argument(
-        gemstone::environment::rejected(gemstone::environment::TimeoutScale, raw, gemstone::environment::PositiveThousandthsExpected));
+    throw std::invalid_argument(gemstone::environment::rejected(gemstone::environment::TimeoutScale, raw.value_or(""),
+                                                                gemstone::environment::PositiveThousandthsExpected));
   return static_cast<double>(*thousandths) / 1000.0 * std::clamp(32.0 / static_cast<double>(threads), 1.0, 4.0);
 }
 

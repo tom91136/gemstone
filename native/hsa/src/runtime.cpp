@@ -202,6 +202,7 @@ constexpr size_t DeviceHeapHeaderBytes = 64;
 struct RuntimeState {
   std::mutex lock;
   std::mutex mirrorLock;
+  bool traceMemoryEnabled = false;
   uint32_t references = 0;
   uint64_t nextHandle = 1;
   uint64_t nextKernel = uint64_t{0x10000};
@@ -260,7 +261,9 @@ bool traceMemory() { return gemstone::traceEnabled("hsa", "memory"); }
 bool tracePackets() { return gemstone::traceEnabled("hsa", "packets"); }
 
 hsa_status_t requireInitialised(const RuntimeState &runtime) {
-  return runtime.references != 0 && runtime.client && runtime.aql ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_NOT_INITIALIZED;
+  if (runtime.references == 0 || !runtime.client || !runtime.aql) return HSA_STATUS_ERROR_NOT_INITIALIZED;
+  runtime.aql->setSystemPaging(gemstone::environment::enabled(gemstone::environment::SystemPagingOn));
+  return HSA_STATUS_SUCCESS;
 }
 
 uint32_t gpuCount() {
@@ -543,7 +546,7 @@ int mirrorBack(RuntimeState &runtime) {
   // drain and copy-back so every queue publishes its signal after those writes.
   std::scoped_lock const mirrorGuard(runtime.mirrorLock);
   auto ranges = runtime.aql->takeDirtyRanges();
-  if (traceMemory()) std::fprintf(stderr, "Gemstone HSA mirror query count=%zu\n", ranges.size());
+  if (runtime.traceMemoryEnabled) std::fprintf(stderr, "Gemstone HSA mirror query count=%zu\n", ranges.size());
   ranges ^= sort_by([](const auto &range) { return std::pair{range.allocation.value, range.offset.value}; });
   for (size_t begin = 0; begin < ranges.size();) {
     size_t end = begin + 1;
@@ -1073,6 +1076,7 @@ extern "C" hsa_status_t hsa_init() {
   runtime.aql = AqlRuntime::fromEnvironment(std::make_unique<PublicSignals>(runtime));
   if (!runtime.client || !runtime.aql || !runtime.client->call(Ping{})) return reset(HSA_STATUS_ERROR_NOT_INITIALIZED);
   runtime.asyncStopping = false;
+  runtime.traceMemoryEnabled = traceMemory();
   try {
     runtime.monitor = std::make_unique<DoorbellMonitor>();
     for (size_t index = 0; index < 4; ++index)
@@ -1183,8 +1187,9 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
         copyName(value, "Gemstone CPU");
         return HSA_STATUS_SUCCESS;
       }
-      const auto preset = gemstone::hsa::targetPreset(gemstone::hsa::targetArch());
-      copyName(value, preset ? preset->name.data() : gemstone::hsa::targetArch());
+      const auto target = gemstone::hsa::targetArch();
+      const auto preset = gemstone::hsa::targetPreset(target);
+      copyName(value, preset ? preset->name.data() : target.c_str());
       return HSA_STATUS_SUCCESS;
     }
     case HSA_AMD_AGENT_INFO_TIMESTAMP_FREQUENCY: return copyStatus(value, gemstone::hsa::TimestampHz);
@@ -1201,10 +1206,12 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
       return copyStatus(value, gpu ? gemstone::hsa::deviceModel().wavesPerComputeUnit() : uint32_t{0});
     case HSA_AMD_AGENT_INFO_NUM_SDMA_ENG: return copyStatus(value, uint32_t(gpu ? 1 : 0));
     case HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG: return copyStatus(value, uint32_t(0));
-    case HSA_AGENT_INFO_NAME:
-      copyName(value, gpu ? gemstone::hsa::targetArch() : "host");
-      traceApiText("hsa_agent_get_info.name", gpu ? gemstone::hsa::targetArch() : "host");
+    case HSA_AGENT_INFO_NAME: {
+      const std::string name = gpu ? gemstone::hsa::targetArch() : std::string("host");
+      copyName(value, name.c_str());
+      traceApiText("hsa_agent_get_info.name", name);
       return HSA_STATUS_SUCCESS;
+    }
     case HSA_AGENT_INFO_VENDOR_NAME: copyName(value, "Gemstone"); return HSA_STATUS_SUCCESS;
     case HSA_AGENT_INFO_FEATURE: return copyStatus(value, gpu ? HSA_AGENT_FEATURE_KERNEL_DISPATCH : hsa_agent_feature_t(0));
     case HSA_AGENT_INFO_MACHINE_MODEL: return copyStatus(value, HSA_MACHINE_MODEL_LARGE);

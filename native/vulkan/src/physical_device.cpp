@@ -20,9 +20,9 @@ namespace gemstone::vulkan {
 bool environmentAccepted() { return gemstone::environment::accepted(gemstone::environment::invalid()); }
 
 std::optional<uint32_t> configuredApiVersion() {
-  const char *value = gemstone::environment::value(gemstone::environment::VulkanApiVersion);
-  if (!value || std::strcmp(value, "1.2") == 0) return VK_API_VERSION_1_2;
-  if (std::strcmp(value, "1.0") == 0) return VK_API_VERSION_1_0;
+  const auto value = gemstone::environment::value(gemstone::environment::VulkanApiVersion);
+  if (!value || *value == "1.2") return VK_API_VERSION_1_2;
+  if (*value == "1.0") return VK_API_VERSION_1_0;
   return std::nullopt;
 }
 
@@ -40,9 +40,9 @@ void fillProperties(VkPhysicalDeviceProperties *properties, uint32_t physicalOrd
   properties->deviceID = 1 + physicalOrdinal;
   properties->deviceType = VK_PHYSICAL_DEVICE_TYPE_CPU;
   const char *name = "Gemstone Vulkan Compute Device";
-  if (const char *raw = gemstone::environment::value(gemstone::environment::ProfileName)) {
+  if (const auto raw = gemstone::environment::value(gemstone::environment::ProfileName)) {
     // a rusticl profile names the Mesa driver, whose Vulkan side reports the same vendor
-    std::string_view profile(raw);
+    std::string_view profile(*raw);
     if (profile.starts_with("rusticl-")) profile.remove_prefix(std::string_view("rusticl-").size());
     if (profile == "amd") {
       name = "AMD Gemstone Vulkan GPU";

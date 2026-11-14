@@ -625,13 +625,13 @@ ze_result_t ZE_APICALL driverLastError(ze_driver_handle_t handle, const char **d
 
 ze_result_t visibleDevices(std::vector<uint32_t> &visible) {
   const auto configured = gemstone::deviceCount();
-  const auto *raw = gemstone::environment::value("ZE_AFFINITY_MASK");
+  const auto raw = gemstone::environment::value("ZE_AFFINITY_MASK");
   if (!raw) {
     for (uint32_t ordinal = 0; ordinal < configured; ++ordinal)
       visible.push_back(ordinal);
     return ZE_RESULT_SUCCESS;
   }
-  for (std::string_view remaining(raw);;) {
+  for (std::string_view remaining(*raw);;) {
     const auto comma = remaining.find(',');
     const auto token = remaining.substr(0, comma);
     uint32_t ordinal = 0;

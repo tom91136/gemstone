@@ -23,7 +23,7 @@ TEST_CASE("HSA target and trace environment", "[hsa]") {
   const gemstone_test::Environment trace(gemstone::environment::TraceList, "all");
   REQUIRE((gemstone::traceEnabled("hsa", "loaders")));
   const gemstone_test::Environment defaultTarget(gemstone::environment::TargetArch, nullptr);
-  REQUIRE((std::strcmp(gemstone::hsa::targetArch(), "gfx900") == 0));
+  REQUIRE((std::strcmp(gemstone::hsa::targetArch().c_str(), "gfx900") == 0));
   const auto defaultVersion = gemstone::hsa::targetVersion();
   REQUIRE((defaultVersion.major == 9 && defaultVersion.minor == 0));
 
@@ -39,10 +39,10 @@ TEST_CASE("HSA target and trace environment", "[hsa]") {
   };
   for (const auto &expected : targets) {
     const gemstone_test::Environment selected(gemstone::environment::TargetArch, expected.name);
-    REQUIRE((std::strcmp(gemstone::hsa::targetArch(), expected.name) == 0));
+    REQUIRE((std::strcmp(gemstone::hsa::targetArch().c_str(), expected.name) == 0));
     const auto version = gemstone::hsa::targetVersion();
     REQUIRE((version.major == expected.version.major && version.minor == expected.version.minor));
   }
   const gemstone_test::Environment emptyTarget(gemstone::environment::TargetArch, "");
-  REQUIRE((std::strcmp(gemstone::hsa::targetArch(), "gfx900") == 0));
+  REQUIRE((std::strcmp(gemstone::hsa::targetArch().c_str(), "gfx900") == 0));
 }

@@ -40,6 +40,7 @@ struct QueueState {
   void *ring = nullptr;
   size_t ringPackets = 0;
   PacketConsumer consume;
+  bool trace = false;
   alignas(8) uint64_t ownedRead = 0;
   alignas(8) uint64_t ownedWrite = 0;
   uint64_t *readIndex = &ownedRead;
@@ -88,7 +89,7 @@ bool scan(QueueState &queue) {
   };
   uint64_t next = __atomic_load_n(queue.readIndex, __ATOMIC_ACQUIRE);
   uint64_t end = __atomic_load_n(queue.writeIndex, __ATOMIC_ACQUIRE);
-  const bool trace = traceEnabled("hsa", "packets");
+  const bool trace = queue.trace;
   if (trace && !queue.tracedArmed.exchange(true, std::memory_order_relaxed)) {
     const uint16_t header = __atomic_load_n(reinterpret_cast<const uint16_t *>(packetAt(next)), __ATOMIC_ACQUIRE);
     std::fprintf(stderr, "Gemstone armed AQL queue=%lu doorbell=%lu read=%lu write=%lu header=0x%04x\n", queue.id, doorbell, next, end,
@@ -199,6 +200,7 @@ std::unique_ptr<AqlQueue> DoorbellMonitor::registerQueue(void *ring, size_t ring
     state->ring = ring;
     state->ringPackets = ringPackets;
     state->consume = std::move(consume);
+    state->trace = traceEnabled("hsa", "packets");
     if (readIndex) state->readIndex = readIndex;
     if (writeIndex) state->writeIndex = writeIndex;
     std::unique_ptr<AqlQueue> queue(new AqlQueue(*this, state));

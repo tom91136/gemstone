@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -100,6 +101,9 @@ public:
   /** Names the registered allocation that every dispatch passes as the device's malloc heap. */
   void setDeviceHeap(uint64_t pointer, uint64_t size);
 
+  /** Snapshots whether unregistered host pointers are pageable; workers read the snapshot. */
+  void setSystemPaging(bool value);
+
   /** Drains the exact service-written ranges of completed dispatches in completion order. */
   std::vector<execution::DirtyRange> takeDirtyRanges();
 
@@ -134,6 +138,8 @@ private:
   PacketResult dispatch(const AqlPacket &packet, bool cooperative, uint32_t device);
 
   std::unique_ptr<Signals> signals;
+  const bool trace;
+  std::atomic<bool> systemPaging;
   mutable std::mutex lock;
   std::unordered_map<uint64_t, Kernel> installedKernels;
   std::unordered_map<int64_t, uint32_t> programReferences;

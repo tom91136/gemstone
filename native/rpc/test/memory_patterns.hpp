@@ -103,8 +103,8 @@ inline bool probeEnabled(std::string_view name) {
 }
 inline bool concurrencyMode() { return gemstone::environment::present(gemstone::environment::TestMemoryConcurrencyDir); }
 inline std::string allocationKind(const char *fallback) {
-  const auto *kind = gemstone::environment::value(gemstone::environment::TestMemoryAllocationMode);
-  return kind && std::string(kind) != "default" ? kind : fallback;
+  const auto kind = gemstone::environment::value(gemstone::environment::TestMemoryAllocationMode);
+  return kind && *kind != "default" ? *kind : std::string(fallback);
 }
 
 inline const char *accessName(unsigned mode) {
@@ -260,7 +260,7 @@ template <class Word> void publishCounter(const std::filesystem::path &directory
   require(counter.good(), "cannot publish contention address");
 }
 template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, unsigned launch) {
-  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir).value_or(""));
   constexpr Word step = 4097;
   AllocationScope allocations(backend);
   constexpr unsigned lanes = 128;
@@ -287,7 +287,7 @@ template <class Word, class Backend> void multiLaneAtomicCase(Backend &backend, 
   std::cout << "verified multi-workgroup atomics bits=" << sizeof(Word) * 8 << " lanes=128 groups=4\n";
 }
 template <class Word, class Backend> void atomicCase(Backend &backend, unsigned launch) {
-  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir).value_or(""));
   const bool fenced = probeEnabled("fence");
   constexpr Word step = 4097;
   AllocationScope allocations(backend);
@@ -341,15 +341,15 @@ template <class Word, class Backend> void atomicCase(Backend &backend, unsigned 
 }
 
 template <class Backend> int atomicProbe(Backend &backend) {
-  const char *bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
+  const auto bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
   if (probeEnabled("multilane")) {
-    if (bits && std::string(bits) == "64") multiLaneAtomicCase<uint64_t>(backend, 0);
+    if (bits && *bits == "64") multiLaneAtomicCase<uint64_t>(backend, 0);
     else multiLaneAtomicCase<uint32_t>(backend, 0);
     return 0;
   }
-  if (bits && std::string(bits) == "64") {
+  if (bits && *bits == "64") {
     atomicCase<uint64_t>(backend, 0);
-  } else if (bits && std::string(bits) == "32") {
+  } else if (bits && *bits == "32") {
     atomicCase<uint32_t>(backend, 0);
   } else {
     atomicCase<uint32_t>(backend, 0);
@@ -361,7 +361,7 @@ template <class Backend> int concurrent(Backend &backend) {
   if (!backend.concurrentCapabilities()) {
     std::cout << "implementation concurrency probe beyond advertised allocation capabilities\n";
   }
-  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir));
+  const std::filesystem::path directory(gemstone::environment::value(gemstone::environment::TestMemoryConcurrencyDir).value_or(""));
   auto *input = static_cast<uint32_t *>(backend.allocate(128));
   auto *storage = static_cast<unsigned char *>(backend.allocate(65536 + 128));
   unsigned launch = 0;
@@ -611,12 +611,12 @@ template <class Backend> int run(Backend &backend) {
     return compareTraffic(backend);
   }
   if (probeEnabled("overlap")) {
-    const auto *bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
-    return bits && std::string(bits) == "64" ? overlap<uint64_t>(backend) : overlap<uint32_t>(backend);
+    const auto bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
+    return bits && *bits == "64" ? overlap<uint64_t>(backend) : overlap<uint32_t>(backend);
   }
   if (probeEnabled("submission")) {
-    const auto *bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
-    return bits && std::string(bits) == "64" ? submission<uint64_t>(backend) : submission<uint32_t>(backend);
+    const auto bits = gemstone::environment::value(gemstone::environment::TestMemoryAtomicBits);
+    return bits && *bits == "64" ? submission<uint64_t>(backend) : submission<uint32_t>(backend);
   }
   if (probeEnabled("atomic")) return atomicProbe(backend);
   if (concurrencyMode()) return concurrent(backend);

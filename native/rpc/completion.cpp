@@ -12,7 +12,6 @@
 #include <limits>
 #include <memory>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -277,10 +276,7 @@ struct LaunchConnection {
   ~LaunchConnection();
 };
 
-std::string_view configured(const char *name) {
-  const char *value = environment::value(name);
-  return value ? value : "";
-}
+std::string configured(const char *name) { return environment::value(name).value_or(""); }
 
 thread_local bool launchConnectionRetired = false;
 // connections asked for after this thread's storage is torn down, as during process exit, are never closed

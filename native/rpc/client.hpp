@@ -47,8 +47,8 @@ private:
         failure = std::move(*problem);
         return;
       }
-      const char *endpoint = environment::value(environment::RpcEndpoint);
-      const char *client = environment::value(environment::RpcClientId);
+      const auto endpoint = environment::value(environment::RpcEndpoint);
+      const auto client = environment::value(environment::RpcClientId);
       if (!endpoint && !client) return;
       if (!endpoint || !client) {
         state = ClientMode::Misconfigured;

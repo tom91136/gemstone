@@ -286,8 +286,8 @@ std::string_view deviceName() {
 }
 
 bool codeRequired(std::string_view mode) {
-  const char *value = gemstone::environment::value(gemstone::environment::CudaCodeMode);
-  return value && mode == value;
+  const auto value = gemstone::environment::value(gemstone::environment::CudaCodeMode);
+  return value && mode == *value;
 }
 
 bool sassCodeRequired() { return codeRequired("sass"); }
@@ -296,8 +296,8 @@ bool environmentAccepted() {
   using namespace gemstone::environment;
   auto problem = invalid();
   if (!problem && targetArch() && !configuredPtxVersion()) {
-    if (present(TargetArch)) problem = rejected(TargetArch, value(TargetArch), "a compute_NN or sm_NN target");
-    else problem = rejected(Device, value(Device), "a device preset with a compute_NN or sm_NN target");
+    if (const auto target = value(TargetArch)) problem = rejected(TargetArch, *target, "a compute_NN or sm_NN target");
+    else if (const auto device = value(Device)) problem = rejected(Device, *device, "a device preset with a compute_NN or sm_NN target");
   }
   return accepted(problem);
 }

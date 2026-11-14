@@ -305,10 +305,10 @@ VkResult implVkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count,
     }
     auto prepared = prepareShader(module->second, infos[i].stage.pName, gx::ShaderStageKind::Compute, infos[i].stage.pSpecializationInfo);
     if (!prepared) return VK_ERROR_INVALID_SHADER_NV;
-    if (const char *directory = gemstone::environment::value(gemstone::environment::VulkanDumpDir)) {
+    if (const auto directory = gemstone::environment::value(gemstone::environment::VulkanDumpDir)) {
       static std::atomic<unsigned> serial{0};
       char filename[1024];
-      std::snprintf(filename, sizeof(filename), "%s/gemstone-%ld-%u.spv", directory, static_cast<long>(getpid()), serial++);
+      std::snprintf(filename, sizeof(filename), "%s/gemstone-%ld-%u.spv", directory->c_str(), static_cast<long>(getpid()), serial++);
       if (auto *file = std::fopen(filename, "wb")) {
         (void)std::fwrite(prepared->image.data(), 1, prepared->image.size(), file);
         std::fclose(file);

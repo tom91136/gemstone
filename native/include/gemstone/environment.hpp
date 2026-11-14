@@ -15,16 +15,33 @@
 #include <aspartame/array.hpp>
 #include <aspartame/vector.hpp>
 
-#include <environment_keys.hpp>
 #include <gemstone_device_presets.hpp>
+
+#include <environment_keys.hpp>
 
 namespace gemstone::environment {
 
-inline const char *value(const char *name) {
+namespace detail {
+
+// getenv walks the environ array while setenv may replace and free it
+inline std::mutex environmentLock;
+
+} // namespace detail
+
+/** The value of `name` as written, copied under the lock the test environment's writes share. */
+inline std::optional<std::string> text(const char *name) {
+  std::scoped_lock const guard(detail::environmentLock);
   const char *raw = std::getenv(name);
-  return raw && raw[0] != '\0' ? raw : nullptr;
+  return raw ? std::optional<std::string>(raw) : std::nullopt;
 }
-inline bool present(const char *name) { return value(name) != nullptr; }
+
+/** The non-empty value of `name`, the form every setting uses. */
+inline std::optional<std::string> value(const char *name) {
+  auto raw = text(name);
+  return raw && !raw->empty() ? raw : std::nullopt;
+}
+
+inline bool present(const char *name) { return value(name).has_value(); }
 
 inline std::optional<bool> boolean(std::string_view raw) {
   using namespace aspartame;
@@ -40,9 +57,9 @@ inline std::optional<bool> boolean(std::string_view raw) {
 
 /** Whether any comma-separated, blank-trimmed token of `name` satisfies `matches`. */
 template <class Matches> bool listed(const char *name, Matches matches) {
-  const char *raw = value(name);
+  const auto raw = value(name);
   if (!raw) return false;
-  for (std::string_view remaining(raw);;) {
+  for (std::string_view remaining(*raw);;) {
     const auto comma = remaining.find(',');
     auto token = remaining.substr(0, comma);
     const auto first = token.find_first_not_of(" \t");
@@ -54,8 +71,8 @@ template <class Matches> bool listed(const char *name, Matches matches) {
 }
 
 inline bool enabled(const char *name) {
-  const auto *raw = value(name);
-  return raw && boolean(raw).value_or(false);
+  const auto raw = value(name);
+  return raw && boolean(*raw).value_or(false);
 }
 
 inline std::optional<uint64_t> positiveInteger(std::string_view raw) {
@@ -82,8 +99,8 @@ inline std::optional<uint64_t> positiveThousandths(std::string_view raw) {
 
 /** Positive decimal only, including an explicit bound for the consumer's representation. */
 inline uint64_t unsignedValue(const char *name, uint64_t fallback, uint64_t maximum = std::numeric_limits<uint64_t>::max()) {
-  const auto *raw = value(name);
-  const auto parsed = raw ? positiveInteger(raw) : std::nullopt;
+  const auto raw = value(name);
+  const auto parsed = raw ? positiveInteger(*raw) : std::nullopt;
   return parsed && *parsed <= maximum ? *parsed : fallback;
 }
 
@@ -98,48 +115,47 @@ inline int rpcTimeoutSeconds() {
   return static_cast<int>(unsignedValue(RpcTimeoutSeconds, RpcTimeoutSecondsDefault, TimeoutSecondsMaximum));
 }
 
-inline std::string rejected(const char *name, const char *raw, std::string_view expected) {
-  return std::string(name) + " must be " + std::string(expected) + ", not '" + raw + "'";
+inline std::string rejected(const char *name, std::string_view raw, std::string_view expected) {
+  return std::string(name) + " must be " + std::string(expected) + ", not '" + std::string(raw) + "'";
 }
 
 inline std::optional<std::string> unlisted(const char *name, const std::vector<std::string_view> &choices) {
   using namespace aspartame;
-  const char *raw = value(name);
-  if (!raw || choices ^ contains(std::string_view(raw))) return std::nullopt;
-  return rejected(name, raw, "one of " + (choices ^ mk_string(" ")));
+  const auto raw = value(name);
+  if (!raw || choices ^ contains(std::string_view(*raw))) return std::nullopt;
+  return rejected(name, *raw, "one of " + (choices ^ mk_string(" ")));
 }
 
 inline std::optional<DevicePreset> selectedDevicePreset() {
-  const char *name = value(Device);
-  return name ? devicePreset(name) : std::nullopt;
+  const auto name = value(Device);
+  return name ? devicePreset(*name) : std::nullopt;
 }
 
-inline std::optional<std::string_view> targetArch() {
-  if (const char *raw = value(TargetArch)) return std::string_view(raw);
-  if (const auto device = selectedDevicePreset()) return device->target;
+inline std::optional<std::string> targetArch() {
+  if (auto raw = value(TargetArch)) return raw;
+  if (const auto device = selectedDevicePreset()) return std::string(device->target);
   return std::nullopt;
 }
 
 /** The first malformed setting shared by every shim; each shim adds the settings only it reads. */
 inline std::optional<std::string> invalid() {
   for (const char *name : {OpenclScanBufferPointersOn, SystemPagingOn, VulkanValidateAllocatorsOn})
-    if (const char *raw = value(name); raw && !boolean(raw)) return rejected(name, raw, "one of 1 true on y yes 0 false off n no");
+    if (const auto raw = value(name); raw && !boolean(*raw)) return rejected(name, *raw, "one of 1 true on y yes 0 false off n no");
   const std::pair<const char *, uint64_t> integers[] = {{RpcClientId, std::numeric_limits<int64_t>::max()},
                                                         {RpcTimeoutSeconds, TimeoutSecondsMaximum},
                                                         {DeviceCount, DeviceCountMaximum},
                                                         {ThreadCount, std::numeric_limits<uint32_t>::max()}};
   for (const auto &[name, maximum] : integers)
-    if (const char *raw = value(name)) {
-      const auto parsed = positiveInteger(raw);
-      if (!parsed || *parsed > maximum) return rejected(name, raw, "a positive integer up to " + std::to_string(maximum));
+    if (const auto raw = value(name)) {
+      const auto parsed = positiveInteger(*raw);
+      if (!parsed || *parsed > maximum) return rejected(name, *raw, "a positive integer up to " + std::to_string(maximum));
     }
-  if (const char *raw = value(TimeoutScale); raw && !positiveThousandths(raw))
-    return rejected(TimeoutScale, raw, PositiveThousandthsExpected);
-  if (const char *raw = value(Device); raw && !selectedDevicePreset())
-    return rejected(Device, raw, "a known device preset name");
+  if (const auto raw = value(TimeoutScale); raw && !positiveThousandths(*raw))
+    return rejected(TimeoutScale, *raw, PositiveThousandthsExpected);
+  if (const auto raw = value(Device); raw && !selectedDevicePreset()) return rejected(Device, *raw, "a known device preset name");
   if (const auto device = selectedDevicePreset())
-    if (const char *target = value(TargetArch); target && std::string_view(target) != device->target)
-      return rejected(TargetArch, target, std::string(device->target) + " for " + std::string(device->name));
+    if (const auto target = value(TargetArch); target && std::string_view(*target) != device->target)
+      return rejected(TargetArch, *target, std::string(device->target) + " for " + std::string(device->name));
   if (auto problem = unlisted(CudaCodeMode, {"ptx", "sass"})) return problem;
   if (auto problem = unlisted(ProfileName, {"amd", "nvidia", "intel", "llvmpipe", "rusticl-amd", "rusticl-intel", "rusticl-llvmpipe"}))
     return problem;

@@ -199,8 +199,8 @@ void Connection::poison() {
   if (established) poisoned = true;
 }
 bool Connection::connect() {
-  const char *configured = environment::value(environment::RpcEndpoint);
-  const std::string endpoint = configured && *configured ? configured : sessionEndpoint;
+  const auto configured = environment::value(environment::RpcEndpoint);
+  const std::string endpoint = configured ? *configured : sessionEndpoint;
   if (endpoint.empty()) {
     error = std::string(environment::RpcEndpoint) + " is not set";
     return false;

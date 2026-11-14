@@ -30,13 +30,14 @@
 #include <gemstone/environment.hpp>
 #include <gemstone/trace.hpp>
 
+#include <environment_keys.hpp>
+
 #ifdef GEMSTONE_HSAKMT_TEST_SUPPORT
   #include <span>
 
   #include <gemstone/process.hpp>
 
   #include "hsakmt_test_support.hpp"
-  #include <environment_keys.hpp>
 #endif
 #include "transfer.hpp"
 
@@ -140,6 +141,7 @@ struct State {
   std::unordered_map<HSA_QUEUEID, std::unique_ptr<Queue>> queues;
   std::unordered_set<uint64_t> notifiedKernels;
   std::string loaderError;
+  bool trace = false;
 };
 
 State &state() {
@@ -156,8 +158,10 @@ bool tracePackets() { return gemstone::traceEnabled("hsa", "packets"); }
 
 bool opened(const State &runtime) { return runtime.openCount != 0; }
 
-HSAKMT_STATUS requireOpen(const State &runtime) {
-  return opened(runtime) ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
+HSAKMT_STATUS requireOpen(State &runtime) {
+  if (!opened(runtime)) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED;
+  if (runtime.runtime) runtime.runtime->setSystemPaging(gemstone::environment::enabled(gemstone::environment::SystemPagingOn));
+  return HSAKMT_STATUS_SUCCESS;
 }
 
 Allocation *findAllocation(State &runtime, const void *pointer) {
@@ -225,7 +229,7 @@ bool notifySignalEvent(uint64_t signal) {
   if (signal == 0) return false;
   const auto *view = reinterpret_cast<const SignalAbiView *>(static_cast<uintptr_t>(signal));
   const uint32_t eventId = __atomic_load_n(&view->eventId, __ATOMIC_ACQUIRE);
-  const bool tracing = tracePackets();
+  const bool tracing = state().trace;
   if (eventId == 0) {
     if (tracing) std::fprintf(stderr, "Gemstone completion signal=%lu has no event\n", signal);
     return true;
@@ -250,7 +254,7 @@ bool notifySignalEvent(uint64_t signal) {
 
 PacketResult consumePacket(uint64_t queueId, uint64_t packetId, const void *packet) {
   auto &runtime = state();
-  const bool tracing = tracePackets();
+  const bool tracing = runtime.trace;
   if (tracing) std::fprintf(stderr, "Gemstone consuming AQL queue=%lu packet=%lu\n", queueId, packetId);
   gemstone::hsa::AqlPacket decoded;
   const auto decode = gemstone::hsa::decodeAqlPacket(packet, AqlPacketSize, decoded);
@@ -454,8 +458,8 @@ bool gemstone::hsakmt::installCodeObject(std::span<const uint8_t> image, std::sp
   }
   if (!pending.empty() && !aql->installCodeObject(image, pending)) {
     const auto detail = aql->lastError();
-    if (const char *dump = gemstone::environment::value(gemstone::environment::HsaRejectedCodeObjectFile); dump && dump[0] != '\0')
-      (void)gemstone::writeFile(dump, image.data(), image.size());
+    if (const auto dump = gemstone::environment::value(gemstone::environment::HsaRejectedCodeObjectFile))
+      (void)gemstone::writeFile(*dump, image.data(), image.size());
     std::fprintf(stderr, "Gemstone rejected AMDGPU code object: %s\n", detail.c_str());
     return reject(detail.empty() ? "execution service rejected AMDGPU code object" : detail);
   }
@@ -499,6 +503,7 @@ extern "C" HSAKMT_STATUS hsaKmtOpenKFD() {
   if (!gemstone::environment::accepted(gemstone::hsa::invalidEnvironment())) return reset(HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED);
   runtime.client = Client::fromEnvironment();
   runtime.runtime = AqlRuntime::fromEnvironment(std::make_unique<gemstone::hsa::RocrSignals>());
+  runtime.trace = tracePackets();
   if (!runtime.client || !runtime.runtime || !runtime.client->call(Ping{})) return reset(HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED);
   try {
     runtime.monitor = std::make_unique<DoorbellMonitor>();
@@ -605,9 +610,9 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   properties->Capability.ui32.QueueSizePowerOfTwo = 1;
   properties->Capability.ui32.DoorbellType = 2;
   properties->Capability.ui32.CoherentHostAccess = 1;
-  const char *name = gemstone::hsa::targetArch();
-  const size_t nameSize = std::min(std::strlen(name), sizeof(properties->AMDName) - 1U);
-  std::memcpy(properties->AMDName, name, nameSize);
+  const std::string name = gemstone::hsa::targetArch();
+  const size_t nameSize = std::min(std::strlen(name.c_str()), sizeof(properties->AMDName) - 1U);
+  std::memcpy(properties->AMDName, name.c_str(), nameSize);
   properties->AMDName[nameSize] = 0;
   const char *marketing = "Gemstone Virtual AMDGPU";
   for (size_t index = 0; marketing[index] != '\0' && index + 1 < HSA_PUBLIC_NAME_SIZE; ++index)

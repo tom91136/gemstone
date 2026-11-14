@@ -235,21 +235,21 @@ struct OpenCLIdentity {
 };
 
 OpenCLIdentity openclIdentity() {
-  const char *profile = gemstone::environment::value(gemstone::environment::ProfileName);
+  const auto profile = gemstone::environment::value(gemstone::environment::ProfileName);
   if (profile) {
-    if (std::strcmp(profile, "amd") == 0)
+    if (std::strcmp(profile->c_str(), "amd") == 0)
       return {.platformName = "AMD Accelerated Parallel Processing",
               .deviceName = "AMD Gemstone GPU",
               .vendor = "Advanced Micro Devices, Inc.",
               .vendorId = 0x1002};
-    if (std::strcmp(profile, "nvidia") == 0)
+    if (std::strcmp(profile->c_str(), "nvidia") == 0)
       return {.platformName = "NVIDIA CUDA", .deviceName = "NVIDIA Gemstone GPU", .vendor = "NVIDIA Corporation", .vendorId = 0x10de};
-    if (std::strcmp(profile, "rusticl-amd") == 0)
+    if (std::strcmp(profile->c_str(), "rusticl-amd") == 0)
       return {.platformName = "rusticl", .deviceName = "AMD Gemstone GPU", .vendor = "Advanced Micro Devices, Inc.", .vendorId = 0x1002};
-    if (std::strcmp(profile, "rusticl-intel") == 0)
+    if (std::strcmp(profile->c_str(), "rusticl-intel") == 0)
       return {.platformName = "rusticl", .deviceName = "Intel Gemstone GPU", .vendor = "Intel(R) Corporation", .vendorId = 0x8086};
     // llvmpipe has no OpenCL driver of its own; Mesa serves it through rusticl
-    if (std::strcmp(profile, "rusticl-llvmpipe") == 0 || std::strcmp(profile, "llvmpipe") == 0)
+    if (std::strcmp(profile->c_str(), "rusticl-llvmpipe") == 0 || std::strcmp(profile->c_str(), "llvmpipe") == 0)
       return {.platformName = "rusticl", .deviceName = "llvmpipe Gemstone GPU", .vendor = "Mesa", .vendorId = 0x10005};
   }
   return {.platformName = "Intel(R) OpenCL Gemstone Graphics",

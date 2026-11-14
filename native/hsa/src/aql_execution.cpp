@@ -1,5 +1,6 @@
 #include "gemstone/hsa/aql_execution.hpp"
 
+#include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -102,7 +103,8 @@ bool RocrSignals::fail(uint64_t signal, int32_t code) {
   return true;
 }
 
-AqlRuntime::AqlRuntime(std::unique_ptr<Signals> signals) : signals(std::move(signals)) {}
+AqlRuntime::AqlRuntime(std::unique_ptr<Signals> signals)
+    : signals(std::move(signals)), trace(tracePackets()), systemPaging(environment::enabled(environment::SystemPagingOn)) {}
 
 std::unique_ptr<AqlRuntime> AqlRuntime::fromEnvironment(std::unique_ptr<Signals> signals) {
   std::unique_ptr<AqlRuntime> runtime(new AqlRuntime(std::move(signals)));
@@ -130,7 +132,7 @@ bool AqlRuntime::installCodeObject(std::span<const uint8_t> image, std::span<con
   if (image.empty() || kernels.empty()) return false;
   auto *connection = launchClient();
   if (!connection) return false;
-  if (tracePackets()) std::fprintf(stderr, "Gemstone loading HSA code object bytes=%zu\n", image.size());
+  if (trace) std::fprintf(stderr, "Gemstone loading HSA code object bytes=%zu\n", image.size());
   const auto program =
       connection->call(LoadProgram{.encoding = ProgramEncoding::HSACodeObject, .image = std::vector<uint8_t>(image.begin(), image.end())});
   if (!program) {
@@ -248,6 +250,8 @@ bool AqlRuntime::registerAllocation(uint64_t base, uint64_t size, uint64_t alloc
   return true;
 }
 
+void AqlRuntime::setSystemPaging(bool value) { systemPaging.store(value, std::memory_order_relaxed); }
+
 void AqlRuntime::setDeviceHeap(uint64_t pointer, uint64_t size) {
   std::scoped_lock const guard(lock);
   deviceHeapPointer = pointer;
@@ -319,8 +323,8 @@ bool AqlRuntime::relocations(const Kernel &kernel, uint64_t kernarg, std::option
       if ((field.offset == 0 && pointer == UINT64_MAX) || pointer == 0) continue;
       if (const auto target = resolve(pointer)) {
         relocate(field.offset, *target);
-      } else if (!isProgramAddress(pointer) && !environment::enabled(environment::SystemPagingOn)) {
-        if (tracePackets())
+      } else if (!isProgramAddress(pointer) && !systemPaging.load(std::memory_order_relaxed)) {
+        if (trace)
           std::fprintf(stderr, "Gemstone AQL kernarg pointer 0x%lx at offset %u names no allocation or program\n", pointer, field.offset);
         return false;
       }
@@ -330,7 +334,7 @@ bool AqlRuntime::relocations(const Kernel &kernel, uint64_t kernarg, std::option
 }
 
 PacketResult AqlRuntime::failPacket(uint64_t completionSignal, PacketFailure failure, std::string message) {
-  if (tracePackets()) std::fprintf(stderr, "Gemstone AQL dispatch failure: %s\n", message.c_str());
+  if (trace) std::fprintf(stderr, "Gemstone AQL dispatch failure: %s\n", message.c_str());
   fail(std::move(message));
   const bool published = signals->fail(completionSignal, static_cast<int32_t>(failure));
   return completionSignal != 0 && published ? PacketResult::Accepted : PacketResult::Fatal;
@@ -357,7 +361,7 @@ PacketResult AqlRuntime::barrier(const AqlPacket &packet) {
     allSatisfied = allSatisfied && value < 1;
   }
   const bool ready = any ? hasDependency && anySatisfied : allSatisfied;
-  if (tracePackets()) {
+  if (trace) {
     std::fprintf(stderr, "Gemstone observed AQL barrier=%s state=%s completion=%lu dependencies=", any ? "or" : "and",
                  barrierState(readable, ready), packet.completionSignal);
     for (uint64_t const signal : packet.dependencySignals) {
@@ -386,12 +390,12 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative, uin
 
   const auto &group = work.workgroupSize;
   const auto &grid = work.gridSize;
-  if (tracePackets())
+  if (trace)
     std::fprintf(stderr, "Gemstone launching AQL kernel=%s grid=%ux%ux%u group=%ux%ux%u relocations=%zu\n", found->name.c_str(), grid[0],
                  grid[1], grid[2], group[0], group[1], group[2], pointerRelocations.size());
   auto *connection = launchClient();
   if (!connection) return failed("Gemstone execution RPC client is not configured");
-  if (environment::enabled(environment::SystemPagingOn)) {
+  if (systemPaging.load(std::memory_order_relaxed)) {
     if (const auto enabled = connection->call(EnableHostMemory{}); !enabled)
       return failed(enabled.error().detail, packetFailure(enabled.error().kind));
   }
@@ -455,7 +459,7 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative, uin
     forward(connection->call(CompletionErrorPrints{completion}), stderr);
   }
   const auto released = connection->call(ReleaseCompletion{completion});
-  if (tracePackets())
+  if (trace)
     std::fprintf(stderr, "Gemstone completed AQL kernel=%s result=%d release=%d\n", found->name.c_str(), awaited ? 0 : -1,
                  released ? 0 : -1);
   if (!awaited || !queried || !printError.empty() || !released) dropLaunchClient();
@@ -475,12 +479,11 @@ PacketResult AqlRuntime::consume(const void *packet, bool cooperative, uint32_t 
   AqlPacket decoded;
   const auto status = decodeAqlPacket(packet, AqlPacketSize, decoded);
   if (status != DecodeStatus::Success) {
-    if (tracePackets()) std::fprintf(stderr, "Gemstone rejected AQL packet: %s\n", describe(status));
+    if (trace) std::fprintf(stderr, "Gemstone rejected AQL packet: %s\n", describe(status));
     return failPacket(decoded.completionSignal, decodeFailure(status), describe(status));
   }
   if (decoded.type == PacketType::VendorSpecific) {
-    if (tracePackets())
-      std::fprintf(stderr, "Gemstone observed AQL PM4-IB synchronisation packet completion=%lu\n", decoded.completionSignal);
+    if (trace) std::fprintf(stderr, "Gemstone observed AQL PM4-IB synchronisation packet completion=%lu\n", decoded.completionSignal);
     if (decoded.completionSignal != 0 && !signals->complete(decoded.completionSignal)) return PacketResult::Fatal;
     return PacketResult::Accepted;
   }

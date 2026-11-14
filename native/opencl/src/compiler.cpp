@@ -134,9 +134,7 @@ constexpr std::string_view NoTranslator = "none";
 
 const std::string &compilerPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclCompilerExe);
-        configured && configured[0] != '\0')
-      return std::string(configured);
+    if (const auto configured = gemstone::environment::value(gemstone::environment::OpenclCompilerExe)) return *configured;
     return discoverExecutable({"clang", "clang++"}, {"/opt/intel/oneapi/compiler/*/bin/compiler/clang", "/opt/rocm/llvm/bin/clang"});
   }();
   return path;
@@ -144,9 +142,8 @@ const std::string &compilerPath() {
 
 const std::string &spirvConverterPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmSpirvExe);
-        configured && configured[0] != '\0')
-      return std::string_view(configured) == NoTranslator ? std::string() : std::string(configured);
+    if (const auto configured = gemstone::environment::value(gemstone::environment::OpenclLlvmSpirvExe))
+      return *configured == NoTranslator ? std::string() : *configured;
     return discoverExecutable({"llvm-spirv"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-spirv", "/opt/rocm/llvm/bin/llvm-spirv",
                                "/usr/lib/llvm-*/bin/llvm-spirv", "/usr/lib64/llvm*/bin/llvm-spirv", "/usr/local/bin/llvm-spirv"});
@@ -156,9 +153,7 @@ const std::string &spirvConverterPath() {
 
 const std::string &bitcodeLinkerPath() {
   static const std::string path = [] {
-    if (const char *configured = gemstone::environment::value(gemstone::environment::OpenclLlvmLinkExe);
-        configured && configured[0] != '\0')
-      return std::string(configured);
+    if (const auto configured = gemstone::environment::value(gemstone::environment::OpenclLlvmLinkExe)) return *configured;
     return discoverExecutable({"llvm-link"},
                               {"/opt/intel/oneapi/compiler/*/bin/compiler/llvm-link", "/opt/rocm/llvm/bin/llvm-link",
                                "/usr/lib/llvm-*/bin/llvm-link", "/usr/lib64/llvm*/bin/llvm-link", "/usr/local/bin/llvm-link"});

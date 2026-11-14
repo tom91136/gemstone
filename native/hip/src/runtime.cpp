@@ -1313,7 +1313,7 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->maxGridSize[2] = MaxGridDimensionYZ;
   properties->clockRate = static_cast<int>(model.clockMHz * 1000U);
   properties->memoryClockRate = static_cast<int>(model.memoryClockMHz * 1000U);
-  const auto version = gemstone::hsa::targetVersion(target.c_str());
+  const auto version = gemstone::hsa::targetVersion(target);
   properties->major = static_cast<int>(version.major);
   properties->minor = static_cast<int>(version.minor);
   properties->multiProcessorCount = static_cast<int>(model.processors());
@@ -1388,7 +1388,7 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
     write(MaxThreadsDim + (axis * sizeof(int)), int(MaxBlockThreads));
     write(MaxGridSize + (axis * sizeof(int)), int(axis == 0 ? MaxGridDimension : MaxGridDimensionYZ));
   }
-  const auto version = gemstone::hsa::targetVersion(target.c_str());
+  const auto version = gemstone::hsa::targetVersion(target);
   write(Major, int(version.major));
   write(Minor, int(version.minor));
   write(MultiProcessorCount, int(model.processors()));
