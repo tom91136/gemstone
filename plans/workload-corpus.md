@@ -43,6 +43,14 @@ Build results at this commit:
 - Run the CUDA models first with the arguments from `benchmarks.yaml`, under the bounded time limit, and classify each result as pass, fail, completion only, or time limit.
 - Benchmarks sized for real GPUs that exceed the limit get smaller arguments, recorded next to the measured time that justified each change.
 
+Triage of the first failing benchmarks on the cuda sm_89 vendor artifact, compared against the RTX 4060 Ti on this host:
+
+- `bitpacking`: emulator defect in the CUDA fatbin loader. The `-rdc` device-link wrapper registers its linked cubin before the per-object metadata stubs; a stub at the same target replaced the linked image, so the module had no kernels and every launch failed with `CUDA_ERROR_NOT_FOUND`. The benchmark ignored the failed launches and printed FAIL for every size. The loader now keeps the first executable cubin at a target over same-target metadata stubs (`cfbdf318`, failing test in `native/cuda/test/code-mode.cpp`). With the compress loop run once, all six shipped sizes pass on `cuda-sass/sm_89` and on PTX; the shipped 1000 iterations over 100M elements exceed the 600 s case timeout on `cuda-sass/sm_89`.
+- `chemv` and `winograd`: the same loader defect. Both pass on hardware and, after the fix, on `cuda-sass/sm_89` (86 s and 29 s) and on PTX.
+- `mdh`: the same loader defect. With `-itmax 1` and a 1e12 instruction budget all three kernels pass on both routes (SASS 333-406 s per kernel, PTX 20-38 s). The default `itmax 100` is dominated by the benchmark's serial CPU reference (6.4 s per iteration), which exceeds the case timeout on hardware too; it is a time limit, not a defect. Its default inputs also overflow `expf` to infinity on both sides, and the comparator treats the resulting NaN difference as equal, so its PASS checks nothing at these defaults.
+- `laplace`: the same loader defect, reported as unsupported cubin text relocation `0x4a` because the per-object relocatable image was selected instead of the linked cubin. A reduced `NUM 256` build passes on both routes with the same 3185 iterations and norms as hardware (SASS 193 s, PTX 168 s). The shipped `NUM 1024` default needs 27,250 GPU iterations, 64 times the reduced work under emulation, and its serial CPU reference alone exceeds 15 minutes on this host, so it is a time limit.
+- The `cuda-ptx` artifact does not carry HeCBench because `BUILD_HECBENCH` is fatbin-only, so the PTX comparison compiled the same sources with `-gencode arch=compute_89,code=compute_89` and ran them through `GEMSTONE_CUDA_CODE_MODE=ptx`.
+
 ### 3. Other models
 
 - HIP, SYCL, and OpenMP, in that order.
