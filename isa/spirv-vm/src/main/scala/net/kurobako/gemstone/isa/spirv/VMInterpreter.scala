@@ -425,14 +425,9 @@ private object VMInterpreter {
     val timeline             = VMTimeline(dispatch.kernelName, control)
     val ops                  = instrumented(programOps, timeline)
 
-    // A workgroup's invocations and state persist between slices, so seeded launches can interleave workgroups.
-    class GroupRun(
-        group: Coordinates,
-        groupState: MemoryState,
-        reuse: Reuse,
-        deferExecution: Boolean = false
-    ) {
-      private val executions               = mutable.ArrayBuffer.empty[InvocationState]
+    // A seeded workgroup's invocations and state persist between slices so launches can interleave groups.
+    class GroupRun(group: Coordinates, groupState: MemoryState, reuse: Reuse) {
+      private var executions               = mutable.ArrayBuffer.empty[InvocationState]
       private val schedule                 = context.schedule.forWorkgroup(group)
       private var started                  = false
       private var complete                 = false
@@ -442,111 +437,11 @@ private object VMInterpreter {
         if (started) Right(())
         else {
           started = true
-          val activeGroupSize = geometry.activeGroupSize(group) match {
-            case Left(message) => return Left(Fault.InvalidRequest(message))
-            case Right(value)  => value
+          prepareGroup(group, groupState, reuse, deferExecution = true).map { prepared =>
+            executions = prepared
+            if (!(schedule eq ConcurrencySchedule.Fixed)) order = Array.ofDim[Int](executions.size)
+            if (!executions.exists(!_.completed)) complete = true
           }
-          val activeLocalCount = activeGroupSize.volumeInt match {
-            case Left(message) => return Left(Fault.InvalidRequest(message))
-            case Right(value)  => value
-          }
-          groupState.workgroup = if (workgroupImage.isEmpty) workgroupImage else workgroupImage.clone()
-          val numSubgroups = (activeLocalCount.toLong + subgroup.toLong - 1L) / subgroup.toLong
-          var linearLocal  = 0
-          while (linearLocal < activeLocalCount) {
-            // The loop lower bound proves the linear local index is non-negative.
-            val local  = activeGroupSize.coordinates(linearLocal.toLong.unsafe[Long >= 0])
-            val global = geometry.globalCoordinates(group, local)
-            if (geometry.containsGlobal(global)) {
-              val subgroupIndex = linearLocal / subgroup
-              val invocation    = Invocation(
-                group,
-                local,
-                global,
-                geometry,
-                activeGroupSize,
-                if (program.vulkan) subgroup
-                else math.min(subgroup, activeLocalCount.raw - subgroupIndex * subgroup),
-                subgroup,
-                numSubgroups,
-                enqueuedSubgroups,
-                subgroupIndex,
-                linearLocal % subgroup
-              )
-              // Stage arguments are arrays of invocation records: each invocation addresses its own slice.
-              val stageValues = stageInterfaces.view.flatMap { variable =>
-                globalValues.get(variable).collect { case VMValue.Address(pointerType, pointer) =>
-                  variable -> VMValue.Address(
-                    pointerType,
-                    pointer.copy(address = pointer.address + global.x.raw * program.typeSize(pointer.pointee))
-                  )
-                }
-              }.toMap
-              // Output initialisers apply to every record, including those never explicitly stored.
-              var initialiser = 0
-              while (initialiser < stageInitialisers.size) {
-                val (variable, bytes) = stageInitialisers(initialiser)
-                initialiser += 1
-                stageValues.get(variable) match {
-                  case Some(VMValue.Address(_, pointer)) => bytes.flatMap(groupState.write(pointer, _)) match {
-                      case Left(error) => return Left(error)
-                      case Right(())   => ()
-                    }
-                  case _ => return Left(Fault.InvalidRequest(s"SPIR-V output %$variable has no invocation record"))
-                }
-              }
-              val reused    = if (hasStaticCollectives) reuse.lanesStates(linearLocal) else reuse.execution
-              val execution = prepareInvocation(
-                program,
-                function,
-                builtins,
-                invocation,
-                stageValues,
-                reused,
-                template,
-                privateImage,
-                timeline,
-                groupState
-              ) match {
-                case Left(error)  => return Left(error)
-                case Right(value) => value
-              }
-              execution.fragmentInvocation = fragment
-              execution.sampleMask = maskVariable.flatMap(stageValues.get).collect {
-                case VMValue.Address(_, pointer) => pointer
-              }
-              execution.fragmentQuad = fragment && groupSize.x == 4 && groupSize.y == 1 && groupSize.z == 1
-              execution.subgroupReconvergence = program.usesNonUniformCollectives && !fragment
-              execution.helperInvocation = helperVariable.flatMap(stageValues.get) match {
-                case Some(VMValue.Address(_, pointer)) => memory.awaitRead(groupState.readScalar(pointer, 1)) match {
-                    case Left(error)  => return Left(error)
-                    case Right(value) => value != 0
-                  }
-                case _ => false
-              }
-              if (hasStaticCollectives) { reuse.lanesStates(linearLocal) = execution; executions += execution }
-              else if (deferExecution) executions += execution
-              else
-                // Deferred host reads retain a frame only when the lane actually suspends.
-                resumeInvocation(program, ops, execution, control) match {
-                  case Left(error)                      => return Left(located(error, timeline, execution))
-                  case Right(()) if execution.completed => reuse.execution = execution
-                  case Right(()) if (hasCollectives && execution.memoryPending) || execution.preempted =>
-                    executions += execution
-                    reuse.execution = null
-                  case Right(()) =>
-                    return Left(
-                      Fault.InvalidRequest(
-                        "SPIR-V program suspended at a collective absent from its static instruction set"
-                      )
-                    )
-                }
-            }
-            linearLocal += 1
-          }
-          if (!(schedule eq ConcurrencySchedule.Fixed)) order = Array.ofDim[Int](executions.size)
-          if (!executions.exists(!_.completed)) complete = true
-          Right(())
         }
 
       def finished: Boolean = complete || (started && !executions.exists(!_.completed))
@@ -559,25 +454,133 @@ private object VMInterpreter {
             if (!executions.exists(!_.completed)) complete = true
             progressed
           }
+    }
 
-      def runToCompletion(): Either[Fault, Unit] = {
-        var failure: Fault | Null = null
-        while (failure == null && !finished)
-          step() match {
-            case Left(error)  => failure = error
-            case Right(false) =>
-              if (!finished)
-                failure = Fault.Hang("SPIR-V workgroup has no runnable invocation")
-            case Right(true) => ()
-          }
-        if (failure == null) Right(()) else Left(failure)
+    def prepareGroup(
+        group: Coordinates,
+        groupState: MemoryState,
+        reuse: Reuse,
+        deferExecution: Boolean
+    ): Either[Fault, mutable.ArrayBuffer[InvocationState]] = {
+      val activeGroupSize = geometry.activeGroupSize(group) match {
+        case Left(message) => return Left(Fault.InvalidRequest(message))
+        case Right(value)  => value
       }
+      val activeLocalCount = activeGroupSize.volumeInt match {
+        case Left(message) => return Left(Fault.InvalidRequest(message))
+        case Right(value)  => value
+      }
+      groupState.workgroup = if (workgroupImage.isEmpty) workgroupImage else workgroupImage.clone()
+      val executions   = mutable.ArrayBuffer.empty[InvocationState]
+      val numSubgroups = (activeLocalCount.toLong + subgroup.toLong - 1L) / subgroup.toLong
+      var linearLocal  = 0
+      while (linearLocal < activeLocalCount) {
+        // The loop lower bound proves the linear local index is non-negative.
+        val local  = activeGroupSize.coordinates(linearLocal.toLong.unsafe[Long >= 0])
+        val global = geometry.globalCoordinates(group, local)
+        if (geometry.containsGlobal(global)) {
+          val subgroupIndex = linearLocal / subgroup
+          val invocation    = Invocation(
+            group,
+            local,
+            global,
+            geometry,
+            activeGroupSize,
+            if (program.vulkan) subgroup else math.min(subgroup, activeLocalCount.raw - subgroupIndex * subgroup),
+            subgroup,
+            numSubgroups,
+            enqueuedSubgroups,
+            subgroupIndex,
+            linearLocal % subgroup
+          )
+          // Stage arguments are arrays of invocation records: each invocation addresses its own slice.
+          val stageValues = stageInterfaces.view.flatMap { variable =>
+            globalValues.get(variable).collect { case VMValue.Address(pointerType, pointer) =>
+              variable -> VMValue.Address(
+                pointerType,
+                pointer.copy(address = pointer.address + global.x.raw * program.typeSize(pointer.pointee))
+              )
+            }
+          }.toMap
+          // Output initialisers apply to every record, including those never explicitly stored.
+          var initialiser = 0
+          while (initialiser < stageInitialisers.size) {
+            val (variable, bytes) = stageInitialisers(initialiser)
+            initialiser += 1
+            stageValues.get(variable) match {
+              case Some(VMValue.Address(_, pointer)) => bytes.flatMap(groupState.write(pointer, _)) match {
+                  case Left(error) => return Left(error)
+                  case Right(())   => ()
+                }
+              case _ => return Left(Fault.InvalidRequest(s"SPIR-V output %$variable has no invocation record"))
+            }
+          }
+          val reused    = if (hasStaticCollectives) reuse.lanesStates(linearLocal) else reuse.execution
+          val execution = prepareInvocation(
+            program,
+            function,
+            builtins,
+            invocation,
+            stageValues,
+            reused,
+            template,
+            privateImage,
+            timeline,
+            groupState
+          ) match {
+            case Left(error)  => return Left(error)
+            case Right(value) => value
+          }
+          execution.fragmentInvocation = fragment
+          execution.sampleMask = maskVariable.flatMap(stageValues.get).collect { case VMValue.Address(_, pointer) =>
+            pointer
+          }
+          execution.fragmentQuad = fragment && groupSize.x == 4 && groupSize.y == 1 && groupSize.z == 1
+          execution.subgroupReconvergence = program.usesNonUniformCollectives && !fragment
+          execution.helperInvocation = helperVariable.flatMap(stageValues.get) match {
+            case Some(VMValue.Address(_, pointer)) => memory.awaitRead(groupState.readScalar(pointer, 1)) match {
+                case Left(error)  => return Left(error)
+                case Right(value) => value != 0
+              }
+            case _ => false
+          }
+          if (hasStaticCollectives) { reuse.lanesStates(linearLocal) = execution; executions += execution }
+          else if (deferExecution) executions += execution
+          else
+            // Deferred host reads retain a frame only when the lane actually suspends.
+            resumeInvocation(program, ops, execution, control) match {
+              case Left(error)                      => return Left(located(error, timeline, execution))
+              case Right(()) if execution.completed => reuse.execution = execution
+              case Right(()) if (hasCollectives && execution.memoryPending) || execution.preempted =>
+                executions += execution
+                reuse.execution = null
+              case Right(()) =>
+                return Left(
+                  Fault.InvalidRequest(
+                    "SPIR-V program suspended at a collective absent from its static instruction set"
+                  )
+                )
+            }
+        }
+        linearLocal += 1
+      }
+      Right(executions)
     }
 
-    def runGroup(group: Coordinates, groupState: MemoryState, reuse: Reuse): Either[Fault, Unit] = {
-      val run = GroupRun(group, groupState, reuse)
-      run.start().flatMap(_ => run.runToCompletion())
-    }
+    def runGroup(group: Coordinates, groupState: MemoryState, reuse: Reuse): Either[Fault, Unit] =
+      prepareGroup(group, groupState, reuse, deferExecution = false).flatMap { executions =>
+        if (hasCollectives || executions.nonEmpty)
+          runWorkgroup(
+            program,
+            timeline,
+            ops,
+            executions,
+            groupState,
+            control,
+            context.schedule.forWorkgroup(group)
+          )
+        else Right(())
+      }
 
     def runSeeded(): Either[Fault, Unit] =
       geometry.groupTotal.refine[Long in 1L ~ 2147483647L] match {
@@ -589,12 +592,13 @@ private object VMInterpreter {
           var index = 0
           while (index < count) {
             val group = geometry.groupCoordinates(index.toLong.unsafe[Long >= 0])
-            runs += GroupRun(group, MemoryState(storage), Reuse(totalLocal), deferExecution = true)
+            runs += GroupRun(group, MemoryState(storage), Reuse(totalLocal))
             index += 1
           }
           var failure: Fault | Null = null
           runs.foreach(run => if (failure == null) run.start().left.foreach(failure = _))
-          val order = Array.ofDim[Int](runs.size)
+          val launchSchedule = context.schedule.forLaunch
+          val order          = Array.ofDim[Int](runs.size)
           while (failure == null && runs.exists(!_.finished)) {
             var active   = 0
             var position = 0
@@ -602,7 +606,7 @@ private object VMInterpreter {
               if (!runs(position).finished) { order(active) = position; active += 1 }
               position += 1
             }
-            ConcurrencySchedule.shuffle(context.schedule.forLaunch, order, active)
+            ConcurrencySchedule.shuffle(launchSchedule, order, active)
             var progressed = false
             var step       = 0
             while (step < active && failure == null) {
@@ -626,7 +630,7 @@ private object VMInterpreter {
     )))
     if (context.schedule.seeded) runSeeded()
     else
-      Dispatch.forEachGroup(geometry, workgroups, context.schedule) { (_, group, _) =>
+      Dispatch.forEachGroup(geometry, workgroups) { (_, group, _) =>
         if (parallel) runGroup(group, MemoryState(storage), Reuse(totalLocal))
         else runGroup(group, state, sequential)
       }
@@ -885,6 +889,101 @@ private object VMInterpreter {
       case Right(resolved) => if (resolved > 0) progressed = true
     }
     Right(progressed)
+  }
+
+  // Fixed-path workgroup progress mutates invocation machines in place without allocating per round.
+  @SuppressWarnings(
+    Array(
+      "scalafix:DisableSyntax.var",
+      "scalafix:DisableSyntax.return",
+      "scalafix:DisableSyntax.null"
+    )
+  )
+  private def runWorkgroup(
+      program: VMProgram,
+      timeline: VMTimeline,
+      ops: Array[Op],
+      executions: mutable.ArrayBuffer[InvocationState],
+      memory: MemoryState,
+      control: TaskControl,
+      schedule: ConcurrencySchedule
+  ): Either[Fault, Unit] = {
+    val order = if (schedule eq ConcurrencySchedule.Fixed) null else Array.ofDim[Int](executions.size)
+    while (executions.exists(!_.completed)) {
+      if (order eq null) {
+        var index = 0
+        while (index < executions.size) {
+          val execution = executions(index)
+          if (
+            !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
+            execution.reconvergenceJoin.isEmpty
+          )
+            resumeInvocation(program, ops, execution, control) match {
+              case Left(error) => return Left(located(error, timeline, execution))
+              case Right(())   => ()
+            }
+          index += 1
+        }
+      } else {
+        val ordering = order.nn
+        var count    = 0
+        while (count < order.length) { ordering(count) = count; count += 1 }
+        var i = count - 1
+        while (i > 0) {
+          val j   = schedule.choose(i + 1)
+          val tmp = ordering(i)
+          ordering(i) = ordering(j)
+          ordering(j) = tmp
+          i -= 1
+        }
+        var step = 0
+        while (step < count) {
+          val execution = executions(ordering(step))
+          if (
+            !execution.completed && execution.suspended.isEmpty && execution.quadRequest.isEmpty &&
+            execution.reconvergenceJoin.isEmpty
+          )
+            resumeInvocation(program, ops, execution, control) match {
+              case Left(error) => return Left(located(error, timeline, execution))
+              case Right(())   => ()
+            }
+          step += 1
+        }
+      }
+      val hadPendingMemory = executions.exists(_.memoryPending)
+      if (hadPendingMemory) {
+        memory.flushHostReads() match {
+          case Left(error) => return Left(error)
+          case Right(())   => executions.foreach(_.memoryReady())
+        }
+      }
+      // A deferred read is a transport suspension, not subgroup divergence.
+      // Resume those lanes before choosing the active set at a collective.
+      if (!hadPendingMemory) CollectiveOps.resolve(program, executions, memory) match {
+        case Left(error) => return Left(error)
+        case Right(0) if !hadPendingMemory && executions.exists(!_.completed) && !executions.exists(_.preempted) =>
+          val waiting = executions.view
+            .filter(!_.completed)
+            .map(execution =>
+              execution.suspended match {
+                case Some(request) =>
+                  s"local=${execution.invocation.vector(execution.invocation.local(_)).mkString("(", ",", ")")}:" +
+                    s"${request.kind}@%${request.function}:${request.pc}/scope=${request.scope}"
+                case None =>
+                  s"local=${execution.invocation.vector(execution.invocation.local(_)).mkString("(", ",", ")")}:running"
+              }
+            )
+            .take(8)
+            .mkString(", ")
+          return Left(
+            Fault.InvalidRequest(
+              s"SPIR-V collective participation diverged within a workgroup: $waiting"
+            )
+          )
+        case Right(_) => ()
+      }
+    }
+    Right(())
   }
 
   private def builtinValue(

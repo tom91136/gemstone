@@ -39,7 +39,9 @@ object CooperativeDispatchSuite {
       cooperative: Boolean,
       memory: AddressSpace,
       limits: TaskControl.Limits = Limits,
-      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed,
+      groupSize: Int = 1,
+      target: Target = gfx906
   )(using
       munit.Location
   ): Either[Fault, Unit] = {
@@ -48,11 +50,19 @@ object CooperativeDispatchSuite {
                       |s_mov_b32 s3, 0x${base >>> 32}%x
                       |v_mov_b32 v0, 0
                       |$text""".stripMargin
-    val code   = asm.Assembler.encode(asm.Parser.parse(assembly).value, TargetMode(gfx906, 64)).value
-    val source = codeKernel(target = gfx906, computePgmRsrc2 = 0x80, code = code)
-    val task   = KernelTask.validated(
+    val code = asm.Assembler.encode(
+      asm.Parser.parse(assembly).value,
+      TargetMode(target, if (target.isa.isRDNA) 32 else 64)
+    ).value
+    val source = codeKernel(
+      target = target,
+      computePgmRsrc2 = 0x80,
+      kernelCodeProperties = if (target.isa.isRDNA) KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32 else 0,
+      code = code
+    )
+    val task = KernelTask.validated(
       "kernel",
-      testDimensions(1),
+      testDimensions(groupSize.unsafe[Int > 0]),
       testDimensions(groups.unsafe[Int > 0]),
       Vec.empty,
       cooperative = cooperative

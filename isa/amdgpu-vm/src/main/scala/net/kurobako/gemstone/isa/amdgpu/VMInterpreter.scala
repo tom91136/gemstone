@@ -322,6 +322,7 @@ private object VMInterpreter {
       schedule: ConcurrencySchedule
   ): Either[Fault, Unit] = {
     val order                 = if (schedule.seeded) Array.ofDim[Int](total) else null
+    val launchSchedule        = if (schedule.seeded) schedule.forLaunch else schedule
     var remaining             = total
     var failure: Fault | Null = null
     while (remaining > 0 && failure == null) {
@@ -349,7 +350,7 @@ private object VMInterpreter {
           if (groups(index) != null) { ordering(count) = index; count += 1 }
           index += 1
         }
-        ConcurrencySchedule.shuffle(schedule.forLaunch, ordering, count)
+        ConcurrencySchedule.shuffle(launchSchedule, ordering, count)
         var step = 0
         while (step < count && failure == null) {
           val at    = ordering(step)
@@ -476,7 +477,7 @@ private object VMInterpreter {
         val waiting = arrived.count(identity)
         if (live == 0) Right(Residency.Complete)
         else {
-          if (waiting == live) { java.util.Arrays.fill(arrived, false); progressed = true }
+          if (waiting == live) java.util.Arrays.fill(arrived, false)
           Right(if (progressed) Residency.Progressed else Residency.Stalled)
         }
       }
@@ -4747,6 +4748,7 @@ private object VMInterpreter {
     )
 
     def run(): Either[Fault, WaveBoundary] = {
+      stalledRun = false
       // A wave the machine released runs again; the timeline records the change before the wave's next issue.
       if (blockReason != null) resume()
       var boundary: WaveBoundary | Null = null

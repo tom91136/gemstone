@@ -203,4 +203,100 @@ class ConcurrencyScheduleSuite extends Suite {
       assertEquals(memory.getInt(out, 4), 2)
     }
   }
+
+  private class CountingRandom(seed: Long) extends ConcurrencySchedule.Random(seed) {
+    var launchSchedules                         = 0
+    override def forLaunch: ConcurrencySchedule = {
+      launchSchedules += 1
+      super.forLaunch
+    }
+  }
+
+  test("the launch order schedule is made once per launch, not once per sweep") {
+    val memory = RegionMemory()
+    val out    = AllocationId(1L)
+    memory.allocate(out, 64)
+    val schedule = CountingRandom(7L)
+    assertEquals(
+      CooperativeDispatchSuite.launch(
+        CooperativeDispatchSuite.spin,
+        groups = 2,
+        cooperative = false,
+        memory = memory,
+        schedule = schedule
+      ),
+      Right(())
+    )
+    assertEquals(memory.getInt(out, 4), 2)
+    assertEquals(schedule.launchSchedules, 1)
+  }
+
+  test("a wave that blocks once then progresses is not reported as stalled") {
+    val text = """s_get_waveid_in_workgroup s0
+                 |s_barrier
+                 |s_cmp_eq_u32 s0, 0
+                 |s_cbranch_scc0 setter
+                 |ds_gws_sema_p offset:1 gds
+                 |s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+                 |s_mov_b32 s4, 100
+                 |waiter:
+                 |s_sub_u32 s4, s4, 1
+                 |s_cmp_eq_u32 s4, 0
+                 |s_cbranch_scc0 waiter
+                 |s_endpgm
+                 |setter:
+                 |s_mov_b32 s5, 70
+                 |delayer:
+                 |s_sub_u32 s5, s5, 1
+                 |s_cmp_eq_u32 s5, 0
+                 |s_cbranch_scc0 delayer
+                 |ds_gws_sema_v offset:1 gds
+                 |s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+                 |s_endpgm
+                 |""".stripMargin
+    val memory = RegionMemory()
+    val out    = AllocationId(1L)
+    memory.allocate(out, 64)
+    assertEquals(
+      CooperativeDispatchSuite.launch(
+        text,
+        groups = 1,
+        cooperative = true,
+        memory = memory,
+        schedule = ConcurrencySchedule.Random(7L),
+        groupSize = 64,
+        target = Target("gfx1010")
+      ),
+      Right(())
+    )
+  }
+
+  test("a cooperative barrier that never completes is a hang") {
+    val text = """s_cmp_eq_u32 s0, 0
+                 |s_cbranch_scc0 exit
+                 |s_mov_b32 m0, 0
+                 |v_mov_b32 v4, 1
+                 |ds_gws_barrier v4 gds
+                 |s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
+                 |exit:
+                 |s_endpgm
+                 |""".stripMargin
+    val memory = RegionMemory()
+    val out    = AllocationId(1L)
+    memory.allocate(out, 64)
+    assert(
+      CooperativeDispatchSuite
+        .launch(
+          text,
+          groups = 2,
+          cooperative = true,
+          memory = memory,
+          schedule = ConcurrencySchedule.Random(7L)
+        )
+        .left
+        .exists(error =>
+          error.message.contains("Hang") || error.message.contains("hangs") || error.message.contains("waits")
+        )
+    )
+  }
 }

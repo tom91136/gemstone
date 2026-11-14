@@ -239,4 +239,35 @@ class ConcurrencyScheduleSuite extends Suite {
       assertEquals(LittleEndian.decodeInt32(memory.bytes(region), 4), finished)
     }
   }
+
+  private class CountingRandom(seed: Long) extends ConcurrencySchedule.Random(seed) {
+    var launchSchedules                         = 0
+    override def forLaunch: ConcurrencySchedule = {
+      launchSchedules += 1
+      super.forLaunch
+    }
+  }
+
+  test("the launch order schedule is made once per launch, not once per sweep") {
+    val memory   = RegionMemory()
+    val region   = memory.allocate(8L)
+    val program  = load(spinModule).value
+    val schedule = CountingRandom(7L)
+    assertEquals(
+      execute(
+        program,
+        task(
+          "spin",
+          Vec(buffer(region, 0L, Some(8L))),
+          local = testDimensions(1),
+          groups = testDimensions(2)
+        ),
+        memory,
+        schedule = schedule
+      ),
+      Right(())
+    )
+    assertEquals(word(memory, region, 4), 1L)
+    assertEquals(schedule.launchSchedules, 1)
+  }
 }

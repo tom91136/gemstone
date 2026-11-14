@@ -13,7 +13,8 @@ object ReplayDevice {
       val image: Vec[Byte],
       val task: KernelTask,
       val step: Long,
-      val start: ArrayMemory.Snapshot
+      val start: ArrayMemory.Snapshot,
+      val schedule: ConcurrencySchedule
   )
 
   /** Called before each instruction with the checkpoint for that point; a fault stops the launch. */
@@ -24,7 +25,8 @@ object ReplayDevice {
 
 /** Launches that resume from any instruction by deterministic replay. Each launch loads its program afresh and starts
   * from a snapshot of device memory; with backends that run workgroups sequentially, or under a seeded schedule that
-  * runs them on one thread, replaying a launch to a checkpoint reaches the same state the launch had there.
+  * runs them on one thread, replaying a launch to a checkpoint reaches the same state the launch had there. A
+  * checkpoint carries the schedule that made it, and resume uses that schedule.
   */
 class ReplayDevice(
     backends: BackendRegistry,
@@ -39,7 +41,7 @@ class ReplayDevice(
       image: Vec[Byte],
       task: KernelTask,
       observer: Observer
-  ): Either[Fault, Vec[Event]] = run(Checkpoint(format, image, task, 0L, memory.snapshot()), observer)
+  ): Either[Fault, Vec[Event]] = run(Checkpoint(format, image, task, 0L, memory.snapshot(), schedule), observer)
 
   /** Restores device memory to how `checkpoint`'s launch began, replays it unobserved to the checkpoint, then continues
     * observed from there.
@@ -55,9 +57,9 @@ class ReplayDevice(
       val replaying: LaunchObserver = (at, state) => {
         val step = steps.getAndIncrement()
         if (step < from.step) Right(())
-        else observer.step(Checkpoint(from.format, from.image, from.task, step, from.start), at, state)
+        else observer.step(Checkpoint(from.format, from.image, from.task, step, from.start, from.schedule), at, state)
       }
-      try Device(backends, memory, limits, schedule).launch(program, from.task, Some(replaying))
+      try Device(backends, memory, limits, from.schedule).launch(program, from.task, Some(replaying))
       finally program.close()
     }
 }
