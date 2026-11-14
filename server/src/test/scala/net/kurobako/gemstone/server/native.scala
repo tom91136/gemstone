@@ -22,7 +22,8 @@ private object native {
     "ZEL_LIBRARY_PATH"             -> directory.toString,
     "ZE_ENABLE_LOADER_DEBUG_TRACE" -> "0",
     "OCL_ICD_FILENAMES"            -> directory.resolve(API.OpenCL.lib).toString
-  )
+  ) ++ Seq(env.OpenclCompilerExe, env.OpenclLlvmSpirvExe, env.OpenclLlvmLinkExe)
+    .flatMap(name => sys.env.get(name).map(name -> _))
 
   /** A child environment that connects to the server at `endpoint` as `client`. */
   def serverEnvironment(

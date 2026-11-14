@@ -1,6 +1,6 @@
 # Native toolchain
 
-Status: in progress. Steps 1 to 5 are done, and step 6 has moved the Clang CUDA routes onto the sysroot. Step 7 has moved `conformance_clang_release` to 23.1.5; the CUDA emulator now provides `cuMemGetAllocationGranularity`, so the OpenMP miniapps pass, and conformance lint accepts the deliberate inline assembly. Native `lint` still reports findings from the libc++ headers.
+Status: in progress. Steps 1 to 5 are done, and step 6 has moved the Clang CUDA routes onto the sysroot. Step 7 has moved `conformance_clang_release` to 23.1.5; the CUDA emulator now provides `cuMemGetAllocationGranularity`, so the OpenMP miniapps pass, and conformance lint accepts the deliberate inline assembly. Native `lint` is clean with clang-tidy 23.1.5. Host and container OpenCL tests run the toolchain image's pinned compiler.
 
 ## Goal
 
@@ -10,8 +10,8 @@ Ship native runtime DSOs that need nothing beyond a glibc at or above a stated f
 
 - A local build of `libcuda.so.1`, `libamdhip64.so.7`, and the other DSOs needs `libstdc++.so.6` and `libgcc_s.so.1`, and reaches `GLIBC_2.34`. `native/CMakeLists.txt` sets hidden visibility but no static runtime.
 - CI's `build`, `test`, `ctest`, and `lint` jobs run on the `ubuntu-24.04` host with LLVM tools unpacked from the release tarball. Only conformance builds and per-backend conformance lint run in containers.
-- `conformance_clang_release` (22.1.8) sets the conformance compiler, `clang-tidy`, and the artifact cache keys. `conformance_clang_format_release` (23.1.5) sets `clang-format` for CI and the pre-commit hook.
-- The Fedora 45 host has LLVM 23.1.5. Its `clang-tidy` reports findings CI never sees, and 32 OpenCL `ctest` cases fail because the DPC++ reader rejects LLVM 23 modules.
+- `conformance_clang_release` (23.1.5) sets the conformance compiler and the artifact cache keys. `conformance_clang_tools_release` (23.1.5) sets the tools, including `clang-format` and `clang-tidy`.
+- The Fedora 45 host has LLVM 23.1.5. Native `clang-tidy` reports nothing that CI does not, and the OpenCL tests run the pinned compiler extracted from the toolchain image instead of the host's.
 - The conformance package is already relocatable: `Assemble.cmake` sets `$ORIGIN` run paths, and `Verify.cmake` runs a moved copy. It has no glibc floor.
 
 ## Design
@@ -41,6 +41,7 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 ### Lint and editor
 
 - `clang-tidy` and `clangd` read the compile database of the native build, so findings reflect the headers that ship.
+- The toolchain file adds libc++ with `-isystem`, so libc++ is a system include, and `HeaderFilterRegex` admits only `native` and `conformance` headers. Findings therefore come from the repository's own headers.
 - The repository mounts at the same absolute path in the image, so `compile_commands.json` also works from a host editor.
 
 ### Conformance package
@@ -65,7 +66,7 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 
 - Build the native DSOs in the image, locally and in CI, through the existing container mechanism.
 - `lint`, `build`, `test`, and `ctest` use it.
-- OpenCL native tests take their compiler from the pinned conformance toolchain, which clears the 32 local failures.
+- OpenCL native tests and host server tests take their compiler from the pinned conformance toolchain, which clears the local failures.
 
 ### 4. Memory, integer, and shift coverage
 
@@ -120,3 +121,5 @@ The compiler version does not set the glibc floor. The sysroot does. The C++ run
 - The floor check reports vendor routes and fails only for objects the suite compiles.
 - `cuda/sm_89/clang` uses the sysroot. The `llvm-offload` stage builds `libomp` and the offload runtime with `--sysroot` and the sysroot's `gcc-toolset-15`, so `support-offload` needs `GLIBC_2.27` and `GLIBCXX_3.4.22`. The route records `glibc = "2.27"` and `glibcxx = "3.4.22"` in `artifact.toml`, and every object the suite compiles stays within the sysroot.
 - `portability-no-assembler` is disabled for the conformance unified sources only, because their inline PTX and SASS are the behaviour under test; the native drivers keep the check.
+- Native lint was rerun with the toolchain image's clang-tidy 23.1.5 over 96 translation units and reported no findings. No check or `NOLINT` suppression changed.
+- The OpenCL compiler is extracted from the toolchain image into `target/native/opencl-toolchain`. CMake's test environment and the server test environment both point at it, so `ctest` and the server suites run one DPC++ release rather than host clang with the host's newer `llvm-spirv`.

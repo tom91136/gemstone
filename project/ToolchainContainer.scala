@@ -1,6 +1,9 @@
 import java.nio.file.Files
 import java.nio.file.Path
+import sbt.internal.util.MessageOnlyException
+import sbt.io.IO
 import scala.sys.process.Process
+import scala.sys.process.ProcessLogger
 
 /** The native toolchain image, which holds the compilers and sysroot the shipped libraries build with. */
 final case class ToolchainContainer(
@@ -26,6 +29,30 @@ final case class ToolchainContainer(
         s"CMAKE_BUILD_PARALLEL_LEVEL=${BuildEnvironment.threadCount}"
       ) ++ environment.toSeq.flatMap((name, value) => Seq("--env", s"$name=$value")) ++
       Seq(image) ++ command
+
+  /** Copies a directory out of the image so host and container runs use the same pinned tools. */
+  def extract(source: String, destination: Path, log: String => Unit): Unit = {
+    val stamp = destination / ".image"
+    if (!Files.isRegularFile(stamp) || Files.readString(stamp).trim != image) {
+      IO.delete(destination.toFile)
+      Files.createDirectories(destination)
+      val command =
+        Seq(executable, "run", "--rm", "--security-opt", "label=disable") ++ ToolchainContainer.identity(executable) ++
+          Seq(
+            "--mount",
+            s"type=bind,source=${destination.toAbsolutePath},target=/output",
+            image,
+            "cp",
+            "-a",
+            "--no-preserve=ownership",
+            s"$source/.",
+            "/output/"
+          )
+      if (Process(command).!(ProcessLogger(log, log)) != 0)
+        throw MessageOnlyException(s"cannot extract $source from $image")
+      val _ = Files.writeString(stamp, image)
+    }
+  }
 }
 
 object ToolchainContainer {

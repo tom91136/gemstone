@@ -133,6 +133,8 @@ lazy val sanitize              = taskKey[Unit]("Build and test native with ASan 
 lazy val nativeCompileDatabase = taskKey[Path]("Configured CMake build directory with compile_commands.json.")
 lazy val nativeToolchain       =
   taskKey[ToolchainContainer]("Native toolchain image and the memory fixtures built beside it.")
+lazy val openClToolchain =
+  taskKey[Path]("OpenCL C compiler extracted from the native toolchain image.")
 lazy val nativeSourceDirectories =
   settingKey[Seq[Path]]("C and C++ source trees governed by the native codestyle checks.")
 lazy val codestyleLint             = taskKey[Unit]("Lint the project's C and C++ sources.")
@@ -638,7 +640,15 @@ lazy val server = module(projectMatrix.in(file("server")))
     publish / skip := true,
     Compile / scalacOptions += s"-P:publicapi:$rootPackage.server",
     Test / scalacOptions -= s"-P:publicapi:$rootPackage.server",
-    Test / envVars += ("GEMSTONE_NATIVE_DIR" -> s"${(native / nativeArtifact).value}"),
+    Test / envVars ++= {
+      val compiler = (native / openClToolchain).value / "bin/compiler"
+      Map(
+        "GEMSTONE_NATIVE_DIR"            -> s"${(native / nativeArtifact).value}",
+        "GEMSTONE_OPENCL_COMPILER_EXE"   -> (compiler / "clang").toString,
+        "GEMSTONE_OPENCL_LLVM_SPIRV_EXE" -> (compiler / "llvm-spirv").toString,
+        "GEMSTONE_OPENCL_LLVM_LINK_EXE"  -> (compiler / "llvm-link").toString
+      )
+    },
     libraryDependencies ++= Seq(
       "com.monovore"  %% "decline"   % declineVersion,
       "com.outr"      %% "scribe"    % scribeVersion,
@@ -755,14 +765,19 @@ lazy val conformanceTool = module(project.in(file("tools/conformance")))
     libraryDependencies += "com.monovore" %% "decline" % declineVersion
   )
 
-def nativeBuildArguments(root: Path, toolchain: ToolchainContainer, toolchainFile: Path): Seq[String] = {
+def nativeBuildArguments(
+    root: Path,
+    toolchain: ToolchainContainer,
+    toolchainFile: Path,
+    openClCompiler: Path
+): Seq[String] = {
   val references = root / "target/references"
   Seq(
     s"-DCMAKE_TOOLCHAIN_FILE=$toolchainFile",
     "-DBUILD_TESTING=ON",
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     s"-DGEMSTONE_PREBUILT_MEMORY_FIXTURES=${toolchain.fixtures}",
-    "-DGEMSTONE_OPENCL_COMPILER_DIRECTORY=/opt/intel/oneapi/compiler/latest/bin/compiler",
+    s"-DGEMSTONE_OPENCL_COMPILER_DIRECTORY=${openClCompiler / "bin/compiler"}",
     s"-DCMAKE_BUILD_TYPE=${BuildEnvironment.buildType}",
     s"-DCUDA_INCLUDE_DIR=${references / "api-native/nvidia/cuda/include"}",
     s"-DHIP_INCLUDE_DIR=${references / "api-native/amd/hip/include"}",
@@ -801,6 +816,11 @@ lazy val native = project.in(file("native"))
         streams.value.log.info
       )
     ),
+    openClToolchain := Def.uncached {
+      val directory = (LocalRootProject / baseDirectory).value.toPath / "target/native/opencl-toolchain"
+      nativeToolchain.value.extract("/opt/intel/oneapi/compiler/latest", directory, streams.value.log.info)
+      directory
+    },
     format        := Def.uncached(NativeCodestyle.format(nativeSourceDirectories.value, Some(nativeToolchain.value))),
     codestyleLint := Def.uncached(
       NativeCodestyle.lint(
@@ -812,6 +832,7 @@ lazy val native = project.in(file("native"))
     ),
     nativeArtifact := Def.uncached {
       val toolchain = nativeToolchain.value
+      val openCl    = openClToolchain.value
       RunMain.main(
         codegenProject,
         s"$rootPackage.codegen.Codegen",
@@ -824,7 +845,8 @@ lazy val native = project.in(file("native"))
         arguments = nativeBuildArguments(
           root,
           toolchain,
-          baseDirectory.value.toPath / "toolchains/linux-x86_64-libcxx.cmake"
+          baseDirectory.value.toPath / "toolchains/linux-x86_64-libcxx.cmake",
+          openCl
         ),
         log = streams.value.log.info,
         buildTargets = Seq.empty,
@@ -837,6 +859,7 @@ lazy val native = project.in(file("native"))
       val root      = (LocalRootProject / baseDirectory).value.toPath
       val toolchain =
         nativeToolchain.value.copy(environment = Map("ASAN_OPTIONS" -> "detect_leaks=0"))
+      val openCl = openClToolchain.value
       RunMain.main(
         codegenProject,
         s"$rootPackage.codegen.Codegen",
@@ -848,7 +871,8 @@ lazy val native = project.in(file("native"))
         arguments = nativeBuildArguments(
           root,
           toolchain,
-          baseDirectory.value.toPath / "toolchains/linux-x86_64-libcxx-asan.cmake"
+          baseDirectory.value.toPath / "toolchains/linux-x86_64-libcxx-asan.cmake",
+          openCl
         ),
         log = streams.value.log.info,
         buildTargets = Seq.empty,
