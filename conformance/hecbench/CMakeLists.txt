@@ -1,5 +1,8 @@
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/Hecbench.cmake")
 
+# CMake only exposes the CUDA compiler's feature table in the directory that enabled CUDA.
+enable_language(CUDA)
+
 FetchContent_MakeAvailable(hecbench)
 set(source "${hecbench_SOURCE_DIR}")
 set(staging "${CMAKE_CURRENT_BINARY_DIR}/source")
@@ -31,7 +34,14 @@ set(selected)
 set(prerequisite_failures)
 foreach(name IN LISTS candidates)
   file(READ "${staging}/src/${name}-cuda/CMakeLists.txt" project)
-  if(project MATCHES "enable_language\\(Fortran\\)" AND NOT CONFORMANCE_HECBENCH_FORTRAN)
+  hecbench_unsupported_cuda_features("${project}" unsupported_features)
+  if(unsupported_features)
+    list(JOIN unsupported_features ", " feature_list)
+    list(APPEND prerequisite_failures
+      "${name}|requires ${feature_list}, which CUDA ${CMAKE_CUDA_COMPILER_VERSION} does not provide")
+    # HeCBench adds every *-cuda directory it finds, so hide it from the nested configure.
+    file(REMOVE "${staging}/src/${name}-cuda/CMakeLists.txt")
+  elseif(project MATCHES "enable_language\\(Fortran\\)" AND NOT CONFORMANCE_HECBENCH_FORTRAN)
     list(APPEND prerequisite_failures "${name}|no Fortran compiler in the CUDA 13.3 image")
   else()
     list(APPEND selected "${name}")
