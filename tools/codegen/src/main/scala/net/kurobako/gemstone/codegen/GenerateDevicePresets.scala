@@ -2,23 +2,16 @@ package net.kurobako.gemstone.codegen
 
 import java.nio.file.Path
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.profile.Architecture
 import net.kurobako.gemstone.profile.DevicePreset
 
-/** Renders the device presets for the native runtimes to report, with the card values of each preset's target. */
+/** Renders the device presets for the native runtimes to report. */
 object GenerateDevicePresets {
 
   def render(presets: Vec[DevicePreset]): String = {
     val rows = presets.sortBy(_.name).map { preset =>
-      val card = Architecture.named(preset.target).flatMap(_.card)
-        .getOrElse(throw IllegalArgumentException(s"${preset.name} has no card on ${preset.target}"))
-      val multiprocessors = card.multiprocessors
-        .getOrElse(throw IllegalArgumentException(s"${preset.name} has no multiprocessor count"))
-      val boostMhz = card.boostMhz.getOrElse(throw IllegalArgumentException(s"${preset.name} has no boost clock"))
-      val l2Bytes  = card.l2KiB * 1024
-      s"""  {"${preset.name}", "${preset.target}", $multiprocessors, $boostMhz, ${preset.memoryBytes}, ${preset.memoryMTps}, ${card.busWidthBits}, $l2Bytes},"""
+      s"""  {"${preset.name}", "${preset.target}", ${preset.multiprocessors}, ${preset.boostMhz}, ${preset.memoryBytes}, ${preset.memoryMTps}, ${preset.busWidthBits}, ${preset.l2Bytes}},"""
     }
-    GeneratedHeader.cpp("from the device presets and the Architecture table") +
+    GeneratedHeader.cpp("from the device presets") +
       s"""#pragma once
          |#include <cstdint>
          |#include <optional>

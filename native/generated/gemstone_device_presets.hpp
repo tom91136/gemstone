@@ -1,4 +1,4 @@
-/* Generated from the device presets and the Architecture table. Regenerate with: sbt codegen */
+/* Generated from the device presets. Regenerate with: sbt codegen */
 #pragma once
 #include <cstdint>
 #include <optional>
