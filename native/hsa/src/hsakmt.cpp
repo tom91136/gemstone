@@ -24,6 +24,7 @@
 #include "gemstone/hsa/aql_execution.hpp"
 #include "gemstone/hsa/doorbell_monitor.hpp"
 #include "gemstone/hsa/target.hpp"
+#include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/devices.hpp>
 #include <gemstone/environment.hpp>
@@ -598,7 +599,7 @@ extern "C" HSAKMT_STATUS hsaKmtGetNodeProperties(HSAuint32 node, HsaNodeProperti
   properties->NumCpQueues = 128;
   properties->NumXcc = 1;
   properties->KFDGpuID = node;
-  properties->LocationId = (node - FirstGpuNode) << 8;
+  properties->LocationId = gemstone::devicePciAddress(node - FirstGpuNode).bdfid();
   properties->UniqueID = node;
   properties->Capability.ui32.HSAMMUPresent = 1;
   properties->Capability.ui32.QueueSizePowerOfTwo = 1;

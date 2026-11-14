@@ -45,6 +45,7 @@
 #include <cuda_runtime_api.h>
 
 #include "gemstone_cuda_entry_points.hpp"
+#include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include "gemstone_texture_layout.hpp"
 #include <gemstone/bytes.hpp>
@@ -76,7 +77,6 @@ constexpr size_t MaximumImageSize = size_t{64} * 1024 * 1024;
 // while running on an older target; inspect those entries without passing them through RPC.
 constexpr size_t MaximumCubinValidationSize = size_t{128} * 1024 * 1024;
 constexpr char DeviceName[] = "Gemstone PTX emulator";
-constexpr uint8_t DeviceUuid[16] = {0x47, 0x45, 0x4d, 0x53, 0x54, 0x4f, 0x4e, 0x45, 0x2d, 0x43, 0x55, 0x44, 0x41, 0x2d, 0x30, 0x31};
 constexpr size_t ContextCapacity = 64;
 constexpr uint32_t FatbinMagic = 0xba55ed50;
 constexpr int FatbinWrapperMagic = 0x466243b1;
@@ -124,9 +124,6 @@ constexpr int32_t TexturePitchAlignment = 32;
 constexpr int32_t SurfaceAlignment = 256;
 constexpr int32_t SingleToDoublePrecisionPerfRatio = 32;
 constexpr int32_t AsyncEngineCount = 2;
-constexpr int32_t PciBusId = 1;
-constexpr int32_t PciDeviceId = 1;
-constexpr int32_t PciDomainId = 0;
 constexpr int32_t MaxTexture1DWidth = 131072;
 constexpr int32_t MaxTexture2DWidth = 131072;
 constexpr int32_t MaxTexture2DHeight = 65536;
@@ -165,20 +162,6 @@ constexpr int32_t MaxSurfaceCubemapWidth = 32768;
 constexpr int32_t MaxSurfaceCubemapLayeredWidth = 32768;
 constexpr int32_t MaxSurfaceCubemapLayeredLayers = 2048;
 } // namespace device_limits
-
-std::array<uint8_t, 16> deviceUuid(int device) {
-  std::array<uint8_t, 16> uuid{};
-  std::memcpy(uuid.data(), DeviceUuid, sizeof(DeviceUuid));
-  uuid[14] = static_cast<uint8_t>('0' + ((device + 1) / 10));
-  uuid[15] = static_cast<uint8_t>('0' + ((device + 1) % 10));
-  return uuid;
-}
-
-std::string devicePciBusId(int device) {
-  char buffer[32];
-  std::snprintf(buffer, sizeof(buffer), "0000:%02x:00.0", device_limits::PciBusId + device);
-  return buffer;
-}
 
 // Driver and runtime status enumerations share their numeric values.
 cudaError_t runtimeStatus(CUresult status) { return static_cast<cudaError_t>(status); }
@@ -1989,10 +1972,12 @@ void cudartHandshakeTransform(uint32_t version, uint64_t unixSeconds, const void
                                       .unixSeconds = unixSeconds};
   cudartHandshakeMixBytes(value, &input, sizeof(input), 0);
   CudartHandshakeDevice device{};
-  std::memcpy(device.uuid, DeviceUuid, sizeof(DeviceUuid));
-  device.pciDomain = device_limits::PciDomainId;
-  device.pciBus = device_limits::PciBusId;
-  device.pciDevice = device_limits::PciDeviceId;
+  const auto uuid = gemstone::deviceUuid(0);
+  const auto pci = gemstone::devicePciAddress(0);
+  std::memcpy(device.uuid, uuid.data(), uuid.size());
+  device.pciDomain = static_cast<int32_t>(pci.domain);
+  device.pciBus = static_cast<int32_t>(pci.bus);
+  device.pciDevice = static_cast<int32_t>(pci.device);
   cudartHandshakeMixBytes(value, &device, sizeof(device), 0);
   cudartHandshakeFinish(value);
   uint8_t pass5Result[16];
@@ -2494,13 +2479,14 @@ CUresult cuDeviceGetName(char *name, int length, CUdevice device) {
 }
 
 CUresult cuDeviceGetPCIBusId(char *busId, int length, CUdevice device) {
-  return validDevice(device) ? copyString(busId, length, devicePciBusId(device)) : CUDA_ERROR_INVALID_VALUE;
+  return validDevice(device) ? copyString(busId, length, gemstone::devicePciBusId(static_cast<uint32_t>(device)))
+                             : CUDA_ERROR_INVALID_VALUE;
 }
 
 CUresult cuDeviceGetByPCIBusId(CUdevice *device, const char *busId) {
   if (!device || !busId) return CUDA_ERROR_INVALID_VALUE;
   for (int ordinal = 0; ordinal < deviceCountValue(); ++ordinal)
-    if (devicePciBusId(ordinal) == busId) {
+    if (gemstone::devicePciBusId(static_cast<uint32_t>(ordinal)) == busId) {
       *device = ordinal;
       return CUDA_SUCCESS;
     }
@@ -2549,7 +2535,7 @@ CUresult cuDeviceGetProperties(CUdevprop *properties, CUdevice device) {
 
 CUresult cuDeviceGetUuid_v2(CUuuid *uuid, CUdevice device) {
   if (!uuid || !validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
-  const auto bytes = deviceUuid(device);
+  const auto bytes = gemstone::deviceUuid(static_cast<uint32_t>(device));
   std::memcpy(uuid->bytes, bytes.data(), bytes.size());
   return CUDA_SUCCESS;
 }
@@ -5073,8 +5059,8 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrSurfaceAlignment: *value = SurfaceAlignment; break;
     case cudaDevAttrConcurrentKernels: *value = 1; break;
     case cudaDevAttrEccEnabled: *value = 0; break;
-    case cudaDevAttrPciBusId: *value = PciBusId + device; break;
-    case cudaDevAttrPciDeviceId: *value = PciDeviceId; break;
+    case cudaDevAttrPciBusId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).bus); break;
+    case cudaDevAttrPciDeviceId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).device); break;
     case cudaDevAttrTccDriver: *value = 0; break;
     case cudaDevAttrMemoryClockRate: *value = spec.memoryClockRateKhz; break;
     case cudaDevAttrGlobalMemoryBusWidth: *value = targetMemory().busWidthBits; break;
@@ -5089,7 +5075,7 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrMaxTexture3DWidthAlt: *value = MaxTexture3DWidth; break;
     case cudaDevAttrMaxTexture3DHeightAlt: *value = MaxTexture3DHeight; break;
     case cudaDevAttrMaxTexture3DDepthAlt: *value = MaxTexture3DDepth; break;
-    case cudaDevAttrPciDomainId: *value = PciDomainId; break;
+    case cudaDevAttrPciDomainId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).domain); break;
     case cudaDevAttrTexturePitchAlignment: *value = TexturePitchAlignment; break;
     case cudaDevAttrMaxTextureCubemapWidth: *value = MaxTextureCubemapWidth; break;
     case cudaDevAttrMaxTextureCubemapLayeredWidth: *value = MaxTextureCubemapLayeredWidth; break;

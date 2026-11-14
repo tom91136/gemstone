@@ -10,6 +10,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
@@ -114,10 +115,24 @@ TEST_CASE("OpenCL devices report distinct uuid and pci identities", "[opencl][mu
   REQUIRE((clGetDeviceInfo(node.devices[0], CL_DEVICE_UUID_KHR, first.size(), first.data(), nullptr) == CL_SUCCESS));
   REQUIRE((clGetDeviceInfo(node.devices[1], CL_DEVICE_UUID_KHR, second.size(), second.data(), nullptr) == CL_SUCCESS));
   CHECK(std::memcmp(first.data(), second.data(), first.size()) != 0);
+  const auto expectedUuid0 = gemstone::deviceUuid(0);
+  const auto expectedUuid1 = gemstone::deviceUuid(1);
+  CHECK(std::memcmp(first.data(), expectedUuid0.data(), first.size()) == 0);
+  CHECK(std::memcmp(second.data(), expectedUuid1.data(), second.size()) == 0);
 
   const auto firstPci = info<cl_device_pci_bus_info_khr>(node.devices[0], CL_DEVICE_PCI_BUS_INFO_KHR);
   const auto secondPci = info<cl_device_pci_bus_info_khr>(node.devices[1], CL_DEVICE_PCI_BUS_INFO_KHR);
   CHECK(firstPci.pci_bus != secondPci.pci_bus);
+  const auto expectedPci0 = gemstone::devicePciAddress(0);
+  const auto expectedPci1 = gemstone::devicePciAddress(1);
+  CHECK(firstPci.pci_domain == expectedPci0.domain);
+  CHECK(firstPci.pci_bus == expectedPci0.bus);
+  CHECK(firstPci.pci_device == expectedPci0.device);
+  CHECK(firstPci.pci_function == expectedPci0.function);
+  CHECK(secondPci.pci_domain == expectedPci1.domain);
+  CHECK(secondPci.pci_bus == expectedPci1.bus);
+  CHECK(secondPci.pci_device == expectedPci1.device);
+  CHECK(secondPci.pci_function == expectedPci1.function);
 }
 
 TEST_CASE("OpenCL contexts span several devices", "[opencl][multi-device]") {

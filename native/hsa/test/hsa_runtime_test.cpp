@@ -24,6 +24,7 @@
 #include "gemstone/hsa/memory_copy.hpp"
 #include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "code_object_fixture.hpp"
@@ -376,9 +377,7 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   hsa_amd_hdp_flush_t hdp{};
   REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_HDP_FLUSH), &hdp) == HSA_STATUS_SUCCESS));
   REQUIRE((!hdp.HDP_MEM_FLUSH_CNTL && !hdp.HDP_REG_FLUSH_CNTL));
-  for (const auto attribute :
-       {HSA_AMD_AGENT_INFO_CHIP_ID, HSA_AMD_AGENT_INFO_BDFID, HSA_AMD_AGENT_INFO_DOMAIN, HSA_AMD_AGENT_INFO_MEMORY_WIDTH,
-        HSA_AMD_AGENT_INFO_ASIC_REVISION, HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY}) {
+  for (const auto attribute : {HSA_AMD_AGENT_INFO_CHIP_ID, HSA_AMD_AGENT_INFO_DOMAIN, HSA_AMD_AGENT_INFO_ASIC_REVISION}) {
     struct WordGuard {
       uint32_t value;
       uint32_t guard;
@@ -386,6 +385,9 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
     REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(attribute), &word.value) == HSA_STATUS_SUCCESS));
     REQUIRE((word.value == 0 && word.guard == 0xa5a5a5a5));
   }
+  uint32_t bdfid = 0;
+  REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &bdfid) == HSA_STATUS_SUCCESS));
+  REQUIRE((bdfid == gemstone::devicePciAddress(0).bdfid()));
   std::vector<hsa_amd_memory_pool_t> pools;
   REQUIRE((hsa_amd_agent_iterate_memory_pools(
                gpu,

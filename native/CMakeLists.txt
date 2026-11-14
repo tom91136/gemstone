@@ -307,4 +307,35 @@ if(BUILD_TESTING)
         "-DSYSROOT=${GEMSTONE_SYSROOT}" "-DSANITIZER_RUNTIME=${GEMSTONE_SANITIZER_PRELOAD}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
   endif()
+  if(GEMSTONE_ENABLE_CUDA AND GEMSTONE_ENABLE_HSA AND GEMSTONE_ENABLE_HIP
+      AND GEMSTONE_ENABLE_OPENCL AND GEMSTONE_ENABLE_VULKAN AND GEMSTONE_ENABLE_LEVEL_ZERO)
+    add_executable(gemstone_preset_identity_test test/preset_identity.cpp)
+    target_include_directories(gemstone_preset_identity_test SYSTEM PRIVATE
+      "${CUDA_INCLUDE_DIR}"
+      "${HIP_INCLUDE_DIR}"
+      "${HSA_INCLUDE_DIR}"
+      "${HSAKMT_INCLUDE_DIR}"
+      "${OPENCL_INCLUDE_DIR}"
+      "${LEVEL_ZERO_INCLUDE_DIR}"
+      "${VULKAN_INCLUDE_DIR}")
+    target_compile_definitions(gemstone_preset_identity_test PRIVATE
+      __HIP_PLATFORM_AMD__=1
+      CL_TARGET_OPENCL_VERSION=300)
+    target_link_libraries(gemstone_preset_identity_test PRIVATE
+      gemstone_cuda
+      gemstone_hip_runtime
+      gemstone_hsa_runtime
+      gemstone_hsakmt
+      gemstone_opencl
+      gemstone_vulkan
+      ze_loader)
+    add_dependencies(gemstone_preset_identity_test level_zero_loader gemstone_levelzero)
+    set_target_properties(gemstone_preset_identity_test PROPERTIES BUILD_RPATH "$ORIGIN;$ORIGIN/vulkan")
+    gemstone_test_target(gemstone_preset_identity_test)
+    gemstone_discover_tests(gemstone_preset_identity_test
+      TEST_PREFIX "preset/"
+      DISCOVERY_MODE PRE_TEST
+      PROPERTIES TIMEOUT 30
+      ENVIRONMENT "ZE_ENABLE_ALT_DRIVERS=$<TARGET_FILE:gemstone_levelzero>")
+  endif()
 endif()

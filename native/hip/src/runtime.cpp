@@ -51,9 +51,9 @@
 #include "gemstone/hsa/images.hpp"
 #include "gemstone/hsa/memory_copy.hpp"
 #include "gemstone/hsa/target.hpp"
+#include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include "gemstone_hip_api.h"
-#include "gemstone_target_memory.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/command_queue.hpp>
 #include <gemstone/elf.hpp>
@@ -1122,15 +1122,9 @@ extern "C" hipError_t hipMemcpyPeerAsync(void *destination, int destinationDevic
   return hipMemcpyAsync(destination, source, size, hipMemcpyDeviceToDevice, stream);
 }
 
-static std::string pciBusId(int device) {
-  char text[32];
-  std::snprintf(text, sizeof(text), "0000:%02x:00.0", static_cast<unsigned>(device));
-  return text;
-}
-
 extern "C" hipError_t hipDeviceGetPCIBusId(char *busId, int length, int device) {
   if (!busId || length <= 0 || !validDevice(device)) return remember(hipErrorInvalidValue);
-  const auto text = pciBusId(device);
+  const auto text = gemstone::devicePciBusId(static_cast<uint32_t>(device));
   if (text.size() >= static_cast<size_t>(length)) return remember(hipErrorInvalidValue);
   std::memcpy(busId, text.c_str(), text.size() + 1U);
   return remember(hipSuccess);
@@ -1139,7 +1133,7 @@ extern "C" hipError_t hipDeviceGetPCIBusId(char *busId, int length, int device) 
 extern "C" hipError_t hipDeviceGetByPCIBusId(int *device, const char *busId) {
   if (!device || !busId) return remember(hipErrorInvalidValue);
   for (int ordinal = 0; validDevice(ordinal); ++ordinal)
-    if (pciBusId(ordinal) == busId) {
+    if (gemstone::devicePciBusId(static_cast<uint32_t>(ordinal)) == busId) {
       *device = ordinal;
       return remember(hipSuccess);
     }
@@ -1148,11 +1142,8 @@ extern "C" hipError_t hipDeviceGetByPCIBusId(int *device, const char *busId) {
 
 extern "C" hipError_t hipDeviceGetUuid(hipUUID *uuid, hipDevice_t device) {
   if (!uuid || !validDevice(device)) return remember(hipErrorInvalidValue);
-  std::memset(uuid->bytes, 0, sizeof(uuid->bytes));
-  std::memcpy(uuid->bytes, "GEMSTONE-HIP-", 13);
-  uuid->bytes[13] = '-';
-  uuid->bytes[14] = static_cast<char>('0' + ((device + 1) / 10));
-  uuid->bytes[15] = static_cast<char>('0' + ((device + 1) % 10));
+  const auto bytes = gemstone::deviceUuid(static_cast<uint32_t>(device));
+  std::memcpy(uuid->bytes, bytes.data(), bytes.size());
   return remember(hipSuccess);
 }
 
@@ -1261,7 +1252,9 @@ extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t att
     case hipDeviceAttributeMaxBlockDimX:
     case hipDeviceAttributeMaxBlockDimY:
     case hipDeviceAttributeMaxBlockDimZ: *value = MaxBlockThreads; break;
-    case hipDeviceAttributePciBusId: *value = device; break;
+    case hipDeviceAttributePciDomainId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).domain); break;
+    case hipDeviceAttributePciBusId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).bus); break;
+    case hipDeviceAttributePciDeviceId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).device); break;
     case hipDeviceAttributeWarpSize: *value = static_cast<int>(gemstone::hsa::waveSize()); break;
     case hipDeviceAttributeMaxGridDimX: *value = static_cast<int>(MaxGridDimension); break;
     case hipDeviceAttributeMaxGridDimY:
@@ -1326,7 +1319,10 @@ extern "C" hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_tR0600 *properti
   properties->multiProcessorCount = static_cast<int>(model.processors());
   properties->memoryBusWidth = model.busWidthBits;
   properties->l2CacheSize = model.l2Bytes;
-  properties->pciBusID = device;
+  const auto pci = gemstone::devicePciAddress(static_cast<uint32_t>(device));
+  properties->pciDomainID = static_cast<int>(pci.domain);
+  properties->pciBusID = static_cast<int>(pci.bus);
+  properties->pciDeviceID = static_cast<int>(pci.device);
   properties->cooperativeLaunch = 1;
   properties->unifiedAddressing = 1;
   properties->canMapHostMemory = 1;

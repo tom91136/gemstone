@@ -8,6 +8,7 @@
 
 #include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
@@ -83,6 +84,10 @@ TEST_CASE("Level Zero devices report distinct uuid and pci identities", "[level-
   REQUIRE(zeDeviceGetProperties(node.devices[0], &first) == ZE_RESULT_SUCCESS);
   REQUIRE(zeDeviceGetProperties(node.devices[1], &second) == ZE_RESULT_SUCCESS);
   CHECK(std::memcmp(first.uuid.id, second.uuid.id, ZE_MAX_DEVICE_UUID_SIZE) != 0);
+  const auto expectedUuid0 = gemstone::deviceUuid(0);
+  const auto expectedUuid1 = gemstone::deviceUuid(1);
+  CHECK(std::memcmp(first.uuid.id, expectedUuid0.data(), ZE_MAX_DEVICE_UUID_SIZE) == 0);
+  CHECK(std::memcmp(second.uuid.id, expectedUuid1.data(), ZE_MAX_DEVICE_UUID_SIZE) == 0);
 
   ze_pci_ext_properties_t firstPci{};
   firstPci.stype = ZE_STRUCTURE_TYPE_PCI_EXT_PROPERTIES;
@@ -91,6 +96,16 @@ TEST_CASE("Level Zero devices report distinct uuid and pci identities", "[level-
   REQUIRE(zeDevicePciGetPropertiesExt(node.devices[0], &firstPci) == ZE_RESULT_SUCCESS);
   REQUIRE(zeDevicePciGetPropertiesExt(node.devices[1], &secondPci) == ZE_RESULT_SUCCESS);
   CHECK(firstPci.address.bus != secondPci.address.bus);
+  const auto expectedPci0 = gemstone::devicePciAddress(0);
+  const auto expectedPci1 = gemstone::devicePciAddress(1);
+  CHECK(firstPci.address.domain == expectedPci0.domain);
+  CHECK(firstPci.address.bus == expectedPci0.bus);
+  CHECK(firstPci.address.device == expectedPci0.device);
+  CHECK(firstPci.address.function == expectedPci0.function);
+  CHECK(secondPci.address.domain == expectedPci1.domain);
+  CHECK(secondPci.address.bus == expectedPci1.bus);
+  CHECK(secondPci.address.device == expectedPci1.device);
+  CHECK(secondPci.address.function == expectedPci1.function);
 }
 
 TEST_CASE("Level Zero reports the owning device of a device allocation", "[level-zero][multi-device]") {

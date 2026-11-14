@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -8,6 +9,7 @@
 #include <cuda_runtime_api.h>
 
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
@@ -55,11 +57,29 @@ TEST_CASE("CUDA enumerates the configured number of distinct devices", "[cuda][m
   REQUIRE(cuDeviceGetUuid_v2(&firstUuid, first) == CUDA_SUCCESS);
   REQUIRE(cuDeviceGetUuid_v2(&secondUuid, second) == CUDA_SUCCESS);
   CHECK(std::memcmp(firstUuid.bytes, secondUuid.bytes, sizeof(firstUuid.bytes)) != 0);
+  const auto expectedFirstUuid = gemstone::deviceUuid(0);
+  const auto expectedSecondUuid = gemstone::deviceUuid(1);
+  CHECK(std::memcmp(firstUuid.bytes, expectedFirstUuid.data(), expectedFirstUuid.size()) == 0);
+  CHECK(std::memcmp(secondUuid.bytes, expectedSecondUuid.data(), expectedSecondUuid.size()) == 0);
 
   char busIds[2][32]{};
   REQUIRE(cuDeviceGetPCIBusId(busIds[0], sizeof(busIds[0]), first) == CUDA_SUCCESS);
   REQUIRE(cuDeviceGetPCIBusId(busIds[1], sizeof(busIds[1]), second) == CUDA_SUCCESS);
   CHECK(std::string(busIds[0]) != std::string(busIds[1]));
+  CHECK(std::string(busIds[0]) == gemstone::devicePciBusId(0));
+  CHECK(std::string(busIds[1]) == gemstone::devicePciBusId(1));
+  for (int ordinal = 0; ordinal < 2; ++ordinal) {
+    const auto address = gemstone::devicePciAddress(static_cast<uint32_t>(ordinal));
+    int domain = -1;
+    int bus = -1;
+    int deviceId = -1;
+    REQUIRE(cudaDeviceGetAttribute(&domain, cudaDevAttrPciDomainId, ordinal) == cudaSuccess);
+    REQUIRE(cudaDeviceGetAttribute(&bus, cudaDevAttrPciBusId, ordinal) == cudaSuccess);
+    REQUIRE(cudaDeviceGetAttribute(&deviceId, cudaDevAttrPciDeviceId, ordinal) == cudaSuccess);
+    CHECK(std::cmp_equal(domain, address.domain));
+    CHECK(std::cmp_equal(bus, address.bus));
+    CHECK(std::cmp_equal(deviceId, address.device));
+  }
   CUdevice found = -1;
   REQUIRE(cuDeviceGetByPCIBusId(&found, busIds[1]) == CUDA_SUCCESS);
   CHECK(found == 1);

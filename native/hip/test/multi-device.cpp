@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -10,6 +11,7 @@
 
 #include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../hsa/test/code_object_fixture.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
@@ -119,15 +121,34 @@ TEST_CASE("HIP enumerates the configured number of distinct devices", "[hip][mul
   REQUIRE(hipGetDevicePropertiesR0600(&other, 1) == hipSuccess);
   CHECK(std::string(first.name) == std::string(other.name));
   CHECK(first.pciBusID != other.pciBusID);
+  CHECK(std::cmp_equal(first.pciDomainID, gemstone::devicePciAddress(0).domain));
+  CHECK(std::cmp_equal(first.pciBusID, gemstone::devicePciAddress(0).bus));
+  CHECK(std::cmp_equal(first.pciDeviceID, gemstone::devicePciAddress(0).device));
+  CHECK(std::cmp_equal(other.pciDomainID, gemstone::devicePciAddress(1).domain));
+  CHECK(std::cmp_equal(other.pciBusID, gemstone::devicePciAddress(1).bus));
+  CHECK(std::cmp_equal(other.pciDeviceID, gemstone::devicePciAddress(1).device));
   CHECK(hipGetDevicePropertiesR0600(&other, 2) == hipErrorInvalidValue);
 
+  int domain[2]{};
   int bus[2]{};
+  int deviceId[2]{};
+  REQUIRE(hipDeviceGetAttribute(&domain[0], hipDeviceAttributePciDomainId, 0) == hipSuccess);
+  REQUIRE(hipDeviceGetAttribute(&domain[1], hipDeviceAttributePciDomainId, 1) == hipSuccess);
   REQUIRE(hipDeviceGetAttribute(&bus[0], hipDeviceAttributePciBusId, 0) == hipSuccess);
   REQUIRE(hipDeviceGetAttribute(&bus[1], hipDeviceAttributePciBusId, 1) == hipSuccess);
+  REQUIRE(hipDeviceGetAttribute(&deviceId[0], hipDeviceAttributePciDeviceId, 0) == hipSuccess);
+  REQUIRE(hipDeviceGetAttribute(&deviceId[1], hipDeviceAttributePciDeviceId, 1) == hipSuccess);
   CHECK(bus[0] != bus[1]);
+  CHECK(std::cmp_equal(domain[0], gemstone::devicePciAddress(0).domain));
+  CHECK(std::cmp_equal(domain[1], gemstone::devicePciAddress(1).domain));
+  CHECK(std::cmp_equal(bus[0], gemstone::devicePciAddress(0).bus));
+  CHECK(std::cmp_equal(bus[1], gemstone::devicePciAddress(1).bus));
+  CHECK(std::cmp_equal(deviceId[0], gemstone::devicePciAddress(0).device));
+  CHECK(std::cmp_equal(deviceId[1], gemstone::devicePciAddress(1).device));
 
   char busId[32]{};
   REQUIRE(hipDeviceGetPCIBusId(busId, sizeof(busId), 1) == hipSuccess);
+  CHECK(std::string(busId) == gemstone::devicePciBusId(1));
   int found = -1;
   REQUIRE(hipDeviceGetByPCIBusId(&found, busId) == hipSuccess);
   CHECK(found == 1);
@@ -137,6 +158,10 @@ TEST_CASE("HIP enumerates the configured number of distinct devices", "[hip][mul
   REQUIRE(hipDeviceGetUuid(&uuids[0], 0) == hipSuccess);
   REQUIRE(hipDeviceGetUuid(&uuids[1], 1) == hipSuccess);
   CHECK(std::memcmp(uuids[0].bytes, uuids[1].bytes, sizeof(uuids[0].bytes)) != 0);
+  const auto expectedUuid0 = gemstone::deviceUuid(0);
+  const auto expectedUuid1 = gemstone::deviceUuid(1);
+  CHECK(std::memcmp(uuids[0].bytes, expectedUuid0.data(), expectedUuid0.size()) == 0);
+  CHECK(std::memcmp(uuids[1].bytes, expectedUuid1.data(), expectedUuid1.size()) == 0);
 }
 
 TEST_CASE("HIP allocations belong to the current device", "[hip][multi-device]") {

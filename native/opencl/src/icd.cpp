@@ -35,6 +35,7 @@
 
 #include "gemstone/command_queue.hpp"
 #include "gemstone/environment.hpp"
+#include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include "gemstone_image_descriptor.hpp"
 #include "gemstone_opencl_dispatch.hpp"
@@ -1528,7 +1529,9 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
     case CL_DEVICE_EXTENSIONS_WITH_VERSION:
       return outputBytes(size, output, written, DeviceExtensionVersions, sizeof(DeviceExtensionVersions));
     case CL_DEVICE_PCI_BUS_INFO_KHR: {
-      const cl_device_pci_bus_info_khr v{.pci_domain = 0, .pci_bus = deviceOrdinal(value), .pci_device = 1, .pci_function = 0};
+      const auto address = gemstone::devicePciAddress(deviceOrdinal(value));
+      const cl_device_pci_bus_info_khr v{
+          .pci_domain = address.domain, .pci_bus = address.bus, .pci_device = address.device, .pci_function = address.function};
       return outputScalar(size, output, written, v);
     }
     case CL_DEVICE_ILS_WITH_VERSION: return outputBytes(size, output, written, DeviceILVersions, sizeof(DeviceILVersions));
@@ -1635,13 +1638,14 @@ CL_API_ENTRY cl_int CL_API_CALL clGetDeviceInfo(cl_device_id value, cl_device_in
       const cl_device_integer_dot_product_acceleration_properties_khr v{};
       return outputScalar(size, output, written, v);
     }
-    // The Vulkan facade derives deviceUUID with the same ordinal convention.
-    case CL_DEVICE_UUID_KHR:
+    case CL_DEVICE_UUID_KHR: {
+      const auto uuid = gemstone::deviceUuid(deviceOrdinal(value));
+      return outputBytes(size, output, written, uuid.data(), uuid.size());
+    }
     case CL_DRIVER_UUID_KHR: {
       std::array<cl_uchar, CL_UUID_SIZE_KHR> v{};
       for (size_t index = 0; index < v.size(); ++index)
-        v[index] = static_cast<cl_uchar>((name == CL_DEVICE_UUID_KHR ? 0x47 : 0x67) + index);
-      if (name == CL_DEVICE_UUID_KHR) v.back() = static_cast<cl_uchar>(v.back() + deviceOrdinal(value));
+        v[index] = static_cast<cl_uchar>(0x67 + index);
       return outputBytes(size, output, written, v.data(), v.size());
     }
     case CL_DEVICE_LUID_VALID_KHR: return outputScalar(size, output, written, cl_bool{CL_FALSE});

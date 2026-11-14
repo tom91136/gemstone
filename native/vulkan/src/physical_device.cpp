@@ -9,6 +9,7 @@
 #include <optional>
 #include <string_view>
 
+#include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/environment.hpp>
 
@@ -26,9 +27,8 @@ std::optional<uint32_t> configuredApiVersion() {
 }
 
 static void fillDeviceUUID(uint8_t (&uuid)[VK_UUID_SIZE], uint32_t physicalOrdinal) {
-  for (size_t i = 0; i < VK_UUID_SIZE; ++i)
-    uuid[i] = static_cast<uint8_t>(0x47 + i);
-  uuid[VK_UUID_SIZE - 1] = static_cast<uint8_t>(uuid[VK_UUID_SIZE - 1] + physicalOrdinal);
+  const auto bytes = gemstone::deviceUuid(physicalOrdinal);
+  std::copy_n(bytes.data(), VK_UUID_SIZE, uuid);
 }
 
 void fillProperties(VkPhysicalDeviceProperties *properties, uint32_t physicalOrdinal) {
@@ -255,6 +255,16 @@ void fillPropertyChain(void *next, uint32_t physicalOrdinal) {
         for (size_t i = 0; i < VK_UUID_SIZE; ++i)
           value->driverUUID[i] = static_cast<uint8_t>(0x67 + i);
         value->deviceLUIDValid = VK_FALSE;
+        break;
+      }
+      case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT: {
+        resetQueryPayload<VkPhysicalDevicePCIBusInfoPropertiesEXT>(base);
+        auto *value = reinterpret_cast<VkPhysicalDevicePCIBusInfoPropertiesEXT *>(base);
+        const auto address = gemstone::devicePciAddress(physicalOrdinal);
+        value->pciDomain = address.domain;
+        value->pciBus = address.bus;
+        value->pciDevice = address.device;
+        value->pciFunction = address.function;
         break;
       }
       case VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_PROPERTIES:

@@ -36,4 +36,13 @@ class GenerateDevicePresetsSuite extends Suite {
       Vec(1)
     )
   }
+
+  test("device UUID and PCI address derive from the device index in the generated header") {
+    val rendered = GenerateDevicePresets.render(DevicePreset.all)
+    assert(rendered.contains("constexpr PciAddress devicePciAddress(uint32_t ordinal) noexcept"))
+    assert(rendered.contains("return {.domain = 0, .bus = ordinal, .device = 1, .function = 0};"))
+    assert(rendered.contains("inline std::string devicePciBusId(uint32_t ordinal)"))
+    assert(rendered.contains("constexpr std::array<uint8_t, 16> deviceUuid(uint32_t ordinal) noexcept"))
+    assert(rendered.contains("inline std::string deviceHsaUuid(uint32_t ordinal)"))
+  }
 }

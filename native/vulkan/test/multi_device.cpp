@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
@@ -48,11 +49,14 @@ std::array<VkPhysicalDevice, 2> enumerate(VkInstance instance) {
 struct Identity {
   uint32_t deviceID = 0;
   VkPhysicalDeviceIDProperties id{};
+  VkPhysicalDevicePCIBusInfoPropertiesEXT pci{};
 };
 
 Identity identity(VkPhysicalDevice physical) {
   Identity result;
+  result.pci.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PCI_BUS_INFO_PROPERTIES_EXT;
   result.id.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+  result.id.pNext = &result.pci;
   VkPhysicalDeviceProperties2 properties{};
   properties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
   properties.pNext = &result.id;
@@ -96,6 +100,20 @@ TEST_CASE("Vulkan physical devices expose distinct identities", "[vulkan][multi-
   CHECK(std::memcmp(first.id.deviceUUID, second.id.deviceUUID, VK_UUID_SIZE) != 0);
   CHECK(first.id.deviceUUID[VK_UUID_SIZE - 1] != second.id.deviceUUID[VK_UUID_SIZE - 1]);
   CHECK(std::memcmp(first.id.driverUUID, second.id.driverUUID, VK_UUID_SIZE) == 0);
+  const auto expectedUuid0 = gemstone::deviceUuid(0);
+  const auto expectedUuid1 = gemstone::deviceUuid(1);
+  CHECK(std::memcmp(first.id.deviceUUID, expectedUuid0.data(), VK_UUID_SIZE) == 0);
+  CHECK(std::memcmp(second.id.deviceUUID, expectedUuid1.data(), VK_UUID_SIZE) == 0);
+  const auto expectedPci0 = gemstone::devicePciAddress(0);
+  const auto expectedPci1 = gemstone::devicePciAddress(1);
+  CHECK(first.pci.pciDomain == expectedPci0.domain);
+  CHECK(first.pci.pciBus == expectedPci0.bus);
+  CHECK(first.pci.pciDevice == expectedPci0.device);
+  CHECK(first.pci.pciFunction == expectedPci0.function);
+  CHECK(second.pci.pciDomain == expectedPci1.domain);
+  CHECK(second.pci.pciBus == expectedPci1.bus);
+  CHECK(second.pci.pciDevice == expectedPci1.device);
+  CHECK(second.pci.pciFunction == expectedPci1.function);
 }
 
 TEST_CASE("Vulkan device groups cover each physical device", "[vulkan][multi-device]") {

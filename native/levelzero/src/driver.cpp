@@ -35,6 +35,7 @@
 #include <zet_ddi.h>
 
 #include "gemstone/command_queue.hpp"
+#include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include "gemstone_image_descriptor.hpp"
 #include <gemstone/copy_out.hpp>
@@ -711,8 +712,8 @@ ze_result_t ZE_APICALL deviceProperties(ze_device_handle_t handle, ze_device_pro
   properties->timerResolution = stype == ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES_1_2 ? 1000000000ULL : 1ULL;
   properties->timestampValidBits = 64;
   properties->kernelTimestampValidBits = 64;
-  std::memcpy(properties->uuid.id, "GEMSTONE-SPIRV", 14);
-  properties->uuid.id[ZE_MAX_DEVICE_UUID_SIZE - 1] = static_cast<uint8_t>(deviceOrdinal(cast<Device>(handle)));
+  const auto uuid = gemstone::deviceUuid(deviceOrdinal(cast<Device>(handle)));
+  std::memcpy(properties->uuid.id, uuid.data(), uuid.size());
   const std::string_view name = preset ? preset->name : "Gemstone Virtual SPIR-V GPU";
   std::memcpy(properties->name, name.data(), std::min(name.size(), size_t{ZE_MAX_DEVICE_NAME - 1}));
   return ZE_RESULT_SUCCESS;
@@ -862,7 +863,8 @@ ze_result_t ZE_APICALL devicePciProperties(ze_device_handle_t handle, ze_pci_ext
   const auto *device = cast<Device>(handle);
   if (!device) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  properties->address = {.domain = 0, .bus = deviceOrdinal(device), .device = 1, .function = 0};
+  const auto address = gemstone::devicePciAddress(deviceOrdinal(device));
+  properties->address = {.domain = address.domain, .bus = address.bus, .device = address.device, .function = address.function};
   properties->maxSpeed = {.genVersion = -1, .width = -1, .maxBandwidth = -1};
   return ZE_RESULT_SUCCESS;
 }

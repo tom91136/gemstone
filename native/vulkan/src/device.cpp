@@ -36,10 +36,11 @@ template <typename T> static VkResult enumerateOne(uint32_t *count, T *values, c
   return VK_SUCCESS;
 }
 
-constexpr std::array<VkExtensionProperties, 3> SupportedDeviceExtensions{{
+constexpr std::array<VkExtensionProperties, 4> SupportedDeviceExtensions{{
     {.extensionName = VK_EXT_HOST_QUERY_RESET_EXTENSION_NAME, .specVersion = VK_EXT_HOST_QUERY_RESET_SPEC_VERSION},
     {.extensionName = VK_KHR_16BIT_STORAGE_EXTENSION_NAME, .specVersion = VK_KHR_16BIT_STORAGE_SPEC_VERSION},
     {.extensionName = VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_EXTENSION_NAME, .specVersion = VK_KHR_STORAGE_BUFFER_STORAGE_CLASS_SPEC_VERSION},
+    {.extensionName = VK_EXT_PCI_BUS_INFO_EXTENSION_NAME, .specVersion = VK_EXT_PCI_BUS_INFO_SPEC_VERSION},
 }};
 
 VkResult implVkEnumerateInstanceVersion(uint32_t *version) {

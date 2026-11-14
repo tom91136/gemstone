@@ -1,3 +1,4 @@
+#include <array>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -12,6 +13,7 @@
 
 #include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "code_object_fixture.hpp"
@@ -171,10 +173,16 @@ TEST_CASE("HSA enumerates the configured number of GPU agents", "[hsa][multi-dev
   CHECK(gpus[0].handle != gpus[1].handle);
   CHECK(text(gpus[0], HSA_AGENT_INFO_NAME) == text(gpus[1], HSA_AGENT_INFO_NAME));
   CHECK(scalar<uint32_t>(gpus[0], HSA_AGENT_INFO_NODE) != scalar<uint32_t>(gpus[1], HSA_AGENT_INFO_NODE));
+  CHECK(scalar<uint32_t>(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN)) == gemstone::devicePciAddress(0).domain);
+  CHECK(scalar<uint32_t>(gpus[1], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN)) == gemstone::devicePciAddress(1).domain);
   CHECK(scalar<uint32_t>(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID))
         != scalar<uint32_t>(gpus[1], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID)));
+  CHECK(scalar<uint32_t>(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID)) == gemstone::devicePciAddress(0).bdfid());
+  CHECK(scalar<uint32_t>(gpus[1], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID)) == gemstone::devicePciAddress(1).bdfid());
   CHECK(text(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID))
         != text(gpus[1], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID)));
+  CHECK(text(gpus[0], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID)) == gemstone::deviceHsaUuid(0));
+  CHECK(text(gpus[1], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID)) == gemstone::deviceHsaUuid(1));
 
   const hsa_agent_t unknown{.handle = gpus[1].handle + (uint64_t{1} << 8)};
   uint32_t node = 0;

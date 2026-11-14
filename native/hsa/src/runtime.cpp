@@ -1159,16 +1159,14 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
     // Software agents have no physical PCI identity, HDP registers, or device and VRAM clocks. ROCclr queries these
     // properties during discovery even when it does not use them.
     case HSA_AMD_AGENT_INFO_CHIP_ID:
-    case HSA_AMD_AGENT_INFO_DOMAIN:
     case HSA_AMD_AGENT_INFO_ASIC_REVISION: return copyStatus(value, uint32_t(0));
+    case HSA_AMD_AGENT_INFO_DOMAIN: return copyStatus(value, gpu ? gemstone::devicePciAddress(ordinal).domain : uint32_t(0));
     case HSA_AMD_AGENT_INFO_MEMORY_WIDTH:
       return copyStatus(value, gpu ? static_cast<uint32_t>(gemstone::hsa::deviceModel().busWidthBits) : uint32_t(0));
     case HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY: return copyStatus(value, gpu ? gemstone::hsa::deviceModel().memoryClockMHz : uint32_t(0));
-    case HSA_AMD_AGENT_INFO_BDFID: return copyStatus(value, ordinal << 8);
+    case HSA_AMD_AGENT_INFO_BDFID: return copyStatus(value, gpu ? gemstone::devicePciAddress(ordinal).bdfid() : uint32_t(0));
     case HSA_AMD_AGENT_INFO_UUID: {
-      char uuid[64] = "CPU-XX";
-      if (gpu) std::snprintf(uuid, sizeof(uuid), "GPU-GEMSTONE%05u", ordinal + 1);
-      copyName(value, uuid);
+      copyName(value, gpu ? gemstone::deviceHsaUuid(ordinal).c_str() : "CPU-XX");
       return HSA_STATUS_SUCCESS;
     }
     case HSA_AMD_AGENT_INFO_MEMORY_AVAIL: {

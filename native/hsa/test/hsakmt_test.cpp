@@ -17,6 +17,7 @@
 #include <gemstone/bytes.hpp>
 #include <gemstone/process.hpp>
 #include <gemstone/test_support.hpp>
+#include <gemstone_device_presets.hpp>
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "code_object_fixture.hpp"
@@ -328,6 +329,8 @@ TEST_CASE("KFD reports one GPU node per emulated device", "[hsa][kmt][multi-devi
     CHECK((gpu.NumFComputeCores != 0 && gpu.NumMemoryBanks == 3));
   CHECK((gpus[0].KFDGpuID != gpus[1].KFDGpuID));
   CHECK((gpus[0].LocationId != gpus[1].LocationId));
+  CHECK((gpus[0].LocationId == gemstone::devicePciAddress(0).bdfid()));
+  CHECK((gpus[1].LocationId == gemstone::devicePciAddress(1).bdfid()));
   HsaNodeProperties missing{};
   CHECK((hsaKmtGetNodeProperties(3, &missing) == HSAKMT_STATUS_INVALID_PARAMETER));
 
