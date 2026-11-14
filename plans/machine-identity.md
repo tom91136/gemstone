@@ -1,6 +1,6 @@
 # Machine identity
 
-Status: proposed, not started. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
+Status: step 1 is done. Device presets hold multiprocessor count, boost clock, bus width, and L2 size per card, and CUDA, HIP, HSA, OpenCL, Level Zero, and Vulkan report the selected preset's identity and capacity and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`. Launch residency scales with the reported multiprocessor count (`multiprocessors * 32`). Steps 2 to 5 are not started. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
 
 ## Goal
 
@@ -10,10 +10,9 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 
 ## Current state
 
-- Presets hold a name, a target, total memory, and memory data rate for six cards. `GEMSTONE_DEVICE` or `gemstone run --device` selects one, and an unknown name is an error.
-- CUDA, HIP, HSA, and OpenCL report the preset's name and memory, and allocation limits scale with it. Level Zero and Vulkan do not read the preset.
-- Multiprocessor count, clocks, bus width, and L2 size come from the target's reference card, not from the preset.
-- CUDA reports a fixed UUID and PCI bus, device, and domain numbers.
+- Presets hold a name, a target, multiprocessor count, boost clock, memory data rate, bus width, L2 size, and total memory for six cards. `GEMSTONE_DEVICE` or `gemstone run --device` selects one, and an unknown name is an error.
+- CUDA, HIP, HSA, OpenCL, Level Zero, and Vulkan report the preset's name, memory, and capacity, and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`.
+- Launch residency scales with the reported multiprocessor count.
 - There is no NVML, ROCm SMI, or AMD SMI library. Level Zero has generated Sysman (`zes`) declarations and no implementation.
 - `rocminfo`, `clinfo`, `sycl-ls`, and `vulkaninfo` are not conformance cases, except for a Vulkan information workload.
 
@@ -34,12 +33,12 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 
 ## Steps
 
-### 1. Preset completion
+### 1. Preset completion (done)
 
-- Add multiprocessor count, clocks, bus width, and L2 per card, each checked against its source row as the existing columns are.
-- Launch capacity follows the reported multiprocessor count. Check the effect on `Pacing` residency and run time for large counts.
-- Level Zero and Vulkan report the preset.
-- Derive UUID and bus address from the device index in one generated place, used by every runtime.
+- Added multiprocessor count, boost clock, bus width, and L2 per card in `DevicePreset`, each checked against its source row in `references/nvidia/gpus.md`, `references/amdgpu/gpus.md`, and the whitepapers.
+- CUDA, HIP, HSA, OpenCL, Level Zero, and Vulkan report the preset's name, memory, multiprocessor count, clocks, bus width, and L2.
+- Launch capacity follows the reported multiprocessor count (`multiprocessors * 32`). On `ptx-calls` with 2688 groups, scaling from 4 multiprocessors (residency 128) to 64, 80, and 84 multiprocessors (residency 2048, 2560, and 2688) changes median launch time from 47.0 ms to 104.6 ms, 115.8 ms, and 70.0 ms, and calling-thread `Pacing` slot allocation from 42.4 KB to 572.4 KB, 713.7 KB, and 749.0 KB per launch.
+- Derived UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`, used by every runtime and checked across runtimes in `gemstone_preset_identity_test`.
 
 ### 2. Discovery tools
 
