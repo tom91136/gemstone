@@ -38,8 +38,14 @@ object Measurement {
     repeat(iterations)(succeeded(body))
 
   /** Measure `iterations` runs on a dedicated pool of `workers`, each of which must succeed. */
-  def repeatPooled(iterations: Int > 0, workers: Int > 0)(run: Workgroups => Either[Fault, ?]): BenchmarkSample =
-    Using.resource(WorkerPool(parallelism = workers, minGroups = 1, minWorkItems = 1)) { pool =>
+  def repeatPooled(
+      iterations: Int > 0,
+      workers: Int > 0,
+      multiprocessors: Int > 0 = WorkerPool.DefaultMultiprocessors
+  )(run: Workgroups => Either[Fault, ?]): BenchmarkSample =
+    Using.resource(
+      WorkerPool(parallelism = workers, multiprocessors = multiprocessors, minGroups = 1, minWorkItems = 1)
+    ) { pool =>
       repeatSucceeding(iterations)(run(pool))
     }
 }

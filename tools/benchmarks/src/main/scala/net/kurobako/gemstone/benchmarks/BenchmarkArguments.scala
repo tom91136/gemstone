@@ -28,6 +28,9 @@ object BenchmarkArguments {
 
   val workers: Opts[Int > 0] = positive("workers", "Host execution workers", 1)
 
+  val multiprocessors: Opts[Int > 0] =
+    positive("multiprocessors", "Reported multiprocessors for launch residency", WorkerPool.DefaultMultiprocessors)
+
   /** The first choice is the default. */
   def choice[A](name: String, first: (name: String, value: A), rest: (name: String, value: A)*): Opts[A] = {
     val choices = first +: rest

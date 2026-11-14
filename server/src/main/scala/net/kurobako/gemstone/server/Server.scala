@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.environment as env
+import net.kurobako.gemstone.profile.DevicePreset
 import net.kurobako.gemstone.rpc.*
 import net.kurobako.gemstone.server.Transport.*
 import net.kurobako.gemstone.server.backend.*
@@ -53,10 +54,16 @@ object Server {
         )
         record <- configuration.lookup(values, env.RecordFile)
           .fold[Either[String, Option[Path]]](Right(None))(paths.parse(env.RecordFile, _).map(Some(_)))
+        multiprocessors <- configuration.lookup(values, env.Device)
+          .fold[Either[String, Int > 0]](Right(WorkerPool.DefaultMultiprocessors)) { value =>
+            DevicePreset.all.find(_.name == value).flatMap(_.multiprocessors.refine[Int > 0].toOption)
+              .toRight(s"${env.Device} must be a known device preset name, not '$value'")
+          }
         schedule <- ConcurrencySchedule.fromEnvironment(values)
       } yield Settings(
         limits = TaskControl.Limits(instructions),
         parallelism = workers.toIntExact,
+        multiprocessors = multiprocessors,
         requestTimeoutMillis = (timeout * 1000L).toIntExact,
         record = record,
         tracePerformance = configuration.lookup(values, env.TraceList).exists(configuration.traceEnabled(_, "perf")),
@@ -76,6 +83,7 @@ object Server {
   case class Settings(
       limits: TaskControl.Limits = TaskControl.Limits.Default,
       parallelism: Int > 0 = Settings.defaultParallelism,
+      multiprocessors: Int > 0 = WorkerPool.DefaultMultiprocessors,
       requestTimeoutMillis: Int > 0 = (env.RpcTimeoutSecondsDefault * 1000L).toIntExact,
       record: Option[Path] = None,
       tracePerformance: Boolean = false,
@@ -94,6 +102,7 @@ object Server {
     try {
       val pool = own(WorkerPool(
         parallelism = settings.parallelism,
+        multiprocessors = settings.multiprocessors,
         reporter = error => scribe.error(error),
         measurement = Option.when(settings.tracePerformance) { measured =>
           scribe.info(

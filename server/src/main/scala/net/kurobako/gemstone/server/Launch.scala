@@ -90,7 +90,7 @@ object Launch {
 
   /** Run a process. Call `validate` first to report a missing runtime provider as a usage error. */
   def run(options: Options): Either[String, Int] =
-    launch(options.apis, options.directory, sys.env, options.serverEndpoint) { changes =>
+    launch(options.apis, options.directory, sys.env ++ options.environment, options.serverEndpoint) { changes =>
       val builder = ProcessBuilder((options.executable.raw +: options.arguments.map(_.raw))*).inheritIO()
       changes.copy(set = changes.set ++ options.environment).applyTo(builder.environment())
       Using.resource(RunningProcess(builder.start()))(running => waitForChild(running.process))

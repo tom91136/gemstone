@@ -96,4 +96,13 @@ class SettingsSuite extends Suite {
         Right(expected)
       )
   }
+
+  test("device preset sets the server multiprocessor count and rejects unknown presets") {
+    assertEquals(Server.Settings.fromEnvironment(Map.empty).map(_.multiprocessors.raw), Right(4))
+    assertEquals(
+      Server.Settings.fromEnvironment(Map(environment.Device -> "GeForce RTX 5080")).map(_.multiprocessors.raw),
+      Right(84)
+    )
+    assert(Server.Settings.fromEnvironment(Map(environment.Device -> "GeForce RTX 9999")).isLeft)
+  }
 }

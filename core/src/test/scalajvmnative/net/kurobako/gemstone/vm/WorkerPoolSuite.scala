@@ -214,4 +214,26 @@ class WorkerPoolSuite extends Suite {
     }
   }
 
+  test("launch residency and coscheduled helpers follow the multiprocessor count") {
+    Using.resource(WorkerPool(2)) { pool =>
+      assertEquals(pool.residency.raw, 128)
+    }
+    Using.resource(WorkerPool(2, multiprocessors = 16)) { pool =>
+      assertEquals(pool.residency.raw, 512)
+    }
+    Using.resource(WorkerPool(2, multiprocessors = 84)) { pool =>
+      assertEquals(pool.residency.raw, 2688)
+    }
+    val gate = CountDownLatch(160)
+    Using.resource(WorkerPool(2, minGroups = 1, minWorkItems = 1, multiprocessors = 5)) { pool =>
+      val result = pool.parallelFor(160L) { index =>
+        if (index == 0L) pool.coschedule()
+        gate.countDown()
+        assertEquals(gate.await(5L, TimeUnit.SECONDS), true)
+        Right(())
+      }
+      assertEquals(result, Right(()): Either[Fault, Unit])
+    }
+  }
+
 }

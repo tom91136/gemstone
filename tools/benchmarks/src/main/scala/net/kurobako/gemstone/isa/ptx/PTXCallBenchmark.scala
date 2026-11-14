@@ -12,7 +12,14 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * the first launch only.
   */
 object PTXCallBenchmark {
-  private case class Options(iterations: Int > 0, calls: Int > 0, lanes: Int > 0, groups: Int > 0, workers: Int > 0)
+  private case class Options(
+      iterations: Int > 0,
+      calls: Int > 0,
+      lanes: Int > 0,
+      groups: Int > 0,
+      workers: Int > 0,
+      multiprocessors: Int > 0
+  )
 
   val benchmark: Case = (
     iterations(5),
@@ -20,8 +27,9 @@ object PTXCallBenchmark {
     positive("lanes", "Even lane count per group, at most 1024", 128)
       .validate("lanes must be even and at most 1024")(value => value <= 1024 && value % 2 == 0),
     positive("groups", "Workgroups per dispatch", 16),
-    workers
-  ).mapN(Options(_, _, _, _, _)).map(options => launch => run(options, launch))
+    workers,
+    multiprocessors
+  ).mapN(Options(_, _, _, _, _, _)).map(options => launch => run(options, launch))
 
   private def source(lanes: Int > 0): String = s""".version 8.0
     .target sm_80
@@ -108,7 +116,7 @@ object PTXCallBenchmark {
     val memory     = BenchmarkMemory(Math.multiplyExact(count, 8))
     val output     = memory.ids(0)
     val parameters = PTXParameters.output(memory, output, "count": NonEmpty[String], options.calls.toLong)
-    val sample     = Measurement.repeatPooled(options.iterations, options.workers)(pool =>
+    val sample     = Measurement.repeatPooled(options.iterations, options.workers, options.multiprocessors)(pool =>
       VMInterpreter.execute(kernel, geometry, parameters, memory, control = launch(), workgroups = pool)
     )
     val oddCalls = options.calls & 1

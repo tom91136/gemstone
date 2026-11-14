@@ -150,7 +150,20 @@ class BenchmarkRunnerSuite extends Suite {
     ("ptx-vector-add", Vector("--iterations", "2"), 2L, false),
     (
       "ptx-calls",
-      Vector("--iterations", "2", "--lanes", "66", "--groups", "3", "--workers", "2", "--calls", "3"),
+      Vector(
+        "--iterations",
+        "2",
+        "--lanes",
+        "66",
+        "--groups",
+        "3",
+        "--workers",
+        "2",
+        "--multiprocessors",
+        "64",
+        "--calls",
+        "3"
+      ),
       2L,
       false
     ),

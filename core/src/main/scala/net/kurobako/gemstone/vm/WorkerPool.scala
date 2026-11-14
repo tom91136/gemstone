@@ -10,7 +10,11 @@ import scala.concurrent.ExecutionContext
 import scala.util.control.NonFatal
 
 object WorkerPool {
-  val Residency: Int = 128
+  val DefaultMultiprocessors: Int > 0      = 4
+  val WorkgroupsPerMultiprocessor: Int > 0 = 32
+  def residencyFor(multiprocessors: Int > 0)
+      : Int > 0      = (multiprocessors.raw * WorkgroupsPerMultiprocessor.raw).unsafe[Int > 0]
+  val Residency: Int = residencyFor(DefaultMultiprocessors).raw
 
   trait Task extends Runnable {
     def reject(error: Throwable): Unit
@@ -30,6 +34,7 @@ class WorkerPool(
     // with the machine core count: even two independent groups can keep another worker busy.
     minGroups: Long >= 0 = 2L,
     minWorkItems: Long >= 0 = 32L,
+    val multiprocessors: Int > 0 = WorkerPool.DefaultMultiprocessors,
     reporter: Throwable => Unit = _.printStackTrace(),
     measurement: Option[WorkerPool.Measurement => Unit] = None
 ) extends Workgroups with ExecutionContext with AutoCloseable {
@@ -132,7 +137,7 @@ class WorkerPool(
   }
 
   private def spawn(job: Job): Unit = lock.withLock {
-    if (!closed && job.next < job.count && extras.size < WorkerPool.Residency - parallelism) {
+    if (!closed && job.next < job.count && extras.size < residency.raw - parallelism.raw) {
       val thread = Thread(() => helperLoop(job), s"gemstone-worker-extra-${extras.size}")
       thread.setDaemon(true)
       extras += thread
@@ -221,7 +226,8 @@ class WorkerPool(
   // A worker awaiting a nested job runs only that job's tasks, so one job never runs on more than the workers.
   override def concurrency: Int > 0 = parallelism
 
-  override def residency: Int > 0 = math.max(parallelism.raw, WorkerPool.Residency).unsafe[Int > 0]
+  override def residency: Int > 0 =
+    math.max(parallelism.raw, WorkerPool.residencyFor(multiprocessors).raw).unsafe[Int > 0]
 
   override def coschedule(): Unit = running.get().foreach { job =>
     lock.withLock { job.coscheduled = true }
