@@ -79,4 +79,15 @@ class ConcurrencyScheduleSuite extends Suite {
     }
     assertEquals(choices(), choices())
   }
+
+  test("launch schedules are fresh per launch and only random schedules seed workgroup order") {
+    val random              = ConcurrencySchedule.Random(100L)
+    def choices(): Seq[Int] = {
+      val launch = random.forLaunch
+      (1 to 20).map(candidates => launch.choose(candidates))
+    }
+    assertEquals(choices(), choices())
+    assert(random.seeded)
+    assert(!ConcurrencySchedule.Fixed.seeded)
+  }
 }

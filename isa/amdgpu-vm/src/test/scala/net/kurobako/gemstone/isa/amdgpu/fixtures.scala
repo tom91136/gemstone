@@ -93,11 +93,12 @@ private object fixtures extends munit.Assertions {
       task: KernelTask,
       memory: AddressSpace,
       control: TaskControl = TaskControl(),
-      workgroups: Workgroups = Workgroups.Sequential
+      workgroups: Workgroups = Workgroups.Sequential,
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
   ): Either[Fault, Unit] =
     VMInterpreter.execute(
       kernel,
-      KernelLaunch(task, TaskContext(memory, control, _ => Right(())), workgroups),
+      KernelLaunch(task, TaskContext(memory, control, _ => Right(()), schedule = schedule), workgroups),
       Vec.empty
     )
 

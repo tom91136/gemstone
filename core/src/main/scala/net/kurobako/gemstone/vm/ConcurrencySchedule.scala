@@ -17,8 +17,13 @@ object ConcurrencySchedule {
     override def choose(candidates: Int): Int =
       if (candidates <= 1) 0 else rng.nextInt(candidates)
 
+    override def seeded: Boolean = true
+
     override def forWorkgroup(group: Coordinates): ConcurrencySchedule =
       Random(mixSeed(seed, group))
+
+    override def forLaunch: ConcurrencySchedule =
+      Random(mixSeed(seed ^ 0x6a09e667f3bcc909L, Coordinates.origin))
   }
 
   def mixSeed(base: Long, group: Coordinates): Long = {
@@ -28,6 +33,18 @@ object ConcurrencySchedule {
     val z1 = (z0 ^ (z0 >>> 30)) * 0xbf58476d1ce4e5b9L
     val z2 = (z1 ^ (z1 >>> 27)) * 0x94d049bb133111ebL
     z2 ^ (z2 >>> 31)
+  }
+
+  /** Shuffles the first `count` entries of `order` in place with `schedule`'s Fisher-Yates choices. */
+  def shuffle(schedule: ConcurrencySchedule, order: Array[Int], count: Int = -1): Unit = {
+    var i = if (count < 0) order.length - 1 else count - 1
+    while (i > 0) {
+      val j   = schedule.choose(i + 1)
+      val tmp = order(i)
+      order(i) = order(j)
+      order(j) = tmp
+      i -= 1
+    }
   }
 
   def parse(value: String): Either[String, ConcurrencySchedule] = {
@@ -55,5 +72,12 @@ object ConcurrencySchedule {
 
 sealed trait ConcurrencySchedule derives CanEqual {
   def choose(candidates: Int): Int
+
+  /** Whether this schedule fixes the order across workgroups, and so runs a launch on one host thread. */
+  def seeded: Boolean = false
+
   def forWorkgroup(group: Coordinates): ConcurrencySchedule = this
+
+  /** A fresh schedule for one launch's workgroup order, so reusing a schedule replays the same launch. */
+  def forLaunch: ConcurrencySchedule = this
 }

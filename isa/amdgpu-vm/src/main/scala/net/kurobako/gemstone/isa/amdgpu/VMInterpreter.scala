@@ -224,6 +224,7 @@ private object VMInterpreter {
     val slices         = CodeSlices(CodeSlice(program, program.jumpTable, dispatchMemory), peers, allocations)
     val schedule       = launch.context.schedule
     if (dispatch.cooperative) runResident(slices, dispatch, control, observer, schedule)
+    else if (schedule.seeded) runSeeded(slices, dispatch, control, observer, schedule)
     else
       Dispatch.forEachGroup(dispatch.geometry, workgroups)((_, group, pace) =>
         runGroup(slices, dispatch, group, control, observer, pace, schedule.forWorkgroup(group))
@@ -248,7 +249,8 @@ private object VMInterpreter {
   }
 
   /** Every workgroup of a cooperative dispatch is resident at once: one thread interleaves them, a sweep advancing each
-    * wave until it reaches a barrier, waits, sleeps, spins or ends. A sweep in which no wave advances is a deadlock.
+    * wave until it reaches a barrier, waits, sleeps, spins or ends. A sweep in which no wave advances is a deadlock. A
+    * seeded schedule picks the order of each sweep but still gives every unfinished group one advance.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
   private def runResident(
@@ -275,32 +277,100 @@ private object VMInterpreter {
             control,
             observer,
             gws,
-            schedule.forWorkgroup(group)
+            schedule.forWorkgroup(group),
+            sliced = true
           )
         }
-        var remaining             = total
-        var failure: Fault | Null = null
-        while (remaining > 0 && failure == null) {
-          var progressed = false
-          var index      = 0
-          while (index < total && failure == null) {
-            val group = groups(index)
-            if (group != null) group.advance() match {
-              case Left(error)               => failure = error
-              case Right(Residency.Complete) =>
-                groups(index) = null
-                remaining -= 1
-                progressed = true
-              case Right(Residency.Progressed) => progressed = true
-              case Right(Residency.Stalled)    => ()
-            }
-            index += 1
-          }
-          if (failure == null && remaining > 0 && !progressed)
-            failure = Fault.Hang("every remaining wave waits on a GWS resource or barrier that no wave can release")
-        }
-        if (failure == null) Right(()) else Left(failure)
+        interleaveGroups(groups, total, schedule)
     }
+
+  /** Runs a non-cooperative seeded launch's workgroups on this thread, a sweep advancing every unfinished group once.
+    */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
+  private def runSeeded(
+      slices: CodeSlices,
+      dispatch: KernelTask,
+      control: TaskControl,
+      observer: LaunchObserver | Null,
+      schedule: ConcurrencySchedule
+  ): Either[Fault, Unit] =
+    dispatch.geometry.groupTotal.refine[Long in 1L ~ 2147483647L] match {
+      case Left(_) =>
+        Left(Fault.InvalidRequest(s"${dispatch.geometry.groupTotal} workgroups cannot run on one thread"))
+      case Right(count) =>
+        val total  = count.toInt
+        val groups = Array.tabulate[ResidentGroup | Null](total) { index =>
+          val group = dispatch.geometry.groupCoordinates(index.toLong.unsafe[Long >= 0])
+          ResidentGroup(
+            slices,
+            dispatch,
+            group,
+            control,
+            observer,
+            null,
+            schedule.forWorkgroup(group),
+            sliced = true
+          )
+        }
+        interleaveGroups(groups, total, schedule)
+    }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
+  private def interleaveGroups(
+      groups: Array[ResidentGroup | Null],
+      total: Int,
+      schedule: ConcurrencySchedule
+  ): Either[Fault, Unit] = {
+    val order                 = if (schedule.seeded) Array.ofDim[Int](total) else null
+    var remaining             = total
+    var failure: Fault | Null = null
+    while (remaining > 0 && failure == null) {
+      var progressed = false
+      if (order eq null) {
+        var index = 0
+        while (index < total && failure == null) {
+          val group = groups(index)
+          if (group != null) group.advance() match {
+            case Left(error)               => failure = error
+            case Right(Residency.Complete) =>
+              groups(index) = null
+              remaining -= 1
+              progressed = true
+            case Right(Residency.Progressed) => progressed = true
+            case Right(Residency.Stalled)    => ()
+          }
+          index += 1
+        }
+      } else {
+        val ordering = order.nn
+        var count    = 0
+        var index    = 0
+        while (index < total) {
+          if (groups(index) != null) { ordering(count) = index; count += 1 }
+          index += 1
+        }
+        ConcurrencySchedule.shuffle(schedule.forLaunch, ordering, count)
+        var step = 0
+        while (step < count && failure == null) {
+          val at    = ordering(step)
+          val group = groups(at)
+          if (group != null) group.advance() match {
+            case Left(error)               => failure = error
+            case Right(Residency.Complete) =>
+              groups(at) = null
+              remaining -= 1
+              progressed = true
+            case Right(Residency.Progressed) => progressed = true
+            case Right(Residency.Stalled)    => ()
+          }
+          step += 1
+        }
+      }
+      if (failure == null && remaining > 0 && !progressed)
+        failure = Fault.Hang("every remaining wave waits on a GWS resource or barrier that no wave can release")
+    }
+    if (failure == null) Right(()) else Left(failure)
+  }
 
   /** A resident workgroup's waves; a wave at a barrier waits there until every live wave has arrived or ended. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var", "scalafix:DisableSyntax.null"))
@@ -310,8 +380,9 @@ private object VMInterpreter {
       group: Coordinates,
       control: TaskControl,
       observer: LaunchObserver | Null,
-      gws: GlobalWaveSyncResources,
-      schedule: ConcurrencySchedule
+      gws: GlobalWaveSyncResources | Null,
+      schedule: ConcurrencySchedule,
+      sliced: Boolean = false
   ) {
     private val program    = slices.origin.program
     private val kernel     = program.source
@@ -335,7 +406,8 @@ private object VMInterpreter {
         control,
         observer,
         gws,
-        Pace.Free
+        Pace.Free,
+        sliced
       )
     }
     private val finished = Array.fill(waveCount)(false)
@@ -563,7 +635,9 @@ private object VMInterpreter {
       observer: LaunchObserver | Null,
       // the GWS resources of a cooperative dispatch, whose waves also yield on sleeps and spins; null otherwise
       gws: GlobalWaveSyncResources | Null,
-      pace: Pace
+      pace: Pace,
+      // whether a backward branch ends the wave's slice so another workgroup can run
+      sliced: Boolean = false
   ) extends AMDGPUSinks[Long, Either[Fault, Int]] with PendingMachineOps {
     private val program = slices.origin.program
     private val kernel  = program.source
@@ -605,7 +679,7 @@ private object VMInterpreter {
     private val generation       = ResourceGeneration.of(program.isa)
     // the leading bytes of the last located access in range, short of all of them only through a buffer
     private var inRange          = 0
-    private val resident         = gws != null
+    private val resident         = sliced
     private var gwsWait          = GlobalWaveSyncResources.Idle
     private var backwardBranches = 0
     // whether the last run only found its wait still unreleased

@@ -383,8 +383,10 @@ private[isa] object VMInterpreter {
         case Some(dimensions) if dimensions != Dimensions.One =>
           if (cooperative) Left(Fault.Unsupported("a cooperative launch cannot also name a cluster shape"))
           else clusters(kernel, geometry, dimensions, parameterBlock, device, dynamicSharedBytes, log)
-        case _ if cooperative => resident(kernel, geometry, parameterBlock, device, dynamicSharedBytes, log)
-        case _                =>
+        case _ if cooperative            => resident(kernel, geometry, parameterBlock, device, dynamicSharedBytes, log)
+        case _ if device.schedule.seeded =>
+          seeded(kernel, geometry, parameterBlock, device, dynamicSharedBytes, allLanes, log)
+        case _ =>
           Dispatch.forEachGroup(geometry, device.workgroups) { (index, group, pace) =>
             val block = borrow(laneCount)
             try {
@@ -407,6 +409,41 @@ private[isa] object VMInterpreter {
       }
       _ <- log.flush(device.handler)
     } yield ()
+
+  /** Runs every workgroup of a seeded launch on this thread, a sweep giving each unfinished group one slice in an order
+    * the launch schedule picks, so one group spinning on memory cannot starve the group it waits for.
+    */
+  private def seeded(
+      kernel: Kernel,
+      geometry: LaunchGeometry,
+      parameterBlock: Array[Byte],
+      device: VMDevice,
+      dynamicSharedBytes: Int >= 0,
+      allLanes: VMLaneMask,
+      log: PrintLog
+  ): Either[Fault, Unit] =
+    geometry.groupTotal.refine[Long in 1L ~ 2147483647L].left.map(_ =>
+      Fault.InvalidRequest(s"${geometry.groupTotal} workgroups cannot run on one thread")
+    ).flatMap { count =>
+      val total   = count.toInt
+      val blocks  = Vec.tabulate(total)(_ => Block(geometry.groupVolume.unsafe[Int in 1 ~ 1024]))
+      val members = Vec.tabulate(total) { index =>
+        val group = geometry.groupCoordinates(index.toLong.unsafe[Long >= 0])
+        Execution(
+          kernel,
+          geometry,
+          group,
+          liveLanes(geometry, group, allLanes),
+          parameterBlock,
+          device,
+          dynamicSharedBytes,
+          blocks(index)
+        )
+      }
+      val result = interleave(kernel, members, "seeded workgroups wait on one another", device.schedule.forLaunch)
+      blocks.zipWithIndex.foreach((block, index) => log.add(index.toLong, block.workgroup.prints))
+      result
+    }
 
   // Steps each member between checks for cluster barrier phases that others completed.
   private val ClusterSlice = 64
@@ -470,7 +507,12 @@ private[isa] object VMInterpreter {
             )
           )
           sync.members = members
-          val result = interleave(kernel, members, "cluster members wait on one another")
+          val result = interleave(
+            kernel,
+            members,
+            "cluster members wait on one another",
+            device.schedule.forWorkgroup(origin)
+          )
           log.add(index, blocks.flatMap(_.workgroup.prints))
           result
         } finally release(blocks)
@@ -509,25 +551,64 @@ private[isa] object VMInterpreter {
           block
         )
       )
-      val result = interleave(kernel, members, "resident workgroups wait on one another")
+      val result = interleave(
+        kernel,
+        members,
+        "resident workgroups wait on one another",
+        device.schedule.forLaunch
+      )
       blocks.zipWithIndex.foreach((block, index) => log.add(index.toLong, block.workgroup.prints))
       result
     }
   }
 
-  /** Steps each of `members` in turn until all finish, failing when a full sweep advances none. */
+  /** Steps each of `members` in turn until all finish, failing when a full sweep advances none. A seeded schedule picks
+    * the order of each sweep, but every unfinished member still takes one slice per sweep.
+    */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def interleave(kernel: Kernel, members: Vec[Execution], stuck: String): Either[Fault, Unit] = {
+  private def interleave(
+      kernel: Kernel,
+      members: Vec[Execution],
+      stuck: String,
+      schedule: ConcurrencySchedule
+  ): Either[Fault, Unit] = {
     members.foreach(_.begin())
+    val order                  = if (schedule.seeded) Array.ofDim[Int](members.size) else null
     var failure: Option[Fault] = None
     var pending                = true
     while (failure.isEmpty && pending) {
       var progressed = false
-      members.foreach { member =>
-        if (failure.isEmpty && !member.finished) {
+      if (order eq null) {
+        members.foreach { member =>
+          if (failure.isEmpty && !member.finished) {
+            val runnable = member.runnable
+            member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
+            progressed ||= runnable || member.runnable
+          }
+        }
+      } else {
+        val ordering = order.nn
+        var count    = 0
+        var index    = 0
+        while (index < members.size) {
+          if (!members(index).finished) { ordering(count) = index; count += 1 }
+          index += 1
+        }
+        var i = count - 1
+        while (i > 0) {
+          val j   = schedule.choose(i + 1)
+          val tmp = ordering(i)
+          ordering(i) = ordering(j)
+          ordering(j) = tmp
+          i -= 1
+        }
+        var step = 0
+        while (step < count && failure.isEmpty) {
+          val member   = members(ordering(step))
           val runnable = member.runnable
           member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
           progressed ||= runnable || member.runnable
+          step += 1
         }
       }
       pending = members.exists(!_.finished)

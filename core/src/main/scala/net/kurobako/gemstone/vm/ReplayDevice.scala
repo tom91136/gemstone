@@ -23,13 +23,14 @@ object ReplayDevice {
 }
 
 /** Launches that resume from any instruction by deterministic replay. Each launch loads its program afresh and starts
-  * from a snapshot of device memory; with backends that run workgroups sequentially, replaying a launch to a checkpoint
-  * reaches the same state the launch had there.
+  * from a snapshot of device memory; with backends that run workgroups sequentially, or under a seeded schedule that
+  * runs them on one thread, replaying a launch to a checkpoint reaches the same state the launch had there.
   */
 class ReplayDevice(
     backends: BackendRegistry,
     memory: ArrayMemory,
-    limits: TaskControl.Limits = TaskControl.Limits.Default
+    limits: TaskControl.Limits = TaskControl.Limits.Default,
+    schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
 ) {
   import ReplayDevice.*
 
@@ -56,7 +57,7 @@ class ReplayDevice(
         if (step < from.step) Right(())
         else observer.step(Checkpoint(from.format, from.image, from.task, step, from.start), at, state)
       }
-      try Device(backends, memory, limits).launch(program, from.task, Some(replaying))
+      try Device(backends, memory, limits, schedule).launch(program, from.task, Some(replaying))
       finally program.close()
     }
 }

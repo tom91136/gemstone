@@ -38,7 +38,8 @@ object CooperativeDispatchSuite {
       groups: Int,
       cooperative: Boolean,
       memory: AddressSpace,
-      limits: TaskControl.Limits = Limits
+      limits: TaskControl.Limits = Limits,
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
   )(using
       munit.Location
   ): Either[Fault, Unit] = {
@@ -56,7 +57,7 @@ object CooperativeDispatchSuite {
       Vec.empty,
       cooperative = cooperative
     ).value
-    executeKernel(compileKernel(source), task, memory, TaskControl(limits))
+    executeKernel(compileKernel(source), task, memory, TaskControl(limits), schedule = schedule)
   }
 }
 

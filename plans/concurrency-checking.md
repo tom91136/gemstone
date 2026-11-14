@@ -1,6 +1,6 @@
 # Concurrency checking
 
-Status: proposed, not started. It comes before `ecosystem-conformance.md` and `workload-corpus.md`, which need it to tell a race in a program from a defect in the emulator.
+Status: in progress; steps 1 and 2 are done. It comes before `ecosystem-conformance.md` and `workload-corpus.md`, which need it to tell a race in a program from a defect in the emulator.
 
 ## Goal
 
@@ -8,10 +8,10 @@ Run a launch under a chosen, reproducible order of waves and workgroups, and rep
 
 ## Current state
 
-- Workgroups of a non-cooperative launch run on `WorkerPool` threads, so their order follows host thread scheduling, not anything a run can name. `Workgroups.Sequential` runs them one at a time.
+- Workgroups of a non-cooperative launch run on `WorkerPool` threads, so their order follows host thread scheduling, not anything a run can name. `Workgroups.Sequential` runs them one at a time, and a seeded schedule runs them on the calling thread in a seeded order.
 - `Pacing` keeps running workgroups within a small step bound of the slowest once a launch polls global memory, to match NVIDIA hardware, where blocks leave a grid barrier at near-equal rates (`conformance-coverage.md` item 15).
 - Within a workgroup the order is fixed. AMDGPU runs a wave until it reaches a barrier, ends, or suspends, and a resident wave yields after 64 backward branches. NVIDIA runs cohorts from a ready queue in arrival order; a cohort in a warp partition runs apart from the others until a barrier spans them.
-- `ReplayDevice` replays a launch to any instruction from a memory snapshot. Replay is exact only with sequential workgroups.
+- `ReplayDevice` replays a launch to any instruction from a memory snapshot. Replay is exact with sequential workgroups and with a seeded schedule that runs them on one thread.
 - Nothing detects races. A race shows only when the fixed order happens to expose it, as the cuSPARSE `find_colors_ker` race did under host load.
 
 ## Design
@@ -22,6 +22,7 @@ Run a launch under a chosen, reproducible order of waves and workgroups, and rep
 - **Random:** a uniform choice at each scheduling point, from a seed.
 - **PCT:** probabilistic concurrency testing (Burckhardt et al., 2010). Random priorities with `d` priority change points find any bug of depth `d` with a known lower bound on probability per run.
 - Under a seeded schedule every workgroup of the launch runs on one host thread. The seed, the schedule kind, the program, and the inputs then fix the run, and `ReplayDevice` can replay it. Parallelism comes from running many cases or seeds at once.
+- Cross-workgroup interleaving keeps each workgroup's state and gives every unfinished workgroup one bounded slice per sweep, in the order the launch schedule picks. No workgroup can run a second slice while another runnable one waits, so a workgroup spinning on global memory cannot starve the group that sets its flag, and a cooperative grid barrier always reaches every arrival; the bound `Pacing` models therefore holds by construction without its atomic clock. A sweep in which no workgroup advances is reported as a hang.
 - Scheduling points are barriers, yields, and ends today. Races need switches at memory operations too: shared, global, atomic, and fence instructions. ALU instructions are not scheduling points, which bounds the cost.
 - NVIDIA sm_70 and newer may also reorder diverged cohorts of one warp, as independent thread scheduling allows. Older NVIDIA targets and AMDGPU keep a wave in lockstep.
 
@@ -51,8 +52,8 @@ Run a launch under a chosen, reproducible order of waves and workgroups, and rep
 
 ### 2. Seeded order across workgroups
 
-- Run all workgroups of a launch on one thread under a seeded schedule, cooperative launches included. Decide how `Pacing` applies: a seeded run should still respect the hardware property `Pacing` models, or report where it relies on it.
-- `ReplayDevice` replays seeded launches.
+- Done: a `random:<seed>` schedule reports itself seeded, and NVIDIA, AMDGPU, and SPIR-V launches run every workgroup on the calling thread as retained state advanced one slice per schedule-chosen sweep, cooperative launches included. A sweep visits every unfinished workgroup once, so a spin on global memory cannot starve its setter and grid barriers progress; a sweep with no progress is a hang. `ReplayDevice` takes a schedule and replays seeded launches exactly. The fixed schedule keeps today's dispatcher and order.
+- Test: workgroup order changes with the seed and repeats under one seed, cooperative grid barriers and cross-workgroup spin waits complete under several seeds, and a seeded replay matches its launch.
 
 ### 3. Memory scheduling points and PCT
 
