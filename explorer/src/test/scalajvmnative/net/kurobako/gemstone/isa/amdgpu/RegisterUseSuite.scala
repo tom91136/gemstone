@@ -15,14 +15,18 @@ import scala.concurrent.duration.*
 class RegisterUseSuite extends Suite {
   override def baseTimeout: FiniteDuration = 15.minutes
 
-  private val Register = raw"([vsa])(?:(\d+)|\[(\d+):(\d+)\])".r
+  private val Register = raw"([vsa])(\d+)".r
+  private val Range    = raw"([vsa])\[(\d+):(\d+)\]".r
 
-  private def dwords(names: Iterable[String]): Set[String] = names.flatMap {
-    case Register(bank, single, first, last) =>
-      val (from, to) = if (single == null) (first.toInt, last.toInt) else (single.toInt, single.toInt)
+  private def dwords(names: Iterable[String]): Set[String] = {
+    def span(bank: String, from: Int, to: Int) =
       if (bank == "s" && from >= Fixed.VccLo) Nil else (from to to).map(bank + _)
-    case _ => Nil
-  }.toSet
+    names.flatMap {
+      case Register(bank, index)    => span(bank, index.toInt, index.toInt)
+      case Range(bank, first, last) => span(bank, first.toInt, last.toInt)
+      case _                        => Nil
+    }.toSet
+  }
 
   private case class Difference(target: Target, text: String, side: String, missing: Set[String], extra: Set[String])
 
