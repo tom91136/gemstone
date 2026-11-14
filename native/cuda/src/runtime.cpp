@@ -356,6 +356,8 @@ struct Fatbin {
   std::string ptx;
   std::vector<uint8_t> cubin;
   int cubinTarget = 0;
+  int selectedCubinTarget = -1;
+  bool selectedCubinEmpty = true;
   bool metadataOnly = true;
   bool entriesValid = true;
   bool incompatibleExecutable = false;
@@ -417,8 +419,6 @@ bool appendFatbin(Fatbin &fatbin, const uint8_t *data, bool validating) {
   uint64_t offset = outerHeaderSize;
   bool onlyEmptyCubins = true;
   bool sawCubin = false;
-  int selectedCubinTarget = -1;
-  bool selectedCubinEmpty = false;
   const auto target = configuredPtxVersion();
   // nvcc can wrap the fatbin in an empty outer header followed by an inner header carrying the payload size.
   if (contentSize == 0 && readNative<uint32_t>(data + offset) == FatbinMagic) {
@@ -475,13 +475,18 @@ bool appendFatbin(Fatbin &fatbin, const uint8_t *data, bool validating) {
       // Prefer the newest image at or below the configured target. Libraries
       // also register catalogues containing only newer architectures; retain
       // their real ELF metadata and let the backend reject unsupported execution.
+      // A device-link wrapper registers its linked image before the per-object
+      // images it was linked from, so an executable at a target already chosen
+      // keeps it against the metadata-only stubs that follow.
       const bool prefer =
           target
-          && (selectedCubinTarget < 0 || (cubinTarget <= *target && (selectedCubinTarget > *target || cubinTarget > selectedCubinTarget))
-              || (cubinTarget > *target && selectedCubinTarget > *target && cubinTarget < selectedCubinTarget));
+          && (fatbin.selectedCubinTarget < 0
+              || (cubinTarget <= *target && (fatbin.selectedCubinTarget > *target || cubinTarget > fatbin.selectedCubinTarget))
+              || (cubinTarget > *target && fatbin.selectedCubinTarget > *target && cubinTarget < fatbin.selectedCubinTarget)
+              || (cubinTarget == fatbin.selectedCubinTarget && fatbin.selectedCubinEmpty && !empty));
       if (prefer && cubinTarget >= 35) {
-        selectedCubinTarget = cubinTarget;
-        selectedCubinEmpty = empty;
+        fatbin.selectedCubinTarget = cubinTarget;
+        fatbin.selectedCubinEmpty = empty;
         fatbin.cubinTarget = cubinTarget;
         if (content) fatbin.cubin.assign(content->begin(), content->end());
         else fatbin.cubin.clear();
@@ -491,7 +496,7 @@ bool appendFatbin(Fatbin &fatbin, const uint8_t *data, bool validating) {
   }
   while (offset < totalSize)
     if (data[offset++] != 0) return false;
-  if (fatbin.ptx.empty() && sawCubin && (selectedCubinTarget >= 0 ? selectedCubinEmpty : onlyEmptyCubins))
+  if (fatbin.ptx.empty() && sawCubin && (fatbin.selectedCubinTarget >= 0 ? fatbin.selectedCubinEmpty : onlyEmptyCubins))
     return appendPtx(fatbin.ptx, emptyPtx());
   return true;
 }

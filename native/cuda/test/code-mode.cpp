@@ -69,6 +69,13 @@ void appendFatbinEntry(std::vector<uint8_t> &fatbin, uint16_t kind, int32_t targ
   std::copy(data, data + size, fatbin.data() + entry + 64);
 }
 
+std::vector<uint8_t> executableCubin() {
+  auto image = minimalCubin();
+  store64(image, 64 + 8, 6);
+  store64(image, 64 + 32, 4);
+  return image;
+}
+
 std::vector<uint8_t> mixedFatbin(const std::vector<uint8_t> &cubin) {
   std::vector<uint8_t> fatbin(16);
   store32(fatbin, 0, 0xba55ed50);
@@ -169,6 +176,34 @@ TEST_CASE("CUDA legacy linker fatbin PTX inputs keep their text", "[cuda][code-m
   CHECK(std::string(static_cast<const char *>(image)) == Ptx);
   CHECK(size == std::strlen(Ptx));
   CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA linked-binary wrappers keep an executable cubin over metadata stubs", "[cuda][code-mode]") {
+  gemstone_test::RpcFixture fixture;
+  const auto endpoint = fixture.endpoint();
+  const gemstone_test::Environment rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str());
+  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClientId, "42");
+  const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, "compute_89");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  CUcontext context = nullptr;
+  REQUIRE(cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS);
+
+  const auto executable = executableCubin();
+  const auto linked = metadataFatbin(executable);
+  const auto stub = metadataFatbin(minimalCubin());
+  const void *prelinked[]{stub.data(), nullptr};
+  struct {
+    int32_t magic;
+    int32_t version;
+    const void *data;
+    const void *const *prelinked;
+  } wrapper{.magic = 0x466243b1, .version = 2, .data = linked.data(), .prelinked = prelinked};
+  CUmodule module = nullptr;
+  REQUIRE(cuModuleLoadData(&module, &wrapper) == CUDA_SUCCESS);
+  CHECK(fixture.lastProgramImage() == executable);
+  REQUIRE(cuModuleUnload(module) == CUDA_SUCCESS);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
 TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin images", "[cuda][code-mode]") {
