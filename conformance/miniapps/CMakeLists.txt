@@ -7,7 +7,7 @@ if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
 endif()
 
 function(conformance_miniapp app)
-  cmake_parse_arguments(PARSE_ARGV 1 MINIAPP "" "MAIN;ADAPT"
+  cmake_parse_arguments(PARSE_ARGV 1 MINIAPP "" "MAIN;ADAPT;SOURCE"
     "MODELS;LICENCE_FILE;EXCLUDE;OPENMP_DEFINITIONS;DATA;DECKS;ARGUMENTS")
   set(models)
   foreach(entry IN LISTS MINIAPP_MODELS)
@@ -30,6 +30,19 @@ function(conformance_miniapp app)
     list(GET MINIAPP_LICENCE_FILE 0 licence)
     list(GET MINIAPP_LICENCE_FILE 1 licence_name)
     install(FILES "${source}/${licence}" DESTINATION licences RENAME "${licence_name}" COMPONENT support)
+  endif()
+  if(MINIAPP_SOURCE)
+    set(commit "not pinned to a commit")
+    if(MINIAPP_SOURCE MATCHES "([0-9a-f]+)$")
+      string(LENGTH "${CMAKE_MATCH_1}" commit_length)
+      if(commit_length GREATER_EQUAL 7)
+        set(commit "${CMAKE_MATCH_1}")
+      endif()
+    endif()
+    file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/${app}-SOURCE.txt"
+      CONTENT "Upstream source: ${MINIAPP_SOURCE}\nUpstream commit: ${commit}\n")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/${app}-SOURCE.txt"
+      DESTINATION licences RENAME "${app}-SOURCE.txt" COMPONENT support)
   endif()
   foreach(path IN LISTS MINIAPP_DATA)
     if(IS_DIRECTORY "${source}/${path}")

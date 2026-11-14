@@ -98,6 +98,17 @@ package. A failed build shard leaves its backends out of the package, which is t
 CI records the emulated server with JFR and uploads each conformance run's recording as the `jfr-<shard>` artifact,
 beside the `report-<shard>` reports.
 
+## Licensing
+
+`conformance/` is Apache-2.0 (`LICENSE`). `THIRD_PARTY_NOTICES.md` lists the files derived from upstream projects.
+The four GPL-3.0-or-later files are separate from the Apache grant: the two decks, `patches/libgomp-default-device.patch`,
+and `patches/cloverleaf-cuda-architectures.patch`. CloverLeaf and TeaLeaf artifacts install their upstream licence and
+a source pointer generated from `dependencies.cmake`.
+
+Artifacts that bundle runtime libraries install component notices under `licences/runtime/` and record the bundled
+libraries in `licences/runtime-libraries.tsv`. Components come from the libraries actually bundled, and the build fails
+when a bundled library has no notice. `conformance_component_notices` covers the check without a GPU.
+
 ## Driver
 
 ```console

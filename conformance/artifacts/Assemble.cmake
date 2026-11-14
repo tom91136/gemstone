@@ -142,6 +142,7 @@ if(NOT DEFINED CONFORMANCE_KEEP_WORK)
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ArtifactWork.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ComponentNotices.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/Floor.cmake")
 
 set(work "${CONFORMANCE_WORK_DIRECTORY}")
@@ -325,6 +326,10 @@ if(architecture)
       COMMAND_ERROR_IS_FATAL ANY)
     file(WRITE "${supplement}/support.stamp" "Runtime closure supplement for ${BACKEND}\n")
   endif()
+  conformance_verify_component_notices("${support}")
+  if(supplement)
+    conformance_verify_component_notices("${supplement}")
+  endif()
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -DARTIFACT=${overlay} -DSUPPORT=${support} -DSUPPLEMENT=${supplement}
       -P /source/conformance/artifacts/Verify.cmake
@@ -347,6 +352,7 @@ else()
     COMMAND_ERROR_IS_FATAL ANY)
   write_metadata("${artifact}" "" "${glibc}" "${glibcxx}")
   set_program_rpath("${artifact}" "$ORIGIN/lib")
+  conformance_verify_component_notices("${artifact}")
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -DARTIFACT=${artifact}
       -P /source/conformance/artifacts/Verify.cmake

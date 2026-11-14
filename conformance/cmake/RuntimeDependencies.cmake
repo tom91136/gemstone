@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 function(bundle_runtime_dependencies)
-  cmake_parse_arguments(PARSE_ARGV 0 bundle "" "DESTINATION"
+  cmake_parse_arguments(PARSE_ARGV 0 bundle "" "DESTINATION;RESOLVED_VARIABLE"
     "EXECUTABLE_PATTERNS;LIBRARY_PATTERNS;SEARCH_DIRECTORIES;PLUGINS;PREFERENCES;EXCLUDE_REGEXES")
   if(NOT bundle_DESTINATION)
     message(FATAL_ERROR "bundle_runtime_dependencies requires DESTINATION")
@@ -77,11 +77,16 @@ function(bundle_runtime_dependencies)
   endforeach()
 
   list(REMOVE_DUPLICATES resolved)
+  set(bundled)
   foreach(dependency IN LISTS resolved plugins)
     if(EXISTS "${dependency}")
       file(COPY "${dependency}" DESTINATION "${bundle_DESTINATION}" FOLLOW_SYMLINK_CHAIN)
+      list(APPEND bundled "${dependency}")
     endif()
   endforeach()
+  if(bundle_RESOLVED_VARIABLE)
+    set(${bundle_RESOLVED_VARIABLE} "${bundled}" PARENT_SCOPE)
+  endif()
   if(unresolved)
     message(FATAL_ERROR "Unresolved runtime dependencies: ${unresolved}")
   endif()

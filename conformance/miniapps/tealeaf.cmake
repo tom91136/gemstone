@@ -1,6 +1,8 @@
 conformance_miniapp(tealeaf
   MODELS cuda hip omp-target=omp kokkos sycl-usm sycl-acc std-indices
   MAIN driver/main.cpp
+  LICENCE_FILE LICENCE.txt TeaLeaf.txt
+  SOURCE "${conformance_tealeaf_source}"
   OPENMP_DEFINITIONS OMP_TARGET DIFFUSE_OVERLOAD
   DATA tea.problems
   DECKS decks/tealeaf.in

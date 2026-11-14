@@ -2,8 +2,7 @@ function(cloverleaf_adapt model source)
   if(model STREQUAL "cuda")
     # The 1.0 release disables CMake's architecture selection in favour of its
     # own -arch option. Conformance needs both real and virtual code images.
-    patch_exact("${source}/src/cuda/model.cmake"
-      "        set(CMAKE_CUDA_ARCHITECTURES OFF)" "")
+    patch_file("${source}" "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../patches/cloverleaf-cuda-architectures.patch")
   endif()
   if(model MATCHES "^(cuda|hip)$")
     # CloverLeaf's CUDA-style models rely on launch completion between kernels.
@@ -17,6 +16,7 @@ conformance_miniapp(cloverleaf
   MODELS cuda hip omp-target kokkos sycl-usm sycl-acc acc std-indices
   MAIN driver/clover_leaf.cpp
   LICENCE_FILE LICENCE.txt CloverLeaf.txt
+  SOURCE "${conformance_cloverleaf_source}"
   OPENMP_DEFINITIONS OMP_TARGET DIFFUSE_OVERLOAD
   DECKS decks/cloverleaf.in
   ARGUMENTS --file [=[${CONFORMANCE_SUPPORT_DIR}/data/decks/cloverleaf.in]=]

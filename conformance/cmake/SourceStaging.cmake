@@ -10,6 +10,11 @@ function(patch_exact path before after)
   file(WRITE "${path}" "${content}")
 endfunction()
 
+function(patch_file source patch)
+  execute_process(COMMAND patch --batch --fuzz=0 -d "${source}" -p1 INPUT_FILE "${patch}"
+    COMMAND_ERROR_IS_FATAL ANY)
+endfunction()
+
 function(stage_source source staging)
   cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "EXCLUDE")
   set(excludes)

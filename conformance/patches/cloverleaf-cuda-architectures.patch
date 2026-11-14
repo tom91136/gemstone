@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+--- a/src/cuda/model.cmake
++++ b/src/cuda/model.cmake
+@@ -40,3 +40,2 @@
+         cmake_policy(SET CMP0104 NEW)
+-        set(CMAKE_CUDA_ARCHITECTURES OFF)
+     endif ()

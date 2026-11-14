@@ -146,8 +146,13 @@ if(NOT CONFORMANCE_ARTIFACT_KIND STREQUAL "suite")
 file(GLOB directories /opt/intel/oneapi/compiler/*/lib /opt/intel/oneapi/umf/*/lib)
 file(GLOB plugins /opt/intel/oneapi/compiler/*/lib/libur_adapter*.so*
   /opt/intel/oneapi/compiler/*/lib/libur_loader.so*)
+include(/source/conformance/cmake/ComponentNotices.cmake)
 bundle_runtime_dependencies(DESTINATION "${destination}"
-  EXECUTABLE_PATTERNS ${executables} SEARCH_DIRECTORIES ${directories} PLUGINS ${plugins})
+  EXECUTABLE_PATTERNS ${executables} SEARCH_DIRECTORIES ${directories} PLUGINS ${plugins}
+  RESOLVED_VARIABLE bundled_runtime_libraries)
+conformance_install_component_notices(LIBRARIES ${bundled_runtime_libraries}
+  DESTINATION "${destination}/licences/runtime"
+  MANIFEST "${destination}/licences/runtime-libraries.tsv")
 file(TOUCH "${destination}/.complete")
 ]=])
       container_command(bundle

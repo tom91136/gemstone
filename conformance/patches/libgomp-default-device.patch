@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 --- a/libgomp/target.c
 +++ b/libgomp/target.c
 @@ -3005,6 +3005,8 @@

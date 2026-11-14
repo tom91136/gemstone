@@ -269,6 +269,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/JobserverTest.cmake")
     add_test(NAME conformance_floor
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/FloorTest.cmake")
+    add_test(NAME conformance_component_notices
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ComponentNoticesTest.cmake")
   endif()
 
   add_executable(conformance_fixture tests/fixture.cpp)
@@ -634,6 +636,7 @@ configure_file(cmake/RuntimeDependencies.cmake
   "${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.cmake" COPYONLY)
 string(CONCAT runtime_install_code
   "include([==[${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.cmake]==])\n"
+  "include([==[${CMAKE_CURRENT_SOURCE_DIR}/cmake/ComponentNotices.cmake]==])\n"
   "set(runtime_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")\n"
   "if(DEFINED ENV{CONFORMANCE_RUNTIME_INPUT_DIR} AND NOT \"\$ENV{CONFORMANCE_RUNTIME_INPUT_DIR}\" STREQUAL \"\")\n"
   "  set(runtime_input \"\$ENV{CONFORMANCE_RUNTIME_INPUT_DIR}\")\n"
@@ -647,7 +650,12 @@ string(CONCAT runtime_install_code
   "  SEARCH_DIRECTORIES${runtime_search_arguments}\n"
   "  PLUGINS${runtime_plugin_arguments}\n"
   "  PREFERENCES${runtime_preference_arguments}\n"
-  "  EXCLUDE_REGEXES${runtime_exclude_arguments})\n")
+  "  EXCLUDE_REGEXES${runtime_exclude_arguments}\n"
+  "  RESOLVED_VARIABLE bundled_runtime_libraries)\n"
+  "conformance_install_component_notices(\n"
+  "  LIBRARIES \${bundled_runtime_libraries}\n"
+  "  DESTINATION \"\${runtime_root}/licences/runtime\"\n"
+  "  MANIFEST \"\${runtime_root}/licences/runtime-libraries.tsv\")\n")
 install(CODE "${runtime_install_code}" COMPONENT support)
 
 if(conformance_offload_libraries)
@@ -655,11 +663,18 @@ if(conformance_offload_libraries)
   conformance_install_arguments(libomp_directory offload_search_arguments)
   string(CONCAT offload_install_code
     "include([==[${CMAKE_CURRENT_BINARY_DIR}/RuntimeDependencies.cmake]==])\n"
+    "include([==[${CMAKE_CURRENT_SOURCE_DIR}/cmake/ComponentNotices.cmake]==])\n"
+    "set(runtime_root \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}\")\n"
     "bundle_runtime_dependencies(\n"
-    "  DESTINATION \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/lib\"\n"
+    "  DESTINATION \"\${runtime_root}/lib\"\n"
     "  SEARCH_DIRECTORIES${offload_search_arguments}\n"
     "  PLUGINS${offload_library_arguments}\n"
-    "  EXCLUDE_REGEXES${runtime_exclude_arguments})\n")
+    "  EXCLUDE_REGEXES${runtime_exclude_arguments}\n"
+    "  RESOLVED_VARIABLE bundled_runtime_libraries)\n"
+    "conformance_install_component_notices(\n"
+    "  LIBRARIES \${bundled_runtime_libraries}\n"
+    "  DESTINATION \"\${runtime_root}/licences/runtime\"\n"
+    "  MANIFEST \"\${runtime_root}/licences/runtime-libraries.tsv\")\n")
   install(CODE "${offload_install_code}" COMPONENT supplement)
 endif()
 

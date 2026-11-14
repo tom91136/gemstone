@@ -52,11 +52,15 @@ pinned_dependency(babelstream SOURCE_ONLY
 pinned_dependency(minibude SOURCE_ONLY
   URL https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/2b23c27e80792f48fdf12a3ed232620160979e4c
   URL_HASH SHA256=5a24663d101873a376fdae03126e7778f361cddd5b65b4bc124414a8839d8543)
+set(conformance_cloverleaf_source
+  https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/e9afc2b0efd8b13210a862c67eb2bb86d4dba599)
 pinned_dependency(cloverleaf SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/CloverLeaf/tar.gz/e9afc2b0efd8b13210a862c67eb2bb86d4dba599
+  URL "${conformance_cloverleaf_source}"
   URL_HASH SHA256=2ba78ec28d6204d328adc4ce07c9755f743ae1f98bde0b292d4a0895531031a5)
+set(conformance_tealeaf_source
+  https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/883b811fbd17888c5071e951776ede1ab8783542)
 pinned_dependency(tealeaf SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/TeaLeaf/tar.gz/883b811fbd17888c5071e951776ede1ab8783542
+  URL "${conformance_tealeaf_source}"
   URL_HASH SHA256=2df6600eebda0d880fbb65b1e79f92414f2defb32c704c55064233e3b62f3500)
 pinned_dependency(kokkos SOURCE_ONLY
   URL https://codeload.github.com/kokkos/kokkos/tar.gz/18a8c050ab3f71afa0376087238b04cc69333f1f

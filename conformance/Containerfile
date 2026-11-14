@@ -161,6 +161,7 @@ RUN sysroot="--sysroot=/opt/sysroot --gcc-toolchain=/opt/sysroot/opt/rh/gcc-tool
        "-DRUNTIMES_CMAKE_ARGS=-DCMAKE_C_FLAGS=$sysroot;-DCMAKE_CXX_FLAGS=$sysroot" \
        -DCMAKE_INSTALL_PREFIX=/llvm-offload/usr/lib/llvm-${LLVM_VERSION} \
     && ninja -C /tmp/llvm-offload-build runtimes install-runtimes \
+    && install -m644 /tmp/llvm-src/LICENSE.TXT "/llvm-offload/usr/lib/llvm-${LLVM_VERSION}/LICENSE.TXT" \
     && rm -rf /tmp/llvm-src /tmp/llvm-offload-build
 
 # Takes the llvm-offload tree from a previous export when the llvm-offload-archive build context is supplied.
@@ -391,6 +392,7 @@ FROM ubuntu-build-base AS toolchain-cuda
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CUDA_PACKAGE_VERSION
 COPY --from=cuda-sdk /usr/local/ /usr/local/
+COPY --from=cuda-sdk /NGC-DL-CONTAINER-LICENSE /usr/local/share/licenses/cuda/NGC-DL-CONTAINER-LICENSE
 RUN apt-install curl xz-utils g++-11 \
     && rm -f /usr/local/cuda \
     && ln -s "cuda-$(echo "${CUDA_PACKAGE_VERSION}" | tr - .)" /usr/local/cuda
