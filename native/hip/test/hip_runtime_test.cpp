@@ -774,6 +774,67 @@ TEST_CASE("HIP queue fault aborts without any call observing it", "[hip]") {
   CHECK(outcome.output.contains("inactivated due to async error"));
 }
 
+TEST_CASE("HIP device assertions return hipErrorAssert until the device resets", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module{};
+  hipFunction_t function{};
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  void *output = nullptr;
+  REQUIRE((hipMalloc(&output, sizeof(uint32_t)) == hipSuccess));
+  uint32_t seed = 1;
+  fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = seed});
+  fixture.failNextCompletion(gemstone::execution::FailureKind::AssertionFailed);
+  void *arguments[] = {&output, &seed};
+  REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
+  CHECK((hipDeviceSynchronize() == hipErrorAssert));
+  CHECK((hipDeviceSynchronize() == hipErrorAssert));
+  CHECK((hipStreamQuery(nullptr) == hipErrorAssert));
+  CHECK((hipPeekAtLastError() == hipErrorAssert));
+  CHECK((hipGetLastError() == hipErrorAssert));
+  CHECK((hipGetLastError() == hipErrorAssert));
+  CHECK((std::strcmp(hipGetErrorName(hipErrorAssert), "hipErrorAssert") == 0));
+  CHECK((hipFree(output) == hipErrorAssert));
+  REQUIRE((hipDeviceReset() == hipSuccess));
+  CHECK((hipDeviceSynchronize() == hipSuccess));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
+namespace {
+
+void assertionLaunch() {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module{};
+  hipFunction_t function{};
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  void *output = nullptr;
+  REQUIRE((hipMalloc(&output, sizeof(uint32_t)) == hipSuccess));
+  uint32_t seed = 1;
+  fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = seed});
+  fixture.failNextCompletion(gemstone::execution::FailureKind::AssertionFailed);
+  void *arguments[] = {&output, &seed};
+  REQUIRE((hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, nullptr, arguments, nullptr) == hipSuccess));
+  std::fprintf(stderr, "synchronise=%d\n", static_cast<int>(hipDeviceSynchronize()));
+  std::fflush(stderr);
+}
+
+} // namespace
+
+TEST_CASE("HIP assertion child", "[.]") { assertionLaunch(); }
+
+TEST_CASE("HIP device assertions print the execution failure", "[hip]") {
+  const auto outcome = gemstone_test::runChildTest("HIP assertion child");
+  CHECK(outcome.signal == 0);
+  CHECK(outcome.exitCode == 0);
+  CHECK(outcome.output.contains("completion failed"));
+  CHECK(outcome.output.contains("synchronise=710"));
+}
+
 TEST_CASE("HIP queue fault aborts silently when the queue fault message is disabled", "[hip]") {
   const gemstone_test::Environment quiet("HSA_ENABLE_QUEUE_FAULT_MESSAGE", "0");
   const auto outcome = gemstone_test::runChildTest("HIP fault child IllegalAddress");

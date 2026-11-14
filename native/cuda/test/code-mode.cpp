@@ -2,6 +2,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <optional>
@@ -15,6 +16,7 @@
 #include <cuda.h>
 #include <cuda_runtime_api.h>
 
+#include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
@@ -724,6 +726,30 @@ TEST_CASE("CUDA traps persist as launch failures", "[cuda][code-mode]") {
 
 TEST_CASE("CUDA failed assertions persist", "[cuda][code-mode]") {
   checkStickyFailure(gemstone::execution::FailureKind::AssertionFailed, CUDA_ERROR_ASSERT);
+}
+
+namespace {
+
+void assertionLaunch() {
+  FailureSession session;
+  const std::string ptx(Ptx);
+  session.loadKernel(ptx.c_str());
+  session.fixture.failNextCompletion(gemstone::execution::FailureKind::AssertionFailed);
+  REQUIRE(session.launch() == CUDA_SUCCESS);
+  std::fprintf(stderr, "synchronise=%d\n", static_cast<int>(cuCtxSynchronize()));
+  std::fflush(stderr);
+}
+
+} // namespace
+
+TEST_CASE("CUDA assertion child", "[.]") { assertionLaunch(); }
+
+TEST_CASE("CUDA failed assertions print the execution failure", "[cuda][code-mode]") {
+  const auto outcome = gemstone_test::runChildTest("CUDA assertion child");
+  CHECK(outcome.signal == 0);
+  CHECK(outcome.exitCode == 0);
+  CHECK(outcome.output.contains("completion failed"));
+  CHECK(outcome.output.contains("synchronise=710"));
 }
 
 TEST_CASE("CUDA launch timeouts persist", "[cuda][code-mode]") {

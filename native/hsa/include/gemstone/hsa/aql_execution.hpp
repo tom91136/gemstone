@@ -50,6 +50,7 @@ enum class PacketFailure : int32_t {
   IllegalInstruction = -9,
   OutOfResources = -10,
   InvalidCodeObject = -11,
+  AssertionFailed = -12,
 };
 
 /** Completion-signal access; ROCr and the public HSA runtime store signals differently. */
@@ -60,6 +61,8 @@ public:
   virtual bool complete(uint64_t signal) = 0;
   /** Receives the failure code of a packet that cannot complete; `signal` is zero when the packet has none. */
   virtual bool fail(uint64_t signal, int32_t code) = 0;
+  /** Publishes a failure the queue survives; the public runtime stores it in the signal instead of halting. */
+  virtual bool report(uint64_t signal, int32_t code) { return fail(signal, code); }
 };
 
 /** ROCr 7.x ordinary signals: the handle points at amd_signal_t, whose signed value word sits at offset 8. */

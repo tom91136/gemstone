@@ -810,6 +810,32 @@ class ControlFlowSuite extends Suite {
     assert(detail.endsWith("x=y:36: x=y: block: [0,0,0], thread: [0,0,0] Assertion `x=y` failed."), detail)
   }
 
+  test("a failed __assertfail taken by one lane matches the CUDA driver's message") {
+    // Observed on an RTX 4060 Ti, driver 620.70.06, CUDA 13.3: the same line appears on stderr and
+    // cudaDeviceSynchronize returns 710.
+    val text =
+      "S2R R0, SR_TID.X; ISETP.EQ.U32.AND P0, PT, R0, 1, PT; " +
+        "MOV R20, 0x65737361; STS [0x0], R20; MOV R20, 0x632e7472; STS [0x4], R20; " +
+        "MOV R20, 0x00000075; STS [0x8], R20; MOV R20, 0x64696f76; STS [0x10], R20; " +
+        "MOV R20, 0x6f727020; STS [0x14], R20; MOV R20, 0x69286562; STS [0x18], R20; " +
+        "MOV R20, 0x2a20746e; STS [0x1c], R20; MOV R20, 0x00000029; STS [0x20], R20; " +
+        "MOV R20, 0x202b2032; STS [0x28], R20; MOV R20, 0x3d3d2032; STS [0x2c], R20; " +
+        "MOV R20, 0x00003520; STS [0x30], R20; " +
+        "MOV R4, 0x10000028; MOV R5, RZ; MOV R6, 0x10000000; MOV R7, RZ; MOV R8, 5; " +
+        "MOV R10, 0x10000010; MOV R11, RZ; MOV R2, 0x40; MOV R3, 0xffffff00; " +
+        "@P0 CALL.ABS.NOINC R2; EXIT"
+    val failed = program(89, text, shared = 64).run(4)(Arg.zeros(4))
+    val detail = failed match {
+      case Left(Fault.Assertion(detail)) => detail.raw
+      case other                         => fail(other.toString)
+    }
+    assertEquals(
+      detail,
+      "assert.cu:5: void probe(int *): block: [0,0,0], thread: [1,0,0] Assertion `2 + 2 == 5` failed."
+    )
+    assertEquals(program(89, text, shared = 64).run(1)(Arg.zeros(4)).map(_ => ()), Right(()))
+  }
+
   test("LEPC and ULEPC write the instruction's 64-bit address") {
     check(
       90,

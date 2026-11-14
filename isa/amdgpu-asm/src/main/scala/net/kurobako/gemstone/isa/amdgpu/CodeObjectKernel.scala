@@ -56,6 +56,9 @@ private case class CodeObjectKernel(
   lazy val heapCalls: Map[Long, DeviceHeapCall] = functionTargets.flatMap { case (address, function) =>
     DeviceHeapCall.matching(function).map(address -> _)
   }
+  lazy val assertCalls: Set[Long] = functionTargets.collect {
+    case (address, "__assert_fail") => address
+  }.toSet
   val globalMemoryLocks: Array[ReentrantLock] = Array.fill(globalMemory.length)(ReentrantLock())
 
   /** MODE as a wave starts: FP_DENORM from FLOAT_DENORM_MODE_32 and _16_64, and DX10_CLAMP and IEEE where GFX12 has not

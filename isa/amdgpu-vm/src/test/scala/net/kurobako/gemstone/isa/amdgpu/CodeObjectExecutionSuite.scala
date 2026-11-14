@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import VMIR.*
 import fixtures.*
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
@@ -138,6 +139,50 @@ class CodeObjectExecutionSuite extends Suite {
     val dispatch = singleTask()
     assert(executeKernel(first, dispatch, RegionMemory()).isLeft)
     assertEquals(executeKernel(second, dispatch, RegionMemory()), Right(()))
+  }
+
+  test("gfx1030 a device assertion on one lane names the file, line, function and expression") {
+    val text =
+      """v_mbcnt_lo_u32_b32 v7, -1, 0
+        |v_cmp_eq_u32 vcc, 1, v7
+        |s_and_saveexec_b64 s[0:1], vcc
+        |s_cbranch_execz pass
+        |v_mov_b32 v0, 0x9000
+        |v_mov_b32 v1, 0
+        |v_mov_b32 v2, 0x9007
+        |v_mov_b32 v3, 0
+        |v_mov_b32 v4, 18
+        |v_mov_b32 v5, 0x9010
+        |v_mov_b32 v6, 0
+        |s_mov_b64 s[4:5], 0x100
+        |s_swappc_b64 s[30:31], s[4:5]
+        |pass:
+        |s_endpgm
+        |.p2align 8
+        |s_endpgm
+        |""".stripMargin
+    val code   = asm.Assembler.encode(asm.Parser.parse(text).value, TargetMode(Target("gfx1030"), 64)).value
+    val kernel = codeKernel(
+      target = Target("gfx1030"),
+      entry = 0L,
+      entrySize = Some(0x100),
+      code = code,
+      functionSizes = Map(0L -> 0x100, 0x100L -> 4),
+      functionTargets = Map(0x100L -> "__assert_fail"),
+      readOnlyAddress = 0x9000L,
+      readOnly = "n == 2\u0000file.hip\u0000probe\u0000".getBytes(StandardCharsets.US_ASCII)
+    )
+    val lanes = KernelTask.validated(
+      "kernel",
+      Dimensions(4.unsafe[Int > 0], 1, 1),
+      Dimensions.One,
+      Vec.empty
+    ).value
+    assertEquals(
+      executeKernel(compileKernel(kernel), lanes, RegionMemory()),
+      Left(Fault.Assertion("file.hip:18: probe: Device-side assertion `n == 2' failed."))
+    )
+    assertEquals(executeKernel(compileKernel(kernel), singleTask(), RegionMemory()), Right(()))
   }
 
   private val trapIds = List(2, 0x3141)

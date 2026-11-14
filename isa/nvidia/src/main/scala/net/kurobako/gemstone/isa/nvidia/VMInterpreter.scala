@@ -747,7 +747,6 @@ private[isa] object VMInterpreter {
     case Fault.Backend(detail)            => Fault.Backend(s"$name: $detail")
     case Fault.IllegalInstruction(detail) => Fault.IllegalInstruction(s"$name: $detail")
     case Fault.Trap(detail)               => Fault.Trap(s"$name: $detail")
-    case Fault.Assertion(detail)          => Fault.Assertion(s"$name: $detail")
     case Fault.Misaligned(detail)         => Fault.Misaligned(s"$name: $detail")
     case other                            => other
   }

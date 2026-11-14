@@ -55,6 +55,7 @@ PacketFailure packetFailure(FailureKind kind) {
     case FailureKind::IllegalInstruction: return PacketFailure::IllegalInstruction;
     case FailureKind::IllegalAddress:
     case FailureKind::MisalignedAddress: return PacketFailure::InvalidMemoryReference;
+    case FailureKind::AssertionFailed: return PacketFailure::AssertionFailed;
     default: return PacketFailure::ExecutionFailed;
   }
 }
@@ -463,7 +464,15 @@ PacketResult AqlRuntime::dispatch(const AqlPacket &packet, bool cooperative, uin
     std::fprintf(stderr, "Gemstone completed AQL kernel=%s result=%d release=%d\n", found->name.c_str(), awaited ? 0 : -1,
                  released ? 0 : -1);
   if (!awaited || !queried || !printError.empty() || !released) dropLaunchClient();
-  if (!awaited) return failed(awaitError, packetFailure(awaitKind));
+  if (!awaited) {
+    if (awaitKind == FailureKind::AssertionFailed) {
+      std::fprintf(stderr, "%s\n", awaitError.c_str());
+      fail(awaitError);
+      return signals->report(packet.completionSignal, static_cast<int32_t>(PacketFailure::AssertionFailed)) ? PacketResult::Accepted
+                                                                                                            : PacketResult::Fatal;
+    }
+    return failed(awaitError, packetFailure(awaitKind));
+  }
   if (!queried) return failed(queryError);
   if (!printError.empty()) return failed(printError);
   if (!released) return failed(released.error().detail);

@@ -381,6 +381,13 @@ public:
     activeSignalCompletion->error = code;
     return handle != 0;
   }
+  bool report(uint64_t handle, int32_t code) override {
+    const auto signal = findSignal(*runtime, handle);
+    if (!signal) return false;
+    __atomic_store_n(&signal->value, static_cast<int64_t>(code), __ATOMIC_RELEASE);
+    runtime->asyncChanged.notify_all();
+    return true;
+  }
 
 private:
   RuntimeState *runtime;
@@ -600,6 +607,7 @@ hsa_status_t queueStatus(int32_t code) {
     case PacketFailure::IllegalInstruction: return static_cast<hsa_status_t>(HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION);
     case PacketFailure::OutOfResources: return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     case PacketFailure::InvalidCodeObject: return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+    case PacketFailure::AssertionFailed: return HSA_STATUS_ERROR_EXCEPTION;
   }
   return HSA_STATUS_ERROR_EXCEPTION;
 }

@@ -233,6 +233,14 @@ public:
     std::erase_if(streams, [](const auto &entry) { return entry.second.created; });
     events.clear();
   }
+  /** Forgets completed work and the statuses it left, after the caller waited for every stream. */
+  void forgetCompleted() {
+    std::scoped_lock const lock(mutex);
+    for (auto &[_, stream] : streams) {
+      stream.outstanding.clear();
+      stream.tail.reset();
+    }
+  }
 
   void *createEvent() {
     std::scoped_lock const lock(mutex);

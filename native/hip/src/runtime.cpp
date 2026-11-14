@@ -43,6 +43,7 @@
 
 #include "gemstone/devices.hpp"
 #include "gemstone/environment.hpp"
+#include "gemstone/hsa/aql_execution.hpp"
 #include "gemstone/hsa/device_heap.hpp"
 #include "gemstone/hsa/device_model.hpp"
 #include "gemstone/hsa/executable_metadata.hpp"
@@ -75,7 +76,23 @@ gemstone::CommandQueue &commands() {
   return queue;
 }
 
-hipError_t waitCommands() { return static_cast<hipError_t>(commands().waitAll()); }
+// A device assertion leaves the device unusable until it resets, as CUDA's sticky context error does.
+std::atomic<hipError_t> stickyError{hipSuccess};
+
+hipError_t stickyStatus(hipError_t status) {
+  const auto latched = stickyError.load();
+  return latched != hipSuccess ? latched : status;
+}
+
+hipError_t latchStatus(hipError_t status) {
+  if (status == hipErrorAssert) {
+    auto expected = hipSuccess;
+    stickyError.compare_exchange_strong(expected, status);
+  }
+  return status;
+}
+
+hipError_t waitCommands() { return stickyStatus(static_cast<hipError_t>(commands().waitAll())); }
 
 gemstone::graph::Captures<hipStream_t, hipEvent_t> captures;
 
@@ -855,6 +872,7 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
     const auto queueOwner = std::shared_ptr<hsa_queue_t>(dispatchQueue, [](hsa_queue_t *queue) { (void)hsa_queue_destroy(queue); });
     hsa_signal_t completion{};
     hipError_t const dispatchError = hipErrorLaunchFailure;
+    int64_t completionValue = 1;
     hsa_status_t status = hsa_signal_create(1, 0, nullptr, &completion);
     if (status == HSA_STATUS_SUCCESS) {
       const uint64_t index = hsa_queue_add_write_index_relaxed(dispatchQueue, 1);
@@ -880,6 +898,7 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
       hsa_signal_store_screlease(dispatchQueue->doorbell_signal, static_cast<hsa_signal_value_t>(index));
       while (hsa_signal_load_scacquire(completion) == 1)
         std::this_thread::yield();
+      completionValue = hsa_signal_load_scacquire(completion);
       // The queue read index advances after the HSA worker mirrors pageable
       // writes back to host memory. Wait for that handoff before returning to a
       // caller that may immediately read or free a captured host pointer.
@@ -901,6 +920,7 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
       if (traceModules()) std::fprintf(stderr, "Gemstone HIP dispatch HSA status=%d\n", static_cast<int>(status));
       return dispatchError;
     }
+    if (completionValue == static_cast<int64_t>(gemstone::hsa::PacketFailure::AssertionFailed)) return latchStatus(hipErrorAssert);
     return mapHsa(destroyed);
   }));
 }
@@ -1166,7 +1186,10 @@ extern "C" hipError_t hipDeviceSetLimit(hipLimit_t limit, size_t value) {
 }
 
 extern "C" hipError_t hipDeviceReset() {
-  if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
+  stickyError.store(hipSuccess);
+  lastError = hipSuccess;
+  if (const auto pending = static_cast<hipError_t>(commands().waitAll()); pending != hipSuccess && pending != hipErrorAssert)
+    return remember(pending);
   auto &runtime = state();
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
   std::scoped_lock const guard(runtime.lock);
@@ -1181,6 +1204,7 @@ extern "C" hipError_t hipDeviceReset() {
     records.clear();
   }
   commands().reset();
+  commands().forgetCompleted();
   for (const auto &module : runtime.driverModules)
     if (const auto live = module.lock()) live->reset();
   runtime.kernels.clear();
@@ -1826,18 +1850,19 @@ extern "C" hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attributes,
 }
 
 extern "C" hipError_t hipGetLastError() {
-  const hipError_t result = lastError;
+  const hipError_t result = stickyStatus(lastError);
   lastError = hipSuccess;
   return result;
 }
 extern "C" hipError_t hipExtGetLastError() { return hipGetLastError(); }
-extern "C" hipError_t hipPeekAtLastError() { return lastError; }
+extern "C" hipError_t hipPeekAtLastError() { return stickyStatus(lastError); }
 extern "C" const char *hipGetErrorName(hipError_t error) {
   switch (error) {
     case hipSuccess: return "hipSuccess";
     case hipErrorNoDevice: return "hipErrorNoDevice";
     case hipErrorInvalidValue: return "hipErrorInvalidValue";
     case hipErrorInvalidDeviceFunction: return "hipErrorInvalidDeviceFunction";
+    case hipErrorAssert: return "hipErrorAssert";
     case hipErrorLaunchFailure: return "hipErrorLaunchFailure";
     case hipErrorInvalidConfiguration: return "hipErrorInvalidConfiguration";
     case hipErrorInvalidImage: return "hipErrorInvalidImage";
@@ -1890,11 +1915,11 @@ extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
 }
 extern "C" hipError_t hipStreamSynchronize(hipStream_t stream) {
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
-  return remember(static_cast<hipError_t>(commands().wait(commands().snapshot(stream))));
+  return remember(stickyStatus(static_cast<hipError_t>(commands().wait(commands().snapshot(stream)))));
 }
 extern "C" hipError_t hipStreamQuery(hipStream_t stream) {
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
-  return remember(static_cast<hipError_t>(commands().query(commands().snapshot(stream), hipErrorNotReady)));
+  return remember(stickyStatus(static_cast<hipError_t>(commands().query(commands().snapshot(stream), hipErrorNotReady))));
 }
 extern "C" hipError_t hipStreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void *data, unsigned int flags) {
   if (!callback || flags != 0) return remember(hipErrorInvalidValue);

@@ -55,6 +55,8 @@ private object VMInterpreter {
   // a resident wave yields after this many backward branches, so a spin on another workgroup lets that one run
   private inline val BackwardBranchesPerSlice = 64
 
+  private inline val AssertionTextBytes = 4096
+
   /** Where a wave stops: arrived at a workgroup barrier, ended, or suspended mid-flow while it waits or yields. */
   private enum WaveBoundary derives CanEqual {
     case Barrier, End, Suspended
@@ -2247,8 +2249,40 @@ private object VMInterpreter {
           serve(active.bits)
       }
 
+    // __assert_fail takes the expression, file, line and function in v0-v6, as the HIP header emits them
+    private def asserted(): Flow[Int] =
+      if (active.isEmpty) NextStep
+      else {
+        val lane                                       = java.lang.Long.numberOfTrailingZeros(active.bits).unsafe[Lane]
+        def text(address: Long): Either[Fault, String] = {
+          val result                                            = new java.lang.StringBuilder
+          @tailrec def read(offset: Int): Either[Fault, String] =
+            if (offset >= AssertionTextBytes) Right(result.toString)
+            else
+              dispatchMemory.readBytes(address + offset, 1) match {
+                case Left(fault)  => Left(fault)
+                case Right(bytes) =>
+                  val byte = bytes(0)
+                  if (byte == 0) Right(result.toString)
+                  else { result.append((byte & 0xff).toChar); read(offset + 1) }
+              }
+          read(0)
+        }
+        text(pair(vector, 0, lane)).flatMap { expression =>
+          text(pair(vector, 2, lane)).flatMap { file =>
+            text(pair(vector, 5, lane)).flatMap { function =>
+              val line = Bits.low32(vector(4)(lane))
+              Left(Fault.Assertion(
+                s"$file:$line: $function: Device-side assertion `$expression' failed.".unsafe[NonEmpty[String]]
+              ))
+            }
+          }
+        }
+      }
+
     private def calledFunction(link: ScalarRegisterIndex, returnAddress: Long, target: Long): Flow[Int] =
-      slice.program.source.emulatedCalls.get(target) match {
+      if (slice.program.source.assertCalls.contains(target)) asserted()
+      else slice.program.source.emulatedCalls.get(target) match {
         case Some(call) =>
           foreachActive { lane =>
             def component(doubleRegister: VectorRegisterIndex, singleRegister: VectorRegisterIndex): Double =

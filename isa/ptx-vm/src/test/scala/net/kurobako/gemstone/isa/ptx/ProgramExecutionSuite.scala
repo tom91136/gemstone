@@ -223,6 +223,82 @@ class ProgramExecutionSuite extends Suite {
     assert(detail.endsWith("x=y:36: x=y: block: [0,0,0], thread: [0,0,0] Assertion `x=y` failed."), detail)
   }
 
+  test("an assertion taken by one thread matches the CUDA driver's message") {
+    // Observed on an RTX 4060 Ti, driver 620.70.06, CUDA 13.3: the same line appears on stderr and
+    // cudaDeviceSynchronize returns 710.
+    val source =
+      """.version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.extern .func __assertfail(.param .b64 message, .param .b64 file, .param .b32 line, .param .b64 function, .param .b64 size);
+      |.visible .entry probe() {
+      | .reg .u64 %base, %file, %function, %expression;
+      | .reg .u32 %tid;
+      | .reg .pred %asserting;
+      | .shared .b8 text[64];
+      | .param .b64 message;
+      | .param .b64 file;
+      | .param .b32 line;
+      | .param .b64 function;
+      | .param .b64 size;
+      | mov.u32 %tid, %tid.x;
+      | setp.eq.u32 %asserting, %tid, 1;
+      | @!%asserting bra done;
+      | st.shared.u32 [text+0], 0x65737361;
+      | st.shared.u32 [text+4], 0x632e7472;
+      | st.shared.u32 [text+8], 0x00000075;
+      | st.shared.u32 [text+12], 0;
+      | st.shared.u32 [text+16], 0x64696f76;
+      | st.shared.u32 [text+20], 0x6f727020;
+      | st.shared.u32 [text+24], 0x69286562;
+      | st.shared.u32 [text+28], 0x2a20746e;
+      | st.shared.u32 [text+32], 0x00000029;
+      | st.shared.u32 [text+36], 0;
+      | st.shared.u32 [text+40], 0x202b2032;
+      | st.shared.u32 [text+44], 0x3d3d2032;
+      | st.shared.u32 [text+48], 0x00003520;
+      | mov.u64 %base, text;
+      | cvta.shared.u64 %base, %base;
+      | add.u64 %file, %base, 0;
+      | add.u64 %function, %base, 16;
+      | add.u64 %expression, %base, 40;
+      | st.param.b64 [message], %expression;
+      | st.param.b64 [file], %file;
+      | st.param.b32 [line], 5;
+      | st.param.b64 [function], %function;
+      | st.param.b64 [size], 1;
+      | call __assertfail, (message, file, line, function, size);
+      | done:
+      | ret;
+      |}
+      |""".stripMargin
+    val loaded = Parser.parse(source).left.map(_.message).flatMap(program =>
+      LoadedProgram.load(program, text = execution.text).left.map(_.message)
+    ).value
+    val lanes = KernelTask.validated(
+      "probe",
+      LaunchGeometry.Dimensions(4.unsafe[Int > 0], 1, 1),
+      LaunchGeometry.Dimensions.One,
+      Vec.empty
+    ).value
+    val failed = loaded.execute(lanes, TaskContext(RejectingMemory(), TaskControl(), _ => Right(())))
+    val detail = failed match {
+      case Left(Fault.Assertion(detail)) => detail.raw
+      case other                         => fail(other.toString)
+    }
+    assertEquals(
+      detail,
+      "assert.cu:5: void probe(int *): block: [0,0,0], thread: [1,0,0] Assertion `2 + 2 == 5` failed."
+    )
+    val alone = KernelTask.validated(
+      "probe",
+      LaunchGeometry.Dimensions.One,
+      LaunchGeometry.Dimensions.One,
+      Vec.empty
+    ).value
+    assertEquals(loaded.execute(alone, TaskContext(RejectingMemory(), TaskControl(), _ => Right(()))), Right(()))
+  }
+
   for (requested <- Vec[Int >= 0](0, 64, 160))
     test(s"dynamic shared size reports the launch request $requested separately from static declarations") {
       val source = s""".version 8.0

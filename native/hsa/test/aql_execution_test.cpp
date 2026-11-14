@@ -312,7 +312,7 @@ TEST_CASE("AQL dispatch failures publish the code for the failure kind", "[hsa][
       {.kind = FailureKind::MisalignedAddress, .code = static_cast<int64_t>(PacketFailure::InvalidMemoryReference)},
       {.kind = FailureKind::IllegalInstruction, .code = static_cast<int64_t>(PacketFailure::IllegalInstruction)},
       {.kind = FailureKind::Trapped, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
-      {.kind = FailureKind::AssertionFailed, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
+      {.kind = FailureKind::AssertionFailed, .code = static_cast<int64_t>(PacketFailure::AssertionFailed)},
       {.kind = FailureKind::TimedOut, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
       {.kind = FailureKind::Unsupported, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
       {.kind = FailureKind::Failed, .code = static_cast<int64_t>(PacketFailure::ExecutionFailed)},
