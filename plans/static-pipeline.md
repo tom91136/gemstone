@@ -110,6 +110,19 @@ How the data splits the two costs:
 - A third term of 12 cycles appears whenever the control follows the body (52 against 40) and whenever a small loop crosses a 64-byte line (79 against 67). It does not depend on how many control ops there are, and a DFMA or MUFU loop that holds the pipe for 64 cycles hides most of it. It is the 13-cycle gap of the one-warp `stream_ffma` and `stream_ffma_8` rows. The model has no code addresses or fetch lines, so it cannot place the term. Adding it to the redirect (33 in total) clears the one-warp FFMA row and turns six other rows red: `stream_ffma_1`, `chain_ffma_1`, `stream_mufu_1`, `stream_dfma_1`, `stream_mufu` with four waves and `stream_dfma_rate`, which model 84 cycles against 63.99.
 - A taken back-edge does not make a pipe-bound loop wait for the redirect: the DFMA loop with the control ahead takes exactly the pipe time. The simulator blocks a wave at issue until the pipe is free, so it charges the redirect after the last pipe op; a wave that issues ahead of the pipe would hide it. `ctl_mufu8_head` is red for this reason: 53 modelled against 41 measured.
 
+Calibration rows. A row is calibration when a model constant was derived from that same measurement, so its pass says the constant was read back correctly, not that the model predicts the card. Every other row is an independent check. The provenance of a constant names its probe and not always the suite row, so the rows below are matched by their numbers:
+
+- sm_89 redirect of 10: derived from the 17.02-cycle intercept of the FFMA loop sweep, whose points are the one-warp rows `stream_ffma_1` (27.02), `stream_ffma_8` (27.02) and `stream_ffma_64` (81.05, which is 64 plus 17.05).
+- sm_89 `ISETP` latency of 13: derived from the one-warp `loop_control` row (27.01), as 27.01 less 4 for IADD3 and 10 for the redirect. It also rests on the redirect, so that row calibrates two constants.
+- sm_89 FP64 restart of 21: derived from the 38-cycle lone-warp intercept of the register-operand DFMA loops, which are the one-warp rows `stream_dfma_reg_8` (166.08) and `stream_dfma_reg_16` (294.08).
+- sm_89 DFMA operand intervals of 19 (constant bank) and 16 (register): derived from the 8 and 16 DFMA loops, the one-warp rows `stream_dfma_8` (188.03), `stream_dfma_16` (340.03), `stream_dfma_reg_8` and `stream_dfma_reg_16`, and the saturated 2 and 4-warp rows of the same kernels.
+- sm_89 shared FP64 pipe: derived from the one-warp `stream_dfma` row, where one warp reaches 1.5 lanes per cycle.
+- gfx1036 redirect of 22: derived from `ctl_f16_head` (40.01) and `ctl_f16_head1` (39.99).
+- gfx1036 dependent `Fma` latency of 5: derived from dependent chains of 16, 32 and 64 ops. `chain_ffma_64` (169.50) is the 64-op point; the other two are not suite rows.
+- gfx1036 oldest-first issue order: derived from the same-SIMD placements of `stream_dfma_16_wide`, `stream_mufu_16_wide` and `stream_ffma_8`. The per-wave times that fixed it are not committed, so the rows hold only their per-warp averages.
+
+The sm_89 MUFU rate and the gfx1036 FP64 and MUFU rates name probes or estimates that are not suite rows, so no row calibrates them. The `ctl_*` rows other than `ctl_f16_head` and `ctl_f16_head1` are independent checks.
+
 Red cases in `core`: 2 failing tests of 323 in `HardwareValidationSuite`, and none elsewhere in the profile suites. Seven further rows were red on the 0.9 rule alone and pass once the suite matches the highest-pressure resource; the model's pressures for them are unchanged:
 
 - sm_89 `stream_mufu_4` with one warp: MUFU is 0.889 busy. The 8.25-cycle interval of the 2026-11-13 probe would need a MUFU rate near 15.5; the committed 16.0 rate and the simulator unit tests that pin 8.0 cycles for one warp-MUFU stay.
