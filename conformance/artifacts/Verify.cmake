@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/Relocation.cmake")
 
 function(conformance_verify_relocation artifact support supplement)
   cmake_path(ABSOLUTE_PATH artifact NORMALIZE)
@@ -14,8 +15,7 @@ function(conformance_verify_relocation artifact support supplement)
       message(FATAL_ERROR "backend artifact must not contain the root driver: ${root}")
     endif()
   endforeach()
-  set(forbidden_paths "/artifact/" "/build/" "/source/" "/work/"
-    "/opt/rocm/" "/opt/intel/" "/usr/local/cuda/")
+  conformance_relocation_roots(forbidden_paths)
   foreach(root IN LISTS roots)
     file(GLOB_RECURSE artifact_files LIST_DIRECTORIES FALSE "${root}/*")
     foreach(path IN LISTS artifact_files)

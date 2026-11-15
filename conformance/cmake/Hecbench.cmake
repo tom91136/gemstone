@@ -1,4 +1,14 @@
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/Relocation.cmake")
+
+# The report quotes compiler diagnostics, which name the build tree and the SDK of the machine that produced them.
+function(hecbench_failure_line entry source build output)
+  string(REPLACE "|" ": " line "${entry}")
+  string(REPLACE "${source}/" "" line "${line}")
+  string(REPLACE "${build}/" "" line "${line}")
+  conformance_relocatable_text("${line}" line)
+  set(${output} "${line}" PARENT_SCOPE)
+endfunction()
 
 # DVC archives are addressed by the MD5 and size recorded in each pointer.
 function(hecbench_dvc_entries source output)

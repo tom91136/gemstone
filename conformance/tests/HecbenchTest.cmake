@@ -108,6 +108,22 @@ expect_class("Creative Commons license by-nc 3.0." CC-BY-NC-3.0 non-commercial)
 expect_class("Dhara Modeling Software\nNon-Exclusive, Non-Commercial Use License" "Dhara non-commercial" non-commercial)
 expect_class("Redistribution  and  use in  source and binary forms, with or without modification" BSD-2-Clause permissive)
 
+set(diagnostic "/usr/local/cuda/targets/x86_64-linux/include/cuda_fp16.hpp(988): error: identifier \"__half\" is undefined")
+hecbench_failure_line("gemm|${diagnostic}" "${directory}/source" "${directory}/build" line)
+set(expected "gemm: /<cuda>/targets/x86_64-linux/include/cuda_fp16.hpp(988): error: identifier \"__half\" is undefined")
+if(NOT line STREQUAL expected)
+  message(FATAL_ERROR "failure report is not relocatable: ${line}")
+endif()
+
+hecbench_failure_line("gemm|/work/build/hecbench/source/src/gemm-cuda/main.cu(9): error: operand types are incompatible"
+  "${directory}/source" "${directory}/build" line)
+conformance_relocation_roots(roots)
+foreach(root IN LISTS roots)
+  if(line MATCHES "${root}")
+    message(FATAL_ERROR "failure report retains ${root}: ${line}")
+  endif()
+endforeach()
+
 hecbench_licence_classification("${directory}" rows)
 set(expected
   "alpha|MIT|permissive|src/alpha-cuda/LICENSE"
