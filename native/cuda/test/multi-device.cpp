@@ -207,3 +207,90 @@ TEST_CASE("CUDA runtime routes calls to the selected device", "[cuda][multi-devi
   CHECK(cudaFree(local) == cudaSuccess);
   CHECK(cudaFree(remote) == cudaSuccess);
 }
+
+TEST_CASE("CUDA limits visible devices to CUDA_VISIBLE_DEVICES", "[cuda][multi-device]") {
+  SECTION("selects a single device by ordinal") {
+    const gemstone_test::Environment env("CUDA_VISIBLE_DEVICES", "1");
+    int count = 0;
+    REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+    CHECK(count == 1);
+    CUdevice device = -1;
+    REQUIRE(cuDeviceGet(&device, 0) == CUDA_SUCCESS);
+    CHECK(device == 0);
+    CHECK(cuDeviceGet(&device, 1) == CUDA_ERROR_INVALID_DEVICE);
+    CUuuid uuid{};
+    REQUIRE(cuDeviceGetUuid_v2(&uuid, 0) == CUDA_SUCCESS);
+    const auto expected = gemstone::deviceUuid(1);
+    CHECK(std::memcmp(uuid.bytes, expected.data(), expected.size()) == 0);
+  }
+
+  SECTION("keeps the order given by the environment") {
+    const gemstone_test::Environment env("CUDA_VISIBLE_DEVICES", "1,0");
+    int count = 0;
+    REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+    CHECK(count == 2);
+    CUuuid firstUuid{};
+    CUuuid secondUuid{};
+    REQUIRE(cuDeviceGetUuid_v2(&firstUuid, 0) == CUDA_SUCCESS);
+    REQUIRE(cuDeviceGetUuid_v2(&secondUuid, 1) == CUDA_SUCCESS);
+    const auto expectedFirst = gemstone::deviceUuid(1);
+    const auto expectedSecond = gemstone::deviceUuid(0);
+    CHECK(std::memcmp(firstUuid.bytes, expectedFirst.data(), expectedFirst.size()) == 0);
+    CHECK(std::memcmp(secondUuid.bytes, expectedSecond.data(), expectedSecond.size()) == 0);
+  }
+
+  SECTION("hides all devices with -1") {
+    const gemstone_test::Environment env("CUDA_VISIBLE_DEVICES", "-1");
+    CHECK(cuInit(0) == CUDA_ERROR_NO_DEVICE);
+    int count = -1;
+    REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+    CHECK(count == 0);
+    int runtimeCount = -1;
+    CHECK(cudaGetDeviceCount(&runtimeCount) == cudaErrorNoDevice);
+    CHECK(runtimeCount == 0);
+    CUdevice device = -1;
+    CHECK(cuDeviceGet(&device, 0) == CUDA_ERROR_INVALID_DEVICE);
+  }
+
+  SECTION("hides all devices with empty string") {
+    const gemstone_test::Environment env("CUDA_VISIBLE_DEVICES", "");
+    CHECK(cuInit(0) == CUDA_ERROR_NO_DEVICE);
+    int count = -1;
+    REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+    CHECK(count == 0);
+  }
+
+  SECTION("stops at first invalid entry") {
+    const gemstone_test::Environment env("CUDA_VISIBLE_DEVICES", "0,invalid,1");
+    int count = 0;
+    REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+    CHECK(count == 1);
+    CUuuid uuid{};
+    REQUIRE(cuDeviceGetUuid_v2(&uuid, 0) == CUDA_SUCCESS);
+    const auto expected = gemstone::deviceUuid(0);
+    CHECK(std::memcmp(uuid.bytes, expected.data(), expected.size()) == 0);
+  }
+
+  SECTION("stops at out of range ordinal") {
+    const gemstone_test::Environment env("CUDA_VISIBLE_DEVICES", "1,99,0");
+    int count = 0;
+    REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+    CHECK(count == 1);
+    CUuuid uuid{};
+    REQUIRE(cuDeviceGetUuid_v2(&uuid, 0) == CUDA_SUCCESS);
+    const auto expected = gemstone::deviceUuid(1);
+    CHECK(std::memcmp(uuid.bytes, expected.data(), expected.size()) == 0);
+  }
+
+  SECTION("selects device by UUID") {
+    const auto uuidStr = gemstone::deviceHsaUuid(1);
+    const gemstone_test::Environment env("CUDA_VISIBLE_DEVICES", uuidStr.c_str());
+    int count = 0;
+    REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+    CHECK(count == 1);
+    CUuuid uuid{};
+    REQUIRE(cuDeviceGetUuid_v2(&uuid, 0) == CUDA_SUCCESS);
+    const auto expected = gemstone::deviceUuid(1);
+    CHECK(std::memcmp(uuid.bytes, expected.data(), expected.size()) == 0);
+  }
+}

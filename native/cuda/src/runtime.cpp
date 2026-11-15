@@ -541,7 +541,60 @@ thread_local int runtimeDevice = 0;
 gemstone::DeviceLedger deviceLedger;
 gemstone::PeerAccess peerAccess;
 
-int deviceCountValue() { return static_cast<int>(gemstone::deviceCount()); }
+std::vector<uint32_t> visibleDevices() {
+  const auto configured = gemstone::deviceCount();
+  const auto raw = gemstone::environment::text("CUDA_VISIBLE_DEVICES");
+  if (!raw) {
+    std::vector<uint32_t> visible;
+    visible.reserve(configured);
+    for (uint32_t ordinal = 0; ordinal < configured; ++ordinal)
+      visible.push_back(ordinal);
+    return visible;
+  }
+  if (raw->empty() || *raw == "-1") return {};
+  std::vector<uint32_t> visible;
+  for (std::string_view remaining(*raw); !remaining.empty();) {
+    const auto comma = remaining.find(',');
+    const auto token = remaining.substr(0, comma);
+    remaining = (comma == std::string_view::npos) ? std::string_view{} : remaining.substr(comma + 1);
+    if (token.empty()) break;
+    uint32_t ordinal = 0;
+    const auto parsed = std::from_chars(token.data(), token.data() + token.size(), ordinal);
+    if (parsed.ec == std::errc{} && parsed.ptr == token.data() + token.size()) {
+      if (ordinal >= configured) break;
+      visible.push_back(ordinal);
+      continue;
+    }
+    bool matched = false;
+    for (uint32_t p = 0; p < configured; ++p) {
+      if (token == gemstone::deviceHsaUuid(p)) {
+        visible.push_back(p);
+        matched = true;
+        break;
+      }
+      const auto bytes = gemstone::deviceUuid(p);
+      char fullUuid[48];
+      std::snprintf(fullUuid, sizeof(fullUuid), "GPU-%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", bytes[0],
+                    bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11],
+                    bytes[12], bytes[13], bytes[14], bytes[15]);
+      if (token == fullUuid || token == std::string_view(fullUuid + 4)) {
+        visible.push_back(p);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) break;
+  }
+  return visible;
+}
+
+uint32_t physicalDevice(int device) {
+  const auto visible = visibleDevices();
+  if (device >= 0 && static_cast<size_t>(device) < visible.size()) return visible[static_cast<size_t>(device)];
+  return static_cast<uint32_t>(std::max(device, 0));
+}
+
+int deviceCountValue() { return static_cast<int>(visibleDevices().size()); }
 bool validDevice(int device) { return device >= 0 && device < deviceCountValue(); }
 
 // The heap behind device-side malloc belongs to the context and lives in a region of its device memory, laid out by the VM's ContextHeap.
@@ -622,7 +675,7 @@ CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, c
   } catch (const std::exception &) {
     return CUDA_ERROR_UNKNOWN;
   }
-  if (!host && !managed) deviceLedger.charge(static_cast<uint32_t>(device), size);
+  if (!host && !managed) deviceLedger.charge(physicalDevice(device), size);
   return CUDA_SUCCESS;
 }
 
@@ -630,7 +683,7 @@ template <class Predicate> void untrackPointers(Predicate predicate) {
   std::scoped_lock const lock{pointerMutex};
   std::erase_if(pointers, [&](const PointerMetadata &p) {
     if (!predicate(p)) return false;
-    if (!p.host && !p.managed) deviceLedger.refund(static_cast<uint32_t>(p.device), p.size);
+    if (!p.host && !p.managed) deviceLedger.refund(physicalDevice(p.device), p.size);
     return true;
   });
 }
@@ -2484,7 +2537,11 @@ std::map<CUstream, int> streamPriorities;
 
 extern "C" {
 
-CUresult cuInit(unsigned flags) { return flags != 0 ? CUDA_ERROR_INVALID_VALUE : executionReady(); }
+CUresult cuInit(unsigned flags) {
+  if (flags != 0) return CUDA_ERROR_INVALID_VALUE;
+  if (deviceCountValue() == 0) return CUDA_ERROR_NO_DEVICE;
+  return executionReady();
+}
 
 CUresult cuDriverGetVersion(int *version) {
   if (!version) return CUDA_ERROR_INVALID_VALUE;
@@ -2514,14 +2571,13 @@ CUresult cuDeviceGetName(char *name, int length, CUdevice device) {
 }
 
 CUresult cuDeviceGetPCIBusId(char *busId, int length, CUdevice device) {
-  return validDevice(device) ? copyString(busId, length, gemstone::devicePciBusId(static_cast<uint32_t>(device)))
-                             : CUDA_ERROR_INVALID_VALUE;
+  return validDevice(device) ? copyString(busId, length, gemstone::devicePciBusId(physicalDevice(device))) : CUDA_ERROR_INVALID_VALUE;
 }
 
 CUresult cuDeviceGetByPCIBusId(CUdevice *device, const char *busId) {
   if (!device || !busId) return CUDA_ERROR_INVALID_VALUE;
   for (int ordinal = 0; ordinal < deviceCountValue(); ++ordinal)
-    if (gemstone::devicePciBusId(static_cast<uint32_t>(ordinal)) == busId) {
+    if (gemstone::devicePciBusId(physicalDevice(ordinal)) == busId) {
       *device = ordinal;
       return CUDA_SUCCESS;
     }
@@ -2570,7 +2626,7 @@ CUresult cuDeviceGetProperties(CUdevprop *properties, CUdevice device) {
 
 CUresult cuDeviceGetUuid_v2(CUuuid *uuid, CUdevice device) {
   if (!uuid || !validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
-  const auto bytes = gemstone::deviceUuid(static_cast<uint32_t>(device));
+  const auto bytes = gemstone::deviceUuid(physicalDevice(device));
   std::memcpy(uuid->bytes, bytes.data(), bytes.size());
   return CUDA_SUCCESS;
 }
@@ -2651,15 +2707,14 @@ CUresult cuCtxEnablePeerAccess(CUcontext peerContext, unsigned flags) {
   const auto device = activeDevice();
   if (flags != 0) return CUDA_ERROR_INVALID_VALUE;
   if (peer < 0 || !contextIsLive(activeContext()) || peer == device) return CUDA_ERROR_INVALID_DEVICE;
-  return peerAccess.enable(static_cast<uint32_t>(device), static_cast<uint32_t>(peer)) ? CUDA_SUCCESS
-                                                                                       : CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED;
+  return peerAccess.enable(physicalDevice(device), physicalDevice(peer)) ? CUDA_SUCCESS : CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED;
 }
 
 CUresult cuCtxDisablePeerAccess(CUcontext peerContext) {
   const auto peer = contextDevice(peerContext);
   const auto device = activeDevice();
   if (peer < 0 || !contextIsLive(activeContext()) || peer == device) return CUDA_ERROR_INVALID_DEVICE;
-  return peerAccess.disable(static_cast<uint32_t>(device), static_cast<uint32_t>(peer)) ? CUDA_SUCCESS : CUDA_ERROR_PEER_ACCESS_NOT_ENABLED;
+  return peerAccess.disable(physicalDevice(device), physicalDevice(peer)) ? CUDA_SUCCESS : CUDA_ERROR_PEER_ACCESS_NOT_ENABLED;
 }
 
 CUresult cuMemcpyPeer(CUdeviceptr destination, CUcontext destinationContext, CUdeviceptr source, CUcontext sourceContext, size_t size) {
@@ -2846,7 +2901,7 @@ CUresult cuDevicePrimaryCtxRelease_v2(CUdevice device) {
   CUcontext context = std::exchange(primary.context, nullptr);
   CUcontext implicit = context;
   implicitContext.compare_exchange_strong(implicit, nullptr, std::memory_order_acq_rel);
-  peerAccess.clear(static_cast<uint32_t>(device));
+  peerAccess.clear(physicalDevice(device));
   return cuCtxDestroy_v2(context);
 }
 
@@ -2942,7 +2997,7 @@ CUresult cuMemGetAllocationGranularity(size_t *granularity, const CUmemAllocatio
 CUresult cuMemGetInfo_v2(size_t *freeBytes, size_t *totalBytes) {
   if (!freeBytes || !totalBytes) return CUDA_ERROR_INVALID_VALUE;
   *totalBytes = deviceSpec().totalGlobalMemoryBytes;
-  *freeBytes = *totalBytes - std::min<uint64_t>(deviceLedger.used(static_cast<uint32_t>(activeDevice())), *totalBytes);
+  *freeBytes = *totalBytes - std::min<uint64_t>(deviceLedger.used(physicalDevice(activeDevice())), *totalBytes);
   return CUDA_SUCCESS;
 }
 
@@ -5152,7 +5207,11 @@ CUresult cuGetProcAddress(const char *symbol, void **function, int cudaVersion, 
   return CUDA_SUCCESS;
 }
 
-cudaError_t cudaGetDeviceCount(int *count) { return runtimeStatus(cuDeviceGetCount(count)); }
+cudaError_t cudaGetDeviceCount(int *count) {
+  if (!count) return cudaErrorInvalidValue;
+  *count = deviceCountValue();
+  return *count == 0 ? cudaErrorNoDevice : cudaSuccess;
+}
 
 cudaError_t cudaGetDevice(int *device) { return runtimeStatus(cuCtxGetDevice(device)); }
 
@@ -5177,13 +5236,13 @@ cudaError_t cudaDeviceEnablePeerAccess(int peer, unsigned flags) {
   if (flags != 0) return cudaErrorInvalidValue;
   const auto device = activeDevice();
   if (!validDevice(peer) || peer == device) return cudaErrorInvalidDevice;
-  return peerAccess.enable(static_cast<uint32_t>(device), static_cast<uint32_t>(peer)) ? cudaSuccess : cudaErrorPeerAccessAlreadyEnabled;
+  return peerAccess.enable(physicalDevice(device), physicalDevice(peer)) ? cudaSuccess : cudaErrorPeerAccessAlreadyEnabled;
 }
 
 cudaError_t cudaDeviceDisablePeerAccess(int peer) {
   const auto device = activeDevice();
   if (!validDevice(peer) || peer == device) return cudaErrorInvalidDevice;
-  return peerAccess.disable(static_cast<uint32_t>(device), static_cast<uint32_t>(peer)) ? cudaSuccess : cudaErrorPeerAccessNotEnabled;
+  return peerAccess.disable(physicalDevice(device), physicalDevice(peer)) ? cudaSuccess : cudaErrorPeerAccessNotEnabled;
 }
 
 cudaError_t cudaMemcpyPeer(void *destination, int destinationDevice, const void *source, int sourceDevice, size_t size) {
@@ -5251,8 +5310,8 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrSurfaceAlignment: *value = SurfaceAlignment; break;
     case cudaDevAttrConcurrentKernels: *value = 1; break;
     case cudaDevAttrEccEnabled: *value = 0; break;
-    case cudaDevAttrPciBusId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).bus); break;
-    case cudaDevAttrPciDeviceId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).device); break;
+    case cudaDevAttrPciBusId: *value = static_cast<int>(gemstone::devicePciAddress(physicalDevice(device)).bus); break;
+    case cudaDevAttrPciDeviceId: *value = static_cast<int>(gemstone::devicePciAddress(physicalDevice(device)).device); break;
     case cudaDevAttrTccDriver: *value = 0; break;
     case cudaDevAttrMemoryClockRate: *value = spec.memoryClockRateKhz; break;
     case cudaDevAttrGlobalMemoryBusWidth: *value = targetMemory().busWidthBits; break;
@@ -5267,7 +5326,7 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrMaxTexture3DWidthAlt: *value = MaxTexture3DWidth; break;
     case cudaDevAttrMaxTexture3DHeightAlt: *value = MaxTexture3DHeight; break;
     case cudaDevAttrMaxTexture3DDepthAlt: *value = MaxTexture3DDepth; break;
-    case cudaDevAttrPciDomainId: *value = static_cast<int>(gemstone::devicePciAddress(static_cast<uint32_t>(device)).domain); break;
+    case cudaDevAttrPciDomainId: *value = static_cast<int>(gemstone::devicePciAddress(physicalDevice(device)).domain); break;
     case cudaDevAttrTexturePitchAlignment: *value = TexturePitchAlignment; break;
     case cudaDevAttrMaxTextureCubemapWidth: *value = MaxTextureCubemapWidth; break;
     case cudaDevAttrMaxTextureCubemapLayeredWidth: *value = MaxTextureCubemapLayeredWidth; break;

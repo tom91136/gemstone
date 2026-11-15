@@ -59,16 +59,15 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
     - `CUDA.jl`: Resolves `libcuda` via `CUDA_Driver_jll.libcuda` (fallback `Libdl.find_library(["libcuda.so.1", "libcuda.so"])`). Requires driver version >= 11.0; gemstone reports 13.3 (13030). Downloads CUDA runtime toolkit artifact (`CUDA_Runtime_jll` 0.25.0 / CUDA 13.4).
     - `AMDGPU.jl`: Resolves `libamdhip64.so` and `libhsa-runtime64.so` via system search or JLL wrappers; requires `/dev/kfd` for hardware kernel driver access, routing to gemstone HIP runtime.
     - `oneAPI.jl`: Resolves Level Zero driver via `oneAPI_Level_Zero_Loader_jll` or system `libze_loader.so.1`, routing to gemstone Level Zero driver.
-  - `JuliaStream.jl` benchmark runs:
-    - `CUDAStream.jl` passes: Copy 401 MB/s, Mul 1354 MB/s, Add 2237 MB/s, Triad 1848 MB/s, Dot 140 MB/s on RTX 4060 Ti.
-    - `AMDGPUStream.jl` passes: Copy 1178 MB/s, Mul 1427 MB/s, Add 2217 MB/s, Triad 2097 MB/s, Dot 8 MB/s on AMD Ryzen 9 9950X3D (HIP device gfx1036).
-    - `oneAPIStream.jl` passes with `--float`: Copy 207 MB/s, Mul 202 MB/s, Add 309 MB/s, Triad 310 MB/s, Dot 87 MB/s on Intel Arc A750 Graphics (Arc series lacks hardware FP64).
-    - `KernelAbstractionsStream.jl` passes on CPU (Copy 2025 MB/s, Add 9461 MB/s) and CUDA (Copy 1436 MB/s, Add 6024 MB/s).
-    - Comparison with C++ BabelStream models: C++ CUDA BabelStream on RTX 4060 Ti achieves 13,133 - 19,980 MB/s at array size 4096; C++ kernel launch overhead is 2-5 us per launch, whereas Julia JIT/dispatch overhead is 40-160 us per launch on micro array sizes.
-  - Package test suites:
-    - `CUDA.jl`:
-      - `core/initialization`: 60+ cases pass; remaining failures in subprocess spawning assert on `@test !CUDA.functional()` when `CUDA_VISIBLE_DEVICES="-1"` is set (gemstone driver does not filter devices based on environment variable).
-      - `core/cudadrv`, `core/array`, `core/broadcast`: previously blocked by `cuOccupancyMaxPotentialBlockSize` and `cuStreamGetPriority` returning `CUDA_ERROR_NOT_SUPPORTED`; resolved by gemstone native implementations.
+  - JuliaStream.jl correctness compared with C++ models under gemstone emulation (array size 4096, 2 iterations):
+    - `CUDAStream.jl` on `cuda` route: ran under gemstone emulation; verification passed. Compares with C++ `miniapp_babelstream_cuda` on `cuda` route (passed).
+    - `AMDGPUStream.jl` on `hip` route: did not run under gemstone emulation (`AMDGPU.jl` initialisation requires Linux `/dev/kfd` kernel device node). Compares with C++ `miniapp_babelstream_hip` on `hip` route (passed via gemstone RPC).
+    - `oneAPIStream.jl` on `levelzero` route: did not run under gemstone emulation (`oneAPI.jl` initialisation requires `NEO_jll` Intel Compute Runtime). Compares with C++ `miniapp_babelstream_sycl2020_usm` `--float` on `levelzero` route (passed).
+    - `KernelAbstractionsStream.jl` on `cuda` and CPU: ran under gemstone emulation; verification passed. Compares with C++ `miniapp_babelstream_cuda` and `miniapp_babelstream_omp` (both passed).
+  - Bounded package test suites under gemstone emulation:
+    - `CUDA.jl` (`core/initialization`, `core/cudadrv`, `base/array`, `base/broadcast`): ran under gemstone emulation; initialisation and driver cases pass after implementing `CUDA_VISIBLE_DEVICES` (filtering ordinals, empty string, `-1`, UUIDs), `cuOccupancy*` queries, and stream priority.
+    - `AMDGPU.jl` (`array`, `execution`): did not run under gemstone emulation; initialisation blocked by `/dev/kfd` device node check in `rocm_discovery.jl`.
+    - `oneAPI.jl` (`level-zero`, `array`): did not run under gemstone emulation; initialisation blocked by `NEO_jll` runtime discovery and loader requirements.
   - Environment footprints:
     - Standalone CPython 3.12: 234 MB.
     - Numba environment: 551 MB (wheels cache: 163 MB), build time ~20 s.
