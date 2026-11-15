@@ -68,12 +68,16 @@ function(conformance_component_notice_files component output)
       "$ENV{NVHPC_ROOT}/compilers/*EULA*"
       "$ENV{NVHPC_ROOT}/compilers/*/licen*"
       "$ENV{NVHPC_ROOT}/compilers/*/EULA*"
+      "$ENV{NVHPC_ROOT}/compilers/licen*/*"
+      "$ENV{NVHPC_ROOT}/cuda/*/EULA*"
       "/opt/nvidia/hpc_sdk/*licen*"
       "/opt/nvidia/hpc_sdk/*EULA*"
       "/opt/nvidia/hpc_sdk/Linux_x86_64/*/*licen*"
       "/opt/nvidia/hpc_sdk/Linux_x86_64/*/*EULA*"
       "/opt/nvidia/hpc_sdk/Linux_x86_64/*/compilers/*licen*"
-      "/opt/nvidia/hpc_sdk/Linux_x86_64/*/compilers/*EULA*")
+      "/opt/nvidia/hpc_sdk/Linux_x86_64/*/compilers/*EULA*"
+      "/opt/nvidia/hpc_sdk/Linux_x86_64/*/compilers/licen*/*"
+      "/opt/nvidia/hpc_sdk/Linux_x86_64/*/cuda/*/EULA*")
   elseif(component STREQUAL "oneapi")
     file(GLOB files LIST_DIRECTORIES false
       "/opt/intel/oneapi/licensing/*/licensing/*/*"

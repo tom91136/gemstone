@@ -139,4 +139,44 @@ make_artifact(unclassified
   LIBRARIES libwibble.so.2)
 expect_fail(unclassified "no known notices")
 
+file(WRITE "${directory}/install.cmake"
+  "include(\"${conformance}/cmake/ComponentNotices.cmake\")\n"
+  "conformance_install_component_notices(LIBRARIES \"\${LIBRARY}\"\n"
+  "  DESTINATION \"\${ROOT}/licences/runtime\"\n"
+  "  MANIFEST \"\${ROOT}/licences/runtime-libraries.tsv\")\n"
+  "message(STATUS \"notices installed\")\n")
+
+function(install_notices root library result_var output_var)
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${ARGN}
+    "${CMAKE_COMMAND}" "-DROOT=${root}" "-DLIBRARY=${library}" -P "${directory}/install.cmake"
+    RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE error)
+  set(${result_var} "${result}" PARENT_SCOPE)
+  string(REGEX REPLACE "[ \t\r\n]+" " " output "${output}${error}")
+  set(${output_var} "${output}" PARENT_SCOPE)
+endfunction()
+
+# NVHPC installs its notices under the compiler prefix, and carries libcudart from the CUDA tree it bundles.
+set(nvhpc_image "${directory}/images/nvhpc/opt/nvidia/hpc_sdk/Linux_x86_64/26.5")
+file(MAKE_DIRECTORY "${nvhpc_image}/compilers/lib" "${nvhpc_image}/compilers/license" "${nvhpc_image}/cuda/13.2")
+file(WRITE "${nvhpc_image}/compilers/lib/libnvomp.so" "")
+file(WRITE "${nvhpc_image}/compilers/license/LICENSE.txt" "NVIDIA HPC SDK\n")
+file(WRITE "${nvhpc_image}/cuda/13.2/EULA.txt" "NVIDIA CUDA EULA\n")
+set(nvhpc_artifact "${directory}/nvhpc")
+install_notices("${nvhpc_artifact}" "${nvhpc_image}/compilers/lib/libnvomp.so" result output
+  "NVHPC_ROOT=${nvhpc_image}")
+if(NOT result EQUAL 0 OR NOT output MATCHES "notices installed")
+  fail("the installed NVHPC tree went unnoticed:\n${output}")
+endif()
+file(GLOB_RECURSE nvhpc_notices LIST_DIRECTORIES FALSE "${nvhpc_artifact}/licences/runtime/nvhpc/*")
+if(NOT (nvhpc_notices MATCHES "${nvhpc_image}/compilers/license/LICENSE.txt"
+    AND nvhpc_notices MATCHES "${nvhpc_image}/cuda/13.2/EULA.txt"))
+  fail("the NVHPC artifact installed other notices: ${nvhpc_notices}")
+endif()
+file(MAKE_DIRECTORY "${nvhpc_artifact}/lib")
+file(WRITE "${nvhpc_artifact}/lib/libnvomp.so" "")
+probe("${nvhpc_artifact}" result output)
+if(NOT result EQUAL 0)
+  fail("the installed NVHPC notices were rejected:\n${output}")
+endif()
+
 file(REMOVE_RECURSE "${directory}")
