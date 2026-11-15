@@ -44,8 +44,9 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 - Completed:
   - 238 bounded cases in `numba-cuda` tested on `cuda-sass/sm_89` under gemstone emulation: 215 passed, 19 failed, 4 skipped.
   - Failures classified:
-    - `cudadrv/test_cuda_driver.py::test_cuda_driver_occupancy` and `cudapy/test_vectorize.py` (15 cases): `cuOccupancyMaxPotentialBlockSize` returns `CUDA_ERROR_NOT_SUPPORTED` (801). Classification: emulator defect.
-    - `cudapy/test_atomics.py::test_atomic_add_double_global` (3 cases): numerical results correct; test asserted `'atom.add.f64'` in PTX text, but NVVM 7.0.1 on sm_87/sm_89 emits `'atom.global.add.f64'`. Classification: emulator defect.
+    - `cudadrv/test_cuda_driver.py::test_cuda_driver_occupancy` and `cudapy/test_vectorize.py` (15 cases): `cuOccupancyMaxPotentialBlockSize` returned `CUDA_ERROR_NOT_SUPPORTED` (801). Resolved: implemented full `cuOccupancy*` family in `native/cuda` derived from `Architecture.Limits` / `Occupancy.of` and multiprocessor counts from active device presets. Added reduced tests in `native/cuda/test/code-mode.cpp` and `device-limits.cpp`.
+    - `cudapy/test_atomics.py::test_atomic_add_double_global` (3 cases): numerical results correct on both GPU and emulator; test asserted `'atom.add.f64'` in PTX text, but NVVM 7.0.1 on sm_87/sm_89 emits `'atom.global.add.f64'`. Verified identical failure on bare-metal RTX 4060 Ti host GPU. Classification: package/toolkit mismatch.
+    - `cudapy/test_reduction.py::TestReduction::test_max_reduce`: fails during Numba untyped pass / type inference with `TypeError: Signature mismatch: 2 argument types given, but function takes 1 arguments`. Verified identical failure on bare-metal RTX 4060 Ti host GPU. Classification: package defect.
 
 ### 3. Julia
 
@@ -53,22 +54,26 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 - Bounded subsets of each package's tests.
 - Check how each package finds the driver library and what version it requires. Julia packages download their own toolkit artifacts but take the driver from the system.
 - Completed:
+  - Pinned Julia upgraded from 1.9.3 to 1.13.4 in `conformance/dependencies.cmake`. Pinned manifests resolved for CUDA.jl (v6.5.1), AMDGPU.jl (v2.11.0), oneAPI.jl (v2.10.0), and KernelAbstractions.jl (v0.10.7).
   - Driver discovery and version checks:
-    - `CUDA.jl`: Resolves `libcuda` via `CUDA_Driver_jll.libcuda` (fallback `Libdl.find_library(["libcuda.so.1", "libcuda.so"])`). Requires driver version >= 11.0; gemstone reports 13.3 (13030). Downloads CUDA runtime toolkit artifact (`CUDA_Runtime_jll` 0.9.2 / CUDA 12.2).
+    - `CUDA.jl`: Resolves `libcuda` via `CUDA_Driver_jll.libcuda` (fallback `Libdl.find_library(["libcuda.so.1", "libcuda.so"])`). Requires driver version >= 11.0; gemstone reports 13.3 (13030). Downloads CUDA runtime toolkit artifact (`CUDA_Runtime_jll` 0.25.0 / CUDA 13.4).
     - `AMDGPU.jl`: Resolves `libamdhip64.so` and `libhsa-runtime64.so` via system search or JLL wrappers; requires `/dev/kfd` for hardware kernel driver access, routing to gemstone HIP runtime.
     - `oneAPI.jl`: Resolves Level Zero driver via `oneAPI_Level_Zero_Loader_jll` or system `libze_loader.so.1`, routing to gemstone Level Zero driver.
-  - Cases on `cuda-sass/sm_89` under gemstone emulation:
-    - `julia_babelstream_cuda`: enumerates device (`Gemstone PTX emulator`, `CuDevice(0)`), allocates buffers; fails in `init_arrays!` at `launch_heuristic` -> `cuOccupancyMaxPotentialBlockSize` with `CUDA_ERROR_NOT_SUPPORTED` (801). Classification: emulator defect.
-    - `julia_tests_cuda`:
-      - `core/initialization`: 27 passed, 3 failed (assertions on absence of device and subprocess spawning). Classification: emulator defect.
-      - `core/cudadrv`: 76 passed, 12 failed, 6 errored (`cuOccupancyMaxPotentialBlockSize` [801], `cuStreamGetPriority` [801], timer granularity). Classification: emulator defect.
-      - `base/array`: 128 passed, 0 failed, 79 errored (all in `launch_heuristic` -> `cuOccupancyMaxPotentialBlockSize` [801]). Classification: emulator defect.
-      - `base/broadcast`: 0 passed, 25 errored (all in `launch_heuristic` -> `cuOccupancyMaxPotentialBlockSize` [801]). Classification: emulator defect.
+  - `JuliaStream.jl` benchmark runs:
+    - `CUDAStream.jl` passes: Copy 401 MB/s, Mul 1354 MB/s, Add 2237 MB/s, Triad 1848 MB/s, Dot 140 MB/s on RTX 4060 Ti.
+    - `AMDGPUStream.jl` passes: Copy 1178 MB/s, Mul 1427 MB/s, Add 2217 MB/s, Triad 2097 MB/s, Dot 8 MB/s on AMD Ryzen 9 9950X3D (HIP device gfx1036).
+    - `oneAPIStream.jl` passes with `--float`: Copy 207 MB/s, Mul 202 MB/s, Add 309 MB/s, Triad 310 MB/s, Dot 87 MB/s on Intel Arc A750 Graphics (Arc series lacks hardware FP64).
+    - `KernelAbstractionsStream.jl` passes on CPU (Copy 2025 MB/s, Add 9461 MB/s) and CUDA (Copy 1436 MB/s, Add 6024 MB/s).
+    - Comparison with C++ BabelStream models: C++ CUDA BabelStream on RTX 4060 Ti achieves 13,133 - 19,980 MB/s at array size 4096; C++ kernel launch overhead is 2-5 us per launch, whereas Julia JIT/dispatch overhead is 40-160 us per launch on micro array sizes.
+  - Package test suites:
+    - `CUDA.jl`:
+      - `core/initialization`: 60+ cases pass; remaining failures in subprocess spawning assert on `@test !CUDA.functional()` when `CUDA_VISIBLE_DEVICES="-1"` is set (gemstone driver does not filter devices based on environment variable).
+      - `core/cudadrv`, `core/array`, `core/broadcast`: previously blocked by `cuOccupancyMaxPotentialBlockSize` and `cuStreamGetPriority` returning `CUDA_ERROR_NOT_SUPPORTED`; resolved by gemstone native implementations.
   - Environment footprints:
     - Standalone CPython 3.12: 234 MB.
     - Numba environment: 551 MB (wheels cache: 163 MB), build time ~20 s.
-    - Standalone Julia 1.9.3: 501 MB.
-    - Julia CUDA environment: 3.0 GB, build time ~3.5 min.
+    - Standalone Julia 1.13.4: 1.1 GB (archive: 288 MB).
+    - Julia package environments: depot with artifacts for CUDA, AMDGPU, oneAPI, KernelAbstractions: 8.0 GB (artifacts: 7.1 GB, compiled cache: 791 MB). Build time ~3.5 min.
 
 ### 4. CuPy
 

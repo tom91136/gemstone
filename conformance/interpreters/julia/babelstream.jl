@@ -1,7 +1,13 @@
 # BabelStream cases for gemstone, using the pinned Julia implementation and the route's Julia package environment.
 # Usage: babelstream.jl <cuda|amdgpu|oneapi> --list | --case <name>
 
-const backends = Dict("cuda" => "CUDAStream.jl", "amdgpu" => "AMDGPUStream.jl", "oneapi" => "oneAPIStream.jl")
+const backends = Dict(
+    "cuda" => "CUDAStream.jl",
+    "amdgpu" => "AMDGPUStream.jl",
+    "oneapi" => "oneAPIStream.jl",
+    "ka" => "KernelAbstractionsStream.jl",
+    "kernelabstractions" => "KernelAbstractionsStream.jl",
+)
 
 function classify(text)
     if occursin("no kernel image", text) || occursin("invalid device function", text)
@@ -25,6 +31,7 @@ end
 
 function main()
     backend = ARGS[1]
+    haskey(backends, backend) || error("unknown backend: $backend")
     source = joinpath(@__DIR__, "babelstream", "src", backends[backend])
     if "--list" in ARGS
         println("babelstream")
@@ -33,7 +40,11 @@ function main()
     index = findfirst(==("--case"), ARGS)
     index === nothing && error("--case is required unless --list is given")
     ARGS[index + 1] == "babelstream" || error("unknown case: $(ARGS[index + 1])")
-    command = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $source -s 4096 -n 2`
+    arguments = ["-s", "4096", "-n", "2"]
+    if backend == "oneapi"
+        push!(arguments, "--float")
+    end
+    command = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $source $arguments`
     println("running: ", command)
     passed, output = execute(command)
     if !passed
