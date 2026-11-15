@@ -83,15 +83,20 @@ object PipelineSimulator {
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class Warp() {
-    var position: Long                   = 0L
-    var dispatch: Long                   = 0L
-    var next: Long                       = 0L
-    var done: Boolean                    = false
-    var stalls: Map[Stall, Long]         = Map.empty
-    val ready: mutable.Map[String, Long] = mutable.Map.empty[String, Long]
+    var position: Long                             = 0L
+    var dispatch: Long                             = 0L
+    var next: Long                                 = 0L
+    var done: Boolean                              = false
+    var stalls: Map[Stall, Long]                   = Map.empty
+    val ready: mutable.Map[String, Long]           = mutable.Map.empty[String, Long]
+    var restarts: Map[ProfileReport.Binding, Long] = Map.empty
   }
 
-  private type Signature = (Int, Vec[(Long, Long, Map[String, Long])], Map[ProfileReport.Binding, Long])
+  private type Signature = (
+      Int,
+      Vec[(Long, Long, Map[String, Long], Map[ProfileReport.Binding, Long])],
+      Map[ProfileReport.Binding, Long]
+  )
 
   private case class Mark(time: Long, positions: Vec[Long], busy: Map[ProfileReport.Binding, Long], issued: Long)
 
@@ -111,7 +116,7 @@ object PipelineSimulator {
     case ProfileReport.Binding.Path             => Pipe.values.length + 4
   }
 
-  private def ahead[K](times: mutable.Map[K, Long], now: Long): Map[K, Long] =
+  private def ahead[K](times: scala.collection.Map[K, Long], now: Long): Map[K, Long] =
     times.view.collect { case (key, time) if time > now => key -> (time - now) }.toMap
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -210,10 +215,31 @@ object PipelineSimulator {
                 op.stall.foreach(stall => sources += stall.source)
                 val taken = architecture.branchRedirect.filter(_ => op.backEdge)
                 taken.foreach(redirect => sources += redirect.source)
+                val restarted = op.pipe.filter(pipe => architecture.pipeRestart.contains(pipe) && op.rate.isEmpty)
+                restarted.foreach { pipe =>
+                  val binding = ProfileReport.Binding.Arithmetic(pipe)
+                  if (!warp.restarts.contains(binding))
+                    warp.restarts = warp.restarts.updated(binding, t + latency)
+                }
                 timeline += Entry(index, iteration, opIndex, warp.dispatch, t, t + latency, warp.stalls)
                 warp.position += 1
                 val hold = math.max(1, op.stall.fold(1)(_.value))
                 warp.next = t + taken.fold(hold)(redirect => math.max(hold, redirect.value)).toLong
+                if (op.backEdge) {
+                  if (count == 1)
+                    warp.restarts.foreach { (binding, gate) =>
+                      val restart = binding match {
+                        case ProfileReport.Binding.Arithmetic(pipe) => architecture.pipeRestart.get(pipe)
+                        case _                                      => None
+                      }
+                      restart.foreach { cycles =>
+                        val drain = math.ceil(cycles.value / math.max(1, active).toDouble).toLong
+                        busyUntil(binding) = busyUntil.getOrElse(binding, 0L).max(gate) + drain
+                        sources += cycles.source
+                      }
+                    }
+                  warp.restarts = Map.empty
+                }
                 warp.dispatch = t + 1
                 warp.stalls = Map.empty
                 used += cost
@@ -238,7 +264,14 @@ object PipelineSimulator {
       case Some(p) =>
         val key = (
           start,
-          warps.map(warp => (warp.position % p, math.max(0L, warp.next - t), ahead(warp.ready, t))),
+          warps.map(warp =>
+            (
+              warp.position % p,
+              math.max(0L, warp.next - t),
+              ahead(warp.ready, t),
+              ahead(warp.restarts, t)
+            )
+          ),
           ahead(busyUntil, t)
         )
         marks.get(key) match {

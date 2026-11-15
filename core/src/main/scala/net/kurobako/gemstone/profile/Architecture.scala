@@ -589,6 +589,15 @@ object Architecture {
     "CUDA 13.3"
   )
 
+  private val adaFp64Restart = Source.Probed(
+    "lone-warp register DFMA loop timed with clock64: the 38-cycle per-trip intercept at N=8 and 16 is 21 above " +
+      "the 17-cycle turn-around of the one-warp FFMA stream, the drain of the FP64 pipe at the back edge " +
+      "(2026-11-13 probe, median of 201 launches)",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
   private val adaRedirect = Source.Probed(
     "FFMA loop sweep timed with clock64: 17.02 cycles per trip beyond the FFMA issues, of which 7 are " +
       "loop-control holds, leaving 10 for the taken back-edge (2026-11-10)",
@@ -634,7 +643,8 @@ object Architecture {
       Sourced(628.29, adaLatency)
     ),
     sharedPipes = Map(Pipe.Fp64 -> adaSharedFp64),
-    branchRedirect = Some(Sourced(10, adaRedirect))
+    branchRedirect = Some(Sourced(10, adaRedirect)),
+    pipeRestart = Map(Pipe.Fp64 -> Sourced(21, adaFp64Restart))
   ).on(Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)))
 
   val sm86: Architecture = sm89
@@ -1523,7 +1533,11 @@ case class Architecture(
     sharedPipes: Map[Pipe, Architecture.Source] = Map.empty,
     waveIssueCycles: Option[Architecture.Sourced[Double]] = None,
     branchRedirect: Option[Architecture.Sourced[Int]] = None,
-    issueOrder: Option[Architecture.Sourced[Architecture.IssueOrder]] = None
+    issueOrder: Option[Architecture.Sourced[Architecture.IssueOrder]] = None,
+    /** Cycles a pipe cannot start a loop trip after its first result, when one warp per partition is resident; the
+      * partitions sharing the pipe split it.
+      */
+    pipeRestart: Map[Pipe, Architecture.Sourced[Int]] = Map.empty
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1573,7 +1587,8 @@ case class Architecture(
       sharedPipes = sharedPipes.view.mapValues(_ => Architecture.Source.Inherited(this.name, basis)).toMap,
       waveIssueCycles = waveIssueCycles.map(inherit(_)),
       branchRedirect = branchRedirect.map(inherit(_)),
-      issueOrder = issueOrder.map(inherit(_))
+      issueOrder = issueOrder.map(inherit(_)),
+      pipeRestart = pipeRestart.view.mapValues(inherit(_)).toMap
     )
   }
 
