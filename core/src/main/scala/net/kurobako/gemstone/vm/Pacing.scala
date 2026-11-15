@@ -211,8 +211,10 @@ class Pacing(private val slots: Int, onEngage: () => Unit = () => ()) {
   }
 
   /** The slot of the other running group with the lowest clock, whose clock is then `seen(slot)`, or -1 when none runs.
-    * A group's `seen` clocks never exceed the real ones, so only the slowest needs re-reading, and a slot seen vacant
-    * or parked is re-read each time in case a group takes it.
+    * A group's `seen` clocks never exceed the real ones while a slot keeps its group, so only the slowest needs
+    * re-reading, and a slot seen vacant or parked is re-read each time in case a group takes it. A slot reused by a
+    * newcomer at a lower bound can leave a cached clock above the real one, which lets the caller run at most about two
+    * skews ahead of that newcomer until it re-reads the slot.
     */
   private def slowest(self: Int, seen: Array[Long]): Int = {
     var slot = 0
