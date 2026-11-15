@@ -2253,7 +2253,12 @@ private object VMCompiler {
       case SWaitcntVscnt | SWaitcntDepctr | SDelayAlu | SWaitAlu => Right(Instruction.Wait)
       case SDenormMode                                           =>
         Right(Instruction.SSetMode(ModeRegister.DenormalShift, 4, InstructionSource.Constant(immediate & 0xf)))
-      case SRoundMode => Right(Instruction.SSetMode(0, 4, InstructionSource.Constant(immediate & 0xf)))
+      case SRoundMode =>
+        Right(Instruction.SSetMode(
+          ModeRegister.RoundShift,
+          ModeRegister.RoundWidth,
+          InstructionSource.Constant(immediate & 0xf)
+        ))
       case SSendmsg if immediate == 3 && target.isa.isGFX11OrLaterGraphics =>
         // MSG_DEALLOC_VGPRS releases hardware registers after their last use.
         Right(Instruction.Wait)

@@ -152,15 +152,6 @@ abstract class ProofSuite[H, L <: Lookup](reference: Reference[H, L], generate: 
     }
   }
 
-  test("floating-point sequences are undecided with the filter's runs") {
-    prove(Vec(fsum("d", a, b)), Vec(fsum("d", a, b)), only("d")) match {
-      case Result.Undecided(reason, filtered) =>
-        assert(reason.nonEmpty)
-        assert(filtered > 0)
-      case other => fail(s"expected undecided, got $other")
-    }
-  }
-
   test("the solver and the VMs disagreeing is reported as such") {
     installed()
     val broken = tampered(sum("d", a, b).kase)
@@ -213,6 +204,37 @@ class SASSProofSuite
       Result.Refused("memory is not observed on this ISA")
     )
   }
+
+  test("a floating-point sum is proved equal in every bit, NaNs included") {
+    installed()
+    prove(Vec(fsum("d", a, b)), Vec(fsum("d", b, a)), only("d")) match {
+      case Result.Proved(report) =>
+        assertEquals(
+          report.instructions.map(cover => (cover.instance, cover.runs)),
+          Vec((fsum("d", a, b).kase.instance, DifferentialSuite.Runs))
+        )
+      case other => fail(s"expected a proof, got $other")
+    }
+  }
+
+  test("flushing denormals is not proved equal to the plain sum") {
+    installed()
+    val flushed =
+      step(lane.find(_.instance == "FADD.FTZ R0, R4, R8").getOrElse(fail("no FADD.FTZ")), Vec(a, b), Vec("d"))
+    prove(Vec(fsum("d", a, b)), Vec(flushed), only("d")) match {
+      case Result.Rejected(counterexample, _) => assert(counterexample.inputs.nonEmpty)
+      case other                              => fail(s"expected a refutation, got $other")
+    }
+  }
+
+  test("rounding down is not proved equal to rounding to nearest") {
+    installed()
+    val down = step(lane.find(_.instance == "FADD.RM R0, R4, R8").getOrElse(fail("no FADD.RM")), Vec(a, b), Vec("d"))
+    prove(Vec(fsum("d", a, b)), Vec(down), only("d")) match {
+      case Result.Rejected(counterexample, _) => assert(counterexample.inputs.nonEmpty)
+      case other                              => fail(s"expected a refutation, got $other")
+    }
+  }
 }
 
 class AMDGPUProofSuite
@@ -246,6 +268,15 @@ class AMDGPUProofSuite
   protected def otherLookup(lookup: Lookup): Lookup = lookup match {
     case spellings: Lookup.Spellings => spellings.copy(operands = Map.empty)
     case other                       => other
+  }
+
+  test("a floating-point sum is refused because its rounding mode is not rendered") {
+    prove(Vec(fsum("d", a, b)), Vec(fsum("d", a, b)), only("d"), unreachable) match {
+      case Result.Refused(reason) =>
+        assert(reason.contains("v_add_f32"), reason)
+        assert(reason.contains("rounding"), reason)
+      case other => fail(s"expected a refusal, got $other")
+    }
   }
 
   // no AMDGPU store renders as a plain machine access, so the lane gains a hand-built store with the real one's operands

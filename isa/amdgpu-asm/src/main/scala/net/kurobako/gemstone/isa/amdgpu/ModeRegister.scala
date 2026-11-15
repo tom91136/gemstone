@@ -2,8 +2,8 @@ package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
 
-/** MODE register fields the VM reads. */
-private object ModeRegister {
+/** Fields of the MODE register. */
+private[isa] object ModeRegister {
   inline val DenormalShift       = 4
   val Denormal32Input: Int       = 1 << 4
   val Denormal32Output: Int      = 1 << 5
@@ -11,6 +11,14 @@ private object ModeRegister {
   val Denormal16And64Output: Int = 1 << 7
   val DX10Clamp: Int             = 1 << 8
   val IEEE: Int                  = 1 << 9
+
+  /** Every field that flushes denormals, as MODE.DENORM holds them. */
+  val DenormalMask: Int = Denormal32Input | Denormal32Output | Denormal16And64Input | Denormal16And64Output
+
+  /** MODE.FP_ROUND, the field `s_round_mode` writes. */
+  inline val RoundShift = 0
+  inline val RoundWidth = 4
+  val RoundMask: Int    = (1 << RoundWidth) - 1
 
   /** GFX12 retired IEEE mode and DX10 clamping, so its MODE bits 8 and 9 always read as clear. */
   def ieeeSupported(isa: ISA): Boolean = isa != ISA.RDNA4 && isa != ISA.CDNA5

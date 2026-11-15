@@ -62,30 +62,38 @@ object Proof {
       uncovered(lane, left ++ right) match {
         case Some(kase) => Result.Refused(s"${describe(kase)} is not a case of the differential lane")
         case None       =>
-          validate(left.iterator ++ right.iterator, liveOut) match {
-            case Left(reason) => Result.Refused(reason)
-            case Right(types) =>
-              val (l, r) = (compose(left, liveOut, types), compose(right, liveOut, types))
-              solver(l, r, liveOut.memory) match {
-                case Solved.Equal                  => Result.Proved(report(left ++ right, filtered))
-                case Solved.Unavailable            => Result.Unavailable(filtered)
-                case Solved.Undecided(reason)      => Result.Undecided(reason, filtered)
-                case Solved.Different(description) =>
-                  counterexample(
-                    reference,
-                    executor,
-                    left,
-                    right,
-                    liveOut,
-                    types,
-                    description,
-                    touchesMemory(l, r),
-                    filtered
-                  )
+          modeFailures(left ++ right) match {
+            case Some(reason) => Result.Refused(reason)
+            case None         =>
+              validate(left.iterator ++ right.iterator, liveOut) match {
+                case Left(reason) => Result.Refused(reason)
+                case Right(types) =>
+                  val (l, r) = (compose(left, liveOut, types), compose(right, liveOut, types))
+                  solver(l, r, liveOut.memory) match {
+                    case Solved.Equal                  => Result.Proved(report(left ++ right, filtered))
+                    case Solved.Unavailable            => Result.Unavailable(filtered)
+                    case Solved.Undecided(reason)      => Result.Undecided(reason, filtered)
+                    case Solved.Different(description) =>
+                      counterexample(
+                        reference,
+                        executor,
+                        left,
+                        right,
+                        liveOut,
+                        types,
+                        description,
+                        touchesMemory(l, r),
+                        filtered
+                      )
+                  }
               }
           }
       }
   }
+
+  /** Why a mode of one of `steps` is not rendered, naming its instruction. */
+  private def modeFailures(steps: Vec[Step]): Option[String] =
+    steps.map(_.kase).map(Modes.check).collectFirst { case Left(reason) => reason }
 
   /** One definition of the whole sequence, over its live-in locations, producing the live-out ones. */
   def compose(steps: Vec[Step], liveOut: LiveOut, types: Map[String, Type]): Definition = {
