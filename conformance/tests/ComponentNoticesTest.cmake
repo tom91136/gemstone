@@ -179,4 +179,44 @@ if(NOT result EQUAL 0)
   fail("the installed NVHPC notices were rejected:\n${output}")
 endif()
 
+# A packaged library names its own notices through the package that owns it.
+set(package_image "${directory}/images/package")
+file(MAKE_DIRECTORY "${package_image}/usr/share/doc/libwibble9" "${directory}/bin" "${directory}/bin-unlisted")
+file(WRITE "${package_image}/usr/share/doc/libwibble9/copyright" "libwibble licence\n")
+file(WRITE "${package_image}/usr/share/doc/libwibble9/changelog.gz" "")
+file(WRITE "${package_image}/usr/lib/libwibble.so.2" "")
+file(WRITE "${directory}/bin/dpkg-query"
+  "#!/bin/sh\ncase \"$1\" in\n  -S) echo \"libwibble9: $2\" ;;\n"
+  "  -L) echo \"${package_image}/usr/share/doc/libwibble9\"\n"
+  "      echo \"${package_image}/usr/share/doc/libwibble9/copyright\"\n"
+  "      echo \"${package_image}/usr/share/doc/libwibble9/changelog.gz\" ;;\nesac\n")
+file(WRITE "${directory}/bin-unlisted/dpkg-query"
+  "#!/bin/sh\ncase \"$1\" in\n  -S) echo \"libwibble9: $2\" ;;\nesac\n")
+file(CHMOD "${directory}/bin/dpkg-query" "${directory}/bin-unlisted/dpkg-query"
+  PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+set(packaged_artifact "${directory}/packaged")
+install_notices("${packaged_artifact}" "${package_image}/usr/lib/libwibble.so.2" result output
+  "PATH=${directory}/bin:$ENV{PATH}")
+if(NOT result EQUAL 0 OR NOT output MATCHES "notices installed")
+  fail("the packaged library went unnoticed:\n${output}")
+endif()
+file(GLOB_RECURSE packaged_notices LIST_DIRECTORIES FALSE
+  "${packaged_artifact}/licences/runtime/system/libwibble9/*")
+if(NOT (packaged_notices MATCHES "libwibble9/copyright" AND NOT packaged_notices MATCHES "changelog"))
+  fail("the packaged library notices came from elsewhere: ${packaged_notices}")
+endif()
+file(MAKE_DIRECTORY "${packaged_artifact}/lib")
+file(WRITE "${packaged_artifact}/lib/libwibble.so.2" "")
+probe("${packaged_artifact}" result output)
+if(NOT result EQUAL 0)
+  fail("the packaged library notices were rejected:\n${output}")
+endif()
+
+# A packaged library whose package lists no notices still fails the check.
+install_notices("${directory}/packaged-unlisted" "${package_image}/usr/lib/libwibble.so.2" result output
+  "PATH=${directory}/bin-unlisted:$ENV{PATH}")
+if(result EQUAL 0 OR NOT output MATCHES "No licence files are installed in the image for system/libwibble9")
+  fail("a packaged library without notices was accepted:\n${output}")
+endif()
+
 file(REMOVE_RECURSE "${directory}")
