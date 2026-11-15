@@ -56,7 +56,7 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.producer("IADD3.X R7, RZ, c[0][0x174], RZ, P0, !PT;"), Some(Iadd32))
     assertEquals(NvidiaLatency.producer("MUFU.RCP R8, R8;"), Some(Rcp32))
     assertEquals(NvidiaLatency.producer("MUFU.RSQ R8, R8;"), None)
-    assertEquals(NvidiaLatency.producer("ISETP.GE.AND P0, PT, R4, c[0][0x178], PT;"), None)
+    assertEquals(NvidiaLatency.producer("ISETP.GE.AND P0, PT, R4, c[0][0x178], PT;"), Some(Isetp))
   }
 
   test("a constant-bank DFMA operand selects the probed constant-form rate") {

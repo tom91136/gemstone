@@ -3,7 +3,7 @@ package net.kurobako.gemstone.profile
 object NvidiaLatency {
 
   enum Producer derives CanEqual {
-    case Fadd32, Fmul32, Ffma32, Iadd32, Imul32, Lop32, Shl32, I2f32, Fma64, Rcp32, Ldg32, Lds32
+    case Fadd32, Fmul32, Ffma32, Iadd32, Imul32, Lop32, Shl32, I2f32, Fma64, Rcp32, Ldg32, Lds32, Isetp
   }
 
   import Producer.*
@@ -78,7 +78,8 @@ object NvidiaLatency {
     "DFMA"     -> Fma64,
     "MUFU.RCP" -> Rcp32,
     "LDG"      -> Ldg32,
-    "LDS"      -> Lds32
+    "LDS"      -> Lds32,
+    "ISETP"    -> Isetp
   )
 
   def producer(text: String): Option[Producer] = {
@@ -110,10 +111,19 @@ object NvidiaLatency {
     "CUDA 13.3"
   )
 
+  private val probedIsetp = Architecture.Source.Probed(
+    "clock64 loop_control, 4096 trips, median of 201 launches: 27.01 cycles per trip against 17 for the back-edge " +
+      "of an FFMA loop, leaving 13 for the predicate after IADD3 and the 4-cycle integer result",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3"
+  )
+
   private val measured89: Map[Producer, Architecture.Sourced[Double]] = Map(
     Lds32 -> Architecture.Sourced(24.00, probed),
     Rcp32 -> Architecture.Sourced(28.00, probed),
-    Fma64 -> Architecture.Sourced(48.01, probedFma64)
+    Fma64 -> Architecture.Sourced(48.01, probedFma64),
+    Isetp -> Architecture.Sourced(13.00, probedIsetp)
   )
 
   def measured(sm: Int, producer: Producer): Option[Architecture.Sourced[Double]] =
