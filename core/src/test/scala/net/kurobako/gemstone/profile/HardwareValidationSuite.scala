@@ -37,6 +37,9 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   * leaves one wave set on a partition, or one wave on each active partition, and the case saturates it. A spread
   * placement with several waves per partition is `Path` when the case runs over 25 percent above the smallest cycles
   * per iteration the card reached with 1 to 32 resident warps, and otherwise the resource at that smallest value.
+  *
+  * The model matches an expected resource when that resource has the highest pressure of the block, at any level, and
+  * matches `Path` when its own binding is `Path`, which needs every pressure below the saturation threshold.
   */
 class HardwareValidationSuite extends Suite {
   import ProfileReport.Binding
@@ -268,6 +271,12 @@ class HardwareValidationSuite extends Suite {
       f"modelled $modelled%.2f against measured $measured%.2f cycles per iteration"
     )
 
+  private def assertBinding(block: PipelineSimulator.Block, expected: Binding): Unit = {
+    val leading = block.pressure.maxBy(_._2)
+    val actual  = if expected == Binding.Path then block.binding else leading._1
+    assertEquals(actual, expected, f"pressure ${leading._2}%.3f on ${leading._1}, model binding ${block.binding}")
+  }
+
   private def variableLatency(row: Row): Boolean = row.schedule match {
     case Schedule.Encoded(_, barrier) => barrier
     case _                            => false
@@ -341,7 +350,7 @@ class HardwareValidationSuite extends Suite {
     }
     measured.binding.foreach { expected =>
       test(s"$name: compiled loop binding") {
-        assertEquals(analysed(architecture, rows, measured.warps, shared, placement).binding, expected)
+        assertBinding(analysed(architecture, rows, measured.warps, shared, placement), expected)
       }
     }
     if direct then {
@@ -350,7 +359,7 @@ class HardwareValidationSuite extends Suite {
       }
       measured.binding.foreach { expected =>
         test(s"$name: table latency binding") {
-          assertEquals(simulated(architecture, rows, measured.warps, placement).binding, expected)
+          assertBinding(simulated(architecture, rows, measured.warps, placement), expected)
         }
       }
     }
