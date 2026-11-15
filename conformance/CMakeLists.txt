@@ -275,6 +275,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ComponentNoticesTest.cmake")
     add_test(NAME conformance_container_image_tag
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ContainerImageTagTest.cmake")
+    add_test(NAME conformance_offload_key
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/OffloadKeyTest.cmake")
   endif()
 
   add_executable(conformance_fixture tests/fixture.cpp)
