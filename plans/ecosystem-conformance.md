@@ -1,6 +1,6 @@
 # Ecosystem conformance
 
-Status: in progress. Step 1 is done; step 2 is underway. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, and on `machine-identity.md` for packages that query NVML or AMD SMI.
+Status: in progress. Steps 1, 2, and 3 are done; step 4 is next. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, and on `machine-identity.md` for packages that query NVML or AMD SMI.
 
 ## Goal
 
@@ -41,12 +41,34 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 ### 2. Numba
 
 - Bounded subsets of the driver and kernel tests in `numba-cuda`.
+- Completed:
+  - 238 bounded cases in `numba-cuda` tested on `cuda-sass/sm_89` under gemstone emulation: 215 passed, 19 failed, 4 skipped.
+  - Failures classified:
+    - `cudadrv/test_cuda_driver.py::test_cuda_driver_occupancy` and `cudapy/test_vectorize.py` (15 cases): `cuOccupancyMaxPotentialBlockSize` returns `CUDA_ERROR_NOT_SUPPORTED` (801). Classification: emulator defect.
+    - `cudapy/test_atomics.py::test_atomic_add_double_global` (3 cases): numerical results correct; test asserted `'atom.add.f64'` in PTX text, but NVVM 7.0.1 on sm_87/sm_89 emits `'atom.global.add.f64'`. Classification: emulator defect.
 
 ### 3. Julia
 
 - `JuliaStream.jl` on CUDA, AMDGPU, oneAPI, and KernelAbstractions, compared with the C++ models.
 - Bounded subsets of each package's tests.
 - Check how each package finds the driver library and what version it requires. Julia packages download their own toolkit artifacts but take the driver from the system.
+- Completed:
+  - Driver discovery and version checks:
+    - `CUDA.jl`: Resolves `libcuda` via `CUDA_Driver_jll.libcuda` (fallback `Libdl.find_library(["libcuda.so.1", "libcuda.so"])`). Requires driver version >= 11.0; gemstone reports 13.3 (13030). Downloads CUDA runtime toolkit artifact (`CUDA_Runtime_jll` 0.9.2 / CUDA 12.2).
+    - `AMDGPU.jl`: Resolves `libamdhip64.so` and `libhsa-runtime64.so` via system search or JLL wrappers; requires `/dev/kfd` for hardware kernel driver access, routing to gemstone HIP runtime.
+    - `oneAPI.jl`: Resolves Level Zero driver via `oneAPI_Level_Zero_Loader_jll` or system `libze_loader.so.1`, routing to gemstone Level Zero driver.
+  - Cases on `cuda-sass/sm_89` under gemstone emulation:
+    - `julia_babelstream_cuda`: enumerates device (`Gemstone PTX emulator`, `CuDevice(0)`), allocates buffers; fails in `init_arrays!` at `launch_heuristic` -> `cuOccupancyMaxPotentialBlockSize` with `CUDA_ERROR_NOT_SUPPORTED` (801). Classification: emulator defect.
+    - `julia_tests_cuda`:
+      - `core/initialization`: 27 passed, 3 failed (assertions on absence of device and subprocess spawning). Classification: emulator defect.
+      - `core/cudadrv`: 76 passed, 12 failed, 6 errored (`cuOccupancyMaxPotentialBlockSize` [801], `cuStreamGetPriority` [801], timer granularity). Classification: emulator defect.
+      - `base/array`: 128 passed, 0 failed, 79 errored (all in `launch_heuristic` -> `cuOccupancyMaxPotentialBlockSize` [801]). Classification: emulator defect.
+      - `base/broadcast`: 0 passed, 25 errored (all in `launch_heuristic` -> `cuOccupancyMaxPotentialBlockSize` [801]). Classification: emulator defect.
+  - Environment footprints:
+    - Standalone CPython 3.12: 234 MB.
+    - Numba environment: 551 MB (wheels cache: 163 MB), build time ~20 s.
+    - Standalone Julia 1.9.3: 501 MB.
+    - Julia CUDA environment: 3.0 GB, build time ~3.5 min.
 
 ### 4. CuPy
 
