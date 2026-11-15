@@ -43,6 +43,8 @@ object environment {
   val TestMemoryAtomicBits: String = "GEMSTONE_TEST_MEMORY_ATOMIC_BITS"
   val TestMemoryConcurrencyDir: String = "GEMSTONE_TEST_MEMORY_CONCURRENCY_DIR"
   val TestMemoryProbeList: String = "GEMSTONE_TEST_MEMORY_PROBE_LIST"
+  val TestPacingStressSeconds: String = "GEMSTONE_TEST_PACING_STRESS_SECONDS"
+  val TestPacingStressSecondsDefault: Long > 0 = 2L
   val ThreadCount: String = "GEMSTONE_THREAD_COUNT"
   val TimeoutScale: String = "GEMSTONE_TIMEOUT_SCALE"
   val TimeoutScaleDefault: Long > 0 = 1L

@@ -79,6 +79,7 @@ object GenerateEnvironment {
       "GEMSTONE_TEST_MEMORY_ATOMIC_BITS"         -> "",
       "GEMSTONE_TEST_MEMORY_CONCURRENCY_DIR"     -> "",
       "GEMSTONE_TEST_MEMORY_PROBE_LIST"          -> "",
+      "GEMSTONE_TEST_PACING_STRESS_SECONDS"      -> "2",
       "GEMSTONE_THREAD_COUNT"                    -> "",
       "GEMSTONE_TIMEOUT_SCALE"                   -> "1",
       "GEMSTONE_TRACE_LIST"                      -> "",

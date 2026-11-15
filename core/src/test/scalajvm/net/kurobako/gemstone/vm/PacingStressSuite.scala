@@ -7,19 +7,23 @@ import java.util.concurrent.atomic.AtomicIntegerArray
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicLongArray
 import java.util.concurrent.atomic.AtomicReference
+import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.environment
 import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 import scala.util.Random
 
 /** Drives Pacing directly from more threads than slots. The floor is documented as a lower bound on the clock of the
   * slowest running group, so a floor above a live group's own clock is a violation. Each test repeats its interleaving
-  * until `GEMSTONE_PACING_STRESS_SECONDS` runs out, which defaults to a couple of seconds and is raised for long runs.
+  * until `GEMSTONE_TEST_PACING_STRESS_SECONDS` runs out, which defaults to a couple of seconds and is raised for long
+  * runs.
   */
 class PacingStressSuite extends Suite {
   override def baseTimeout: FiniteDuration = 30.minutes
 
   private val Seconds =
-    sys.env.get("GEMSTONE_PACING_STRESS_SECONDS").flatMap(_.toIntOption).getOrElse(2)
+    sys.env.get(environment.TestPacingStressSeconds).flatMap(_.toIntOption)
+      .getOrElse(environment.TestPacingStressSecondsDefault.raw.toInt)
 
   private object Peek {
     private val clock = classOf[Pace].getDeclaredField("clock")
