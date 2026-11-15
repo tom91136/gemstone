@@ -101,6 +101,15 @@ function(conformance_verify_relocation artifact support supplement)
       endif()
       continue()
     endif()
+    # Interpreter cases resolve an environment cache that deliberately stays out of the artifact, so only their shim
+    # belongs to the relocation check.
+    if(entry MATCHES "\tcases$")
+      if(NOT EXISTS "${relocated_artifact}/${program}")
+        file(REMOVE_RECURSE "${relocated_root}")
+        message(FATAL_ERROR "relocated interpreter program is missing: ${program}")
+      endif()
+      continue()
+    endif()
     if(entry MATCHES "\tdeqp$")
       execute_process(COMMAND "${CMAKE_COMMAND}" -E env ${runtime_environment}
         "${relocated_artifact}/${program}" --deqp-runmode=stdout-caselist --deqp-shadercache=disable

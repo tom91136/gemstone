@@ -1,7 +1,7 @@
 include_guard(GLOBAL)
 
 function(container_command output)
-  cmake_parse_arguments(ARG "" "EXECUTABLE;IMAGE;SOURCE;SOURCE_TARGET;ARTIFACTS;DEPENDENCIES;CCACHE;WORK;NETWORK;CPU_SHARES;IDENTITY"
+  cmake_parse_arguments(ARG "" "EXECUTABLE;IMAGE;SOURCE;SOURCE_TARGET;ARTIFACTS;DEPENDENCIES;CCACHE;WORK;NETWORK;CPU_SHARES;IDENTITY;INTERPRETERS"
     "COMMAND" ${ARGN})
   if(NOT ARG_EXECUTABLE OR NOT ARG_IMAGE)
     message(FATAL_ERROR "container_command requires EXECUTABLE and IMAGE")
@@ -37,6 +37,10 @@ function(container_command output)
   endif()
   if(ARG_WORK)
     list(APPEND command --mount "type=bind,source=${ARG_WORK},target=/work")
+  endif()
+  # Interpreter environments keep absolute paths in their caches (depots, bytecode), so they mount where they live.
+  if(ARG_INTERPRETERS)
+    list(APPEND command --mount "type=bind,source=${ARG_INTERPRETERS},target=${ARG_INTERPRETERS}")
   endif()
   list(APPEND command "${ARG_IMAGE}")
   list(APPEND command ${ARG_COMMAND})

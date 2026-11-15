@@ -199,6 +199,9 @@ set(artifact_outputs)
 set(CONFORMANCE_DEPENDENCY_DIRECTORY "${CMAKE_BINARY_DIR}/deps" CACHE PATH
   "Shared source cache for conformance dependencies")
 option(CONFORMANCE_OFFLINE "Require cached dependencies and disable network fetches" OFF)
+option(CONFORMANCE_BUILD_INTERPRETERS "Build interpreter environments into the conformance artifacts" ON)
+set(CONFORMANCE_INTERPRETER_DIRECTORY "${CMAKE_BINARY_DIR}/interpreters" CACHE PATH
+  "Persistent cache of interpreter environments, keyed by lock file")
 set(CONFORMANCE_CCACHE_DIRECTORY "${CMAKE_BINARY_DIR}/ccache" CACHE PATH
   "Compiler cache shared by all artifact containers")
 file(MAKE_DIRECTORY "${CONFORMANCE_CCACHE_DIRECTORY}")
@@ -219,7 +222,6 @@ set(conformance_dependency_stamp "${CONFORMANCE_DEPENDENCY_DIRECTORY}/.populated
 if(CONFORMANCE_OFFLINE)
   set(DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_DIRECTORY}")
   set(DEPENDENCY_CACHE_MODE verify)
-  include("${dependency_manifest}")
 else()
   add_custom_command(
     OUTPUT "${conformance_dependency_stamp}"
@@ -229,7 +231,17 @@ else()
     DEPENDS "${dependency_manifest}" "${CONFORMANCE_SOURCE_DIRECTORY}/cmake/DependencyCache.cmake"
     COMMENT "Populating conformance dependency cache"
     VERBATIM)
+  set(DEPENDENCY_CACHE "${CONFORMANCE_DEPENDENCY_DIRECTORY}")
+  set(DEPENDENCY_CACHE_MODE apply)
 endif()
+include("${dependency_manifest}")
+
+if(CONFORMANCE_OFFLINE)
+  set(CONFORMANCE_OFFLINE_BINARY 1)
+else()
+  set(CONFORMANCE_OFFLINE_BINARY 0)
+endif()
+include("${CMAKE_CURRENT_LIST_DIR}/Interpreters.cmake")
 
 # GFX8 has no rocBLAS, so its programs need less of the HIP closure than the others do.
 function(partial_closure backend architecture result)
@@ -296,19 +308,33 @@ function(add_artifact backend architecture compiler code output supplement_outpu
   artifact_arguments("${backend}" "${architecture}" "${compiler}" "${output}" "${code}" arguments)
   conformance_support_supplement("${backend}" "${architecture}" "${compiler}" supplement)
 
+  set(interpreter_packages)
+  set(interpreter_stamps)
+  if(CONFORMANCE_BUILD_INTERPRETERS)
+    conformance_interpreter_packages_for_backend("${backend}" interpreter_packages)
+    foreach(package IN LISTS interpreter_packages)
+      conformance_interpreter_environment("${package}" "${image}" "${toolchain_stamp}" interpreter_stamp)
+      list(APPEND interpreter_stamps "${interpreter_stamp}")
+    endforeach()
+  endif()
+
+  string(REPLACE ";" "," interpreter_packages_argument "${interpreter_packages}")
   list(APPEND arguments
     "-DCONFORMANCE_SUPPORT_KEY=${support}"
     "-DCONFORMANCE_SUPPLEMENT_KEY=${supplement}"
     "-DCONFORMANCE_SUPPLEMENT_OUTPUT=${supplement_output}"
     "-DCONFORMANCE_DEPENDENCY_CACHE=/conformance-deps"
     "-DCONFORMANCE_OFFLINE=ON"
+    "-DCONFORMANCE_INTERPRETER_DIRECTORY=${CONFORMANCE_INTERPRETER_DIRECTORY}"
+    "-DCONFORMANCE_INTERPRETER_PACKAGES=${interpreter_packages_argument}"
+    "-DCONFORMANCE_INTERPRETER_IMAGE=${image}"
     "-DCONFORMANCE_WORK_DIRECTORY=/work")
   set(work_directory "${CONFORMANCE_WORK_DIRECTORY}/${name}")
 
   # CTS directories and unified backend implementations belong only to their
   # backend. Everything else remains shared, including headers used across
   # backends and CMake files that select sources or package runtime libraries.
-  set(dependencies ${artifact_scripts} "${toolchain_stamp}")
+  set(dependencies ${artifact_scripts} "${toolchain_stamp}" ${interpreter_stamps})
   foreach(input IN LISTS artifact_inputs)
     if(input MATCHES "^cts/([^/]+)/" AND NOT CMAKE_MATCH_1 STREQUAL backend)
       continue()

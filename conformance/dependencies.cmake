@@ -49,6 +49,9 @@ pinned_dependency(levelzero_headers SOURCE_ONLY
 pinned_dependency(babelstream SOURCE_ONLY
   URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/5cb9445483786f3502b12b8faab8414f8c5873b1
   URL_HASH SHA256=3f6d3e600feed6933254f28bd135cef9b068e0186d0942f3089d42f24d0a39d9)
+pinned_dependency(babelstream_julia SOURCE_ONLY
+  URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/f9e95b09fe0ef5d4a307a9e1111caaf56b9fece3
+  URL_HASH SHA256=7f36c5fcf960da6331be974924fca65c5dc9dc4faf12570b14df7757cbfb4ddf)
 pinned_dependency(minibude SOURCE_ONLY
   URL https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/2b23c27e80792f48fdf12a3ed232620160979e4c
   URL_HASH SHA256=5a24663d101873a376fdae03126e7778f361cddd5b65b4bc124414a8839d8543)
@@ -128,6 +131,19 @@ pinned_dependency(cxxopts SOURCE_ONLY
 pinned_dependency(hecbench_fmt SOURCE_ONLY
   URL https://codeload.github.com/fmtlib/fmt/tar.gz/refs/tags/7.1.2
   URL_HASH SHA256=4119a1c34dff91631e1d0a3707428f764f1ea22fe3cd5e70af5b4ccd5513831c)
+
+# Interpreter environments are built from these toolchains and cached by lock file; only the downloads are shared with
+# the source cache, never their installed payloads.
+set(conformance_python_release 3.12.16+20261110)
+pinned_dependency(cpython DOWNLOAD_NO_EXTRACT YES
+  URL https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-x86_64-unknown-linux-gnu-install_only.tar.gz
+  URL_HASH SHA256=c2f87d4b4e8db3abddb0f116c6ccfc503d0cbdbb9ee8faacddad1b679ec12e99
+  FILENAME cpython-3.12.16.tar.gz)
+set(conformance_julia_release 1.9.3)
+pinned_dependency(julia DOWNLOAD_NO_EXTRACT YES
+  URL https://julialang-s3.julialang.org/bin/linux/x64/1.9/julia-1.9.3-linux-x86_64.tar.gz
+  URL_HASH SHA256=d76670cc9ba3e0fd4c1545dd3d00269c0694976a1176312795ebce1692d323d1
+  FILENAME julia-1.9.3.tar.gz)
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/Hecbench.cmake")
 if(DEPENDENCY_CACHE_MODE STREQUAL "populate" OR CONFORMANCE_BUILD_HECBENCH)

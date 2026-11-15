@@ -1,0 +1,4 @@
+# Every interpreter-hosted case the artifact carries. Package suites are large, so interpreters-bounded selects the
+# cases a normal run uses.
+specs = ['*']
+include_programs = ['python_numba', 'julia_*']

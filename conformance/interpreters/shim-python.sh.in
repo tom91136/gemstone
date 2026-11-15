@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+base=${CONFORMANCE_INTERPRETER_DIRECTORY:-@CONFORMANCE_INTERPRETER_DIRECTORY@}
+environment="$base/@PACKAGE@-@KEY@"
+PYTHONNOUSERSITE=1
+PYTHONPATH="$environment/site-packages"
+CUDA_HOME="$environment/cuda"
+export PYTHONNOUSERSITE PYTHONPATH CUDA_HOME
+exec "$environment/python" "$root/data/interpreters/@SCRIPT@" "$@"

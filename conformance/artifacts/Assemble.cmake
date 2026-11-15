@@ -140,6 +140,15 @@ endif()
 if(NOT DEFINED CONFORMANCE_KEEP_WORK)
   set(CONFORMANCE_KEEP_WORK ON)
 endif()
+if(NOT DEFINED CONFORMANCE_INTERPRETER_DIRECTORY)
+  set(CONFORMANCE_INTERPRETER_DIRECTORY "")
+endif()
+if(NOT DEFINED CONFORMANCE_INTERPRETER_PACKAGES)
+  set(CONFORMANCE_INTERPRETER_PACKAGES "")
+endif()
+if(NOT DEFINED CONFORMANCE_INTERPRETER_IMAGE)
+  set(CONFORMANCE_INTERPRETER_IMAGE "")
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ArtifactWork.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ComponentNotices.cmake")
@@ -148,7 +157,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/Floor.cmake")
 set(work "${CONFORMANCE_WORK_DIRECTORY}")
 file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../dependencies.cmake" dependencies_digest)
 set(configuration_signature
-  "${dependencies_digest}|${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${BUILD_HECBENCH}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${backend_cmake_arguments}")
+  "${dependencies_digest}|${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${BUILD_HECBENCH}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${CONFORMANCE_INTERPRETER_PACKAGES}|${backend_cmake_arguments}")
 prepare_work_directory("${work}" "${configuration_signature}")
 set(build "${work}/build")
 set(ENV{HOME} "${work}/home")
@@ -180,6 +189,9 @@ execute_process(
     -DCMAKE_HIP_ARCHITECTURES=${amd_architecture}
     "-DCONFORMANCE_DEPENDENCY_CACHE=${CONFORMANCE_DEPENDENCY_CACHE}"
     -DCONFORMANCE_OFFLINE=${CONFORMANCE_OFFLINE}
+    "-DCONFORMANCE_INTERPRETER_DIRECTORY=${CONFORMANCE_INTERPRETER_DIRECTORY}"
+    "-DCONFORMANCE_INTERPRETER_PACKAGES=${CONFORMANCE_INTERPRETER_PACKAGES}"
+    "-DCONFORMANCE_INTERPRETER_IMAGE=${CONFORMANCE_INTERPRETER_IMAGE}"
     -DBUILD_TESTING=OFF
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     ${backend_cmake_arguments}
@@ -273,6 +285,11 @@ function(set_program_rpath root rpath)
     endforeach()
   endif()
   foreach(program IN LISTS programs)
+    file(READ "${program}" magic LIMIT 4 HEX)
+    string(TOLOWER "${magic}" magic)
+    if(NOT magic STREQUAL "7f454c46")
+      continue()
+    endif()
     execute_process(COMMAND "${patchelf}" --set-rpath "${rpath}" "${program}"
       COMMAND_ERROR_IS_FATAL ANY)
   endforeach()

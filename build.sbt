@@ -932,6 +932,7 @@ def conformanceArtifacts(
     s"-DCONFORMANCE_ARTIFACT_DIRECTORY=${directory / "artifacts"}",
     s"-DCONFORMANCE_DEPENDENCY_DIRECTORY=${root / ".cache/conformance"}",
     s"-DCONFORMANCE_WORK_DIRECTORY=${directory / "work"}",
+    s"-DCONFORMANCE_INTERPRETER_DIRECTORY=${directory / "interpreters"}",
     s"-DCONFORMANCE_CCACHE_DIRECTORY=${root / ".cache/ccache"}",
     s"-DCONFORMANCE_OFFLOAD_DIRECTORY=${root / ".cache/llvm-offload"}",
     s"-DCONFORMANCE_OFFLINE=${if (offline) "ON" else "OFF"}",

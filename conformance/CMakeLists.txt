@@ -173,6 +173,13 @@ if(CONFORMANCE_BUILD_HECBENCH AND NOT (CONFORMANCE_BACKEND STREQUAL "cuda"
     AND CONFORMANCE_COMPILER STREQUAL "vendor" AND CONFORMANCE_CUDA_CODE STREQUAL "fatbin"))
   message(FATAL_ERROR "HeCBench requires the nvcc CUDA 13.3 fatbin route")
 endif()
+# Interpreter programs are shims over an environment cache built by the artifact matrix; the cache path is embedded as
+# their default, and CONFORMANCE_INTERPRETER_DIRECTORY overrides it at run time.
+set(CONFORMANCE_INTERPRETER_DIRECTORY "" CACHE PATH "Interpreter environment cache the shims resolve by default")
+set(CONFORMANCE_INTERPRETER_PACKAGES "" CACHE STRING "Interpreter packages whose shims this artifact installs")
+string(REPLACE "," ";" CONFORMANCE_INTERPRETER_PACKAGES "${CONFORMANCE_INTERPRETER_PACKAGES}")
+set(CONFORMANCE_INTERPRETER_IMAGE "" CACHE STRING "Container image the Julia cases run in")
+set(CONFORMANCE_TIMEOUT_INTERPRETER 900)
 include(dependencies.cmake)
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
   list(LENGTH CMAKE_CUDA_ARCHITECTURES conformance_architecture_count)
@@ -537,6 +544,9 @@ if(CONFORMANCE_BUILD_HECBENCH)
   add_subdirectory(hecbench)
   list(APPEND conformance_artifact_targets conformance_hecbench_artifact)
 endif()
+if(CONFORMANCE_INTERPRETER_PACKAGES)
+  add_subdirectory(interpreters)
+endif()
 if(CONFORMANCE_BUILD_VENDOR AND CONFORMANCE_COMPILER STREQUAL "vendor"
     AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vendor/${CONFORMANCE_BACKEND}.cmake")
   add_subdirectory(vendor)
@@ -549,18 +559,20 @@ if(conformance_test_programs)
   file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test-programs.txt"
     CONTENT "${conformance_test_program_manifest}\n")
 endif()
-# HeCBench contributes only the programs that its keep-going build produced, so
-# its fragment is merged at install time.
+# HeCBench and interpreter programs contribute only what their builds produced, so their fragments are merged at
+# install time.
 install(CODE "
   set(manifest \"\")
   if(EXISTS \"${CMAKE_CURRENT_BINARY_DIR}/test-programs.txt\")
     file(READ \"${CMAKE_CURRENT_BINARY_DIR}/test-programs.txt\" manifest)
   endif()
-  if(EXISTS \"\${CMAKE_INSTALL_PREFIX}/hecbench-test-programs.txt\")
-    file(READ \"\${CMAKE_INSTALL_PREFIX}/hecbench-test-programs.txt\" hecbench)
-    string(APPEND manifest \"\${hecbench}\")
-    file(REMOVE \"\${CMAKE_INSTALL_PREFIX}/hecbench-test-programs.txt\")
-  endif()
+  foreach(fragment IN ITEMS hecbench interpreter)
+    if(EXISTS \"\${CMAKE_INSTALL_PREFIX}/\${fragment}-test-programs.txt\")
+      file(READ \"\${CMAKE_INSTALL_PREFIX}/\${fragment}-test-programs.txt\" extra)
+      string(APPEND manifest \"\${extra}\")
+      file(REMOVE \"\${CMAKE_INSTALL_PREFIX}/\${fragment}-test-programs.txt\")
+    endif()
+  endforeach()
   if(NOT manifest STREQUAL \"\")
     file(WRITE \"\${CMAKE_INSTALL_PREFIX}/test-programs.txt\" \"\${manifest}\")
   endif()

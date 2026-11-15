@@ -1,0 +1,28 @@
+# Bounded interpreter selection: whole driver and kernel modules from the package's own suite, chosen by module or name
+# pattern, plus one BabelStream run per Julia backend that the C++ miniapp models compare with.
+extends = "interpreters"
+include_cases = [
+  "inventory",
+  "smoke/vector_add",
+  "cudadrv/test_cuda_driver.py::*",
+  "cudadrv/test_cuda_memory.py::*",
+  "cudadrv/test_context_stack.py::*",
+  "cudadrv/test_events.py::*",
+  "cudadrv/test_init.py::*",
+  "cudadrv/test_select_device.py::*",
+  "cudadrv/test_streams.py::*",
+  "cudapy/test_array.py::*",
+  "cudapy/test_atomics.py::*",
+  "cudapy/test_constmem.py::*",
+  "cudapy/test_device_func.py::*",
+  "cudapy/test_reduce.py::*",
+  "cudapy/test_vectorize.py::*",
+  "babelstream",
+  "core/initialization",
+  "core/cudadrv",
+  "base/array",
+  "base/broadcast",
+  "array",
+  "execution",
+  "level-zero",
+]

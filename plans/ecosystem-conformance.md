@@ -1,6 +1,6 @@
 # Ecosystem conformance
 
-Status: proposed, not started. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, and on `machine-identity.md` for packages that query NVML or AMD SMI.
+Status: in progress. Step 1 is done; step 2 is underway. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, and on `machine-identity.md` for packages that query NVML or AMD SMI.
 
 ## Goal
 
@@ -32,6 +32,11 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 
 - The source kind, the environment cache, and one Numba case end to end.
 - For each package, record which driver-level libraries it loads and which entry points it calls, so missing entry points appear as a list before any test runs.
+- Completed:
+  - Interpreter-hosted source kind with lock-file keyed environment cache in `conformance/interpreters/`.
+  - Numba environment pinned via `requirements-numba.txt` and standalone CPython 3.12.
+  - Driver inventory for Numba (`python_numba --case inventory`): driver API 13030; 467 entry points referenced by `cuda-bindings`; 19 missing entry points under gemstone, all EGL, VDPAU, and OpenGL interop (`cuEGLStream*`, `cuEventCreateFromEGLSync`, `cuGLGetDevices`, `cuGraphicsEGL*`, `cuGraphicsGL*`, `cuGraphicsResourceGetMappedEglFrame`, `cuGraphicsVDPAU*`, `cuVDPAU*`).
+  - `smoke/vector_add` passes under gemstone emulation on `cuda-sass/sm_89`.
 
 ### 2. Numba
 

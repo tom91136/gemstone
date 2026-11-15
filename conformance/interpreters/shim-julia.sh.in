@@ -1,0 +1,35 @@
+#!/bin/bash
+# Julia 1.9 refuses to start under the host's SELinux execstack policy, so the case runs in the route's image with the
+# client's loader paths, RPC socket, and environment mounted. Everything else is the pinned depot beside the interpreter.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+base=${CONFORMANCE_INTERPRETER_DIRECTORY:-@CONFORMANCE_INTERPRETER_DIRECTORY@}
+depot="$base/@PACKAGE@-@KEY@"
+image=${CONFORMANCE_INTERPRETER_IMAGE:-@IMAGE@}
+container=${CONFORMANCE_CONTAINER_EXECUTABLE:-podman}
+julia="$base/julia-@JULIA@/bin/julia"
+project="$depot/environment/@PROJECT@"
+
+arguments=(run --rm --security-opt label=disable --userns keep-id --user "$(id -u):$(id -g)"
+  --network none --env-host --env HOME=/tmp --workdir /tmp
+  --env "JULIA_DEPOT_PATH=$depot" --env JULIA_PKG_OFFLINE=true --env "JULIA_NUM_THREADS=${JULIA_NUM_THREADS:-1}"
+  --mount "type=bind,source=$base,target=$base"
+  --mount "type=bind,source=$root,target=$root,readonly")
+saved_ifs=$IFS
+IFS=:
+for directory in ${LD_LIBRARY_PATH-}; do
+  [ -d "$directory" ] && arguments+=(--mount "type=bind,source=$directory,target=$directory,readonly")
+done
+for library in ${LD_PRELOAD-}; do
+  [ -d "$(dirname "$library")" ] && arguments+=(--mount "type=bind,source=$(dirname "$library"),target=$(dirname "$library"),readonly")
+done
+IFS=$saved_ifs
+unset directory library
+for endpoint in $(env | sed -n 's/^.*=unix:\/\///p'); do
+  if [ -e "$endpoint" ] || [ -d "$(dirname "$endpoint")" ]; then
+    session=$(dirname "$endpoint")
+    arguments+=(--mount "type=bind,source=$session,target=$session")
+  fi
+done
+exec "$container" "${arguments[@]}" "$image" "$julia" --startup-file=no --project="$project" \
+  "$root/data/interpreters/@SCRIPT@" @ARGUMENTS@ "$@"
