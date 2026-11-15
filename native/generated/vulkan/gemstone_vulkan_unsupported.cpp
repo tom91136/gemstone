@@ -262,7 +262,6 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateCuFunctionNVX(VkDevice, const 
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateCuModuleNVX(VkDevice, const VkCuModuleCreateInfoNVX *, const VkAllocationCallbacks *, VkCuModuleNVX *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateDataGraphPipelineSessionARM(VkDevice, const VkDataGraphPipelineSessionCreateInfoARM *, const VkAllocationCallbacks *, VkDataGraphPipelineSessionARM *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateDataGraphPipelinesARM(VkDevice, VkDeferredOperationKHR, VkPipelineCache, uint32_t, const VkDataGraphPipelineCreateInfoARM *, const VkAllocationCallbacks *, VkPipeline *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
-extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugReportCallbackEXT(VkInstance, const VkDebugReportCallbackCreateInfoEXT *, const VkAllocationCallbacks *, VkDebugReportCallbackEXT *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateDebugUtilsMessengerEXT(VkInstance, const VkDebugUtilsMessengerCreateInfoEXT *, const VkAllocationCallbacks *, VkDebugUtilsMessengerEXT *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateDeferredOperationKHR(VkDevice, const VkAllocationCallbacks *, VkDeferredOperationKHR *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateDisplayModeKHR(VkPhysicalDevice, VkDisplayKHR, const VkDisplayModeCreateInfoKHR *, const VkAllocationCallbacks *, VkDisplayModeKHR *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
@@ -291,14 +290,12 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateVideoSessionKHR(VkDevice, cons
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkCreateVideoSessionParametersKHR(VkDevice, const VkVideoSessionParametersCreateInfoKHR *, const VkAllocationCallbacks *, VkVideoSessionParametersKHR *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectNameEXT(VkDevice, const VkDebugMarkerObjectNameInfoEXT *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkDebugMarkerSetObjectTagEXT(VkDevice, const VkDebugMarkerObjectTagInfoEXT *) { return VK_ERROR_FEATURE_NOT_PRESENT; }
-extern "C" VKAPI_ATTR void VKAPI_CALL vkDebugReportMessageEXT(VkInstance, VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char *, const char *) { std::abort(); }
 extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkDeferredOperationJoinKHR(VkDevice, VkDeferredOperationKHR) { return VK_ERROR_FEATURE_NOT_PRESENT; }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyAccelerationStructureKHR(VkDevice, VkAccelerationStructureKHR, const VkAllocationCallbacks *) { std::abort(); }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyAccelerationStructureNV(VkDevice, VkAccelerationStructureNV, const VkAllocationCallbacks *) { std::abort(); }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyCuFunctionNVX(VkDevice, VkCuFunctionNVX, const VkAllocationCallbacks *) { std::abort(); }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyCuModuleNVX(VkDevice, VkCuModuleNVX, const VkAllocationCallbacks *) { std::abort(); }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyDataGraphPipelineSessionARM(VkDevice, VkDataGraphPipelineSessionARM, const VkAllocationCallbacks *) { std::abort(); }
-extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyDebugReportCallbackEXT(VkInstance, VkDebugReportCallbackEXT, const VkAllocationCallbacks *) { std::abort(); }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyDebugUtilsMessengerEXT(VkInstance, VkDebugUtilsMessengerEXT, const VkAllocationCallbacks *) { std::abort(); }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyDeferredOperationKHR(VkDevice, VkDeferredOperationKHR, const VkAllocationCallbacks *) { std::abort(); }
 extern "C" VKAPI_ATTR void VKAPI_CALL vkDestroyExternalComputeQueueNV(VkDevice, VkExternalComputeQueueNV, const VkAllocationCallbacks *) { std::abort(); }

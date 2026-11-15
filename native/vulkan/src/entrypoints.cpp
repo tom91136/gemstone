@@ -56,6 +56,9 @@ extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInst
   // Device extension commands are visible through a valid instance when any
   // physical device supports the extension; device lookup still checks enablement.
   if (function == "vkResetQueryPoolEXT") return supportedFunction(name);
+  if (function == "vkCreateDebugReportCallbackEXT" || function == "vkDebugReportMessageEXT"
+      || function == "vkDestroyDebugReportCallbackEXT")
+    return supportedFunction(name);
   if (function.ends_with("KHR") || function.ends_with("EXT")) {
     std::scoped_lock const lock(stateMutex);
     const auto found = instanceProperties2.find(instance);

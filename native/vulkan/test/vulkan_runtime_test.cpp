@@ -499,6 +499,23 @@ TEST_CASE("Vulkan procedure lookup respects command scope and enabled extensions
   vkDestroyInstance(extended, nullptr);
 }
 
+TEST_CASE("Vulkan debug report entry points exist without the extension", "[vulkan][lookup]") {
+  TestDevice const runtime;
+  const auto create =
+      reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(vkGetInstanceProcAddr(runtime.instance, "vkCreateDebugReportCallbackEXT"));
+  const auto message = reinterpret_cast<PFN_vkDebugReportMessageEXT>(vkGetInstanceProcAddr(runtime.instance, "vkDebugReportMessageEXT"));
+  const auto destroy =
+      reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(vkGetInstanceProcAddr(runtime.instance, "vkDestroyDebugReportCallbackEXT"));
+  REQUIRE((create && message && destroy));
+  VkDebugReportCallbackCreateInfoEXT info{};
+  info.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
+  VkDebugReportCallbackEXT callback{};
+  REQUIRE((create(runtime.instance, &info, nullptr, &callback) == VK_SUCCESS));
+  REQUIRE((callback != VK_NULL_HANDLE));
+  message(runtime.instance, VK_DEBUG_REPORT_ERROR_BIT_EXT, VK_DEBUG_REPORT_OBJECT_TYPE_INSTANCE_EXT, 0, 0, 0, "gemstone", "test");
+  destroy(runtime.instance, callback, nullptr);
+}
+
 TEST_CASE("Vulkan host query reset extension is enumerated and scoped to enabled devices", "[vulkan][query][lookup]") {
   TestDevice const runtime;
   uint32_t count = 1;

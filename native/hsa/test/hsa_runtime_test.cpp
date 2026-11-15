@@ -204,7 +204,12 @@ TEST_CASE("HSA system paging ISA feature", "[hsa]") {
   REQUIRE((hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &length) == HSA_STATUS_SUCCESS));
   std::string name(length, '\0');
   REQUIRE((hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, name.data()) == HSA_STATUS_SUCCESS));
+  REQUIRE((name.back() == '\0'));
   REQUIRE((name.contains("xnack+")));
+  std::array<bool, 3> rounding{};
+  REQUIRE((hsa_isa_get_info_alt(isa, HSA_ISA_INFO_DEFAULT_FLOAT_ROUNDING_MODES, rounding.data()) == HSA_STATUS_SUCCESS));
+  REQUIRE((!rounding[HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT] && !rounding[HSA_DEFAULT_FLOAT_ROUNDING_MODE_ZERO]
+           && rounding[HSA_DEFAULT_FLOAT_ROUNDING_MODE_NEAR]));
   std::array<uint32_t, 2> hostValues{41, 43};
   void *agentPointer = nullptr;
   REQUIRE((hsa_amd_memory_lock(hostValues.data(), sizeof(hostValues), nullptr, 0, &agentPointer) == HSA_STATUS_SUCCESS));
@@ -344,7 +349,25 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
   hsa_profile_t profile{};
   REQUIRE((hsa_agent_get_info(gpu, HSA_AGENT_INFO_PROFILE, &profile) == HSA_STATUS_SUCCESS));
   REQUIRE((profile == HSA_PROFILE_BASE));
-  for (const auto attribute : {HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT}) {
+  for (const auto attribute :
+       {HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS, HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES, HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE,
+        HSA_AMD_AGENT_INFO_UCODE_VERSION, HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION}) {
+    uint32_t count = UINT32_MAX;
+    REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(attribute), &count) == HSA_STATUS_SUCCESS));
+  }
+  hsa_amd_iommu_version_t iommu = HSA_IOMMU_SUPPORT_V2;
+  REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_IOMMU_SUPPORT), &iommu) == HSA_STATUS_SUCCESS));
+  REQUIRE((iommu == HSA_IOMMU_SUPPORT_NONE));
+  bool directHostAccess = true;
+  REQUIRE((hsa_agent_get_info(gpu, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS), &directHostAccess)
+           == HSA_STATUS_SUCCESS));
+  REQUIRE((!directHostAccess));
+  bool fastF16 = false;
+  REQUIRE((hsa_agent_get_info(gpu, HSA_AGENT_INFO_FAST_F16_OPERATION, &fastF16) == HSA_STATUS_SUCCESS));
+  REQUIRE((fastF16));
+  for (const auto attribute :
+       {HSA_AMD_SYSTEM_INFO_SVM_SUPPORTED, HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT, HSA_AMD_SYSTEM_INFO_MWAITX_ENABLED,
+        HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED, HSA_AMD_SYSTEM_INFO_XNACK_ENABLED, HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED}) {
     bool supported = true;
     REQUIRE((hsa_system_get_info(attribute, &supported) == HSA_STATUS_SUCCESS));
     REQUIRE((!supported));
@@ -411,6 +434,12 @@ TEST_CASE("HSA runtime facade", "[hsa]") {
       uint32_t flags = UINT32_MAX;
       REQUIRE((hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags) == HSA_STATUS_SUCCESS));
       REQUIRE((flags == 0));
+      for (const auto attribute : {HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE,
+                                   HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT, HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE}) {
+        size_t granule = 0;
+        REQUIRE((hsa_amd_memory_pool_get_info(pool, attribute, &granule) == HSA_STATUS_SUCCESS));
+        REQUIRE((granule > 0));
+      }
       REQUIRE((hsa_amd_memory_pool_allocate(pool, 64, 0, &allocation) == HSA_STATUS_ERROR_INVALID_ALLOCATION));
     } else {
       REQUIRE((segment == HSA_AMD_SEGMENT_GLOBAL));

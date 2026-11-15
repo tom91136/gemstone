@@ -68,6 +68,7 @@ if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateBuffer") == 0) r
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateBufferView") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateBufferView);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateCommandPool") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateCommandPool);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateComputePipelines") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateComputePipelines);
+if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateDebugReportCallbackEXT") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateDebugReportCallbackEXT);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateDescriptorPool") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateDescriptorPool);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateDescriptorSetLayout") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateDescriptorSetLayout);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateDescriptorUpdateTemplate") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateDescriptorUpdateTemplate);
@@ -90,9 +91,11 @@ if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateSampler") == 0) 
 if (version >= VK_API_VERSION_1_1 && std::strcmp(name, "vkCreateSamplerYcbcrConversion") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateSamplerYcbcrConversion);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateSemaphore") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateSemaphore);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkCreateShaderModule") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkCreateShaderModule);
+if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDebugReportMessageEXT") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDebugReportMessageEXT);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDestroyBuffer") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyBuffer);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDestroyBufferView") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyBufferView);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDestroyCommandPool") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyCommandPool);
+if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDestroyDebugReportCallbackEXT") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyDebugReportCallbackEXT);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDestroyDescriptorPool") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyDescriptorPool);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDestroyDescriptorSetLayout") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyDescriptorSetLayout);
 if (version >= VK_API_VERSION_1_0 && std::strcmp(name, "vkDestroyDescriptorUpdateTemplate") == 0) return reinterpret_cast<PFN_vkVoidFunction>(vkDestroyDescriptorUpdateTemplate);

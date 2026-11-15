@@ -63,6 +63,7 @@ VkResult implVkCreateBuffer(VkDevice, const VkBufferCreateInfo *, const VkAlloca
 VkResult implVkCreateBufferView(VkDevice, const VkBufferViewCreateInfo *, const VkAllocationCallbacks *, VkBufferView *);
 VkResult implVkCreateCommandPool(VkDevice, const VkCommandPoolCreateInfo *, const VkAllocationCallbacks *, VkCommandPool *);
 VkResult implVkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t, const VkComputePipelineCreateInfo *, const VkAllocationCallbacks *, VkPipeline *);
+VkResult implVkCreateDebugReportCallbackEXT(VkInstance, const VkDebugReportCallbackCreateInfoEXT *, const VkAllocationCallbacks *, VkDebugReportCallbackEXT *);
 VkResult implVkCreateDescriptorPool(VkDevice, const VkDescriptorPoolCreateInfo *, const VkAllocationCallbacks *, VkDescriptorPool *);
 VkResult implVkCreateDescriptorSetLayout(VkDevice, const VkDescriptorSetLayoutCreateInfo *, const VkAllocationCallbacks *, VkDescriptorSetLayout *);
 VkResult implVkCreateDescriptorUpdateTemplate(VkDevice, const VkDescriptorUpdateTemplateCreateInfo *, const VkAllocationCallbacks *, VkDescriptorUpdateTemplate *);
@@ -82,9 +83,11 @@ VkResult implVkCreateRenderPass2(VkDevice, const VkRenderPassCreateInfo2 *, cons
 VkResult implVkCreateSampler(VkDevice, const VkSamplerCreateInfo *, const VkAllocationCallbacks *, VkSampler *);
 VkResult implVkCreateSemaphore(VkDevice, const VkSemaphoreCreateInfo *, const VkAllocationCallbacks *, VkSemaphore *);
 VkResult implVkCreateShaderModule(VkDevice, const VkShaderModuleCreateInfo *, const VkAllocationCallbacks *, VkShaderModule *);
+void implVkDebugReportMessageEXT(VkInstance, VkDebugReportFlagsEXT, VkDebugReportObjectTypeEXT, uint64_t, size_t, int32_t, const char *, const char *);
 void implVkDestroyBuffer(VkDevice, VkBuffer, const VkAllocationCallbacks *);
 void implVkDestroyBufferView(VkDevice, VkBufferView, const VkAllocationCallbacks *);
 void implVkDestroyCommandPool(VkDevice, VkCommandPool, const VkAllocationCallbacks *);
+void implVkDestroyDebugReportCallbackEXT(VkInstance, VkDebugReportCallbackEXT, const VkAllocationCallbacks *);
 void implVkDestroyDescriptorPool(VkDevice, VkDescriptorPool, const VkAllocationCallbacks *);
 void implVkDestroyDescriptorSetLayout(VkDevice, VkDescriptorSetLayout, const VkAllocationCallbacks *);
 void implVkDestroyDescriptorUpdateTemplate(VkDevice, VkDescriptorUpdateTemplate, const VkAllocationCallbacks *);

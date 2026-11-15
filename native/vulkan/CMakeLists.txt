@@ -17,6 +17,7 @@ add_library(gemstone_vulkan SHARED
   src/descriptor.cpp
   src/physical_device.cpp
   src/entrypoints.cpp
+  src/debug_report.cpp
   src/shader.cpp
   src/submission.cpp
   src/capabilities.cpp

@@ -29,6 +29,7 @@ option(GEMSTONE_ENABLE_LEVEL_ZERO "Build the Level Zero facade" ON)
 include(cmake/Aspartame.cmake)
 include(cmake/Fmt.cmake)
 include(cmake/Glaze.cmake)
+include(cmake/Tools.cmake)
 include_directories(SYSTEM "${aspartame_SOURCE_DIR}/src" "${glaze_SOURCE_DIR}/include")
 
 if(GEMSTONE_ENABLE_CUDA OR GEMSTONE_ENABLE_HIP)
@@ -307,6 +308,22 @@ if(BUILD_TESTING)
         "-DSYSROOT=${GEMSTONE_SYSROOT}" "-DSANITIZER_RUNTIME=${GEMSTONE_SANITIZER_PRELOAD}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckPackage.cmake")
   endif()
+  add_executable(gemstone_tools_test test/tools.cpp)
+  gemstone_test_target(gemstone_tools_test)
+  target_link_libraries(gemstone_tools_test PRIVATE gemstone_execution_client)
+  target_compile_definitions(gemstone_tools_test PRIVATE
+    GEMSTONE_TOOL_ROCMINFO="${GEMSTONE_TOOL_ROCMINFO}"
+    GEMSTONE_TOOL_CLINFO="${GEMSTONE_TOOL_CLINFO}"
+    GEMSTONE_TOOL_VULKANINFO="${GEMSTONE_TOOL_VULKANINFO}"
+    GEMSTONE_TOOL_SYCL_LS="${GEMSTONE_TOOL_SYCL_LS}"
+    GEMSTONE_TOOL_LIBRARY_PATH="${GEMSTONE_TOOL_LIBRARY_PATH}"
+    GEMSTONE_OPENCL_LIBRARY="${GEMSTONE_OPENCL_LIBRARY}"
+    GEMSTONE_LEVEL_ZERO_LIBRARY="${GEMSTONE_LEVEL_ZERO_LIBRARY}"
+    GEMSTONE_SANITIZER_PRELOAD="${GEMSTONE_SANITIZER_PRELOAD}")
+  add_dependencies(gemstone_tools_test gemstone_cuda gemstone_hsa_runtime gemstone_hip_runtime gemstone_opencl gemstone_vulkan
+    gemstone_levelzero level_zero_loader)
+  gemstone_discover_tests(gemstone_tools_test TEST_PREFIX "tools/" DISCOVERY_MODE PRE_TEST PROPERTIES TIMEOUT 120)
+
   if(GEMSTONE_ENABLE_CUDA AND GEMSTONE_ENABLE_HSA AND GEMSTONE_ENABLE_HIP
       AND GEMSTONE_ENABLE_OPENCL AND GEMSTONE_ENABLE_VULKAN AND GEMSTONE_ENABLE_LEVEL_ZERO)
     add_executable(gemstone_preset_identity_test test/preset_identity.cpp)

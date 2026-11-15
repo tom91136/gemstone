@@ -1005,6 +1005,10 @@ extern "C" hsa_status_t hsa_system_get_info(hsa_system_info_t attribute, void *v
     case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT: return copyStatus(value, false);
     case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MAJOR: return copyStatus(value, uint16_t(HSA_AMD_INTERFACE_VERSION_MAJOR));
     case HSA_AMD_SYSTEM_INFO_EXT_VERSION_MINOR: return copyStatus(value, uint16_t(HSA_AMD_INTERFACE_VERSION_MINOR));
+    case HSA_AMD_SYSTEM_INFO_MWAITX_ENABLED: return copyStatus(value, false);
+    case HSA_AMD_SYSTEM_INFO_DMABUF_SUPPORTED: return copyStatus(value, false);
+    case HSA_AMD_SYSTEM_INFO_XNACK_ENABLED: return copyStatus(value, false);
+    case HSA_AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED: return copyStatus(value, false);
     default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -1214,6 +1218,13 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
       return copyStatus(value, gpu ? gemstone::hsa::deviceModel().wavesPerComputeUnit() : uint32_t{0});
     case HSA_AMD_AGENT_INFO_NUM_SDMA_ENG: return copyStatus(value, uint32_t(gpu ? 1 : 0));
     case HSA_AMD_AGENT_INFO_NUM_SDMA_XGMI_ENG: return copyStatus(value, uint32_t(0));
+    case HSA_AMD_AGENT_INFO_MAX_ADDRESS_WATCH_POINTS: return copyStatus(value, uint32_t(gpu ? 1 : 0));
+    case HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES: return copyStatus(value, uint32_t(gpu ? 1 : 0));
+    case HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE: return copyStatus(value, uint32_t(gpu ? 1 : 0));
+    case HSA_AMD_AGENT_INFO_SVM_DIRECT_HOST_ACCESS: return copyStatus(value, false);
+    case HSA_AMD_AGENT_INFO_UCODE_VERSION: return copyStatus(value, uint32_t(0));
+    case HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION: return copyStatus(value, uint32_t(0));
+    case HSA_AMD_AGENT_INFO_IOMMU_SUPPORT: return copyStatus(value, HSA_IOMMU_SUPPORT_NONE);
     case HSA_AGENT_INFO_NAME: {
       const std::string name = gpu ? gemstone::hsa::targetArch() : std::string("host");
       copyName(value, name.c_str());
@@ -1237,6 +1248,7 @@ extern "C" hsa_status_t hsa_agent_get_info(hsa_agent_t agent, hsa_agent_info_t a
     case HSA_AGENT_INFO_QUEUE_MIN_SIZE: return copyStatus(value, uint32_t(1));
     case HSA_AGENT_INFO_QUEUE_MAX_SIZE: return copyStatus(value, (gpu ? QueueMaximum : 0));
     case HSA_AGENT_INFO_QUEUE_TYPE: return copyStatus(value, hsa_queue_type32_t(HSA_QUEUE_TYPE_MULTI));
+    case HSA_AGENT_INFO_FAST_F16_OPERATION: return copyStatus(value, gpu);
     case HSA_AGENT_INFO_NODE: return copyStatus(value, gpu ? 1 + ordinal : 0);
     case HSA_AGENT_INFO_DEVICE: return copyStatus(value, gpu ? HSA_DEVICE_TYPE_GPU : HSA_DEVICE_TYPE_CPU);
     case HSA_AGENT_INFO_CACHE_SIZE:
@@ -1289,9 +1301,9 @@ extern "C" hsa_status_t hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attri
   const std::string name = std::string("amdgcn-amd-amdhsa--") + gemstone::hsa::targetArch()
                            + (gemstone::environment::enabled(gemstone::environment::SystemPagingOn) ? ":xnack+" : "");
   switch (attribute) {
-    case HSA_ISA_INFO_NAME_LENGTH: return copyStatus(value, static_cast<uint32_t>(name.size()));
+    case HSA_ISA_INFO_NAME_LENGTH: return copyStatus(value, static_cast<uint32_t>(name.size() + 1));
     case HSA_ISA_INFO_NAME:
-      std::memcpy(value, name.data(), name.size());
+      std::memcpy(value, name.c_str(), name.size() + 1);
       traceApiText("hsa_isa_get_info_alt.name", name);
       return HSA_STATUS_SUCCESS;
     case HSA_ISA_INFO_CALL_CONVENTION_COUNT: return copyStatus(value, uint32_t(1));
@@ -1300,7 +1312,7 @@ extern "C" hsa_status_t hsa_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attri
     case HSA_ISA_INFO_MACHINE_MODELS: return copyStatus(value, std::array<bool, 2>{false, true});
     case HSA_ISA_INFO_PROFILES: return copyStatus(value, std::array<bool, 2>{true, true});
     case HSA_ISA_INFO_DEFAULT_FLOAT_ROUNDING_MODES:
-    case HSA_ISA_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES: return copyStatus(value, std::array<bool, 3>{false, true, false});
+    case HSA_ISA_INFO_BASE_PROFILE_DEFAULT_FLOAT_ROUNDING_MODES: return copyStatus(value, std::array<bool, 3>{false, false, true});
     case HSA_ISA_INFO_FAST_F16_OPERATION: return copyStatus(value, true);
     case HSA_ISA_INFO_WORKGROUP_MAX_DIM: return copyStatus(value, std::array<uint16_t, 3>{1024, 1024, 1024});
     case HSA_ISA_INFO_WORKGROUP_MAX_SIZE: return copyStatus(value, uint32_t(1024));
@@ -2571,6 +2583,10 @@ extern "C" hsa_status_t hsa_amd_memory_pool_get_info(hsa_amd_memory_pool_t pool,
       case HSA_AMD_MEMORY_POOL_INFO_SIZE: return copyStatus(value, gemstone::hsa::GroupMemoryBytes);
       case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED:
       case HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL: return copyStatus(value, false);
+      case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE:
+      case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALIGNMENT:
+      case HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE: return copyStatus(value, size_t(4));
+      case HSA_AMD_MEMORY_POOL_INFO_ALLOC_MAX_SIZE: return copyStatus(value, gemstone::hsa::GroupMemoryBytes);
       default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
