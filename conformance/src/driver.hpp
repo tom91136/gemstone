@@ -63,6 +63,7 @@ struct Workload {
   std::vector<std::string> excludeCases;
   // Case-identity globs kept after discovery. Empty keeps every discovered case.
   std::vector<std::string> includeCases;
+  std::map<std::string, std::vector<std::string>> programArguments;
 };
 struct ArtifactMetadata {
   std::string backend, architecture, support, code;
@@ -88,6 +89,7 @@ struct WorkloadFields {
       addIncludeCases;
   std::optional<std::vector<std::string>> includeCases;
   std::optional<std::string> vulkanMustpass;
+  std::optional<std::map<std::string, std::vector<std::string>>> programArguments;
 };
 struct ExecutionConfig {
   std::string directory, reportDirectory, device;
@@ -97,6 +99,7 @@ struct ExecutionConfig {
   std::vector<std::string> jitPrograms;
   // Programs whose warm-up failed, with the reason; their cases fail without running.
   std::map<std::string, std::string> jitFailures;
+  std::map<std::string, std::vector<std::string>> programArguments;
 };
 struct DiscoveryFailure {
   std::string message, classification;

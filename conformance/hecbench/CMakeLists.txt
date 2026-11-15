@@ -8,6 +8,16 @@ set(source "${hecbench_SOURCE_DIR}")
 set(staging "${CMAKE_CURRENT_BINARY_DIR}/source")
 stage_source("${source}" "${staging}")
 
+# Bounded workload: compress loop run once (5.4 s on sm_89 vs >600 s timeout under emulation at 1000 iterations).
+patch_exact("${staging}/src/bitpacking-cuda/kernels.cu"
+  "for (int n = 0; n < 1000; n++)"
+  "for (int n = 0; n < 1; n++)")
+
+# Bounded workload: NUM 256 (3185 iterations, 193 s on SASS / 168 s on PTX; default NUM 1024 needs 27250 iterations and serial CPU reference exceeds 15 minutes).
+patch_exact("${staging}/src/laplace-cuda/kernels.h"
+  "#define NUM 1024"
+  "#define NUM 256")
+
 hecbench_dvc_entries("${source}" dvc_entries)
 hecbench_licence_classification("${source}" licence_rows)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hecbench-licences.csv" "benchmark,licence,class,files\n")
@@ -107,8 +117,12 @@ add_custom_target(conformance_hecbench_artifact
   COMMENT "Building HeCBench CUDA benchmarks"
   VERBATIM)
 
+hecbench_benchmark_arguments("${source}/benchmarks.yaml" benchmark_args)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hecbench-arguments.json" "${benchmark_args}\n")
+
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hecbench-licences.csv"
   "${CMAKE_CURRENT_BINARY_DIR}/hecbench-excluded.txt"
+  "${CMAKE_CURRENT_BINARY_DIR}/hecbench-arguments.json"
   DESTINATION data/hecbench COMPONENT support)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hecbench-build-failures.txt"
   DESTINATION data/hecbench COMPONENT architecture OPTIONAL)

@@ -473,6 +473,10 @@ Workload loadWorkload(const RunOptions &configuration) {
     append(workload.excludePrograms, fields.addExcludePrograms);
     append(workload.excludeCases, fields.addExcludeCases);
     append(workload.includeCases, fields.addIncludeCases);
+    if (fields.programArguments) {
+      for (auto &[prog, args] : *fields.programArguments)
+        workload.programArguments[prog] = std::move(args);
+    }
     active.erase(name);
     return workload;
   };
@@ -741,6 +745,17 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
     applyJitCacheEnvironment(environment, fs::absolute(configuration.output / "jit-cache"));
   const auto reports = runDirectory / target.id;
   fs::create_directories(reports);
+  auto programArgs = workload.programArguments;
+  const auto candidateSupport = support.empty() ? artifact : support;
+  const auto argsFile = candidateSupport / "data/hecbench/hecbench-arguments.json";
+  if (fs::is_regular_file(argsFile)) {
+    std::map<std::string, std::vector<std::string>> defaults;
+    std::string buffer;
+    if (!glz::read_file_json(defaults, argsFile.string(), buffer)) {
+      for (auto &[name, args] : defaults)
+        programArgs.try_emplace(name, std::move(args));
+    }
+  }
   ExecutionConfig exec{.directory = artifact.string(),
                        .reportDirectory = reports.string(),
                        .device = {},
@@ -750,7 +765,8 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
                        .specs = workload.specs,
                        .deviceLock = !configuration.direct && !configuration.isolatedLauncher,
                        .jitPrograms = {},
-                       .jitFailures = {}};
+                       .jitFailures = {},
+                       .programArguments = std::move(programArgs)};
   applyDeviceProbe(exec, probeDevice(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probeDevice(configuration, artifact, exec.environment, target.id);
@@ -823,6 +839,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     environment[environment::DeviceCount] = std::string(devices);
   if (hecbench) {
     arguments = {program.string()};
+    if (const auto args = config.programArguments ^ get_maybe(test.program)) arguments.insert(arguments.end(), args->begin(), args->end());
   } else if (deqp) {
     arguments = {program.string(),
                  "--deqp-case=" + test.identity,

@@ -1,6 +1,6 @@
 # Workload corpus
 
-Status: in progress. Step 1 is done for the CUDA nvcc 13.3 fatbin route. Its build and first runs do not wait for other plans. Triage uses `concurrency-checking.md` to separate races from emulator defects.
+Status: in progress. Step 1 and T42 (bounded arguments) are done. Step 2 (CUDA sm_89 runs) in progress. Triage uses `concurrency-checking.md` to separate races from emulator defects.
 
 ## Goal
 
@@ -84,6 +84,13 @@ Step 1 at the same commit:
 - Staging the three build-input DVC archives fixed sad, seam-carving, and testSNAP; they build. The remaining CUDA build failures are the 17 above.
 - The full `hecbench` workload discovers the 537 built programs on the same artifact. The first `hecbench-bounded` run through Gemstone on `cuda-sass/sm_89` selected assert, bitpacking, minimod, and overlap: 1 verified pass, 1 completion only, 2 failed, 0 skipped, and 0 time limit in 24.8 s. overlap passes, minimod completes without a pass or fail marker, assert fails because Gemstone does not implement device-side `assert`, and bitpacking prints FAIL for every size. The run exits non-zero because failures stay red.
 - A probe of larger defaults found page-rank passing in 266 s and overlap in 21 s; chemv, winograd, mdh, and laplace fail under emulation, with laplace failing its own verification after one iteration. Step 2 needs the yaml arguments, smaller inputs, or both before those can be bounded.
+
+Ticket T42 (bounded arguments):
+
+- Default test arguments from `benchmarks.yaml` are extracted during configure to `data/hecbench/hecbench-arguments.json` (144 programs with test arguments). Conformance driver supports `program_arguments` in TOML workloads, merged over default arguments and passed to `hecbench` program execution.
+- `bitpacking`: `main()` takes no command-line arguments. Shipped `kernels.cu` runs 1000 iterations over 100M elements (>600 s under emulation). Staging patch reduces loop to 1 iteration (5.4 s on sm_89 hardware, passing all six sizes under 600 s in SASS/PTX).
+- `laplace`: `main(void)` takes no command-line arguments. Shipped `NUM 1024` requires 27,250 GPU iterations and serial CPU reference exceeds 15 minutes. Staging patch reduces grid size to `NUM 256` (3185 iterations, 193 s on SASS / 168 s on PTX; passes verification with identical norms).
+- `mdh`: takes `-itmax` and `-wgsize`. `-itmax 1` set in `hecbench-bounded.toml` (2.4 s on sm_89, SASS 333-406 s per kernel; default `itmax 100` exceeds 600 s). All input coordinates, charges, and parameters are hardcoded in `main.cu`. The kernel computes `-xkappa * (dist - size[iatom])` where `dist <= sqrt(3)` and `size[iatom] = 5877.0f`, yielding `+432.2` which overflows `expf` to `+inf` on CPU and GPU. The comparator computes `fabsf(inf - inf) > 1e-3f` which evaluates to NaN and compares false, printing PASS without checking anything. Because `getargs` only parses `-itmax` and `-wgsize`, no command-line inputs can prevent this overflow without patching benchmark source code. `mdh` is reported as unverified and not counted as a verified pass.
 
 ## Risks to confirm
 

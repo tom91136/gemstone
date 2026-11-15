@@ -1,3 +1,8 @@
 # Short CI selection: small defaults and no input files.
 specs = ['*']
-include_programs = ['hecbench_assert', 'hecbench_bitpacking', 'hecbench_minimod', 'hecbench_overlap']
+include_programs = ['hecbench_assert', 'hecbench_bitpacking', 'hecbench_laplace', 'hecbench_mdh', 'hecbench_minimod', 'hecbench_overlap']
+
+# Bounded workload arguments.
+# mdh: itmax 1 (passes in 2.4 s on sm_89, SASS 333-406 s per kernel; default itmax 100 exceeds 600 s case timeout).
+[program_arguments]
+hecbench_mdh = ['-itmax', '1']

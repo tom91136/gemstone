@@ -138,4 +138,30 @@ list(SORT expected)
 if(NOT rows STREQUAL expected)
   message(FATAL_ERROR "licence classification changed: ${rows}")
 endif()
+
+write("${directory}/benchmarks.yaml" [=[
+accuracy:
+  categories: [algorithms]
+  test:
+    regex: 'result'
+    args: ["8192", "10000"]
+ace:
+  test:
+    args: ["100"]
+empty_test:
+  test:
+    args: []
+no_test:
+  categories: [ml]
+slash/name:
+  test:
+    args: ["1", "2"]
+]=])
+hecbench_benchmark_arguments("${directory}/benchmarks.yaml" yaml_args)
+set(expected_args
+  "{\n  \"hecbench_accuracy\": [\"8192\", \"10000\"],\n  \"hecbench_ace\": [\"100\"],\n  \"hecbench_slash_name\": [\"1\", \"2\"]\n}")
+if(NOT yaml_args STREQUAL expected_args)
+  message(FATAL_ERROR "benchmark arguments changed: expected [${expected_args}], got [${yaml_args}]")
+endif()
+
 file(REMOVE_RECURSE "${directory}")
