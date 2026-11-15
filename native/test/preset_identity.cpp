@@ -8,6 +8,7 @@
 
 #include <hsa.h>
 #include <hsa_ext_amd.h>
+#include <nvml.h>
 
 #include <CL/cl.h>
 #include <CL/cl_ext.h>
@@ -169,11 +170,56 @@ RuntimeReport queryVulkan(VkPhysicalDevice device) {
   return report;
 }
 
+RuntimeReport queryNvml(unsigned int ordinal) {
+  RuntimeReport report{};
+  nvmlDevice_t handle = nullptr;
+  REQUIRE(nvmlDeviceGetHandleByIndex_v2(ordinal, &handle) == NVML_SUCCESS);
+  char name[256]{};
+  REQUIRE(nvmlDeviceGetName(handle, name, sizeof(name)) == NVML_SUCCESS);
+  report.name = name;
+  nvmlMemory_t mem{};
+  REQUIRE(nvmlDeviceGetMemoryInfo(handle, &mem) == NVML_SUCCESS);
+  report.memoryBytes = mem.total;
+  unsigned int clockMhz = 0;
+  REQUIRE(nvmlDeviceGetClockInfo(handle, NVML_CLOCK_SM, &clockMhz) == NVML_SUCCESS);
+  report.boostMhz = static_cast<int32_t>(clockMhz);
+  unsigned int memClockMhz = 0;
+  REQUIRE(nvmlDeviceGetClockInfo(handle, NVML_CLOCK_MEM, &memClockMhz) == NVML_SUCCESS);
+  report.memoryClockMhz = static_cast<int32_t>(memClockMhz);
+  unsigned int cores = 0;
+  REQUIRE(nvmlDeviceGetNumGpuCores(handle, &cores) == NVML_SUCCESS);
+  report.multiprocessors = static_cast<int32_t>(cores);
+  char uuidStr[64]{};
+  REQUIRE(nvmlDeviceGetUUID(handle, uuidStr, sizeof(uuidStr)) == NVML_SUCCESS);
+  const char *hex = std::strncmp(uuidStr, "GPU-", 4) == 0 ? uuidStr + 4 : uuidStr;
+  const auto hexByte = [](char c) -> uint8_t {
+    if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
+    return 0;
+  };
+  size_t uidx = 0;
+  for (size_t i = 0; hex[i] && hex[i + 1] && uidx < report.uuid.size();) {
+    if (hex[i] == '-') {
+      ++i;
+      continue;
+    }
+    report.uuid[uidx++] = static_cast<uint8_t>((hexByte(hex[i]) << 4) | hexByte(hex[i + 1]));
+    i += 2;
+  }
+  nvmlPciInfo_t pci{};
+  REQUIRE(nvmlDeviceGetPciInfo_v3(handle, &pci) == NVML_SUCCESS);
+  report.pci = {.domain = pci.domain, .bus = pci.bus, .device = pci.device, .function = 0};
+  report.pciBusId = pci.busIdLegacy;
+  return report;
+}
+
 } // namespace
 
 TEST_CASE("Every runtime reports the same identity and capacity for the same preset and device index", "[preset][identity]") {
   const gemstone_test::Environment presetEnv(gemstone::environment::Device, "GeForce RTX 5080");
   REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  REQUIRE(nvmlInit_v2() == NVML_SUCCESS);
 
   cl_platform_id clPlatform = nullptr;
   REQUIRE(clGetPlatformIDs(1, &clPlatform, nullptr) == CL_SUCCESS);
@@ -328,8 +374,21 @@ TEST_CASE("Every runtime reports the same identity and capacity for the same pre
     CHECK(kmtProps.LocationId == cuda.pci.bdfid());
     CHECK(cuda.pciBusId == gemstone::devicePciBusId(ordinal));
     CHECK(hip.pciBusId == cuda.pciBusId);
+
+    const auto nvml = queryNvml(ordinal);
+    CHECK(nvml.name == expectedPreset.name);
+    CHECK(nvml.memoryBytes == cuda.memoryBytes);
+    CHECK(nvml.multiprocessors == cuda.multiprocessors);
+    CHECK(nvml.boostMhz == cuda.boostMhz);
+    CHECK(nvml.memoryClockMhz == cuda.memoryClockMhz);
+    CHECK(nvml.uuid == cuda.uuid);
+    CHECK(nvml.pci.domain == cuda.pci.domain);
+    CHECK(nvml.pci.bus == cuda.pci.bus);
+    CHECK(nvml.pci.device == cuda.pci.device);
+    CHECK(nvml.pciBusId == cuda.pciBusId);
   }
 
+  REQUIRE(nvmlShutdown() == NVML_SUCCESS);
   REQUIRE(hsa_shut_down() == HSA_STATUS_SUCCESS);
   REQUIRE(hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS);
   vkDestroyInstance(vkInstance, nullptr);

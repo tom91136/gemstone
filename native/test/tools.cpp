@@ -46,6 +46,19 @@ gemstone::DevicePreset radeon() {
   throw std::runtime_error("unknown preset");
 }
 
+gemstone::DevicePreset nvidiaPreset() {
+  const auto preset = gemstone::devicePreset("GeForce GTX 1080");
+  if (preset) return *preset;
+  throw std::runtime_error("unknown preset");
+}
+
+std::string pciBusIdLong(uint32_t ordinal) {
+  const auto address = gemstone::devicePciAddress(ordinal);
+  char buffer[32];
+  std::snprintf(buffer, sizeof(buffer), "%08x:%02x:%02x.%u", address.domain, address.bus, address.device, address.function);
+  return buffer;
+}
+
 std::string toolLibraryPath() {
   std::string path(GEMSTONE_TOOL_LIBRARY_PATH);
   if (const auto inherited = gemstone::environment::text("LD_LIBRARY_PATH"); inherited && !inherited->empty())
@@ -54,7 +67,8 @@ std::string toolLibraryPath() {
 }
 
 std::string toolPreload() {
-  std::string preload(GEMSTONE_SANITIZER_PRELOAD);
+  std::string preload;
+  if (const auto *sanitizer = GEMSTONE_SANITIZER_PRELOAD; sanitizer[0] != '\0') preload = sanitizer;
   if (const auto inherited = gemstone::environment::text("LD_PRELOAD"); inherited && !inherited->empty()) {
     if (!preload.empty()) preload.append(":");
     preload.append(*inherited);
@@ -86,6 +100,8 @@ public:
 };
 
 std::string memoryKilobytes(const gemstone::DevicePreset &preset) { return std::to_string(preset.memoryBytes / 1024); }
+
+std::string memoryMegabytes(const gemstone::DevicePreset &preset) { return std::to_string(preset.memoryBytes / (1024ULL * 1024ULL)); }
 
 } // namespace
 
@@ -135,8 +151,8 @@ TEST_CASE("vulkaninfo reports the preset identity and memory", "[tools][vulkanin
 }
 
 TEST_CASE("sycl-ls reports the preset identity", "[tools][sycl-ls]") {
-  const std::string syclLs = GEMSTONE_TOOL_SYCL_LS;
-  if (syclLs.empty()) SKIP("sycl-ls is not configured");
+  const char *const syclLs = GEMSTONE_TOOL_SYCL_LS;
+  if (syclLs[0] == '\0') SKIP("sycl-ls is not configured");
   const auto preset = radeon();
   const ToolEnvironment environment(preset);
   const auto result = runTool(syclLs, {"--verbose"});
@@ -145,4 +161,48 @@ TEST_CASE("sycl-ls reports the preset identity", "[tools][sycl-ls]") {
   REQUIRE_THAT(result.output, ContainsSubstring("[level_zero:gpu][level_zero:0]"));
   REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.name)));
   REQUIRE_THAT(result.output, ContainsSubstring("UUID              : " + uuidText(0)));
+}
+
+TEST_CASE("nvidia-smi reports the preset identity and capacity", "[tools][nvidia-smi]") {
+  const auto preset = nvidiaPreset();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_NVIDIA_SMI, {});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.name)));
+  REQUIRE_THAT(result.output, ContainsSubstring(pciBusIdLong(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring(memoryMegabytes(preset) + "MiB"));
+}
+
+TEST_CASE("nvidia-smi -q reports product name, memory, and UUID", "[tools][nvidia-smi]") {
+  const auto preset = nvidiaPreset();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_NVIDIA_SMI, {"-q"});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring("Product Name                          : " + std::string(preset.name)));
+  REQUIRE_THAT(result.output, ContainsSubstring("Total                             : " + memoryMegabytes(preset) + " MiB"));
+  REQUIRE_THAT(result.output, ContainsSubstring("GPU UUID                              : GPU-" + uuidText(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring("Bus Id                            : " + pciBusIdLong(0)));
+}
+
+TEST_CASE("nvidia-smi --query-gpu formats identity as CSV", "[tools][nvidia-smi]") {
+  const auto preset = nvidiaPreset();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_NVIDIA_SMI, {"--query-gpu=name,uuid,pci.bus_id,memory.total", "--format=csv,noheader,nounits"});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.name)));
+  REQUIRE_THAT(result.output, ContainsSubstring("GPU-" + uuidText(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring(pciBusIdLong(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring(memoryMegabytes(preset)));
+}
+
+TEST_CASE("nvtop runs from the pinned driver utilities package", "[tools][nvtop]") {
+  const auto preset = nvidiaPreset();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_NVTOP, {"-v"});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring("nvtop version"));
 }

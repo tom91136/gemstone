@@ -53,6 +53,12 @@ if(BUILD_TESTING)
   gemstone_fetch_deb(vulkaninfo
     "http://archive.ubuntu.com/ubuntu/pool/universe/v/vulkan-tools/vulkan-tools_1.3.275.0+dfsg1-1_amd64.deb"
     "994e429b5a4550b46c5bd9a938af1f60c4aa4890e08f661603b9518a8df824d1")
+  gemstone_fetch_deb(nvidia-smi
+    "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/nvidia-utils-580_580.65.06-0ubuntu1_amd64.deb"
+    "5af89f7fe38be8cbff553245b45d1b31a8ac0e2a073e16990046bf2464360d85")
+  gemstone_fetch_deb(nvtop
+    "http://archive.ubuntu.com/ubuntu/pool/universe/n/nvtop/nvtop_3.0.2-1_amd64.deb"
+    "70431cfc6c6ae819ef77617d980670970855364e68b68377158a6ad837f45ee7")
   foreach(dependency IN ITEMS
       "libx11-6|pool/main/libx/libx11/libx11-6_1.8.7-1build1_amd64.deb|397f84347476a3c5786b39f3ff6f0f82866eb3d8be6d2ad3efeadf019efe5b80"
       "libxcb1|pool/main/libx/libxcb/libxcb1_1.15-1ubuntu2_amd64.deb|e1c6611d11ad7398326f1bf028afc34c3b14c51d917a3426b966ed4b9687fa58"
@@ -76,11 +82,17 @@ if(BUILD_TESTING)
   file(MAKE_DIRECTORY "${GEMSTONE_TOOL_DIRECTORY}/lib")
   execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
     "${CMAKE_BINARY_DIR}/libOpenCL_gemstone.so.1" "${GEMSTONE_TOOL_DIRECTORY}/lib/libOpenCL.so.1")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/libnvidia-ml.so.1" "${GEMSTONE_TOOL_DIRECTORY}/lib/libnvidia-ml.so.1")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/libnvidia-ml.so.1" "${GEMSTONE_TOOL_DIRECTORY}/lib/libnvidia-ml.so")
 
   set(GEMSTONE_TOOL_ROCMINFO "${rocminfo_ROOT}/opt/rocm-7.1.1/bin/rocminfo")
   set(GEMSTONE_TOOL_CLINFO "${clinfo_ROOT}/usr/bin/clinfo")
   set(GEMSTONE_TOOL_VULKANINFO "${vulkaninfo_ROOT}/usr/bin/vulkaninfo")
   set(GEMSTONE_TOOL_SYCL_LS "${GEMSTONE_SYCL_LS}")
+  set(GEMSTONE_TOOL_NVIDIA_SMI "${nvidia-smi_ROOT}/usr/bin/nvidia-smi")
+  set(GEMSTONE_TOOL_NVTOP "${nvtop_ROOT}/usr/bin/nvtop")
 
   set(GEMSTONE_TOOL_LIBRARY_DIRECTORIES
     "${CMAKE_BINARY_DIR}"

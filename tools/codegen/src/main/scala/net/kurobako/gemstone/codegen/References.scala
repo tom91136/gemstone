@@ -146,6 +146,17 @@ object References {
         Vector("include/crt/**")
       ),
       Source(
+        cuda(
+          "nvidia-cuda-nvml-dev",
+          "cuda-nvml-dev",
+          CudaAPIPackage,
+          "495184653dfcf34d5e6aa6db9f13d04bcf39684ecd367ce3006ee7762c176670"
+        ),
+        "nvidia/nvml",
+        CudaTarget,
+        Vector("include/nvml.h")
+      ),
+      Source(
         Artifact(
           "amd-hip",
           s"HIP-rocm-$HipVersion.tar.gz",

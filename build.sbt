@@ -780,6 +780,7 @@ def nativeBuildArguments(
     s"-DGEMSTONE_OPENCL_COMPILER_DIRECTORY=${openClCompiler / "bin/compiler"}",
     s"-DCMAKE_BUILD_TYPE=${BuildEnvironment.buildType}",
     s"-DCUDA_INCLUDE_DIR=${references / "api-native/nvidia/cuda/include"}",
+    s"-DNVML_INCLUDE_DIR=${references / "api-native/nvidia/nvml/include"}",
     s"-DHIP_INCLUDE_DIR=${references / "api-native/amd/hip/include"}",
     s"-DHSA_INCLUDE_DIR=${references / "api-native/amd/hsa/runtime/hsa-runtime/inc"}",
     s"-DHSAKMT_INCLUDE_DIR=${references / "api-native/amd/hsa/libhsakmt/include"}",

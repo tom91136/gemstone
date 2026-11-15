@@ -28,6 +28,7 @@ typedef int (*PFN_cuOther_v11040)(void);
 typedef int (*cuUnversioned)(void);
 """,
       "nvidia/cuda/include/cuda_runtime_api.h"        -> "extern void cudaFixture(void);",
+      "nvidia/nvml/include/nvml.h"                    -> "extern int nvmlFixture(void);",
       "amd/hip/include/hip/hip_runtime_api.h"         -> "extern void hipFixture(void);",
       "amd/hsa/runtime/hsa-runtime/inc/hsa.h"         -> "extern void hsa_fixture(void);",
       "amd/hsa/runtime/hsa-runtime/inc/hsa_ext_amd.h" -> "",

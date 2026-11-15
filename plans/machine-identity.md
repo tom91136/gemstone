@@ -1,6 +1,6 @@
 # Machine identity
 
-Status: steps 1 and 2 are done. Device presets hold multiprocessor count, boost clock, bus width, and L2 size per card, and CUDA, HIP, HSA, OpenCL, Level Zero, and Vulkan report the selected preset's identity and capacity and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`. Launch residency scales with the reported multiprocessor count (`multiprocessors * 32`). Discovery tool cases verify rocminfo, clinfo, sycl-ls, and vulkaninfo against preset values. Steps 3 to 5 are not started. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
+Status: steps 1, 2, and 3 are done. Device presets hold multiprocessor count, boost clock, bus width, and L2 size per card, and CUDA, HIP, HSA, OpenCL, Level Zero, Vulkan, and NVML report the selected preset's identity and capacity and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`. Launch residency scales with the reported multiprocessor count (`multiprocessors * 32`). Discovery tool cases verify rocminfo, clinfo, sycl-ls, and vulkaninfo against preset values. NVML provides `libnvidia-ml.so.1` with device identity, memory, PCI info, clocks, and empty process lists, verified against CUDA and by `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop`. Steps 4 and 5 are not started. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
 
 ## Goal
 
@@ -45,11 +45,12 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 - Conformance cases for `rocminfo`, `clinfo`, `sycl-ls`, and `vulkaninfo`. These need no new library, only correct reporting.
 - Expected values come from the preset table, not from text written into each case.
 
-### 3. NVML
+### 3. NVML (done)
 
-- Generate the declarations from the NVML header, as for the other APIs, and implement the queries above.
-- Cases: `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop`, with the tools taken from a pinned driver utilities package.
-- A case checks that NVML and CUDA agree on name, UUID, bus address, and memory for every device index.
+- Generated declarations from NVML header in `gemstone_nvml_api.h` and implemented `libnvidia-ml.so.1`.
+- Implemented device handles by index, UUID, and PCI bus ID, memory info v1/v2, PCI info v2/v3/Ext, clocks, compute capability, empty process lists, event sets, and internal export table query.
+- Conformance cases for `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop` against preset values.
+- Cross-runtime check in `gemstone_preset_identity_test` verifying NVML and CUDA report identical name, UUID, bus address, and memory across all presets.
 
 ### 4. ROCm SMI and AMD SMI
 
@@ -67,7 +68,7 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 
 ## Risks to confirm
 
-- Whether `nvidia-smi` uses only NVML or also opens `/dev/nvidiactl` or reads `/proc/driver/nvidia`. If it does, the tool needs more than the library.
+- Whether `nvidia-smi` uses only NVML or also opens `/dev/nvidiactl` or reads `/proc/driver/nvidia`. Confirmed by strace: `nvidia-smi` runs purely against `libnvidia-ml.so.1` without opening `/dev/nvidiactl` or `/proc/driver/nvidia`. It queries internal export table symbol `nvmlInternalGetExportTable` and MIG device count; returning success allows the tool to run unmodified.
 - Whether `rocm-smi` and `amd-smi` load their libraries through a path the conformance package can redirect, or need sysfs as well.
 - Whether `xpu-smi` needs Intel components beyond Level Zero.
 - Licence terms for taking `nvidia-smi` from the driver utilities package into a conformance image.

@@ -25,6 +25,7 @@ option(GEMSTONE_ENABLE_HIP "Build the HIP facade" ON)
 option(GEMSTONE_ENABLE_OPENCL "Build the OpenCL facade" ON)
 option(GEMSTONE_ENABLE_VULKAN "Build the Vulkan compute facade" ON)
 option(GEMSTONE_ENABLE_LEVEL_ZERO "Build the Level Zero facade" ON)
+option(GEMSTONE_ENABLE_NVML "Build the NVML facade" ON)
 
 include(cmake/Aspartame.cmake)
 include(cmake/Fmt.cmake)
@@ -281,6 +282,10 @@ if(GEMSTONE_ENABLE_LEVEL_ZERO)
   add_subdirectory(levelzero)
   list(APPEND _gemstone_install_targets gemstone_levelzero)
 endif()
+if(GEMSTONE_ENABLE_NVML)
+  add_subdirectory(nvml)
+  list(APPEND _gemstone_install_targets gemstone_nvml)
+endif()
 
 if(_gemstone_install_targets)
   install(TARGETS ${_gemstone_install_targets} LIBRARY DESTINATION lib)
@@ -316,16 +321,19 @@ if(BUILD_TESTING)
     GEMSTONE_TOOL_CLINFO="${GEMSTONE_TOOL_CLINFO}"
     GEMSTONE_TOOL_VULKANINFO="${GEMSTONE_TOOL_VULKANINFO}"
     GEMSTONE_TOOL_SYCL_LS="${GEMSTONE_TOOL_SYCL_LS}"
+    GEMSTONE_TOOL_NVIDIA_SMI="${GEMSTONE_TOOL_NVIDIA_SMI}"
+    GEMSTONE_TOOL_NVTOP="${GEMSTONE_TOOL_NVTOP}"
     GEMSTONE_TOOL_LIBRARY_PATH="${GEMSTONE_TOOL_LIBRARY_PATH}"
     GEMSTONE_OPENCL_LIBRARY="${GEMSTONE_OPENCL_LIBRARY}"
     GEMSTONE_LEVEL_ZERO_LIBRARY="${GEMSTONE_LEVEL_ZERO_LIBRARY}"
     GEMSTONE_SANITIZER_PRELOAD="${GEMSTONE_SANITIZER_PRELOAD}")
   add_dependencies(gemstone_tools_test gemstone_cuda gemstone_hsa_runtime gemstone_hip_runtime gemstone_opencl gemstone_vulkan
-    gemstone_levelzero level_zero_loader)
+    gemstone_levelzero level_zero_loader gemstone_nvml)
   gemstone_discover_tests(gemstone_tools_test TEST_PREFIX "tools/" DISCOVERY_MODE PRE_TEST PROPERTIES TIMEOUT 120)
 
   if(GEMSTONE_ENABLE_CUDA AND GEMSTONE_ENABLE_HSA AND GEMSTONE_ENABLE_HIP
-      AND GEMSTONE_ENABLE_OPENCL AND GEMSTONE_ENABLE_VULKAN AND GEMSTONE_ENABLE_LEVEL_ZERO)
+      AND GEMSTONE_ENABLE_OPENCL AND GEMSTONE_ENABLE_VULKAN AND GEMSTONE_ENABLE_LEVEL_ZERO
+      AND GEMSTONE_ENABLE_NVML)
     add_executable(gemstone_preset_identity_test test/preset_identity.cpp)
     target_include_directories(gemstone_preset_identity_test SYSTEM PRIVATE
       "${CUDA_INCLUDE_DIR}"
@@ -334,7 +342,8 @@ if(BUILD_TESTING)
       "${HSAKMT_INCLUDE_DIR}"
       "${OPENCL_INCLUDE_DIR}"
       "${LEVEL_ZERO_INCLUDE_DIR}"
-      "${VULKAN_INCLUDE_DIR}")
+      "${VULKAN_INCLUDE_DIR}"
+      "${NVML_INCLUDE_DIR}")
     target_compile_definitions(gemstone_preset_identity_test PRIVATE
       __HIP_PLATFORM_AMD__=1
       CL_TARGET_OPENCL_VERSION=300)
@@ -345,7 +354,8 @@ if(BUILD_TESTING)
       gemstone_hsakmt
       gemstone_opencl
       gemstone_vulkan
-      ze_loader)
+      ze_loader
+      gemstone_nvml)
     add_dependencies(gemstone_preset_identity_test level_zero_loader gemstone_levelzero)
     set_target_properties(gemstone_preset_identity_test PROPERTIES BUILD_RPATH "$ORIGIN;$ORIGIN/vulkan")
     gemstone_test_target(gemstone_preset_identity_test)

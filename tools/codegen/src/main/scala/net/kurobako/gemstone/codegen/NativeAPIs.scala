@@ -63,6 +63,7 @@ object NativeAPIs {
     }
 
   private val cudaInclude: Path => Path = root => findParent(root.resolve("nvidia/cuda"), "cuda.h")
+  private val nvmlInclude: Path => Path = root => findParent(root.resolve("nvidia/nvml"), "nvml.h")
 
   val platforms: Vector[Platform] = Vector(
     Platform(
@@ -340,6 +341,82 @@ clSVMAlloc clSVMFree clSetCommandQueueProperty clSetContextDestructorCallback cl
 clSetEventCallback clSetKernelArg clSetKernelArgMemPointerINTEL clSetKernelArgSVMPointer clSetKernelExecInfo
 clSetMemObjectDestructorCallback clSetProgramReleaseCallback clSetProgramSpecializationConstant clSetUserEventStatus
 clSharedMemAllocINTEL clUnloadCompiler clUnloadPlatformCompiler clWaitForEvents""")
+      )
+    ),
+    Platform(
+      "nvml",
+      Vector(Surface(
+        "nvml",
+        Vector("nvml.h"),
+        nvmlInclude,
+        upperCamelAfter("nvml"),
+        defines = Vector("NVML_NO_UNVERSIONED_FUNC_DEFS=1")
+      )),
+      Coverage.Partial(
+        Vector(Status("nvmlReturn_t", "NVML_ERROR_NOT_SUPPORTED", "gemstone_nvml_unsupported")),
+        names("""
+nvmlDeviceGetBoardPartNumber
+nvmlDeviceGetBrand
+nvmlDeviceGetClockInfo
+nvmlDeviceGetComputeMode
+nvmlDeviceGetComputeRunningProcesses
+nvmlDeviceGetComputeRunningProcesses_v2
+nvmlDeviceGetComputeRunningProcesses_v3
+nvmlDeviceGetCount
+nvmlDeviceGetCount_v2
+nvmlDeviceGetCudaComputeCapability
+nvmlDeviceGetDisplayMode
+nvmlDeviceGetEnforcedPowerLimit
+nvmlDeviceGetGraphicsRunningProcesses
+nvmlDeviceGetGraphicsRunningProcesses_v2
+nvmlDeviceGetGraphicsRunningProcesses_v3
+nvmlDeviceGetHandleByIndex
+nvmlDeviceGetHandleByIndex_v2
+nvmlDeviceGetHandleByPciBusId
+nvmlDeviceGetHandleByPciBusId_v2
+nvmlDeviceGetHandleByUUID
+nvmlDeviceGetIndex
+nvmlDeviceGetInforomImageVersion
+nvmlDeviceGetInforomVersion
+nvmlDeviceGetMPSComputeRunningProcesses
+nvmlDeviceGetMPSComputeRunningProcesses_v2
+nvmlDeviceGetMPSComputeRunningProcesses_v3
+nvmlDeviceGetMaxClockInfo
+nvmlDeviceGetMaxMigDeviceCount
+nvmlDeviceGetMemoryInfo
+nvmlDeviceGetMemoryInfo_v2
+nvmlDeviceGetName
+nvmlDeviceGetNumGpuCores
+nvmlDeviceGetPciInfo
+nvmlDeviceGetPciInfoExt
+nvmlDeviceGetPciInfo_v2
+nvmlDeviceGetPciInfo_v3
+nvmlDeviceGetPerformanceState
+nvmlDeviceGetPersistenceMode
+nvmlDeviceGetPowerManagementDefaultLimit
+nvmlDeviceGetPowerManagementLimit
+nvmlDeviceGetPowerManagementMode
+nvmlDeviceGetPowerState
+nvmlDeviceGetSerial
+nvmlDeviceGetSupportedEventTypes
+nvmlDeviceGetUUID
+nvmlDeviceGetUtilizationRates
+nvmlDeviceGetVbiosVersion
+nvmlDeviceRegisterEvents
+nvmlErrorString
+nvmlEventSetCreate
+nvmlEventSetFree
+nvmlEventSetWait
+nvmlEventSetWait_v2
+nvmlInit
+nvmlInitWithFlags
+nvmlInit_v2
+nvmlShutdown
+nvmlSystemGetCudaDriverVersion
+nvmlSystemGetCudaDriverVersion_v2
+nvmlSystemGetDriverVersion
+nvmlSystemGetNVMLVersion
+nvmlSystemGetProcessName""")
       )
     ),
     Platform(
