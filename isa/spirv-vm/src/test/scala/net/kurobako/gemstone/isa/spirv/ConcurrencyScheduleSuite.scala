@@ -8,10 +8,9 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
-import scala.collection.mutable
-import scala.util.Using
 
 class ConcurrencyScheduleSuite extends Suite {
+  import ConcurrencyScheduleKernels.*
 
   private val orderModule = spv"""
     $openCL
@@ -96,58 +95,6 @@ class ConcurrencyScheduleSuite extends Suite {
     %scaled = OpIMul %uint %value %three
     %next = OpIAdd %uint %scaled %id
     OpStore %out %next
-    OpReturn
-    OpFunctionEnd
-  """
-
-  private def spinModule(localSize: Int = 1): Module = spv"""
-    $openCL
-    OpEntryPoint Kernel %main "spin" %workgroup
-    OpExecutionMode %main LocalSize $localSize 1 1
-    OpDecorate %workgroup BuiltIn WorkgroupId
-    %void = OpTypeVoid
-    %bool = OpTypeBool
-    %uint = OpTypeInt 32 0
-    %id_vector = OpTypeVector %uint 3
-    %id_vector_ptr = OpTypePointer Input %id_vector
-    %uint_ptr = OpTypePointer CrossWorkgroup %uint
-    %fn = OpTypeFunction %void %uint_ptr
-    %zero = OpConstant %uint 0
-    %one = OpConstant %uint 1
-    %workgroup = OpVariable %id_vector_ptr Input
-    %main = OpFunction %void None %fn
-    %out = OpFunctionParameter %uint_ptr
-    %entry = OpLabel
-    %ids = OpLoad %id_vector %workgroup
-    %id = OpCompositeExtract %uint %ids 0
-    %is_setter = OpIEqual %bool %id %one
-    OpSelectionMerge %merge None
-    OpBranchConditional %is_setter %set %wait
-    %set = OpLabel
-    OpStore %out %one
-    OpBranch %merge
-    %wait = OpLabel
-    OpBranch %loop
-    %loop = OpLabel
-    OpLoopMerge %merge %continue None
-    OpBranch %body
-    %body = OpLabel
-    %flag = OpLoad %uint %out
-    %ready = OpIEqual %bool %flag %one
-    OpBranchConditional %ready %merge %continue
-    %continue = OpLabel
-    OpBranch %loop
-    %merge = OpLabel
-    %is_waiter = OpIEqual %bool %id %zero
-    OpSelectionMerge %done None
-    OpBranchConditional %is_waiter %increment %done
-    %increment = OpLabel
-    %slot = OpPtrAccessChain %uint_ptr %out %one
-    %count = OpLoad %uint %slot
-    %next = OpIAdd %uint %count %one
-    OpStore %slot %next
-    OpBranch %done
-    %done = OpLabel
     OpReturn
     OpFunctionEnd
   """
@@ -250,40 +197,6 @@ class ConcurrencyScheduleSuite extends Suite {
           s"before the setter, over the $slice instruction workgroup slice"
       )
       assertEquals(word(memory, region, 4), localSize.toLong)
-    }
-  }
-
-  test("ReplayDevice reproduces a seeded launch") {
-    val image = ISA.encode(spinModule()).value
-    Using.resource(WorkerPool(1, minGroups = 1L, minWorkItems = 1L)) { pool =>
-      val memory = ArrayMemory()
-      val region = memory.allocate(8L)
-      val replay = ReplayDevice(
-        BackendRegistry(Vec(SPIRVBackend(Validation.Environment.OpenCLCompute, workgroups = pool))),
-        memory,
-        TaskControl.Limits(2000000L),
-        ConcurrencySchedule.Random(7L)
-      )
-      val task = KernelTask.validated(
-        "spin",
-        testDimensions(1),
-        testDimensions(2),
-        Vec(buffer(region, 0L, Some(8L)))
-      ).value
-      val checkpoints = mutable.ArrayBuffer.empty[ReplayDevice.Checkpoint]
-      val whole       = replay.launch(
-        ProgramFormat.SPIRVOpenCLCompute,
-        image,
-        task,
-        (checkpoint, _, _) => Right(checkpoints += checkpoint).map(_ => ())
-      )
-      assert(whole.isRight, whole)
-      val finished = LittleEndian.decodeInt32(memory.bytes(region), 4)
-      assertEquals(finished, 1)
-
-      val resumed = replay.resume(checkpoints(10), (_, _, _) => Right(()))
-      assert(resumed.isRight, resumed)
-      assertEquals(LittleEndian.decodeInt32(memory.bytes(region), 4), finished)
     }
   }
 
