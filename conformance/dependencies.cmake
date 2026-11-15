@@ -20,8 +20,8 @@ pinned_dependency(fmt
   URL https://github.com/fmtlib/fmt/archive/refs/tags/11.2.0.tar.gz
   URL_HASH SHA256=bc23066d87ab3168f27cef3e97d545fa63314f5c79df5ea444d41d56f962c6af)
 pinned_dependency(aspartame
-  URL https://github.com/tom91136/Aspartame/archive/350653d33df03386c22b0c0baece22ea48ddfef1.tar.gz
-  URL_HASH SHA256=32a68e79f35f1bde31abaf3df9df7428e7cbc98081ce6340adc2c27a16be81bc)
+  URL https://github.com/tom91136/Aspartame/archive/298876536d4403d9fd3d0d9960a9396aa738f5ac.tar.gz
+  URL_HASH SHA256=c5784265a9db9f8dae5414115892ccba0845657b1f57d26aa0d4934c1b0e65bb)
 pinned_dependency(opencl_cts SOURCE_ONLY
   URL https://codeload.github.com/KhronosGroup/OpenCL-CTS/tar.gz/726a6d94da0876cf69bf6198d20d42197b0392de
   URL_HASH SHA256=b859bda3045735883848c09b4e794c89058cb17ec54d749b5acc0e361afba8e2)

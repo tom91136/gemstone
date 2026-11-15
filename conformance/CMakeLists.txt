@@ -225,6 +225,8 @@ install(FILES "${fmt_SOURCE_DIR}/LICENSE"
 FetchContent_MakeAvailable(aspartame)
 mark_system_includes(aspartame)
 mark_system_includes(Aspartame::Aspartame)
+install(FILES "${aspartame_SOURCE_DIR}/LICENSE"
+  DESTINATION licences RENAME Aspartame.txt COMPONENT support)
 
 if(NOT CONFORMANCE_BACKEND OR BUILD_TESTING)
   FetchContent_MakeAvailable(fire)

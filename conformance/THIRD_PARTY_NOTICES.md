@@ -21,8 +21,6 @@ Ocelot licence text and is installed into CUDA and HIP artifacts.
 - Artifacts install runtime component licences and notices by copying the files
   that the toolchain image already carries. The check derives components from
   the libraries actually bundled; it does not test a fixed list of libraries.
-- Aspartame is pending: the pinned commit has no licence, so no notice can be
-  installed for it. The pin must change once Aspartame carries a licence.
 
 ## Derived files
 
