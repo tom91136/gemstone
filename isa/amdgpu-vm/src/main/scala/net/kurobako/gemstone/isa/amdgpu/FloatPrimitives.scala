@@ -63,6 +63,13 @@ private object FloatPrimitives {
         )
       )
 
+    /** The bits of MODE.FP_ROUND that round `width`-bit arithmetic. */
+    inline def roundingField(mode: V, width: Int in (16, 32, 64)): V =
+      algebra.and(
+        mode,
+        algebra.literal((if (width == 32) ModeRegister.Round32Mask else ModeRegister.Round16And64Mask).toLong)
+      )
+
     /** A conversion from `from` bits to `to` bits, its operand's and result's denormals as MODE has them. */
     inline def converted[A, B](mode: V, from: Int in (16, 32, 64), to: Int in (16, 32, 64), a: V)(
         inline conversion: A => B
@@ -93,35 +100,49 @@ private object FloatPrimitives {
       )
   }
 
-  /** A binary32 operation, saturated when `clamp`. */
+  /** A binary32 operation under `rounding`, saturated when `clamp`. */
   extension [V](inline algebra: Algebra[V]) {
-    inline def singleOperation(clamp: Boolean, left: V, right: V)(
-        inline operation: (Float32, Float32) => Float32
-    ): V = algebra.saturated(clamp, algebra.primitive(left, right)(operation), 32)
+    inline def singleOperation(clamp: Boolean, left: V, right: V, rounding: V)(
+        inline operation: (Float32, Float32, UInt[32]) => Float32
+    ): V = algebra.saturated(clamp, algebra.primitive(left, right, rounding)(operation), 32)
 
     /** A binary16 operation computed in binary32, saturated when `clamp`. */
-    inline def halfOperation(clamp: Boolean, left: V, right: V)(
-        inline operation: (Float16, Float16) => Float16
-    ): V = algebra.saturated(clamp, algebra.primitive(left, right)(operation), 16)
+    inline def halfOperation(clamp: Boolean, left: V, right: V, rounding: V)(
+        inline operation: (Float16, Float16, UInt[32]) => Float16
+    ): V = algebra.saturated(clamp, algebra.primitive(left, right, rounding)(operation), 16)
 
-    /** [[singleOperation]] on operands and result as MODE.FP_DENORM has it read and write them. */
+    /** [[singleOperation]] on operands and result as MODE has them read, written and rounded. */
     inline def flushedSingle(mode: V, clamp: Boolean, left: V, right: V)(
-        inline operation: (Float32, Float32) => Float32
-    ): V = algebra.flushedBinary(mode, 32, left, right)((x, y) => algebra.singleOperation(clamp, x, y)(operation))
+        inline operation: (Float32, Float32, UInt[32]) => Float32
+    ): V = algebra.flushedBinary(mode, 32, left, right)((x, y) =>
+      algebra.singleOperation(clamp, x, y, algebra.roundingField(mode, 32))(operation)
+    )
 
-    /** [[halfOperation]] on operands and result as MODE.FP_DENORM has it read and write them. */
+    /** [[halfOperation]] on operands and result as MODE has them read, written and rounded. */
     inline def flushedHalf(mode: V, clamp: Boolean, left: V, right: V)(
-        inline operation: (Float16, Float16) => Float16
-    ): V = algebra.flushedBinary(mode, 16, left, right)((x, y) => algebra.halfOperation(clamp, x, y)(operation))
+        inline operation: (Float16, Float16, UInt[32]) => Float16
+    ): V = algebra.flushedBinary(mode, 16, left, right)((x, y) =>
+      algebra.halfOperation(clamp, x, y, algebra.roundingField(mode, 16))(operation)
+    )
 
-    inline def addSingle(left: V, right: V): V =
-      algebra.primitive(left, right)(Floats.add(_: Float32, _: Float32))
+    inline def addSingle(left: V, right: V, rounding: V): V =
+      algebra.primitive(left, right, rounding)(Floats.add(_: Float32, _: Float32, _: UInt[32]))
 
-    inline def multiplySingle(left: V, right: V): V =
-      algebra.primitive(left, right)(Floats.mul(_: Float32, _: Float32))
+    inline def multiplySingle(left: V, right: V, rounding: V): V =
+      algebra.primitive(left, right, rounding)(Floats.mul(_: Float32, _: Float32, _: UInt[32]))
 
-    inline def fusedMultiplyAdd(a: V, b: V, c: V, width: Int in (16, 32, 64)): V =
-      algebra.dispatched(width, a, b, c)(Floats.fma, Floats.fma, Floats.fma)
+    /** A fused multiply-add on operands and result as MODE has them read, written and rounded. */
+    inline def flushedFusedMultiplyAdd(mode: V, width: Int in (16, 32, 64), a: V, b: V, c: V): V =
+      algebra.flushedTernary(mode, width, a, b, c)(
+        algebra.fusedMultiplyAdd(_, _, _, width, algebra.roundingField(mode, width))
+      )
+
+    inline def fusedMultiplyAdd(a: V, b: V, c: V, width: Int in (16, 32, 64), rounding: V): V =
+      width.raw match {
+        case 16 => algebra.primitive(a, b, c, rounding)(Floats.fma(_: Float16, _: Float16, _: Float16, _: UInt[32]))
+        case 32 => algebra.primitive(a, b, c, rounding)(Floats.fma(_: Float32, _: Float32, _: Float32, _: UInt[32]))
+        case _  => algebra.primitive(a, b, c, rounding)(Floats.fma(_: Float64, _: Float64, _: Float64, _: UInt[32]))
+      }
 
     /** [[divisionFixup]] with the denominator's and numerator's denormals as MODE has them read; the quotient passes as
       * it is.

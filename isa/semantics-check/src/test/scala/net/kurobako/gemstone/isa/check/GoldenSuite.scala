@@ -252,12 +252,27 @@ class AMDGPUGoldenSuite
     }
   }
 
-  test("a floating-point sum that survives the filter is refused for its rounding mode") {
-    prove(Vec(vadd("d", a, b)), Vec(vadd("d", a, b)), only("d")) match {
-      case Result.Refused(reason) =>
-        assert(reason.contains("v_add_f32"), reason)
-        assert(reason.contains("rounding"), reason)
-      case other => fail(s"expected a refusal, got $other")
+  private val two = Operand.Immediate(0x40000000L)
+
+  private def vaddUnder(rounding: Long, destination: String, x: Operand, y: Operand): Step =
+    step(exact("v_add_f32_e32 v0, v1, v2"), Vec(x, y, Operand.Immediate(rounding)), Vec(destination))
+
+  test("a doubling is the sum of a value with itself under every rounding mode") {
+    installed()
+    proved(Vec(vmul("d", a, two)), Vec(vadd("d", a, a)), only("d"))
+  }
+
+  test("a sum rounded to nearest differs from the same sum rounded up") {
+    installed()
+    refuted(Vec(vaddUnder(0L, "d", a, b)), Vec(vaddUnder(1L, "d", a, b)), only("d"))
+  }
+
+  test("a sum under the mode register differs from the nearest-even sum only where FP_ROUND is not nearest even") {
+    installed()
+    prove(Vec(vaddUnder(0L, "d", a, b)), Vec(vadd("d", a, b)), only("d")) match {
+      case Result.Rejected(counterexample, _) =>
+        assert((counterexample.inputs.toMap.getOrElse("mode", 0L) & 3L) != 0L, counterexample.inputs.toString)
+      case other => fail(s"expected a refutation, got $other")
     }
   }
 

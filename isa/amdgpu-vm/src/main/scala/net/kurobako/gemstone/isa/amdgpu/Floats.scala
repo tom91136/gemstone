@@ -32,79 +32,167 @@ private[isa] object Floats {
     (zero(a) && infinite(b, width)) || (infinite(a, width) && zero(b))
   }
 
-  // compiled code may order a commutative operation's operands either way, so which of two NaN operands the JVM
-  // returns varies; it returns a lone NaN operand quieted, so the last operand needs no check
-  private inline def singles(left: Float32, right: Float32)(inline operation: (Float, Float) => Float): Float32 = {
-    val x = left.toFloat
-    if (x != x) fromRaw[Float32](quieted(bits(left), 32)) else Float32(operation(x, right.toFloat))
-  }
+  val NearestEven: UInt[32] = fromRaw[UInt[32]](0L)
 
-  private inline def doubles(left: Float64, right: Float64)(inline operation: (Double, Double) => Double): Float64 = {
-    val x = left.toDouble
-    if (x != x) fromRaw[Float64](quieted(bits(left), 64)) else Float64(operation(x, right.toDouble))
-  }
+  /** The rounding MODE.FP_ROUND asks of `width`-bit arithmetic, or nothing for the default of nearest even. */
+  private def directed(rounding: UInt[32], width: Int in (16, 32, 64)): Option[IEEE754.Rounding] =
+    ((bits(rounding) >>> (if (width == 32) 0 else 2)) & 3L) match {
+      case 1L => Some(IEEE754.Rounding.Up)
+      case 2L => Some(IEEE754.Rounding.Down)
+      case 3L => Some(IEEE754.Rounding.TowardZero)
+      case _  => None
+    }
 
-  private inline def halves(left: Float16, right: Float16)(inline operation: (Float, Float) => Float): Float16 = {
-    val x = left.toFloat
-    if (x != x) fromRaw[Float16](quieted(bits(left), 16)) else Float16(operation(x, right.toFloat))
+  /** A NaN operand propagates quieted, the left first, and an invalid operation gives the default NaN, whatever NaN the
+    * host's arithmetic returns. A binary16 difference negates the NaN of its right operand.
+    */
+  private inline def settled(left: Long, right: Long, width: Int in (16, 32, 64), negated: Boolean)(
+      inline result: Long
+  ): Long =
+    if (IEEE754.isNaN(left, width)) quieted(left, width)
+    else if (IEEE754.isNaN(right, width)) quieted(if (negated) right ^ IEEE754.signBit(width) else right, width)
+    else {
+      val value = result
+      if (IEEE754.isNaN(value, width)) defaultNaN(width) else value
+    }
+
+  private def sum(left: Long, right: Long, width: Int in (16, 32, 64), rounding: UInt[32], subtract: Boolean): Long =
+    directed(rounding, width) match {
+      case Some(mode) =>
+        val addend = IEEE754.toDouble(right, width)
+        IEEE754.fusedMultiplyAddExact(
+          IEEE754.toDouble(left, width),
+          1.0,
+          if (subtract) -addend else addend,
+          width,
+          mode
+        )
+      case None =>
+        width.raw match {
+          case 32 =>
+            val (x, y) = (IEEE754.binary32ToFloat(Bits.low32(left)), IEEE754.binary32ToFloat(Bits.low32(right)))
+            IEEE754.floatToBinary32(if (subtract) x - y else x + y).toLong
+          case 64 =>
+            val (x, y) = (IEEE754.binary64ToDouble(left), IEEE754.binary64ToDouble(right))
+            IEEE754.doubleToBinary64(if (subtract) x - y else x + y)
+          case _ =>
+            val (x, y) = (IEEE754.toDouble(left, width), IEEE754.toDouble(right, width))
+            IEEE754.fromDouble(if (subtract) x - y else x + y, width)
+        }
+    }
+
+  private def product(left: Long, right: Long, width: Int in (16, 32, 64), rounding: UInt[32]): Long = {
+    val (x, y) = (IEEE754.toDouble(left, width), IEEE754.toDouble(right, width))
+    directed(rounding, width) match {
+      case Some(mode) if x != 0.0 && y != 0.0 && x.isFinite && y.isFinite =>
+        IEEE754.fusedMultiplyAddExact(x, y, 0.0, width, mode)
+      case Some(mode)          => IEEE754.fromDouble(x * y, width, mode)
+      case None if width == 32 =>
+        IEEE754.floatToBinary32(IEEE754.binary32ToFloat(Bits.low32(left)) *
+          IEEE754.binary32ToFloat(Bits.low32(right))).toLong
+      case None => IEEE754.fromDouble(x * y, width)
+    }
   }
 
   @targetName("addF32")
-  def add(left: Float32, right: Float32): Float32 = singles(left, right)(_ + _)
+  def add(left: Float32, right: Float32, rounding: UInt[32]): Float32 =
+    fromRaw[Float32](settled(
+      bits(left),
+      bits(right),
+      32,
+      negated = false
+    )(sum(bits(left), bits(right), 32, rounding, subtract = false)))
   @targetName("subF32")
-  def sub(left: Float32, right: Float32): Float32 = singles(left, right)(_ - _)
+  def sub(left: Float32, right: Float32, rounding: UInt[32]): Float32 =
+    fromRaw[Float32](settled(
+      bits(left),
+      bits(right),
+      32,
+      negated = false
+    )(sum(bits(left), bits(right), 32, rounding, subtract = true)))
   @targetName("mulF32")
-  def mul(left: Float32, right: Float32): Float32 = singles(left, right)(_ * _)
+  def mul(left: Float32, right: Float32, rounding: UInt[32]): Float32 =
+    fromRaw[Float32](settled(
+      bits(left),
+      bits(right),
+      32,
+      negated = false
+    )(product(bits(left), bits(right), 32, rounding)))
 
   /** The DX9 multiply: a zero operand gives +0 whatever the other is. */
-  def mulLegacyF32(left: Float32, right: Float32): Float32 =
-    if ((bits(left) & 0x7fffffffL) == 0L || (bits(right) & 0x7fffffffL) == 0L) Float32(0.0f) else mul(left, right)
+  def mulLegacyF32(left: Float32, right: Float32, rounding: UInt[32]): Float32 =
+    if ((bits(left) & 0x7fffffffL) == 0L || (bits(right) & 0x7fffffffL) == 0L) Float32(0.0f)
+    else mul(left, right, rounding)
   @targetName("addF16")
-  def add(left: Float16, right: Float16): Float16 = halves(left, right)(_ + _)
+  def add(left: Float16, right: Float16, rounding: UInt[32]): Float16 =
+    fromRaw[Float16](settled(
+      bits(left),
+      bits(right),
+      16,
+      negated = false
+    )(sum(bits(left), bits(right), 16, rounding, subtract = false)))
   @targetName("subF16")
-  def sub(left: Float16, right: Float16): Float16 =
+  def sub(left: Float16, right: Float16, rounding: UInt[32]): Float16 =
     // the hardware subtracts by adding the negated right operand, whose NaN propagates negated
-    if (IEEE754.isNaN(bits(left), 16)) fromRaw[Float16](quieted(bits(left), 16))
-    else if (IEEE754.isNaN(bits(right), 16)) fromRaw[Float16](quieted(bits(right) ^ 0x8000L, 16))
-    else Float16(left.toFloat - right.toFloat)
+    fromRaw[Float16](settled(
+      bits(left),
+      bits(right),
+      16,
+      negated = true
+    )(sum(bits(left), bits(right), 16, rounding, subtract = true)))
   @targetName("mulF16")
-  def mul(left: Float16, right: Float16): Float16 = halves(left, right)(_ * _)
+  def mul(left: Float16, right: Float16, rounding: UInt[32]): Float16 =
+    fromRaw[Float16](settled(
+      bits(left),
+      bits(right),
+      16,
+      negated = false
+    )(product(bits(left), bits(right), 16, rounding)))
   @targetName("addF64")
-  def add(left: Float64, right: Float64): Float64 = doubles(left, right)(_ + _)
+  def add(left: Float64, right: Float64, rounding: UInt[32]): Float64 =
+    fromRaw[Float64](settled(
+      bits(left),
+      bits(right),
+      64,
+      negated = false
+    )(sum(bits(left), bits(right), 64, rounding, subtract = false)))
   @targetName("mulF64")
-  def mul(left: Float64, right: Float64): Float64 = doubles(left, right)(_ * _)
+  def mul(left: Float64, right: Float64, rounding: UInt[32]): Float64 =
+    fromRaw[Float64](settled(
+      bits(left),
+      bits(right),
+      64,
+      negated = false
+    )(product(bits(left), bits(right), 64, rounding)))
+
+  /** A NaN factor wins, then an invalid product, then a NaN addend; the fused result rounds once as `rounding` asks. */
+  private def fused(a: Long, b: Long, c: Long, width: Int in (16, 32, 64), rounding: UInt[32]): Long =
+    if (IEEE754.isNaN(a, width)) quieted(a, width)
+    else if (IEEE754.isNaN(b, width)) quieted(b, width)
+    else if (invalidProduct(a, b, width)) defaultNaN(width)
+    else if (IEEE754.isNaN(c, width)) quieted(c, width)
+    else {
+      val result =
+        IEEE754.fusedMultiplyAdd(a, b, c, width, directed(rounding, width).getOrElse(IEEE754.Rounding.NearestEven))
+      if (IEEE754.isNaN(result, width)) defaultNaN(width) else result
+    }
 
   @targetName("fmaF16")
-  def fma(a: Float16, b: Float16, c: Float16): Float16 = fromRaw[Float16](
-    if (IEEE754.isNaN(bits(a), 16)) quieted(bits(a), 16)
-    else if (IEEE754.isNaN(bits(b), 16)) quieted(bits(b), 16)
-    else if (invalidProduct(bits(a), bits(b), 16)) defaultNaN(16)
-    else IEEE754.fusedMultiplyAdd(bits(a), bits(b), bits(c), 16)
-  )
+  def fma(a: Float16, b: Float16, c: Float16, rounding: UInt[32]): Float16 =
+    fromRaw[Float16](fused(bits(a), bits(b), bits(c), 16, rounding))
 
   @targetName("fmaF32")
-  def fma(a: Float32, b: Float32, c: Float32): Float32 = {
-    val (x, y) = (a.toFloat, b.toFloat)
-    if (x != x) fromRaw[Float32](quieted(bits(a), 32))
-    else if (y != y) fromRaw[Float32](quieted(bits(b), 32))
-    else if (invalidProduct(bits(a), bits(b), 32)) fromRaw[Float32](defaultNaN(32))
-    else if (IEEE754.isNaN(bits(c), 32)) fromRaw[Float32](quieted(bits(c), 32))
-    else Float32(IEEE754.fma(x, y, c.toFloat))
-  }
+  def fma(a: Float32, b: Float32, c: Float32, rounding: UInt[32]): Float32 =
+    fromRaw[Float32](fused(bits(a), bits(b), bits(c), 32, rounding))
 
   /** V_FMA_LEGACY_F32: [[fma]] under DX9 rules, the product of a zero and anything +0. */
-  def fmaLegacyF32(a: Float32, b: Float32, c: Float32): Float32 =
-    if ((bits(a) & 0x7fffffffL) == 0L || (bits(b) & 0x7fffffffL) == 0L) add(Float32(0.0f), c) else fma(a, b, c)
+  def fmaLegacyF32(a: Float32, b: Float32, c: Float32, rounding: UInt[32]): Float32 =
+    if ((bits(a) & 0x7fffffffL) == 0L || (bits(b) & 0x7fffffffL) == 0L) add(Float32(0.0f), c, rounding)
+    else fma(a, b, c, rounding)
 
   @targetName("fmaF64")
-  def fma(a: Float64, b: Float64, c: Float64): Float64 = {
-    val (x, y) = (a.toDouble, b.toDouble)
-    if (x != x) fromRaw[Float64](quieted(bits(a), 64))
-    else if (y != y) fromRaw[Float64](quieted(bits(b), 64))
-    else if (invalidProduct(bits(a), bits(b), 64)) fromRaw[Float64](defaultNaN(64))
-    else if (IEEE754.isNaN(bits(c), 64)) fromRaw[Float64](quieted(bits(c), 64))
-    else Float64(IEEE754.fma(x, y, c.toDouble))
-  }
+  def fma(a: Float64, b: Float64, c: Float64, rounding: UInt[32]): Float64 =
+    fromRaw[Float64](fused(bits(a), bits(b), bits(c), 64, rounding))
 
   /** V_MED3: the median, or the minimum when any operand is NaN, where a signalling NaN propagates quieted and a quiet
     * one is ignored. A denormal compares as a zero unless MODE keeps input denormals of its width, ties keep the
@@ -221,7 +309,7 @@ private[isa] object Floats {
   def mullitF32(left: Float32, right: Float32, select: Float32): Float32 = {
     val (y, z) = (right.toFloat, select.toFloat)
     if (y == -Float.MaxValue || y == Float.NegativeInfinity || y.isNaN || !(z > 0.0f)) Float32(-Float.MaxValue)
-    else mulLegacyF32(left, right)
+    else mulLegacyF32(left, right, NearestEven)
   }
 
   /** V_MIN_LEGACY and V_MAX_LEGACY, DX9's selections: SRC0 where it compares less, or not less, else SRC1. */
@@ -463,12 +551,12 @@ private[isa] object Floats {
   def divFmas(a: Float32, b: Float32, c: Float32, scaled: Bool): Float32 =
     if (scaled && a.toFloat.isFinite && b.toFloat.isFinite && c.toFloat.isFinite)
       fromRaw[Float32](divisionFusedMultiplyAdd(bits(a), bits(b), bits(c), 32))
-    else fma(a, b, c)
+    else fma(a, b, c, NearestEven)
   @targetName("divFmasF64")
   def divFmas(a: Float64, b: Float64, c: Float64, scaled: Bool): Float64 =
     if (scaled && a.toDouble.isFinite && b.toDouble.isFinite && c.toDouble.isFinite)
       fromRaw[Float64](divisionFusedMultiplyAdd(bits(a), bits(b), bits(c), 64))
-    else fma(a, b, c)
+    else fma(a, b, c, NearestEven)
 
   /** V_TRIG_PREOP_F64: the segment of 2/pi the dword selects, scaled for the operand's exponent. */
   def trigPreopF64(value: Float64, segment: UInt[32]): Float64 = Float64(trigPreop(value.toDouble, segment.raw.toInt))

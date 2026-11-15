@@ -409,7 +409,7 @@ class FloatSemanticsSuite extends Suite {
       b <- doubles.take(24)
       c <- doubles.take(8)
     } same(
-      Execute.fusedMultiplyAdd(a, b, c, 64),
+      Execute.fusedMultiplyAdd(a, b, c, 64, 0L),
       IEEE754.doubleToBinary64(
         IEEE754.fma(IEEE754.binary64ToDouble(a), IEEE754.binary64ToDouble(b), IEEE754.binary64ToDouble(c))
       ),

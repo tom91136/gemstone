@@ -45,11 +45,11 @@ private object FloatSemantics {
       )
     case VectorBinaryOperation.MinimumLegacyF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
-        algebra.singleOperation(clamp, a, b)(Floats.minLegacyF32)
+        algebra.saturated(clamp, algebra.primitive(a, b)(Floats.minLegacyF32), 32)
       )
     case VectorBinaryOperation.MaximumLegacyF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
-        algebra.singleOperation(clamp, a, b)(Floats.maxLegacyF32)
+        algebra.saturated(clamp, algebra.primitive(a, b)(Floats.maxLegacyF32), 32)
       )
     case VectorBinaryOperation.MaximumF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, _) =>
@@ -58,7 +58,11 @@ private object FloatSemantics {
     case VectorBinaryOperation.MultiplyAccumulateF32 =>
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, d) =>
         algebra.flushedTernary(sinks.modeRegister, 32, a, b, d)((x, y, z) =>
-          algebra.addSingle(algebra.multiplySingle(x, y), z)
+          algebra.addSingle(
+            algebra.multiplySingle(x, y, algebra.roundingField(sinks.modeRegister, 32)),
+            z,
+            algebra.roundingField(sinks.modeRegister, 32)
+          )
         )
       )
     case VectorBinaryOperation.LoadExponentF32 =>
@@ -103,7 +107,7 @@ private object FloatSemantics {
       sinks.vectorFloat(dest, srcA, srcB, modifiers, floatWidth(operation))((a, b, d) =>
         algebra.saturated(
           clamp,
-          algebra.flushedTernary(sinks.modeRegister, 16, a, b, d)(algebra.fusedMultiplyAdd(_, _, _, 16)),
+          algebra.flushedFusedMultiplyAdd(sinks.modeRegister, 16, a, b, d),
           16
         )
       )
@@ -881,11 +885,19 @@ private object FloatSemantics {
       sinks.pairDword(dest, srcA, srcB, PairRead.Floating, modifiers)((a, b) => algebra.loadExponent(a, b, 64))
     case VectorBinary64Operation.Add =>
       sinks.pairBinary(dest, srcA, srcB, PairRead.Floating, modifiers)((a, b) =>
-        algebra.primitive(a, b)(Floats.add(_: Float64, _: Float64))
+        algebra.primitive(
+          a,
+          b,
+          algebra.roundingField(sinks.modeRegister, 64)
+        )(Floats.add(_: Float64, _: Float64, _: UInt[32]))
       )
     case VectorBinary64Operation.Multiply =>
       sinks.pairBinary(dest, srcA, srcB, PairRead.Floating, modifiers)((a, b) =>
-        algebra.primitive(a, b)(Floats.mul(_: Float64, _: Float64))
+        algebra.primitive(
+          a,
+          b,
+          algebra.roundingField(sinks.modeRegister, 64)
+        )(Floats.mul(_: Float64, _: Float64, _: UInt[32]))
       )
     case VectorBinary64Operation.Maximum =>
       sinks.pairBinary(dest, srcA, srcB, PairRead.Floating, modifiers)((a, b) => algebra.maximumNumber(a, b, 64))
@@ -933,17 +945,39 @@ private object FloatSemantics {
       modifiers: SourceModifiers
   ): R = operation match {
     case VectorMadF32Operation.FusedMultiplyAdd =>
-      single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)(algebra.fusedMultiplyAdd(_, _, _, 32))
+      single(algebra, clamp)(
+        sinks,
+        dest,
+        srcA,
+        srcB,
+        srcC,
+        modifiers
+      )(algebra.fusedMultiplyAdd(_, _, _, 32, algebra.roundingField(sinks.modeRegister, 32)))
     case VectorMadF32Operation.MultiplyAdd =>
       single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)((a, b, c) =>
-        algebra.addSingle(algebra.multiplySingle(a, b), c)
+        algebra.addSingle(
+          algebra.multiplySingle(a, b, algebra.roundingField(sinks.modeRegister, 32)),
+          c,
+          algebra.roundingField(sinks.modeRegister, 32)
+        )
       )
     case VectorMadF32Operation.MultiplyAddLegacy =>
       single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)((a, b, c) =>
-        algebra.addSingle(algebra.primitive(a, b)(Floats.mulLegacyF32), c)
+        algebra.addSingle(
+          algebra.primitive(a, b, algebra.roundingField(sinks.modeRegister, 32))(Floats.mulLegacyF32),
+          c,
+          algebra.roundingField(sinks.modeRegister, 32)
+        )
       )
     case VectorMadF32Operation.FusedMultiplyAddLegacy =>
-      single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)(algebra.primitive(_, _, _)(Floats.fmaLegacyF32))
+      single(algebra, clamp)(
+        sinks,
+        dest,
+        srcA,
+        srcB,
+        srcC,
+        modifiers
+      )(algebra.primitive(_, _, _, algebra.roundingField(sinks.modeRegister, 32))(Floats.fmaLegacyF32))
     case VectorMadF32Operation.MultiplyLighting =>
       single(algebra, clamp)(sinks, dest, srcA, srcB, srcC, modifiers)(algebra.primitive(_, _, _)(Floats.mullitF32))
   }
@@ -1001,10 +1035,15 @@ private object FloatSemantics {
         algebra.fusedMultiplyAdd(
           algebra.bfloat16(a),
           algebra.bfloat16(b),
-          algebra.multiplySingle(algebra.bfloat16(algebra.high16(a)), algebra.bfloat16(algebra.high16(b))),
-          32
+          algebra.multiplySingle(
+            algebra.bfloat16(algebra.high16(a)),
+            algebra.bfloat16(algebra.high16(b)),
+            algebra.literal(0L)
+          ),
+          32,
+          algebra.literal(0L)
         )
-      )(products => algebra.addSingle(products, d))
+      )(products => algebra.addSingle(products, d, algebra.literal(0L)))
 
     /** The low half's bfloat16 as binary32, exactly. */
     inline def bfloat16(value: V): V =
@@ -1017,15 +1056,15 @@ private object FloatSemantics {
   ): R = instruction.operation match {
     case PackedF32Operation.Add =>
       sinks.packedSingle(instruction)((a, b, _) =>
-        algebra.flushedBinary(sinks.modeRegister, 32, a, b)(algebra.addSingle)
+        algebra.flushedSingle(sinks.modeRegister, clamp = false, a, b)(Floats.add)
       )
     case PackedF32Operation.Multiply =>
       sinks.packedSingle(instruction)((a, b, _) =>
-        algebra.flushedBinary(sinks.modeRegister, 32, a, b)(algebra.multiplySingle)
+        algebra.flushedSingle(sinks.modeRegister, clamp = false, a, b)(Floats.mul)
       )
     case PackedF32Operation.Fma =>
       sinks.packedSingle(instruction)((a, b, c) =>
-        algebra.flushedTernary(sinks.modeRegister, 32, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 32))
+        algebra.flushedFusedMultiplyAdd(sinks.modeRegister, 32, a, b, c)
       )
   }
 
@@ -1177,7 +1216,7 @@ private object FloatSemantics {
   /** V_PK_FMA_F16 on one half of each source, its denormals as MODE has them. */
   extension [V](inline algebra: Algebra[V]) {
     inline def packedHalfFusedMultiplyAdd(mode: V, clamp: Boolean, a: V, b: V, c: V): V =
-      algebra.saturated(clamp, algebra.flushedTernary(mode, 16, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 16)), 16)
+      algebra.saturated(clamp, algebra.flushedFusedMultiplyAdd(mode, 16, a, b, c), 16)
 
     /** V_FMA_MIX and V_MAD_MIX into a binary16 half of the destination's previous dword. Bit `i` of `selectionHigh`
       * converts source `i` from the binary16 half bit `i` of `selection` names; `absolute` and `negate` then apply. The
@@ -1210,7 +1249,8 @@ private object FloatSemantics {
             algebra.primitive(
               algebra.multiplySingle(
                 algebra.mixed(a, 0, selection, selectionHigh, negate, absolute),
-                algebra.mixed(b, 1, selection, selectionHigh, negate, absolute)
+                algebra.mixed(b, 1, selection, selectionHigh, negate, absolute),
+                algebra.literal(0L)
               ),
               algebra.mixed(c, 2, selection, selectionHigh, negate, absolute)
             )(Floats.madMixF16),
@@ -1238,15 +1278,18 @@ private object FloatSemantics {
             algebra.mixed(a, 0, selection, selectionHigh, negate, absolute),
             algebra.mixed(b, 1, selection, selectionHigh, negate, absolute),
             algebra.mixed(c, 2, selection, selectionHigh, negate, absolute),
-            32
+            32,
+            algebra.literal(0L)
           )
         else
           algebra.addSingle(
             algebra.multiplySingle(
               algebra.mixed(a, 0, selection, selectionHigh, negate, absolute),
-              algebra.mixed(b, 1, selection, selectionHigh, negate, absolute)
+              algebra.mixed(b, 1, selection, selectionHigh, negate, absolute),
+              algebra.literal(0L)
             ),
-            algebra.mixed(c, 2, selection, selectionHigh, negate, absolute)
+            algebra.mixed(c, 2, selection, selectionHigh, negate, absolute),
+            algebra.literal(0L)
           ),
         32
       )
@@ -1280,19 +1323,25 @@ private object FloatSemantics {
     case DualVectorOperation.Move =>
       dualShape(algebra, sinks, second, half, other)((a, _, _, _) => algebra.truncate(a, 32))
     case DualVectorOperation.AddF32 =>
-      dualShape(algebra, sinks, second, half, other)((a, b, _, _) => algebra.addSingle(a, b))
+      dualShape(algebra, sinks, second, half, other)((a, b, _, _) =>
+        algebra.addSingle(a, b, algebra.roundingField(sinks.modeRegister, 32))
+      )
     case DualVectorOperation.SubtractF32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) =>
-        algebra.singleOperation(clamp = false, a, b)(Floats.sub)
+        algebra.singleOperation(clamp = false, a, b, algebra.roundingField(sinks.modeRegister, 32))(Floats.sub)
       )
     case DualVectorOperation.ReverseSubtractF32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) =>
-        algebra.singleOperation(clamp = false, b, a)(Floats.sub)
+        algebra.singleOperation(clamp = false, b, a, algebra.roundingField(sinks.modeRegister, 32))(Floats.sub)
       )
     case DualVectorOperation.MultiplyF32 =>
-      dualShape(algebra, sinks, second, half, other)((a, b, _, _) => algebra.multiplySingle(a, b))
+      dualShape(algebra, sinks, second, half, other)((a, b, _, _) =>
+        algebra.multiplySingle(a, b, algebra.roundingField(sinks.modeRegister, 32))
+      )
     case DualVectorOperation.FmaF32 =>
-      dualShape(algebra, sinks, second, half, other)((a, b, c, _) => algebra.fusedMultiplyAdd(a, b, c, 32))
+      dualShape(algebra, sinks, second, half, other)((a, b, c, _) =>
+        algebra.fusedMultiplyAdd(a, b, c, 32, algebra.roundingField(sinks.modeRegister, 32))
+      )
     case DualVectorOperation.MinimumF32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) => algebra.minimumNumber(a, b, 32))
     case DualVectorOperation.MaximumF32 =>
@@ -1308,7 +1357,9 @@ private object FloatSemantics {
     case DualVectorOperation.And32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) => algebra.truncate(algebra.and(a, b), 32))
     case DualVectorOperation.MultiplyLegacyF32 =>
-      dualShape(algebra, sinks, second, half, other)((a, b, _, _) => algebra.primitive(a, b)(Floats.mulLegacyF32))
+      dualShape(algebra, sinks, second, half, other)((a, b, _, _) =>
+        algebra.primitive(a, b, algebra.roundingField(sinks.modeRegister, 32))(Floats.mulLegacyF32)
+      )
     case DualVectorOperation.DotHalvesF32 =>
       dualShape(algebra, sinks, second, half, other)((a, b, c, _) =>
         algebra.primitive(a, b, c)((x: UInt[32], y: UInt[32], z: Float32) => Dots.halvesToFloat(x, y, z))
@@ -1339,14 +1390,24 @@ private object FloatSemantics {
       )
     case DualVectorOperation.AddF64 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) =>
-        algebra.primitive(a, b)(Floats.add(_: Float64, _: Float64))
+        algebra.primitive(
+          a,
+          b,
+          algebra.roundingField(sinks.modeRegister, 64)
+        )(Floats.add(_: Float64, _: Float64, _: UInt[32]))
       )
     case DualVectorOperation.MultiplyF64 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) =>
-        algebra.primitive(a, b)(Floats.mul(_: Float64, _: Float64))
+        algebra.primitive(
+          a,
+          b,
+          algebra.roundingField(sinks.modeRegister, 64)
+        )(Floats.mul(_: Float64, _: Float64, _: UInt[32]))
       )
     case DualVectorOperation.FmaF64 =>
-      dualShape(algebra, sinks, second, half, other)((a, b, c, _) => algebra.fusedMultiplyAdd(a, b, c, 64))
+      dualShape(algebra, sinks, second, half, other)((a, b, c, _) =>
+        algebra.fusedMultiplyAdd(a, b, c, 64, algebra.roundingField(sinks.modeRegister, 64))
+      )
     case DualVectorOperation.MinimumF64 =>
       dualShape(algebra, sinks, second, half, other)((a, b, _, _) => algebra.minimumNumber(a, b, 64))
     case DualVectorOperation.MaximumF64 =>

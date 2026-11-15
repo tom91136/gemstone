@@ -529,11 +529,12 @@ object SmtBackend extends Backend {
       * binary16 difference propagates negated, and an invalid operation gives the default NaN.
       */
     private def amdBinary(operator: String, arguments: Vec[Term], result: Type): Either[String, Value] = for {
-      format <- formatOf(result)
-      left   <- floatingArgument(arguments, 0)
-      right  <- floatingArgument(arguments, 1)
+      format   <- formatOf(result)
+      left     <- floatingArgument(arguments, 0)
+      right    <- floatingArgument(arguments, 1)
+      rounding <- fieldRounding(arguments, 2, format)
     } yield {
-      val core    = operation(s"($operator RNE ${left.sexp} ${right.sexp})", format)
+      val core    = operation(s"($operator $rounding ${left.sexp} ${right.sexp})", format)
       val negated = if (operator == "fp.sub" && format.width == 16)
         s"(bvxor ${right.bits} ${literal(format.signBit, 16)})"
       else right.bits
@@ -547,12 +548,13 @@ object SmtBackend extends Backend {
 
     /** An AMDGPU fused multiply-add: a NaN factor wins, an invalid product is the default NaN, then a NaN addend. */
     private def amdFused(arguments: Vec[Term], result: Type): Either[String, Value] = for {
-      format <- formatOf(result)
-      left   <- floatingArgument(arguments, 0)
-      right  <- floatingArgument(arguments, 1)
-      addend <- floatingArgument(arguments, 2)
+      format   <- formatOf(result)
+      left     <- floatingArgument(arguments, 0)
+      right    <- floatingArgument(arguments, 1)
+      addend   <- floatingArgument(arguments, 2)
+      rounding <- fieldRounding(arguments, 3, format)
     } yield {
-      val core    = operation(s"(fp.fma RNE ${left.sexp} ${right.sexp} ${addend.sexp})", format)
+      val core    = operation(s"(fp.fma $rounding ${left.sexp} ${right.sexp} ${addend.sexp})", format)
       val invalid = s"(or (and (fp.isZero ${left.sexp}) (fp.isInfinite ${right.sexp})) " +
         s"(and (fp.isInfinite ${left.sexp}) (fp.isZero ${right.sexp})))"
       fromBits(
@@ -598,6 +600,17 @@ object SmtBackend extends Backend {
 
     private def floatingArgument(arguments: Vec[Term], index: Int): Either[String, Value.Floating] =
       arguments.lift(index).toRight(s"the primitive has no argument $index").flatMap(floatingTerm(_))
+
+    /** The rounding a MODE field selects: 0 nearest even, 1 up, 2 down, 3 toward zero, in the low two bits of the
+      * argument for binary32 and the next two for the other widths.
+      */
+    private def fieldRounding(arguments: Vec[Term], index: Int, format: FpFormat): Either[String, String] =
+      arguments.lift(index).toRight(s"the primitive has no rounding argument $index").flatMap(expression(_)).map {
+        value =>
+          val low   = if (format.width == 32) 0 else 2
+          val field = s"((_ extract ${low + 1} $low) ${bits(value, 32)})"
+          s"(ite (= $field #b00) RNE (ite (= $field #b01) RTP (ite (= $field #b10) RTN RTZ)))"
+      }
 
     private def roundingArgument(arguments: Vec[Term], index: Int): Either[String, String] =
       arguments.lift(index).toRight(s"the primitive has no argument $index").flatMap {

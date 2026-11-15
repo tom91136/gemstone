@@ -580,7 +580,7 @@ class AMDGPUMatrixSuite extends Suite {
     // 1 + 2^-24 is a tie, which rounds to 1 each time, where the exact sum 1 + 2^-23 is representable
     val half = fromRaw[Float32](java.lang.Float.floatToRawIntBits(math.scalb(1.0f, -12)) & 0xffffffffL)
     val one  = fromRaw[Float32](java.lang.Float.floatToRawIntBits(1.0f) & 0xffffffffL)
-    val sum  = Floats.fma(half, half, Floats.fma(half, half, one))
+    val sum  = Floats.fma(half, half, Floats.fma(half, half, one, Floats.NearestEven), Floats.NearestEven)
     assertEquals(java.lang.Float.intBitsToFloat(toRaw(sum).toInt), 1.0f)
   }
 

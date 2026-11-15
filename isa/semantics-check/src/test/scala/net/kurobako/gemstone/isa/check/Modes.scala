@@ -71,10 +71,10 @@ object Modes {
 
   private def renderedModes(kase: Case): Set[Mode] =
     if (kase.target.exists(_.startsWith("gfx"))) {
-      val (rounding, denormal) = reachedModes(kase.definition)
+      val known = knownMasks(kase.definition)
       Set(
-        Option.when((rounding & ModeRegister.RoundMask) == ModeRegister.RoundMask)(Mode.Rounding),
-        Option.when((denormal & ModeRegister.DenormalMask) != 0)(Mode.Flush)
+        Option.when(arithmeticPrimitives(kase.definition).forall(roundedByMode(_, known)))(Mode.Rounding),
+        Option.when((reachedModes(kase.definition, known) & ModeRegister.DenormalMask) != 0)(Mode.Flush)
       ).flatten
     } else {
       val all = terms(kase.definition)
@@ -117,9 +117,26 @@ object Modes {
     case _ => false
   }
 
-  /** The bits of the MODE register the definition's results may read, as a mask of rounding and denormal field bits. */
-  private def reachedModes(definition: Definition): (rounding: Long, denormal: Long) = {
-    val known = definition.body.foldLeft[Map[String, Long]](Map("mode" -> -1L)) { (masks, statement) =>
+  private def arithmeticPrimitives(definition: Definition): Vec[Term.Primitive] =
+    terms(definition).flatMap(primitives).filter(primitive =>
+      FloatOwners(Term.simple(primitive.owner)) && AmdArithmetic(primitive.method)
+    )
+
+  private def primitives(term: Term): Vec[Term.Primitive] = term match {
+    case primitive: Term.Primitive => primitive +: primitive.children.flatMap(primitives)
+    case _                         => term.children.flatMap(primitives)
+  }
+
+  /** Whether the primitive's trailing argument carries the FP_ROUND field of its width, so MODE decides its rounding.
+    */
+  private def roundedByMode(primitive: Term.Primitive, known: Map[String, Long]): Boolean = {
+    val field = if (primitive.result == Type.Float(32)) ModeRegister.Round32Mask else ModeRegister.Round16And64Mask
+    primitive.arguments.lastOption.exists(argument => (reached(argument, known) & field) == field)
+  }
+
+  /** The bits of the MODE register each name of the definition may depend on. */
+  private def knownMasks(definition: Definition): Map[String, Long] =
+    definition.body.foldLeft[Map[String, Long]](Map("mode" -> -1L)) { (masks, statement) =>
       val value = reached(statement.term, masks)
       statement.target match {
         case Definition.Target.Binding(name) => masks.updated(name, value)
@@ -127,11 +144,13 @@ object Modes {
         case Definition.Target.Effect        => masks
       }
     }
+
+  /** The bits of the MODE register the definition's results may read. */
+  private def reachedModes(definition: Definition, known: Map[String, Long]): Long = {
     val outputs = definition.results.map(_.value) ++ definition.body.collect {
       case Definition.Statement(Definition.Target.Effect, term) => term
     }
-    val all = outputs.foldLeft(0L)((mask, term) => mask | reached(term, known))
-    (all & ModeRegister.RoundMask, all & ModeRegister.DenormalMask)
+    outputs.foldLeft(0L)((mask, term) => mask | reached(term, known))
   }
 
   private def reached(term: Term, known: Map[String, Long]): Long = term match {

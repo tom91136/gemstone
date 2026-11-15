@@ -98,6 +98,6 @@ private object ScalarStaged {
       srcC: InstructionSource,
       width: Int in (16, 32, 64)
   ): R = sinks.scalarTernary(dest, srcA, srcB, srcC)((a, b, c) =>
-    algebra.flushedTernary(sinks.modeRegister, width, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, width))
+    algebra.flushedFusedMultiplyAdd(sinks.modeRegister, width, a, b, c)
   )
 }

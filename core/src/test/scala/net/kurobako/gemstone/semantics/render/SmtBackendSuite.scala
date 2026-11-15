@@ -157,11 +157,49 @@ class SmtBackendSuite extends Suite {
   test("AMDGPU arithmetic quiets a NaN operand rather than leaving the solver to pick one") {
     val sum = definition(
       ab,
-      Vec(("d", u32, bits(amdgpu("add", asFloat(Term.Variable("a")), asFloat(Term.Variable("b"))))))
+      Vec(("d", u32, bits(amdgpu("add", asFloat(Term.Variable("a")), asFloat(Term.Variable("b")), Term.Literal(0)))))
     )
     val shown = SmtBackend.show(sum)
     assert(shown.contains("(fp.isNaN ((_ to_fp 8 24) a))"), shown)
     assert(shown.contains("(bvor a (_ bv4194304 32))"), shown)
+  }
+
+  test("an AMDGPU binary32 operation rounds as the low field of the mode it is given") {
+    val fields = Vec(("a", u32), ("b", u32), ("m", u32))
+    val mode   = Term.Binary("&", Term.Variable("m"), Term.Literal(3))
+    val sum    = definition(
+      fields,
+      Vec(("d", u32, bits(amdgpu("add", asFloat(Term.Variable("a")), asFloat(Term.Variable("b")), mode))))
+    )
+    val shown = SmtBackend.show(sum)
+    assert(shown.contains("(fp.add (ite "), shown)
+    Vec("RNE", "RTP", "RTN", "RTZ").foreach(name => assert(shown.contains(name), shown))
+    assert(shown.contains("((_ extract 1 0) "), shown)
+  }
+
+  test("an AMDGPU binary16 fused multiply-add rounds as the second field of the mode it is given") {
+    val f16   = Type.Float(16)
+    val u16   = Type.unsigned(16)
+    val mode  = Term.Binary("&", Term.Variable("m"), Term.Literal(12))
+    val names = Vec("x", "y", "z")
+    val fma   = Term.Primitive(
+      "net.kurobako.gemstone.isa.amdgpu.Floats",
+      "fma",
+      names.map(name => asFloat(Term.Variable(name))) :+ mode,
+      Vec(Some(f16), Some(f16), Some(f16), Some(u32)),
+      f16
+    )
+    val shown = SmtBackend.show(definition(names.map((_, u16)) :+ (("m", u32)), Vec(("d", u16, bits(fma)))))
+    assert(shown.contains("(fp.fma (ite "), shown)
+    assert(shown.contains("((_ extract 3 2) "), shown)
+  }
+
+  test("an AMDGPU operation without a rounding argument is rejected") {
+    val sum = definition(
+      ab,
+      Vec(("d", u32, bits(amdgpu("add", asFloat(Term.Variable("a")), asFloat(Term.Variable("b"))))))
+    )
+    assert(SmtBackend.equivalence(sum, sum, memory = false).isLeft)
   }
 
   test("an invalid NVIDIA sum is the negative default NaN the host gives") {
@@ -196,8 +234,8 @@ class SmtBackendSuite extends Suite {
     val sub = Term.Primitive(
       "net.kurobako.gemstone.isa.amdgpu.Floats",
       "sub",
-      Vec(asFloat(Term.Variable("a")), asFloat(Term.Variable("b"))),
-      Vec(Some(f16), Some(f16)),
+      Vec(asFloat(Term.Variable("a")), asFloat(Term.Variable("b")), Term.Literal(0)),
+      Vec(Some(f16), Some(f16), Some(u32)),
       f16
     )
     val shown = SmtBackend.show(definition(Vec(("a", u16), ("b", u16)), Vec(("d", u16, bits(sub)))))

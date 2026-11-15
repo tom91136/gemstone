@@ -18,9 +18,12 @@ private object AtomicStaged {
   inline def atomic[V, R](inline algebra: Algebra[V], instruction: Instruction.Atomic)(
       inline sinks: AMDGPUSinks[V, R]
   ): R = (instruction.operation, instruction.bytes.raw) match {
-    case (AtomicOperation.FloatAdd, 4) => sinks.atomic(instruction)((old, operand) => algebra.addSingle(old, operand))
+    case (AtomicOperation.FloatAdd, 4) =>
+      sinks.atomic(instruction)((old, operand) => algebra.addSingle(old, operand, algebra.literal(0L)))
     case (AtomicOperation.FloatAdd, _) =>
-      sinks.atomic(instruction)((old, operand) => algebra.primitive(old, operand)(Floats.add(_: Float64, _: Float64)))
+      sinks.atomic(instruction)((old, operand) =>
+        algebra.primitive(old, operand, algebra.literal(0L))(Floats.add(_: Float64, _: Float64, _: UInt[32]))
+      )
     case (AtomicOperation.FloatMinimum, 4) =>
       sinks.atomic(instruction)((old, operand) => algebra.minimumNumber(old, operand, 32))
     case (AtomicOperation.FloatMinimum, _) =>
@@ -41,7 +44,7 @@ private object AtomicStaged {
       sinks.localSource2(instruction)((old, other) => algebra.truncate(algebra.subtract(other, old), 32))
     case (_, true, _) => sinks.localSource2(instruction)((old, other) => algebra.subtract(other, old))
     case (AtomicOperation.FloatAdd, _, _) =>
-      sinks.localSource2(instruction)((old, other) => algebra.addSingle(old, other))
+      sinks.localSource2(instruction)((old, other) => algebra.addSingle(old, other, algebra.literal(0L)))
     case (AtomicOperation.FloatMinimum, _, 4) =>
       sinks.localSource2(instruction)((old, other) => algebra.minimumNumber(old, other, 32))
     case (AtomicOperation.FloatMinimum, _, _) =>

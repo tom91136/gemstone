@@ -64,13 +64,9 @@ class ModesSuite extends Suite {
     }
   }
 
-  test("an AMDGPU sum does not render the rounding field of MODE") {
-    Modes.check(amdCase("v_add_f32_e32 v0, v1, v2")) match {
-      case Left(reason) =>
-        assert(reason.contains("v_add_f32_e32 v0, v1, v2"), reason)
-        assert(reason.contains(Mode.Rounding.label), reason)
-      case Right(_) => fail("expected the missing rounding to be refused")
-    }
+  test("an AMDGPU sum and fused multiply-add render the rounding and denormal fields of MODE") {
+    assertEquals(Modes.check(amdCase("v_add_f32_e32 v0, v1, v2")), Right(()))
+    assertEquals(Modes.check(amdCase("v_fma_f32_e64 v0, v1, v2, v3")), Right(()))
   }
 
   test("an AMDGPU integer sum has no floating-point mode") {

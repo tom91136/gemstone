@@ -1,6 +1,6 @@
 # Rewrite equivalence
 
-Status: all three steps are done. `Proof.prove` encodes integer, bitwise and floating-point sequences in the SMT backend, refuses an instruction whose modes the definition does not render, and reports each instruction it relied on with the differential coverage behind it. AMDGPU floating-point arithmetic is refused, because the renderer reads MODE's denormal fields but not its rounding field.
+Status: all three steps are done. `Proof.prove` encodes integer, bitwise and floating-point sequences in the SMT backend, refuses an instruction whose modes the definition does not render, and reports each instruction it relied on with the differential coverage behind it. AMDGPU arithmetic renders MODE's FP_ROUND fields beside its denormal fields, and the solver proves it for every rounding mode.
 
 ## Goal
 
@@ -42,7 +42,7 @@ As in `cost-model.md`. In addition, known-equivalent and known-different pairs (
 
 ## Limits
 
-- AMDGPU floating-point arithmetic is refused, because its definitions read MODE's denormal fields but not its rounding field. Bitwuzla has no `fp.to_ieee_bv`, so a floating-point value's bits are tied to its term by an equality, and the payload of a NaN the rendered semantics leaves open is the solver's choice: that of binary16 and binary32 fused multiply-add with a NaN operand, whose result the host picks. An invalid operation gives the negative default NaN, as the JVM on x86 and the AMDGPU do. The differential filter types AMDGPU registers as integers, so it samples no float edge values; a pair that only differs on one needs more runs than the default 64.
+- AMDGPU add, subtract, multiply and fused multiply-add round as MODE.FP_ROUND says: its low two bits for binary32 and the next two for binary16 and binary64. Other AMDGPU float instructions are refused because they keep a fixed nearest-even rounding the hardware may not: the mixed-precision and dot forms, V_DIV_FMAS, atomics, and the matrix units. Bitwuzla has no `fp.to_ieee_bv`, so a floating-point value's bits are tied to its term by an equality, and the payload of a NaN the rendered semantics leaves open is the solver's choice: that of binary16 and binary32 fused multiply-add with a NaN operand, whose result the host picks. An invalid operation gives the negative default NaN, as the JVM on x86 and the AMDGPU do. The differential filter types AMDGPU registers as integers, so it samples no float edge values; a pair that only differs on one needs more runs than the default 64.
 
 ## Open decisions
 

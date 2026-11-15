@@ -34,7 +34,7 @@ private object MatrixSemantics {
 
   /** A binary32 product step on elements [[widen]] has converted. */
   inline def product[V](inline algebra: Algebra[V], sum: V, a: V, b: V): V =
-    algebra.primitive(a, b, sum)(Floats.fma(_: Float32, _: Float32, _: Float32))
+    algebra.primitive(a, b, sum, algebra.literal(0L))(Floats.fma(_: Float32, _: Float32, _: Float32, _: UInt[32]))
 
   /** An element of A or B as the matrix core reads it: binary32 elements as MODE flushes their denormals. */
   inline def core[V](inline algebra: Algebra[V], format: MatrixFormat, value: V, mode: V): V = format match {
@@ -117,7 +117,13 @@ private object MatrixSemantics {
           c => c,
           a => a,
           b => b,
-          (sum, a, b, _, _) => algebra.primitive(a, b, sum)(Floats.fma(_: Float64, _: Float64, _: Float64)),
+          (sum, a, b, _, _) =>
+            algebra.primitive(
+              a,
+              b,
+              sum,
+              algebra.literal(0L)
+            )(Floats.fma(_: Float64, _: Float64, _: Float64, _: UInt[32])),
           sum => sum
         )
       case MatrixFormat.I32 if shape.layout == MatrixLayout.Core =>

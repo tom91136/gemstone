@@ -36,7 +36,7 @@ private[isa] object MatrixArithmetic {
     * MODE.FP16_OVFL as other instructions clamp by CLAMP: each overflowing step saturates.
     */
   def fma(a: Float32, b: Float32, sum: Float32, mode: UInt[32]): Float32 =
-    saturated(Floats.fma(a, b, sum), infinite(a) || infinite(b) || infinite(sum), mode)
+    saturated(Floats.fma(a, b, sum, Floats.NearestEven), infinite(a) || infinite(b) || infinite(sum), mode)
 
   /** [[accumulateScaled]] on the matrix core, saturating as [[fma]] does. */
   def scaledFma(a: Float64, b: Float64, sum: Float32, mode: UInt[32]): Float32 = {

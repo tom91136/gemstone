@@ -25,7 +25,7 @@ private object VectorFloatStaged {
     case Instruction.VMadF64(dest, srcA, srcB, srcC, modifiers) =>
       sinks.section(
         sinks.pairTernary(dest, srcA, srcB, srcC, modifiers)((a, b, c) =>
-          algebra.flushedTernary(sinks.modeRegister, 64, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 64))
+          algebra.flushedFusedMultiplyAdd(sinks.modeRegister, 64, a, b, c)
         )
       )
     case Instruction.VTrigPreopF64(dest, src, segment, modifiers) =>

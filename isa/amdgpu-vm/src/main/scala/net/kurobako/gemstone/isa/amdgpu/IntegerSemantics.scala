@@ -645,7 +645,7 @@ private object IntegerSemantics {
               )
             case VectorTernaryOperation.FusedMultiplyAddF16 =>
               sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 16)((a, b, c) =>
-                algebra.flushedTernary(sinks.modeRegister, 16, a, b, c)(algebra.fusedMultiplyAdd(_, _, _, 16))
+                algebra.flushedFusedMultiplyAdd(sinks.modeRegister, 16, a, b, c)
               )
             case VectorTernaryOperation.MultiplyAddU32U16 =>
               sinks.vectorTernary(dest, srcA, srcB, srcC, modifiers, 32)((a, b, c) =>
@@ -674,7 +674,17 @@ private object IntegerSemantics {
                 algebra.saturated(
                   clamp,
                   algebra.flushedTernary(sinks.modeRegister, 16, a, b, c)((x, y, z) =>
-                    algebra.halfOperation(clamp = false, algebra.halfOperation(clamp = false, x, y)(Floats.mul), z)(
+                    algebra.halfOperation(
+                      clamp = false,
+                      algebra.halfOperation(
+                        clamp = false,
+                        x,
+                        y,
+                        algebra.roundingField(sinks.modeRegister, 16)
+                      )(Floats.mul),
+                      z,
+                      algebra.roundingField(sinks.modeRegister, 16)
+                    )(
                       Floats.add
                     )
                   ),

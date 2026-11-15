@@ -48,8 +48,8 @@ class InstructionSemanticsSuite extends Suite {
     )
     assertEquals(
       defined(Instruction.VBinary64(VectorBinary64Operation.Add, 4, vector(2), vector(6), SourceModifiers.Unmodified)),
-      "def op(`v[2:3]`: UInt[64], `v[6:7]`: UInt[64]): (`v[4:5]`: UInt[64]) =\n" +
-        "  (`v[4:5]` = Floats.add(`v[2:3]`.asFloat, `v[6:7]`.asFloat).bits)"
+      "def op(`v[2:3]`: UInt[64], `v[6:7]`: UInt[64], mode: UInt[32]): (`v[4:5]`: UInt[64]) =\n" +
+        "  (`v[4:5]` = Floats.add(`v[2:3]`.asFloat, `v[6:7]`.asFloat, mode & 12).bits)"
     )
     assertEquals(
       defined(Instruction.VBitOp3(3, vector(1), vector(2), vector(4), 0xca, half = false)),
@@ -176,7 +176,7 @@ class InstructionSemanticsSuite extends Suite {
       ),
       """def op(v3: UInt[32], v1: UInt[32], v2: UInt[32], mode: UInt[32]): (v3: UInt[32]) = {
         |  val v0 = mode & 64
-        |  val v4 = Floats.add(if (((v1 & 0x7c00) | v0) == UInt[32](0)) (v1 & -0x8000).to[UInt[16]].asFloat else v1.to[UInt[16]].asFloat, if (((v2 & 0x7c00) | v0) == UInt[32](0)) (v2 & -0x8000).to[UInt[16]].asFloat else v2.to[UInt[16]].asFloat).bits
+        |  val v4 = Floats.add(if (((v1 & 0x7c00) | v0) == UInt[32](0)) (v1 & -0x8000).to[UInt[16]].asFloat else v1.to[UInt[16]].asFloat, if (((v2 & 0x7c00) | v0) == UInt[32](0)) (v2 & -0x8000).to[UInt[16]].asFloat else v2.to[UInt[16]].asFloat, mode & 12).bits
         |  (v3 = (v3.to[UInt[16]].to[UInt[64]] | ((if (((v4 & 0x7c00).to[UInt[32]] | (mode & 128)) == UInt[32](0)) (v4 & -0x8000).to[UInt[64]] else v4.to[UInt[64]]) << 16)).to[UInt[32]])
         |}""".stripMargin
     )
@@ -278,8 +278,8 @@ class InstructionSemanticsSuite extends Suite {
     assertEquals(
       describe(Target("gfx906"), "v_add_f64 v[0:1], v[2:3], v[4:5]", "v[0:1]" -> "VDST", "v[2:3]" -> "SRC0"),
       Some(
-        "def v_add_f64(SRC0: UInt[64], `v[4:5]`: UInt[64]): (VDST: UInt[64]) =\n" +
-          "  (VDST = Floats.add(SRC0.asFloat, `v[4:5]`.asFloat).bits)"
+        "def v_add_f64(SRC0: UInt[64], `v[4:5]`: UInt[64], mode: UInt[32]): (VDST: UInt[64]) =\n" +
+          "  (VDST = Floats.add(SRC0.asFloat, `v[4:5]`.asFloat, mode & 12).bits)"
       )
     )
     assertEquals(

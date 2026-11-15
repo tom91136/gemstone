@@ -20,6 +20,10 @@ private[isa] object ModeRegister {
   inline val RoundWidth = 4
   val RoundMask: Int    = (1 << RoundWidth) - 1
 
+  /** FP_ROUND holds binary32's rounding in its low two bits, and binary16's and binary64's in the next two. */
+  val Round32Mask: Int      = 0x3
+  val Round16And64Mask: Int = 0xc
+
   /** GFX12 retired IEEE mode and DX10 clamping, so its MODE bits 8 and 9 always read as clear. */
   def ieeeSupported(isa: ISA): Boolean = isa != ISA.RDNA4 && isa != ISA.CDNA5
 

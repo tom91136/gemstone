@@ -270,12 +270,11 @@ class AMDGPUProofSuite
     case other                       => other
   }
 
-  test("a floating-point sum is refused because its rounding mode is not rendered") {
-    prove(Vec(fsum("d", a, b)), Vec(fsum("d", a, b)), only("d"), unreachable) match {
-      case Result.Refused(reason) =>
-        assert(reason.contains("v_add_f32"), reason)
-        assert(reason.contains("rounding"), reason)
-      case other => fail(s"expected a refusal, got $other")
+  test("a floating-point sum is proved equal to itself under every rounding mode") {
+    installed()
+    prove(Vec(fsum("d", a, b)), Vec(fsum("d", a, b)), only("d")) match {
+      case Result.Proved(report) => assert(report.instructions.nonEmpty)
+      case other                 => fail(s"expected a proof, got $other")
     }
   }
 
