@@ -36,6 +36,7 @@ object ConcurrencySchedule {
   }
 
   /** Shuffles the first `count` entries of `order` in place with `schedule`'s Fisher-Yates choices. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def shuffle(schedule: ConcurrencySchedule, order: Array[Int], count: Int = -1): Unit = {
     var i = if (count < 0) order.length - 1 else count - 1
     while (i > 0) {

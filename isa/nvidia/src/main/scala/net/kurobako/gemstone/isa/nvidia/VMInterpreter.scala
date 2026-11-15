@@ -656,43 +656,36 @@ private[isa] object VMInterpreter {
       schedule: ConcurrencySchedule
   ): Either[Fault, Unit] = {
     members.foreach(_.begin())
-    val order                  = if (schedule.seeded) Array.ofDim[Int](members.size) else null
+    val order                  = Option.when(schedule.seeded)(Array.ofDim[Int](members.size))
     var failure: Option[Fault] = None
     var pending                = true
     while (failure.isEmpty && pending) {
       var progressed = false
-      if (order eq null) {
-        members.foreach { member =>
-          if (failure.isEmpty && !member.finished) {
+      order match {
+        case None =>
+          members.foreach { member =>
+            if (failure.isEmpty && !member.finished) {
+              val runnable = member.runnable
+              member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
+              progressed ||= runnable || member.runnable
+            }
+          }
+        case Some(ordering) =>
+          var count = 0
+          var index = 0
+          while (index < members.size) {
+            if (!members(index).finished) { ordering(count) = index; count += 1 }
+            index += 1
+          }
+          ConcurrencySchedule.shuffle(schedule, ordering, count)
+          var step = 0
+          while (step < count && failure.isEmpty) {
+            val member   = members(ordering(step))
             val runnable = member.runnable
             member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
             progressed ||= runnable || member.runnable
+            step += 1
           }
-        }
-      } else {
-        val ordering = order.nn
-        var count    = 0
-        var index    = 0
-        while (index < members.size) {
-          if (!members(index).finished) { ordering(count) = index; count += 1 }
-          index += 1
-        }
-        var i = count - 1
-        while (i > 0) {
-          val j   = schedule.choose(i + 1)
-          val tmp = ordering(i)
-          ordering(i) = ordering(j)
-          ordering(j) = tmp
-          i -= 1
-        }
-        var step = 0
-        while (step < count && failure.isEmpty) {
-          val member   = members(ordering(step))
-          val runnable = member.runnable
-          member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
-          progressed ||= runnable || member.runnable
-          step += 1
-        }
       }
       pending = members.exists(!_.finished)
       if (pending && !progressed && failure.isEmpty) {

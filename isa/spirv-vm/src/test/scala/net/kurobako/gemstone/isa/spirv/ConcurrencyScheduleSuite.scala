@@ -155,6 +155,7 @@ class ConcurrencyScheduleSuite extends Suite {
     }
   }
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class FirstSetter extends LaunchObserver {
     private var setterSeen       = false
     var waiterBeforeSetter: Long = 0L

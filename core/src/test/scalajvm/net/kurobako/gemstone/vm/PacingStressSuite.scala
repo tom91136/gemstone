@@ -18,6 +18,7 @@ import scala.util.Random
   * until `GEMSTONE_TEST_PACING_STRESS_SECONDS` runs out, which defaults to a couple of seconds and is raised for long
   * runs.
   */
+@SuppressWarnings(Array("scalafix:DisableSyntax.var"))
 class PacingStressSuite extends Suite {
   override def baseTimeout: FiniteDuration = 30.minutes
 
@@ -32,7 +33,7 @@ class PacingStressSuite extends Suite {
     floor.setAccessible(true)
 
     def clockOf(pace: Pace): Long     = clock.getLong(pace)
-    def floorOf(pacing: Pacing): Long = floor.get(pacing).asInstanceOf[AtomicLong].get()
+    def floorOf(pacing: Pacing): Long = floor.get(pacing) match { case value: AtomicLong => value.get() }
   }
 
   private def thread(name: String)(run: => Unit): Thread = {
@@ -48,9 +49,9 @@ class PacingStressSuite extends Suite {
     threads.forall(!_.isAlive)
   }
 
-  private def describe(at: AtomicReference[String], what: String, floor: Long, clock: Long): Unit = {
+  private def describe(at: AtomicReference[Option[String]], what: String, floor: Long, clock: Long): Unit = {
     val gap = floor - clock
-    val _   = at.compareAndSet(null, s"$what: floor $floor, clock $clock, floor leads by $gap")
+    val _   = at.compareAndSet(None, Some(s"$what: floor $floor, clock $clock, floor leads by $gap"))
   }
 
   test("the floor never passes a group that has just joined") {
@@ -65,7 +66,7 @@ class PacingStressSuite extends Suite {
     val bad       = AtomicLong()
     val worst     = AtomicLong()
     val exhausted = AtomicLong()
-    val first     = AtomicReference[String](null)
+    val first     = AtomicReference[Option[String]](None)
     pacing.engage()
 
     val joinThreads = (0 until joiners).map { index =>
@@ -102,7 +103,7 @@ class PacingStressSuite extends Suite {
       s"join: ${joins.get()} attempts in $Seconds s, ${bad.get()} violations, worst lead ${worst.get()}, " +
         s"${exhausted.get()} spurious slot exhaustions"
     println(summary)
-    if (bad.get() > 0) fail(s"$summary; first $first")
+    if (bad.get() > 0) fail(s"$summary; first ${first.get().mkString}")
   }
 
   test("the floor never passes a group that has just resumed") {
@@ -115,7 +116,7 @@ class PacingStressSuite extends Suite {
     val resumes  = AtomicLong()
     val bad      = AtomicLong()
     val worst    = AtomicLong()
-    val first    = AtomicReference[String](null)
+    val first    = AtomicReference[Option[String]](None)
     pacing.engage()
     val paces = (0 until groups).map(_ => pacing.join())
 
@@ -145,7 +146,7 @@ class PacingStressSuite extends Suite {
     paces.foreach(_.leave())
     val summary = s"resume: ${resumes.get()} resumes in $Seconds s, ${bad.get()} violations, worst lead ${worst.get()}"
     println(summary)
-    if (bad.get() > 0) fail(s"$summary; first $first")
+    if (bad.get() > 0) fail(s"$summary; first ${first.get().mkString}")
   }
 
   test("join finds a free slot while fewer threads than slots are claiming") {
@@ -159,7 +160,7 @@ class PacingStressSuite extends Suite {
     val holders  = AtomicInteger()
     val joins    = AtomicLong()
     val failures = AtomicLong()
-    val first    = AtomicReference[String](null)
+    val first    = AtomicReference[Option[String]](None)
     pacing.engage()
 
     val workers = (0 until threads).map { index =>
@@ -179,9 +180,11 @@ class PacingStressSuite extends Suite {
               case error: IllegalStateException =>
                 val _ = failures.incrementAndGet()
                 val _ = first.compareAndSet(
-                  null,
-                  s"${error.getMessage}; ${holders.get()} of $slots permits held, this joiner holds one, " +
-                    s"so at most ${slots - 1} slots were taken and one was free"
+                  None,
+                  Some(
+                    s"${error.getMessage}; ${holders.get()} of $slots permits held, this joiner holds one, " +
+                      s"so at most ${slots - 1} slots were taken and one was free"
+                  )
                 )
                 stop.set(true)
             }
@@ -195,7 +198,7 @@ class PacingStressSuite extends Suite {
     assert(finish(workers, Seconds.seconds + 60.seconds), "the claim stress did not finish")
     val summary = s"claim: ${joins.get()} joins in $Seconds s, ${failures.get()} spurious exhaustions"
     println(summary)
-    if (failures.get() > 0) fail(s"$summary; first $first")
+    if (failures.get() > 0) fail(s"$summary; first ${first.get().mkString}")
   }
 
   test("many threads over few slots stay within the skew and make progress") {
@@ -212,7 +215,7 @@ class PacingStressSuite extends Suite {
     val exclusions   = AtomicLong()
     val abases       = AtomicLong()
     val slowestGap   = AtomicLong()
-    val firstGap     = AtomicReference[String](null)
+    val firstGap     = AtomicReference[Option[String]](None)
     val deadline     = Seconds.seconds.fromNow
     pacing.engage()
 
@@ -303,7 +306,7 @@ class PacingStressSuite extends Suite {
       s"skew: ${joins.get()} groups in $Seconds s, widest live gap ${slowestGap.get()}, " +
         s"${abases.get()} floor-above-clock, ${exclusions.get()} spurious slot exhaustions"
     println(summary)
-    if (abases.get() > 0 || slowestGap.get() > 4 * Pacing.Skew) fail(s"$summary; first $firstGap")
+    if (abases.get() > 0 || slowestGap.get() > 4 * Pacing.Skew) fail(s"$summary; first ${firstGap.get().mkString}")
   }
 
   test("a launch with every slot taken reports exhaustion, and a finished group frees one") {
