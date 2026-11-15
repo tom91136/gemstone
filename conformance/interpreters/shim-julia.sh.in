@@ -24,6 +24,7 @@ for directory in ${LD_LIBRARY_PATH-}; do
 done
 for library in ${LD_PRELOAD-}; do
   [ -d "$(dirname "$library")" ] && mounted_dirs+=("$(readlink -f "$(dirname "$library")")")
+  case "$(basename "$library")" in libamdhip64.so*) arguments+=(--env "ROCM_PATH=$(dirname "$library")") ;; esac
 done
 IFS=$saved_ifs
 unset directory library
