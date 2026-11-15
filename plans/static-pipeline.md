@@ -1,6 +1,6 @@
 # Static pipeline analysis
 
-Status: steps 1 to 5 are done; 1 of the 301 `HardwareValidationSuite` tests remains red. It builds on the cost model (`cost-model.md`, F3) and shares its pipeline model with F4 of `performance-profile.md`, the dynamic timing replay. `rewrite-equivalence.md` and `rewrite-search.md` use it as their cost function.
+Status: steps 1 to 5 are done; 2 of the 323 `HardwareValidationSuite` tests remain red. It builds on the cost model (`cost-model.md`, F3) and shares its pipeline model with F4 of `performance-profile.md`, the dynamic timing replay. `rewrite-equivalence.md` and `rewrite-search.md` use it as their cost function.
 
 ## Goal
 
@@ -76,7 +76,7 @@ As in `cost-model.md`: test first, seen failing; `testOnly *` on the touched mod
 
 The simulator takes an explicit placement: the number of resident warps on each partition. `Placement.even` reproduces the former even spread, so existing results are unchanged; the validation suite passes the measured sm_89 slot map (slot mod 4), which lets the same-SMSP and spread rows differ. Cycles per iteration divide by the number of active partitions, which equals `min(partitions, subgroups)` for an even spread.
 
-The redirect applies to taken back-edges only. `Architecture.branchRedirect` is 10 cycles on sm_89 and 21 on gfx1036, both probed. `Op.backEdge` marks the op that closes a CFG back-edge: the last op of a latch in `BlockAnalysis`, and the last row of a table loop. Only those ops pay the redirect, combined with their stall hold by max. Straight blocks and loops without a back-edge op pay nothing. The gfx1036 value includes 2 cycles of scalar loop control, which the `s_add` and `s_cmp` holds may charge again, so up to 2 cycles per trip may be double counted. This is not resolved.
+The redirect applies to taken back-edges only. `Architecture.branchRedirect` is 10 cycles on sm_89 and 22 on gfx1036, both probed. `Op.backEdge` marks the op that closes a CFG back-edge: the last op of a latch in `BlockAnalysis`, and the last row of a table loop. Only those ops pay the redirect, combined with their stall hold by max. Straight blocks and loops without a back-edge op pay nothing. The gfx1036 value is measured with the loop control ahead of the body, so the `s_add` and `s_cmp` holds are not charged twice; see the loop-control probe below.
 
 The gfx1036 dependent `Fma` latency is 5 cycles, probed from dependent `v_fma_f32` chains of 16, 32 and 64 ops on one wave.
 
@@ -94,7 +94,23 @@ Other current values:
 - Issue order is per target: sm_89 is round-robin and gfx1036 is oldest-first, from the 2026-11-13 same-SIMD placements (oldest wave keeps its lone MUFU, DFMA and FFMA rate, the youngest is 1.5 to 5.5 times slower, and delayed starts are not equalised). `Architecture.issueOrder` carries the choice with probed provenance and is inherited like the other fields. The simulator applies it when one partition is active; spread placements keep round-robin because their measured cycles match it.
 - The 2026-11-13 probe also measured the sm_89 MUFU interval at 8.25 cycles per warp-op. That is 3 percent above the 16 per multiprocessor of the 2026-11-10 rate kernel, which the model keeps and `PipelineSimulatorSuite` pins. The two probes disagree, so one row stays red below.
 
-Red cases in `core`: 1 failing test of 301 in `HardwareValidationSuite`, and none elsewhere in the profile suites. Seven further rows were red on the 0.9 rule alone and pass once the suite matches the highest-pressure resource; the model's pressures for them are unchanged:
+The gfx1036 loop-control probe separates the back-edge redirect from the scalar loop control. Every kernel is one inline asm loop on one wave with the loop top on a 64-byte boundary, timed with `clock64` (`s_memtime`) around the loop, 1024 trips per launch, median of 201 launches after 5 warm-ups. Two full passes in opposite kernel order agree to 0.001 cycles per trip. Card: Ryzen 9 9950X3D integrated GPU, Linux 7.3.3 amdgpu, ROCm 7.2 hipcc (HIP 7.2.53211, clang 22), 2026-11-15, host load average 7.4 to 11.9 on 32 threads. The timed region of each kernel was disassembled and holds only the listed instructions. The rows are the `ctl_*` loops in `HardwareLoops`, with the cycles in `HardwareValidationSuite`. Cycles per trip:
+
+- 16 independent `v_fma_f32` with `s_add`, `s_cmp` and the branch after the body (the compiled form): 52.00, equal to the compiler-built loop of the same body. With both control ops ahead of the body and the branch alone after it: 40.01. With a single `s_sub` ahead and a `scc0` branch after: 39.99. With the single `s_sub` after the body: 50.00.
+- Extra independent scalar ops after the body each cost 1.00 cycle: 2 extra `s_add` 54.00, 4 gives 56.00, 8 gives 60.00; extra `s_cmp` give the same. Ahead of the body they cost nothing: two control ops and one cost the same 40.0.
+- Control placed inside the body costs more: the two control ops spread through the body 51.01, and 4 extra independent `s_add` spread through it 70.00, 4.5 cycles each.
+- The same loop unrolled twice and four times: 68.00 and 100.00, so 16.0 cycles per 16 FMAs and the same 36-cycle intercept per back-edge.
+- The loop top at offsets 0 to 60 bytes in a 64-byte line moves the 16-FMA loop between 52.00 and 55.51.
+- 4 `v_fma_f64`: 67.01 with tail control, 63.91 with the control ahead (the 64 cycles of FP64 pipe, so the loop overhead is hidden), 71.01 and 86.00 with 4 and 8 extra scalar ops, 138.00 unrolled twice. Loops of 1, 2, 3 and 6 DFMAs take 22.01, 37.01, 52.01 and 97.01.
+- 8 `v_rcp_f32`: 50.00 with tail control, 41.00 with the control ahead, 92.99 unrolled twice. The 44-byte DFMA and MUFU loops take 67.0 and 50.0 when they sit inside one 64-byte line and 79.0 and 62.0 when they cross a 64-byte boundary, a 12-cycle step.
+
+How the data splits the two costs:
+
+- The scalar loop control costs one issue cycle per op, and nothing when it sits ahead of the body. It is not a separate 2-cycle term, so the earlier 21 (19 per trip beyond the dependent chain plus 2 assumed for control) is replaced by the measured 22: with the control ahead of the body the branch issues 18 cycles into the trip and the next trip starts at 40.
+- A third term of 12 cycles appears whenever the control follows the body (52 against 40) and whenever a small loop crosses a 64-byte line (79 against 67). It does not depend on how many control ops there are, and a DFMA or MUFU loop that holds the pipe for 64 cycles hides most of it. It is the 13-cycle gap of the one-warp `stream_ffma` and `stream_ffma_8` rows. The model has no code addresses or fetch lines, so it cannot place the term. Adding it to the redirect (33 in total) clears the one-warp FFMA row and turns six other rows red: `stream_ffma_1`, `chain_ffma_1`, `stream_mufu_1`, `stream_dfma_1`, `stream_mufu` with four waves and `stream_dfma_rate`, which model 84 cycles against 63.99.
+- A taken back-edge does not make a pipe-bound loop wait for the redirect: the DFMA loop with the control ahead takes exactly the pipe time. The simulator blocks a wave at issue until the pipe is free, so it charges the redirect after the last pipe op; a wave that issues ahead of the pipe would hide it. `ctl_mufu8_head` is red for this reason: 53 modelled against 41 measured.
+
+Red cases in `core`: 2 failing tests of 323 in `HardwareValidationSuite`, and none elsewhere in the profile suites. Seven further rows were red on the 0.9 rule alone and pass once the suite matches the highest-pressure resource; the model's pressures for them are unchanged:
 
 - sm_89 `stream_mufu_4` with one warp: MUFU is 0.889 busy. The 8.25-cycle interval of the 2026-11-13 probe would need a MUFU rate near 15.5; the committed 16.0 rate and the simulator unit tests that pin 8.0 cycles for one warp-MUFU stay.
 - sm_89 `chain_ffma` with 16 warps: issue pressure is 0.880 over a 50-cycle window. The measurement implies 48.3 cycles, so the compiled path's holds on IADD3 and ISETP and the four warps' back-edge redirects overlap slightly more than the round-robin model gives.
@@ -103,12 +119,12 @@ Red cases in `core`: 1 failing test of 301 in `HardwareValidationSuite`, and non
 
 Remaining red:
 
-- gfx1036 `stream_ffma_8` with one warp (compiled cycles): the model gives 15.5 against 22.0, and `stream_ffma` gives 19.5 against 26.0, which passes only by the 25 percent tolerance. Both windows are 13 cycles shorter than the measurement, the scalar dependency chain plus the back-edge redirect that the one-wave loop pays.
-- The model keeps the gfx1036 redirect at 21. The committed data does not separate the redirect from the scalar loop control, and no single value fits the one-warp and pipe-bound rows.
+- gfx1036 `stream_ffma_8` with one warp (compiled cycles): the model gives 16.0 against 22.0, and `stream_ffma` gives 20.0 against 26.0, which passes only by the 25 percent tolerance. Both windows are 12 cycles short of the measurement: the layout term above, which the model has no way to place.
+- gfx1036 `ctl_mufu8_head` (compiled cycles): 53 modelled against 41 measured. The loop overhead hides under the MUFU pipe on the hardware, and the simulator charges the redirect after the last pipe op.
 
 Unit suites:
 
-- `ArchitectureSuite` asserts that the gfx1036 `pipeLatency` for `Fma` is 5 and that the sm_89 MUFU rate matches its probe.
+- `ArchitectureSuite` asserts that the gfx1036 `pipeLatency` for `Fma` is 5, that its `branchRedirect` is 22, and that the sm_89 MUFU rate matches its probe.
 - `BlockAnalysisSuite` expects 14 cycles for its synthetic loop, whose conditional back-edge pays the 10-cycle sm_89 redirect.
 - `NvidiaLatencySuite` expects `ISETP` to name a producer now that the predicate latency is a measured value.
 
@@ -116,6 +132,6 @@ Unit suites:
 
 - Whether the simulator also serves F4's dynamic replay, with the profile stream as input instead of a static block. Recommendation: yes, one model, so the two views cannot disagree.
 - The tolerance at which a target's results count as validated.
-- Whether the 21-cycle gfx1036 redirect applies to pipe-bound loops. The one-warp FFMA rows need 21; `stream_dfma_rate` and the two-wave MUFU rows imply 13 or less. Only a probe that varies the back-edge on a pipe-bound loop can separate the redirect from the scalar loop control.
+- Whether the simulator should let a wave issue ahead of a busy pipe, so that a pipe-bound loop hides its back-edge. The gfx1036 DFMA and MUFU loops with the control ahead of the body say yes; the sm_89 rows have no such probe.
 - Which sm_89 MUFU interval is right: 8.0 cycles per warp-op from the 2026-11-10 rate kernel, which the model and its unit tests use, or 8.25 from the 2026-11-13 stream fit, which would bind `stream_mufu_4`. A probe that times both forms in one session would decide it.
 - The sm_89 redirect of 10 cycles is derived as 17.02 minus 7 loop-control holds in the probe. The split has not been checked independently.

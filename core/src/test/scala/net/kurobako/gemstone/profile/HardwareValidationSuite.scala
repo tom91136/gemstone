@@ -33,6 +33,14 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   * Placements follow slot mod 4 on sm_89 and `hw_id1` bits 9-8 on gfx1036; `same SMSP` and `same SIMD` put every warp
   * on one partition.
   *
+  * The 2026-11-15 `ctl_*` rows time one wave in one workgroup on the same gfx1036 under Linux 7.3.3 amdgpu and ROCm 7.2
+  * hipcc (HIP 7.2.53211, clang 22), 201 launches after 5 warm-ups of 1024 iterations, at host load average 7.4 to 11.9
+  * on 32 threads. Each loop is one inline asm block with its top on a 64-byte boundary, and its timed region was
+  * disassembled to hold only the listed instructions. The body is 16 independent `v_fma_f32`, 4 `v_fma_f64` or 8
+  * `v_rcp_f32`. The loop control follows the body (`tail`), precedes it (`head`, `head1` with one control op), sits
+  * inside it (`mid`), gains independent `s_add` after the body (`add2`, `add4`, `add8`) or has the body unrolled twice.
+  * `head1` and `tail1` count with a single `s_sub_u32`.
+  *
   * The expected binding is the partition-local resource, the issue slots or a non-shared pipe, when the placement
   * leaves one wave set on a partition, or one wave on each active partition, and the case saturates it. A spread
   * placement with several waves per partition is `Path` when the case runs over 25 percent above the smallest cycles
@@ -195,7 +203,21 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_mufu_16_wide", 16, 16.97, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd4)),
     Measured("stream_mufu_16_wide", 32, 16.45, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd8)),
     Measured("stream_ffma_8", 4, 10.86, Some(Binding.Issue), Some(sameSimd4)),
-    Measured("stream_ffma_8", 8, 10.40, Some(Binding.Issue), Some(sameSimd8))
+    Measured("stream_ffma_8", 8, 10.40, Some(Binding.Issue), Some(sameSimd8)),
+    Measured("ctl_f16_tail", 1, 52.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f16_head", 1, 40.01, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f16_head1", 1, 39.99, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f16_tail1", 1, 50.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f16_tail_add2", 1, 54.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f16_tail_add8", 1, 60.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f16_mid", 1, 51.01, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f16_unroll2", 1, 68.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_dfma4_tail", 1, 67.01, None, Some(oneSimd)),
+    Measured("ctl_dfma4_head", 1, 63.91, None, Some(oneSimd)),
+    Measured("ctl_dfma4_tail_add4", 1, 71.01, None, Some(oneSimd)),
+    Measured("ctl_dfma4_unroll2", 1, 138.00, None, Some(oneSimd)),
+    Measured("ctl_mufu8_tail", 1, 50.00, None, Some(oneSimd)),
+    Measured("ctl_mufu8_head", 1, 41.00, None, Some(oneSimd))
   )
 
   private class State(

@@ -180,6 +180,11 @@ class ArchitectureSuite extends Suite {
     assertEquals(Architecture.gfx1030.pipeLatency, Map.empty[Pipe, Sourced[Int]])
   }
 
+  test("gfx1036 back-edge redirect is the loop-control probe") {
+    assertEquals(Architecture.gfx1036.branchRedirect.map(_.value), Some(22))
+    assertEquals(Architecture.gfx1036.branchRedirect.map(_.source.kind), Some("probed"))
+  }
+
   test("gfx1036 fp64 rate matches its probe") {
     assertMeasured(Architecture.gfx1036.throughput.fp64, 7.9996)
   }

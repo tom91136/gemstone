@@ -1214,11 +1214,12 @@ object Architecture {
   )
 
   private val gfx1036Redirect = Source.Probed(
-    "s_cbranch_scc1 back-edge of the dependent v_fma_f32 chain timed with clock64: 19 cycles per trip beyond 5 per " +
-      "op at 16 or more ops, plus 2 cycles of scalar loop control before the last result lands, giving 21 " +
-      "(2026-11-10, median of 201 launches each)",
+    "taken s_cbranch back-edge of a loop of 16 independent v_fma_f32 with the counter decrement and compare ahead " +
+      "of them, so only the branch follows the FMAs: 40.01 cycles per trip, the branch issuing 18 cycles in, " +
+      "which leaves 22 before the next trip issues; with a single control op ahead of the FMAs 39.99, leaving 23; " +
+      "timed with clock64 on one wave, median of 201 launches each (2026-11-15)",
     "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
-    "Linux 7.2.15 amdgpu",
+    "Linux 7.3.3 amdgpu",
     "ROCm 7.2 hipcc"
   )
 
@@ -1245,7 +1246,7 @@ object Architecture {
     latency = rdnaProbeLatency(gfx1036Latency),
     pipeLatency = Map(Pipe.Fma -> Sourced(5, gfx1036Chain)),
     waveIssueCycles = Some(Sourced(1.0, gfx1036Issue)),
-    branchRedirect = Some(Sourced(21, gfx1036Redirect)),
+    branchRedirect = Some(Sourced(22, gfx1036Redirect)),
     issueOrder = Some(Sourced(Architecture.IssueOrder.OldestFirst, gfx1036IssueOrder))
   )
 
