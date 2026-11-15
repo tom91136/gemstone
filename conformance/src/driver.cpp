@@ -1,6 +1,7 @@
 #include "driver.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -193,6 +194,42 @@ std::vector<std::string> catchCaseNames(std::string_view json, std::string_view 
     if (test.name.empty() || test.name.contains('\0') || !names.insert(test.name).second)
       throw std::runtime_error("invalid or duplicate Catch test from " + std::string(program));
     result.push_back(std::move(test.name));
+  }
+  return result;
+}
+std::vector<std::string> listedCaseNames(std::string_view listing, std::string_view program) {
+  std::vector<std::string> result;
+  std::set<std::string> names;
+  while (!listing.empty()) {
+    const auto end = listing.find('\n');
+    auto line = listing.substr(0, end);
+    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+    if (end == std::string_view::npos) listing = {};
+    else listing.remove_prefix(end + 1);
+    if (line.empty() || line.front() == '#') continue;
+    if (line.size() > 4096 || line.contains('\t') || line.contains('\0'))
+      throw std::runtime_error("invalid case name from " + std::string(program));
+    if (!names.insert(std::string(line)).second) throw std::runtime_error("duplicate case name from " + std::string(program));
+    result.emplace_back(line);
+  }
+  return result;
+}
+std::string caseClassification(std::string_view output) {
+  constexpr std::string_view prefix = "conformance-classification: ";
+  constexpr auto known =
+      std::to_array<std::string_view>({"emulator defect", "missing entry point", "missing code for the target", "race", "time limit"});
+  std::string result;
+  while (!output.empty()) {
+    const auto end = output.find('\n');
+    auto line = output.substr(0, end);
+    if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+    if (end == std::string_view::npos) output = {};
+    else output.remove_prefix(end + 1);
+    if (!line.starts_with(prefix)) continue;
+    const auto value = line.substr(prefix.size());
+    if (!(known ^ exists([&](std::string_view candidate) { return candidate == value; })))
+      throw std::runtime_error("unknown case classification: " + std::string(value));
+    result = value;
   }
   return result;
 }
@@ -425,6 +462,7 @@ Workload loadWorkload(const RunOptions &configuration) {
     replace(workload.vulkanMustpass, fields.vulkanMustpass);
     replace(workload.excludePrograms, fields.excludePrograms);
     replace(workload.excludeCases, fields.excludeCases);
+    replace(workload.includeCases, fields.includeCases);
     const auto append = [](auto &destination, auto &source) {
       if (source) destination.insert(destination.end(), source->begin(), source->end());
     };
@@ -433,6 +471,7 @@ Workload loadWorkload(const RunOptions &configuration) {
     append(workload.vulkanCases, fields.addVulkanCases);
     append(workload.excludePrograms, fields.addExcludePrograms);
     append(workload.excludeCases, fields.addExcludeCases);
+    append(workload.includeCases, fields.addIncludeCases);
     active.erase(name);
     return workload;
   };
@@ -484,7 +523,7 @@ static std::vector<TestProgram> testPrograms(const fs::path &artifact, const Wor
     const auto formatAt = line.find('\t', separator + 1);
     if (formatAt == std::string::npos) throw std::runtime_error("missing test program format: " + manifest.string());
     const auto format = line.substr(formatAt + 1);
-    if (format != "catch2" && format != "gtest" && format != "deqp" && format != "hecbench")
+    if (format != "catch2" && format != "gtest" && format != "deqp" && format != "hecbench" && format != "cases")
       throw std::runtime_error("invalid test program format");
     result.push_back({.name = std::move(name),
                       .path = std::move(path),
@@ -584,6 +623,7 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
     const bool gtest = program.format == "gtest";
     const bool deqp = program.format == "deqp";
     const bool hecbench = program.format == "hecbench";
+    const bool listed = program.format == "cases";
     std::vector<std::string> vulkanCases;
     std::vector<std::string> names;
     if (hecbench) {
@@ -591,7 +631,9 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
     } else {
       auto command = gtest ? std::vector<std::string>{program.path.string(), "--gtest_list_tests"}
                            : std::vector<std::string>{program.path.string(), "--list-tests", "--reporter", "json", "--order", "lex"};
-      if (deqp) {
+      if (listed) {
+        command = {program.path.string(), "--list"};
+      } else if (deqp) {
         const auto archive = fs::path(environment.at(environment::SupportDir)) / "data/vulkan";
         vulkanCases = workload.vulkanMustpass.empty() ? workload.vulkanCases
                                                       : deqpMustpassCases(archive, workload.vulkanMustpass, workload.vulkanCases);
@@ -627,6 +669,8 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
         names = deqpCaseNames(input);
       } else if (gtest) {
         names = gtestCaseNames(listing.output, program.name);
+      } else if (listed) {
+        names = listedCaseNames(listing.output, program.name);
       } else {
         names = catchCaseNames(listing.output, program.name);
       }
@@ -641,7 +685,9 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
     if (gtest)
       std::erase_if(names, [&](const std::string &name) { return !gtestCaseSelected(program.name, name, workload.levelzeroCases); });
     std::erase_if(names, [&](const std::string &name) {
-      return workload.excludeCases ^ exists([&](const std::string &pattern) { return globMatches(pattern, name); });
+      return (!workload.includeCases.empty()
+              && workload.includeCases ^ none_match([&](const std::string &pattern) { return globMatches(pattern, name); }))
+             || workload.excludeCases ^ exists([&](const std::string &pattern) { return globMatches(pattern, name); });
     });
     if (names.size() > UINT32_MAX) throw std::runtime_error("test inventory is too large");
     const auto count = static_cast<uint32_t>(names.size());
@@ -750,6 +796,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   const bool gtest = selected->get().format == "gtest";
   const bool deqp = selected->get().format == "deqp";
   const bool hecbench = selected->get().format == "hecbench";
+  const bool listed = selected->get().format == "cases";
   const auto &program = selected->get().path;
   std::vector<std::string> arguments;
   const auto report = fs::path(config.reportDirectory) / test.program / fmt::to_string(test.index);
@@ -772,6 +819,8 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   } else {
     if (gtest) {
       arguments = {"--gtest_filter=" + test.identity, "--gtest_output=xml:" + (report / "gtest.xml").string()};
+    } else if (listed) {
+      arguments = {"--case", test.identity};
     } else {
       const bool sharded = suiteUsesCatchSharding(test.program);
       arguments = catchShardArguments(config.specs, sharded ? test.index : 0, sharded ? test.count : 1);
@@ -807,6 +856,16 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     }
   }
   output.close();
+  if (listed) {
+    try {
+      classification = caseClassification(readFile(outputPath));
+    } catch (const std::exception &error) {
+      status = status == 0 ? 1 : status;
+      reason = error.what();
+    }
+    if (process.timedOut) classification = "time limit";
+    if (status != 0 && classification.empty() && status != SkipReturnCode) classification = "emulator defect";
+  }
   if (hecbench) {
     auto outcome = classifyHecbenchOutput(readFile(outputPath), process.timedOut);
     if (status != 0 && outcome != HecbenchOutcome::TimeLimit) outcome = HecbenchOutcome::Fail;
@@ -821,13 +880,13 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
       case HecbenchOutcome::Pass: reason = "pass"; break;
     }
   }
-  if (status == SkipReturnCode && !gtest && !deqp && !hecbench) reason = catchSkipReason(readFile(outputPath));
+  if (status == SkipReturnCode && !gtest && !deqp && !hecbench) reason = listed ? "package skip" : catchSkipReason(readFile(outputPath));
   std::string message = std::move(reason);
   if (message.empty()) {
     message = process.timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
                                : fmt::format("exit status {}", status);
   }
-  if (!classification.empty()) record += fmt::format("hecbench: {}\n", classification);
+  if (!classification.empty()) record += fmt::format("{}: {}\n", listed ? "classification" : "hecbench", classification);
   record += fmt::format("conformance: {}, full output: {}\n", message, outputPath.string());
   return {.status = status, .output = std::move(record), .message = std::move(message), .classification = std::move(classification)};
 }
@@ -869,8 +928,13 @@ void writeJunit(const fs::path &path, const std::vector<CaseReport> &reports) {
       file << "/>\n";
       continue;
     }
-    file << ">\n    " << fmt::format("<{} message=\"{}\"/>", skipped(result) ? "skipped" : "failure", xmlEscaped(failureMessage(result)))
-         << "\n    <system-out>" << xmlEscaped(result.output) << "</system-out>\n  </testcase>\n";
+    file << ">\n    ";
+    if (result.classification.empty())
+      file << fmt::format(R"(<{} message="{}"/>)", skipped(result) ? "skipped" : "failure", xmlEscaped(failureMessage(result)));
+    else
+      file << fmt::format(R"(<{} type="{}" message="{}"/>)", skipped(result) ? "skipped" : "failure", xmlEscaped(result.classification),
+                          xmlEscaped(failureMessage(result)));
+    file << "\n    <system-out>" << xmlEscaped(result.output) << "</system-out>\n  </testcase>\n";
   }
   file << "</testsuite>\n";
   file.close();

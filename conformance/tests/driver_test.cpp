@@ -448,14 +448,14 @@ TEST_CASE("hecbench workloads include the corpus and the bounded selection", "[d
   CHECK(full.includePrograms ^ exists([](const auto &pattern) { return conformance::globMatches(pattern, "hecbench_lud"); }));
   for (const auto &pattern : bounded.includePrograms) {
     CAPTURE(pattern);
-    CHECK(full.includePrograms ^ exists([&](const auto &full_pattern) { return conformance::globMatches(full_pattern, pattern); }));
+    CHECK(full.includePrograms ^ exists([&](const auto &fullPattern) { return conformance::globMatches(fullPattern, pattern); }));
   }
   CHECK(full.excludePrograms.empty());
   CHECK(bounded.excludePrograms.empty());
 }
 
 TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") {
-  TemporaryDirectory directory;
+  const TemporaryDirectory directory;
   const auto artifact = directory.path / "artifact";
   const auto reports = directory.path / "reports";
   fs::create_directories(artifact);
@@ -470,7 +470,7 @@ TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") 
   Workload workload;
   workload.specs = {"*"};
   workload.includePrograms = {"hecbench_*"};
-  RunOptions options;
+  const RunOptions options;
   const auto tests = discoverCases(options, workload, artifact, {}, "cuda-sass/sm_89", reports);
   REQUIRE(tests.size() == 2);
   CHECK(tests[0].identity == "hecbench_demo");
@@ -488,6 +488,27 @@ TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") 
   const auto limited = executeCase(configuration, tests[1]);
   CHECK(limited.classification == "time limit");
   CHECK(limited.status != 0);
+}
+
+TEST_CASE("case inventories accept package test identifiers and reject malformed lines", "[driver]") {
+  const auto names = listedCaseNames("# collected by the package suite\n"
+                                     "cudadrv/test_driver.py::test_init\n"
+                                     "\n"
+                                     "cudapy/test_atomics.py::TestAtomics::test_add[1]\n",
+                                     "python_numba");
+  CHECK(names == std::vector<std::string>{"cudadrv/test_driver.py::test_init", "cudapy/test_atomics.py::TestAtomics::test_add[1]"});
+  CHECK(listedCaseNames("", "empty").empty());
+  CHECK_THROWS(listedCaseNames("same\nsame\n", "duplicate"));
+  CHECK_THROWS(listedCaseNames("tab\tinside\n", "tab"));
+  CHECK_THROWS(listedCaseNames(std::string_view{"nul\0inside\n", 11}, "nul"));
+}
+
+TEST_CASE("case classification markers carry known failure kinds only", "[driver]") {
+  CHECK(caseClassification("noise\nconformance-classification: missing entry point\n") == "missing entry point");
+  CHECK(caseClassification("conformance-classification: emulator defect\nconformance-classification: race\n") == "race");
+  CHECK(caseClassification("conformance-classification: missing code for the target\n") == "missing code for the target");
+  CHECK(caseClassification("nothing\n").empty());
+  CHECK_THROWS(caseClassification("conformance-classification: flaky\n"));
 }
 
 TEST_CASE("Google Test inventories retain parameterised cases and reject duplicates", "[driver]") {
@@ -554,6 +575,17 @@ TEST_CASE("native shards select exact names including Catch metacharacters", "[d
   }
   CHECK_THROWS(catchShardArguments({}, 1, 1));
   CHECK_THROWS(catchShardArguments({}, 0, 0));
+}
+
+TEST_CASE("workload case patterns load and append across tiers", "[driver]") {
+  WorkloadFields fields;
+  REQUIRE(!glz::read_toml(fields, std::string("include_cases = ['python_numba::*']\nadd_include_cases = ['julia/*']\n")));
+  if (fields.includeCases && fields.addIncludeCases) {
+    CHECK(*fields.includeCases == std::vector<std::string>{"python_numba::*"});
+    CHECK(*fields.addIncludeCases == std::vector<std::string>{"julia/*"});
+  } else {
+    FAIL("expected include_cases and add_include_cases to be present");
+  }
 }
 
 TEST_CASE("several workload specs select the union of their cases", "[driver]") {

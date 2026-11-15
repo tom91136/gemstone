@@ -60,6 +60,8 @@ struct Workload {
   std::vector<std::string> excludePrograms;
   // Case-identity globs dropped after discovery, in every program.
   std::vector<std::string> excludeCases;
+  // Case-identity globs kept after discovery. Empty keeps every discovered case.
+  std::vector<std::string> includeCases;
 };
 struct ArtifactMetadata {
   std::string backend, architecture, support, code;
@@ -81,7 +83,9 @@ struct WorkloadFields {
   std::string extends;
   std::optional<std::vector<std::string>> specs, includePrograms, levelzeroCases, vulkanCases, excludePrograms, excludeCases;
   // Appended to the inherited or replaced list of the same name.
-  std::optional<std::vector<std::string>> addIncludePrograms, addLevelzeroCases, addVulkanCases, addExcludePrograms, addExcludeCases;
+  std::optional<std::vector<std::string>> addIncludePrograms, addLevelzeroCases, addVulkanCases, addExcludePrograms, addExcludeCases,
+      addIncludeCases;
+  std::optional<std::vector<std::string>> includeCases;
   std::optional<std::string> vulkanMustpass;
 };
 struct ExecutionConfig {
@@ -112,7 +116,7 @@ struct CaseResult {
   // The full record and its one-line summary for failure and skip reports.
   std::string output, message;
   // HeCBench-only outcome derived from the run's output.
-  std::string classification = {};
+  std::string classification;
   std::chrono::duration<double> elapsed{};
 };
 struct DeqpResult {
@@ -146,6 +150,8 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
                                          const std::map<std::string, std::string> &environment, const std::string &id,
                                          const std::filesystem::path &reports);
 std::vector<std::string> catchCaseNames(std::string_view json, std::string_view program);
+std::vector<std::string> listedCaseNames(std::string_view listing, std::string_view program);
+std::string caseClassification(std::string_view output);
 std::string deqpExactCaseList(const std::vector<std::string> &names);
 std::vector<std::string> deqpMustpassCases(const std::filesystem::path &root, const std::filesystem::path &manifest,
                                            const std::vector<std::string> &patterns);
