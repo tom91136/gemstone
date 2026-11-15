@@ -459,7 +459,7 @@ object SmtBackend extends Backend {
       fromBits(
         s"(ite (fp.isNaN ${right.sexp}) ${quieted(right.bits, format)} " +
           s"(ite (fp.isNaN ${left.sexp}) ${quieted(left.bits, format)} " +
-          s"(ite (fp.isNaN ${core.sexp}) ${literal(defaultNaN(format), format.width)} ${core.bits})))",
+          s"(ite (fp.isNaN ${core.sexp}) ${literal(nvidiaNaN(format), format.width)} ${core.bits})))",
         format
       )
     }
@@ -476,7 +476,7 @@ object SmtBackend extends Backend {
       rounding <- roundingArgument(arguments, 3)
     } yield {
       val core    = operation(s"(fp.fma $rounding ${left.sexp} ${right.sexp} ${addend.sexp})", format)
-      val default = literal(defaultNaN(format), format.width)
+      val default = literal(nvidiaNaN(format), format.width)
       if (format.width == 64)
         fromBits(
           s"(ite (fp.isNaN ${right.sexp}) ${quieted(right.bits, format)} " +
@@ -497,7 +497,7 @@ object SmtBackend extends Backend {
       value  <- floatingArgument(arguments, 0)
     } yield fromBits(
       if (format.width == 64) value.bits
-      else s"(ite (fp.isNaN ${value.sexp}) ${literal(canonicalNaN(format), format.width)} ${value.bits})",
+      else s"(ite (fp.isNaN ${value.sexp}) ${literal(nvidiaNaN(format), format.width)} ${value.bits})",
       format
     )
 
@@ -541,7 +541,7 @@ object SmtBackend extends Backend {
       fromBits(
         s"(ite (fp.isNaN ${left.sexp}) ${quieted(left.bits, format)} " +
           s"(ite (fp.isNaN ${right.sexp}) ${quieted(negated, format)} " +
-          s"(ite (fp.isNaN ${core.sexp}) ${literal(defaultNaN(format), format.width)} ${core.bits})))",
+          s"(ite (fp.isNaN ${core.sexp}) ${literal(amdNaN(format), format.width)} ${core.bits})))",
         format
       )
     }
@@ -560,9 +560,9 @@ object SmtBackend extends Backend {
       fromBits(
         s"(ite (fp.isNaN ${left.sexp}) ${quieted(left.bits, format)} " +
           s"(ite (fp.isNaN ${right.sexp}) ${quieted(right.bits, format)} " +
-          s"(ite $invalid ${literal(defaultNaN(format), format.width)} " +
+          s"(ite $invalid ${literal(amdNaN(format), format.width)} " +
           s"(ite (fp.isNaN ${addend.sexp}) ${quieted(addend.bits, format)} " +
-          s"(ite (fp.isNaN ${core.sexp}) ${literal(defaultNaN(format), format.width)} ${core.bits})))))",
+          s"(ite (fp.isNaN ${core.sexp}) ${literal(amdNaN(format), format.width)} ${core.bits})))))",
         format
       )
     }
@@ -688,13 +688,16 @@ object SmtBackend extends Backend {
     case other                       => Left(s"$other is not an integer or a truth value")
   }
 
-  /** The negative quiet NaN an invalid operation gives, which the JVM on x86 and the AMDGPU both produce. */
-  private def defaultNaN(format: FpFormat): Long = format.signBit | format.infinity | format.quietBit
+  /** The negative quiet NaN an AMDGPU invalid operation gives at every width, as gfx1036 produces it. */
+  private def amdNaN(format: FpFormat): Long = format.signBit | format.infinity | format.quietBit
 
-  /** NVIDIA's canonical NaN for the format. */
-  private def canonicalNaN(format: FpFormat): Long = format.width match {
+  /** NVIDIA's NaN for the format: canonical at binary16 and binary32, and the negative quiet NaN at binary64 on an
+    * invalid operation, as sm_89 produces them.
+    */
+  private def nvidiaNaN(format: FpFormat): Long = format.width match {
     case 16 => 0x7fffL
-    case _  => 0x7fffffffL
+    case 32 => 0x7fffffffL
+    case _  => format.signBit | format.infinity | format.quietBit
   }
 
   private def assertion(differences: List[String]): String = differences match {

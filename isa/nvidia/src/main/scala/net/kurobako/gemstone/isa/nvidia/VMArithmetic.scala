@@ -66,15 +66,31 @@ private[isa] object VMArithmetic {
     else result
   }
 
-  def floatQuotient(left: Long, right: Long, width: Int in (16, 32, 64)): Long =
-    if (width == 32)
-      IEEE754.floatToBinary32(IEEE754.binary32ToFloat(low32(left)) / IEEE754.binary32ToFloat(low32(right))).toLong
-    else IEEE754.fromDouble(IEEE754.toDouble(left, width) / IEEE754.toDouble(right, width), width)
+  def floatQuotient(left: Long, right: Long, width: Int in (16, 32, 64)): Long = {
+    val result =
+      if (width == 32)
+        IEEE754.floatToBinary32(IEEE754.binary32ToFloat(low32(left)) / IEEE754.binary32ToFloat(low32(right))).toLong
+      else IEEE754.fromDouble(IEEE754.toDouble(left, width) / IEEE754.toDouble(right, width), width)
+    invalidDefault(result, width, IEEE754.isNaN(left, width) || IEEE754.isNaN(right, width))
+  }
+
+  /** The binary64 default NaN for a NaN `result` that no NaN operand explains, whatever NaN the host's arithmetic
+    * gives.
+    */
+  private def invalidDefault(result: Long, width: Int in (16, 32, 64), operandNaN: Boolean): Long =
+    if (width == 64 && IEEE754.isNaN(result, 64) && !operandNaN) DefaultNaN64 else result
 
   def floatUnaryBits(operation: FloatUnaryOperation, bits: Long, width: Int in (16, 32, 64)): Long = {
     val sign                                    = IEEE754.signBit(width)
     def rounded(result: Double => Double): Long =
-      canonical(IEEE754.fromDouble(result(IEEE754.toDouble(bits, width)), width), width)
+      canonical(
+        invalidDefault(
+          IEEE754.fromDouble(result(IEEE754.toDouble(bits, width)), width),
+          width,
+          IEEE754.isNaN(bits, width)
+        ),
+        width
+      )
     operation match {
       case FloatUnaryOperation.Negate               => truncate(bits ^ sign, width)
       case FloatUnaryOperation.Absolute             => truncate(bits & ~sign, width)

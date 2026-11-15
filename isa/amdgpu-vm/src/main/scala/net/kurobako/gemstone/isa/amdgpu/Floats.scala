@@ -359,7 +359,10 @@ private[isa] object Floats {
   /** Binary16 operations computed in binary64, which holds every binary16 result before its one rounding. */
   private inline def halved(value: Float16)(inline operation: Double => Double): Float16 =
     if (IEEE754.isNaN(bits(value), 16)) fromRaw[Float16](quieted(bits(value), 16))
-    else Float16(operation(value.toDouble))
+    else {
+      val result = operation(value.toDouble)
+      if (result.isNaN) fromRaw[Float16](defaultNaN(16)) else Float16(result)
+    }
 
   /** Binary16 operations the transcendental unit evaluates as binary32, rounding the binary32 result. */
   private inline def narrowed(value: Float16)(inline operation: Float32 => Float32): Float16 =
@@ -570,31 +573,34 @@ private[isa] object Floats {
     else if (IEEE754.isNaN(c, 32)) narrowed(quieted(c, 32))
     else value
 
+  private def invalid16(result: Long): Long = if (IEEE754.isNaN(result, 16)) defaultNaN(16) else result
+
   /** V_FMA_MIX into binary16: the binary32 operands' fused multiply-add, rounded once. */
   def fmaMixF16(a: Float32, b: Float32, c: Float32): Float16 = fromRaw[Float16](
     if (IEEE754.isNaN(a.bits.raw, 32)) narrowed(quieted(a.bits.raw, 32))
     else if (IEEE754.isNaN(b.bits.raw, 32)) narrowed(quieted(b.bits.raw, 32))
     else if (invalidProduct(a.bits.raw, b.bits.raw, 32)) narrowed(defaultNaN(32))
     else if (IEEE754.isNaN(c.bits.raw, 32)) narrowed(quieted(c.bits.raw, 32))
-    else IEEE754.fusedMultiplyAddExact(
-      left = a.toDouble,
-      right = b.toDouble,
-      addend = c.toDouble,
-      width = 16,
-      rounding = IEEE754.Rounding.NearestEven
-    )
+    else
+      invalid16(IEEE754.fusedMultiplyAddExact(
+        left = a.toDouble,
+        right = b.toDouble,
+        addend = c.toDouble,
+        width = 16,
+        rounding = IEEE754.Rounding.NearestEven
+      ))
   )
 
   /** V_MAD_MIX into binary16: a rounded binary32 product plus the addend, rounded once. */
   def madMixF16(product: Float32, addend: Float32): Float16 = fromRaw[Float16](
     mixed(product.bits.raw, addend.bits.raw, 0L)(
-      IEEE754.fusedMultiplyAddExact(
+      invalid16(IEEE754.fusedMultiplyAddExact(
         left = product.toDouble,
         right = 1.0,
         addend = addend.toDouble,
         width = 16,
         rounding = IEEE754.Rounding.NearestEven
-      )
+      ))
     )
   )
 

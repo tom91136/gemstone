@@ -202,12 +202,13 @@ class SmtBackendSuite extends Suite {
     assert(SmtBackend.equivalence(sum, sum, memory = false).isLeft)
   }
 
-  test("an invalid NVIDIA sum is the negative default NaN the host gives") {
+  test("an invalid NVIDIA binary32 sum is the canonical NaN of the hardware, not the host's") {
     val sum = definition(
       ab,
       Vec(("d", u32, bits(nvidia("add", asFloat(Term.Variable("a")), asFloat(Term.Variable("b"))))))
     )
-    assert(SmtBackend.show(sum).contains("(_ bv4290772992 32)"), SmtBackend.show(sum))
+    assert(SmtBackend.show(sum).contains("(_ bv2147483647 32)"), SmtBackend.show(sum))
+    assert(!SmtBackend.show(sum).contains("(_ bv4290772992 32)"), SmtBackend.show(sum))
   }
 
   test("a binary64 NVIDIA fused multiply-add takes a NaN from the factor, the addend, then the other factor") {
