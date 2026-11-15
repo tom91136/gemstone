@@ -1,6 +1,6 @@
 # Rewrite equivalence
 
-Status: steps 1 and 2 are done, and so are sequence proofs and the coverage report of step 3 for integer and bitwise sequences (`Proof.prove` in `semantics-check`). Floating point stays with the filter and the solver reports it undecided, so mode completeness is not yet checked.
+Status: all three steps are done. `Proof.prove` encodes integer, bitwise and floating-point sequences in the SMT backend, refuses an instruction whose modes the definition does not render, and reports each instruction it relied on with the differential coverage behind it. AMDGPU floating-point arithmetic is refused, because the renderer reads MODE's denormal fields but not its rounding field.
 
 ## Goal
 
@@ -42,9 +42,9 @@ As in `cost-model.md`. In addition, known-equivalent and known-different pairs (
 
 ## Limits
 
-- Floating-point sequences end as undecided at the solver, so the requirement that every mode is rendered holds only because nothing floating-point is proved. AMDGPU rounding modes are not rendered. Proving floating-point rewrites needs a check derived from each definition first.
+- AMDGPU floating-point arithmetic is refused, because its definitions read MODE's denormal fields but not its rounding field. Bitwuzla has no `fp.to_ieee_bv`, so a floating-point value's bits are tied to its term by an equality, and the payload of a NaN the rendered semantics leaves open is the solver's choice: that of binary16 and binary32 fused multiply-add with a NaN operand, whose result the host picks. An invalid operation gives the negative default NaN, as the JVM on x86 and the AMDGPU do. The differential filter types AMDGPU registers as integers, so it samples no float edge values; a pair that only differs on one needs more runs than the default 64.
 
 ## Open decisions
 
 - Solver: the project avoids new dependencies. Recommendation: print SMT-LIB text and run an external solver binary (Bitwuzla or Z3) found through the toolchain registry, with no JVM library dependency. The check is then unavailable where no solver is installed, and says so.
-- Floating point: whether to prove FP rewrites in the SMT float theory, or to limit proofs to integer and bitwise rewrites and leave FP to the differential filter. Recommendation: integer and bitwise first.
+- Floating point: proved in the SMT floating-point theory, with each definition's rounding mode, flush, saturation and NaN handling. Integer and bitwise rewrites came first.
