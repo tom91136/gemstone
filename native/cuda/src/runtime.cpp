@@ -47,6 +47,7 @@
 #include "gemstone_cuda_entry_points.hpp"
 #include "gemstone_device_presets.hpp"
 #include "gemstone_execution_rpc.hpp"
+#include "gemstone_target_limits.hpp"
 #include "gemstone_texture_layout.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/command_queue.hpp>
@@ -1646,9 +1647,37 @@ CUresult functionRegisterCount(const void *function, int *value) {
   return CUDA_SUCCESS;
 }
 
+gemstone::TargetLimits activeTargetLimits() {
+  if (const auto device = gemstone::environment::selectedDevicePreset()) {
+    if (const auto limits = gemstone::targetLimits(device->target)) return *limits;
+  }
+  const auto version = configuredPtxVersion().value_or(75);
+  if (const auto limits = gemstone::targetLimits("sm_" + std::to_string(version))) return *limits;
+  if (const auto limits = gemstone::targetLimits("sm_75")) return *limits;
+  return gemstone::TargetLimits{
+      .maxWarpsPerMultiprocessor = 32,
+      .maxBlocksPerMultiprocessor = 32,
+      .maxThreadsPerBlock = 1024,
+      .partitions = 4,
+      .partitionRegisters = 16384,
+      .registerGranule = 256,
+      .maxRegistersPerThread = 255,
+      .maxRegistersPerBlock = 65536,
+      .maxSharedMemoryPerMultiprocessor = 65536,
+      .maxSharedMemoryPerBlock = 49152,
+      .reservedSharedMemoryPerBlock = 0,
+      .sharedMemoryGranule = 256,
+  };
+}
+
+int activeMultiprocessorCount() { return deviceSpec().multiprocessors; }
+
 CUresult occupancyMaxBlocks(int *blocks, int blockSize) {
-  if (!blocks || blockSize <= 0 || blockSize > device_limits::MaxThreadsPerBlock) return CUDA_ERROR_INVALID_VALUE;
-  *blocks = std::max(1, device_limits::MaxThreadsPerBlock / blockSize);
+  if (!blocks || blockSize <= 0) return CUDA_ERROR_INVALID_VALUE;
+  const auto limits = activeTargetLimits();
+  if (blockSize > limits.maxThreadsPerBlock) return CUDA_ERROR_INVALID_VALUE;
+  const int warps = (blockSize + 31) / 32;
+  *blocks = std::max(1, std::min(limits.maxBlocksPerMultiprocessor, limits.maxWarpsPerMultiprocessor / warps));
   return CUDA_SUCCESS;
 }
 
@@ -2450,6 +2479,7 @@ bool poolOwns(CUdeviceptr pointer) {
 namespace {
 std::mutex streamContextMutex;
 std::map<CUstream, CUcontext> streamContexts;
+std::map<CUstream, int> streamPriorities;
 } // namespace
 
 extern "C" {
@@ -4191,24 +4221,158 @@ CUresult cuFuncSetCacheConfig(CUfunction function, CUfunc_cache) { return functi
 
 CUresult cuFuncSetSharedMemConfig(CUfunction function, CUsharedconfig) { return function ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
 
-// Library strategy selection queries occupancy; the independent-workgroup executor reports a conservative bound.
-CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, CUfunction, int blockSize, size_t) {
-  return occupancyMaxBlocks(blocks, blockSize);
+CUresult occupancyActiveBlocks(int *blocks, CUfunction function, int blockSize, size_t dynamicSMemSize) {
+  if (!blocks || blockSize <= 0) return CUDA_ERROR_INVALID_VALUE;
+  const auto limits = activeTargetLimits();
+  if (blockSize > limits.maxThreadsPerBlock) {
+    *blocks = 0;
+    return CUDA_SUCCESS;
+  }
+  int numRegs = 1;
+  int staticShared = 0;
+  if (function) {
+    if (const auto status = cuFuncGetAttribute(&numRegs, CU_FUNC_ATTRIBUTE_NUM_REGS, function); status != CUDA_SUCCESS) return status;
+    if (const auto status = cuFuncGetAttribute(&staticShared, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function); status != CUDA_SUCCESS)
+      return status;
+  }
+
+  const int64_t subgroupSize = 32;
+  const int64_t perWorkgroup = ((blockSize + subgroupSize) - 1) / subgroupSize;
+  const int64_t bySubgroups = limits.maxWarpsPerMultiprocessor / perWorkgroup;
+  const int64_t byWorkgroups = limits.maxBlocksPerMultiprocessor;
+
+  int64_t byRegisters = std::numeric_limits<int64_t>::max();
+  if (numRegs > 0) {
+    const int64_t perSubgroup =
+        ((((static_cast<int64_t>(numRegs) * subgroupSize) + limits.registerGranule) - 1) / limits.registerGranule) * limits.registerGranule;
+    const int64_t warpsAligned = (((perWorkgroup + limits.partitions) - 1) / limits.partitions) * limits.partitions;
+    const bool tooMany =
+        (perSubgroup * warpsAligned > limits.maxRegistersPerBlock) || (perSubgroup * perWorkgroup > limits.maxRegistersPerBlock);
+    if (numRegs > limits.maxRegistersPerThread || tooMany) {
+      byRegisters = 0;
+    } else if (perSubgroup == 0) {
+      byRegisters = std::numeric_limits<int64_t>::max();
+    } else {
+      byRegisters = (limits.partitionRegisters / perSubgroup) * limits.partitions / perWorkgroup;
+    }
+  }
+
+  const int64_t totalShared = static_cast<int64_t>(staticShared) + static_cast<int64_t>(dynamicSMemSize);
+  const int64_t reserved = limits.reservedSharedMemoryPerBlock;
+  const int64_t allocated =
+      ((((totalShared + reserved) + limits.sharedMemoryGranule) - 1) / limits.sharedMemoryGranule) * limits.sharedMemoryGranule;
+  int64_t byShared = std::numeric_limits<int64_t>::max();
+  if (allocated > limits.maxSharedMemoryPerBlock + reserved) {
+    byShared = 0;
+  } else if (allocated == 0) {
+    byShared = std::numeric_limits<int64_t>::max();
+  } else {
+    byShared = limits.maxSharedMemoryPerMultiprocessor / allocated;
+  }
+
+  const int64_t active = std::min({bySubgroups, byWorkgroups, byRegisters, byShared});
+  *blocks = static_cast<int>(std::max<int64_t>(0, active));
+  return CUDA_SUCCESS;
 }
 
-CUresult cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *blocks, CUfunction, int blockSize, size_t, unsigned) {
-  return occupancyMaxBlocks(blocks, blockSize);
+CUresult cuOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, CUfunction function, int blockSize, size_t dynamicSMemSize) {
+  if (!function || !blocks || blockSize <= 0) return CUDA_ERROR_INVALID_VALUE;
+  return occupancyActiveBlocks(blocks, function, blockSize, dynamicSMemSize);
+}
+
+CUresult cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *blocks, CUfunction function, int blockSize, size_t dynamicSMemSize,
+                                                              unsigned) {
+  if (!function || !blocks || blockSize <= 0) return CUDA_ERROR_INVALID_VALUE;
+  return occupancyActiveBlocks(blocks, function, blockSize, dynamicSMemSize);
 }
 
 CUresult cuOccupancyAvailableDynamicSMemPerBlock(size_t *bytes, CUfunction function, int blocks, int blockSize) {
-  if (!bytes || !function || blocks <= 0 || blocks > device_limits::MaxBlocksPerMultiprocessor) return CUDA_ERROR_INVALID_VALUE;
+  if (!bytes || !function || blocks <= 0) return CUDA_ERROR_INVALID_VALUE;
+  const auto limits = activeTargetLimits();
+  if (blocks > limits.maxBlocksPerMultiprocessor) return CUDA_ERROR_INVALID_VALUE;
   int maximumBlocks = 0;
-  if (occupancyMaxBlocks(&maximumBlocks, blockSize) != CUDA_SUCCESS || blocks > maximumBlocks) return CUDA_ERROR_INVALID_VALUE;
+  if (occupancyActiveBlocks(&maximumBlocks, function, blockSize, 0) != CUDA_SUCCESS || blocks > maximumBlocks)
+    return CUDA_ERROR_INVALID_VALUE;
   int staticBytes = 0;
   if (const auto status = cuFuncGetAttribute(&staticBytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function); status != CUDA_SUCCESS)
     return status;
-  const auto perBlock = std::min(device_limits::MaxSharedMemoryPerBlockOptin, device_limits::MaxSharedMemoryPerMultiprocessor / blocks);
+  const auto perBlock = limits.maxSharedMemoryPerMultiprocessor / blocks;
   *bytes = static_cast<size_t>(std::max(0, perBlock - staticBytes));
+  return CUDA_SUCCESS;
+}
+
+CUresult cuOccupancyMaxPotentialBlockSize(int *minGridSize, int *blockSize, CUfunction function,
+                                          CUoccupancyB2DSize blockSizeToDynamicSMemSize, size_t dynamicSMemSize, int blockSizeLimit) {
+  return cuOccupancyMaxPotentialBlockSizeWithFlags(minGridSize, blockSize, function, blockSizeToDynamicSMemSize, dynamicSMemSize,
+                                                   blockSizeLimit, 0);
+}
+
+CUresult cuOccupancyMaxPotentialBlockSizeWithFlags(int *minGridSize, int *blockSize, CUfunction function,
+                                                   CUoccupancyB2DSize blockSizeToDynamicSMemSize, size_t dynamicSMemSize,
+                                                   int blockSizeLimit, unsigned) {
+  if (!minGridSize || !blockSize || !function) return CUDA_ERROR_INVALID_VALUE;
+  const auto limits = activeTargetLimits();
+  const int limit = blockSizeLimit > 0 ? std::min(blockSizeLimit, limits.maxThreadsPerBlock) : limits.maxThreadsPerBlock;
+  const int limitAligned = ((limit + 31) / 32) * 32;
+  const int occupancyLimit = limits.maxWarpsPerMultiprocessor * 32;
+
+  int maxBlockSize = 0;
+  int numBlocks = 0;
+  int maxOccupancy = 0;
+
+  for (int blockSizeToTryAligned = limitAligned; blockSizeToTryAligned > 0; blockSizeToTryAligned -= 32) {
+    const int blockSizeToTry = std::min(limit, blockSizeToTryAligned);
+    const size_t dynamicSMem = blockSizeToDynamicSMemSize ? blockSizeToDynamicSMemSize(blockSizeToTry) : dynamicSMemSize;
+    int activeBlocks = 0;
+    if (occupancyActiveBlocks(&activeBlocks, function, blockSizeToTry, dynamicSMem) != CUDA_SUCCESS) return CUDA_ERROR_INVALID_VALUE;
+    const int occupancyInThreads = blockSizeToTry * activeBlocks;
+    if (occupancyInThreads > maxOccupancy) {
+      maxBlockSize = blockSizeToTry;
+      numBlocks = activeBlocks;
+      maxOccupancy = occupancyInThreads;
+    }
+    if (occupancyLimit == maxOccupancy) break;
+  }
+
+  if (maxBlockSize == 0) {
+    *minGridSize = 0;
+    *blockSize = 0;
+    return CUDA_ERROR_INVALID_VALUE;
+  }
+
+  *minGridSize = numBlocks * activeMultiprocessorCount();
+  *blockSize = maxBlockSize;
+  return CUDA_SUCCESS;
+}
+
+CUresult cuOccupancyMaxPotentialClusterSize(int *clusterSize, CUfunction function, const CUlaunchConfig *config) {
+  if (!clusterSize || !function || !config) return CUDA_ERROR_INVALID_VALUE;
+  const auto threads = static_cast<uint64_t>(config->blockDimX) * config->blockDimY * config->blockDimZ;
+  const auto limits = activeTargetLimits();
+  if (threads == 0 || std::cmp_greater(threads, limits.maxThreadsPerBlock)) return CUDA_ERROR_INVALID_VALUE;
+  int blocks = 0;
+  if (const auto status = occupancyActiveBlocks(&blocks, function, static_cast<int>(threads), config->sharedMemBytes);
+      status != CUDA_SUCCESS)
+    return status;
+  if (blocks <= 0) {
+    *clusterSize = 0;
+    return CUDA_SUCCESS;
+  }
+  std::array<uint32_t, 3> required{};
+  constexpr std::array attributes{CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT,
+                                  CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH};
+  for (size_t axis = 0; axis < required.size(); ++axis) {
+    int dimension = 0;
+    if (const auto status = cuFuncGetAttribute(&dimension, attributes[axis], function); status != CUDA_SUCCESS) return status;
+    required[axis] = static_cast<uint32_t>(dimension);
+  }
+  const bool hasRequired = required ^ exists([](auto size) { return size != 0; });
+  if (hasRequired) {
+    *clusterSize = static_cast<int>(required[0] * required[1] * required[2]);
+    return CUDA_SUCCESS;
+  }
+  const int maxPossible = std::min(8, blocks * activeMultiprocessorCount());
+  *clusterSize = std::max(1, maxPossible);
   return CUDA_SUCCESS;
 }
 
@@ -4218,7 +4382,8 @@ CUresult cuOccupancyMaxActiveClusters(int *clusters, CUfunction function, const 
       || config->blockDimZ > device_limits::MaxBlockDimZ)
     return CUDA_ERROR_INVALID_VALUE;
   const auto threads = static_cast<uint64_t>(config->blockDimX) * config->blockDimY * config->blockDimZ;
-  if (threads > device_limits::MaxThreadsPerBlock) return CUDA_ERROR_INVALID_VALUE;
+  const auto limits = activeTargetLimits();
+  if (std::cmp_greater(threads, limits.maxThreadsPerBlock)) return CUDA_ERROR_INVALID_VALUE;
   std::array<uint32_t, 3> required{};
   constexpr std::array attributes{CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT,
                                   CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH};
@@ -4247,15 +4412,10 @@ CUresult cuOccupancyMaxActiveClusters(int *clusters, CUfunction function, const 
   const uint64_t volume = static_cast<uint64_t>((*dimensions)[0]) * (*dimensions)[1] * (*dimensions)[2];
   if (volume > 16) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
   int blocks = 0;
-  (void)occupancyMaxBlocks(&blocks, static_cast<int>(threads));
-  blocks = std::min(blocks, device_limits::MaxBlocksPerMultiprocessor);
-  int staticBytes = 0;
-  if (const auto status = cuFuncGetAttribute(&staticBytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function); status != CUDA_SUCCESS)
+  if (const auto status = occupancyActiveBlocks(&blocks, function, static_cast<int>(threads), config->sharedMemBytes);
+      status != CUDA_SUCCESS)
     return status;
-  const auto shared = static_cast<uint64_t>(config->sharedMemBytes) + static_cast<uint32_t>(staticBytes);
-  if (shared > device_limits::MaxSharedMemoryPerBlockOptin) blocks = 0;
-  else if (shared != 0) blocks = std::min(blocks, static_cast<int>(device_limits::MaxSharedMemoryPerMultiprocessor / shared));
-  *clusters = static_cast<int>(static_cast<uint64_t>(blocks) * deviceSpec().multiprocessors / volume);
+  *clusters = static_cast<int>(static_cast<uint64_t>(blocks) * activeMultiprocessorCount() / volume);
   return CUDA_SUCCESS;
 }
 
@@ -4581,12 +4741,38 @@ CUresult cuStreamCreate(CUstream *stream, unsigned flags) {
   {
     std::scoped_lock const lock{streamContextMutex};
     streamContexts.emplace(created, activeContext());
+    streamPriorities.emplace(created, 0);
   }
   *stream = created;
   return CUDA_SUCCESS;
 }
 
-CUresult cuStreamCreateWithPriority(CUstream *stream, unsigned flags, int) { return cuStreamCreate(stream, flags); }
+CUresult cuStreamCreateWithPriority(CUstream *stream, unsigned flags, int priority) {
+  if (!stream) return CUDA_ERROR_INVALID_VALUE;
+  auto *const created = static_cast<CUstream>(commands().createStream((flags & CU_STREAM_NON_BLOCKING) != 0));
+  {
+    std::scoped_lock const lock{streamContextMutex};
+    streamContexts.emplace(created, activeContext());
+    streamPriorities.emplace(created, priority);
+  }
+  *stream = created;
+  return CUDA_SUCCESS;
+}
+
+CUresult cuStreamGetPriority(CUstream stream, int *priority) {
+  if (!priority) return CUDA_ERROR_INVALID_VALUE;
+  if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
+  if (!contextIsLive(activeContext())) return CUDA_ERROR_INVALID_CONTEXT;
+  if (stream == nullptr || stream == CU_STREAM_LEGACY || stream == CU_STREAM_PER_THREAD) {
+    *priority = 0;
+    return CUDA_SUCCESS;
+  }
+  std::scoped_lock const lock{streamContextMutex};
+  const auto found = streamPriorities.find(stream);
+  if (found == streamPriorities.end()) return CUDA_ERROR_INVALID_HANDLE;
+  *priority = found->second;
+  return CUDA_SUCCESS;
+}
 
 // Handles this queue did not create are drained like any stream but leave the registry untouched.
 CUresult cuStreamDestroy_v2(CUstream stream) {
@@ -4594,6 +4780,7 @@ CUresult cuStreamDestroy_v2(CUstream stream) {
   (void)commands().destroyStream(stream);
   std::scoped_lock const lock{streamContextMutex};
   streamContexts.erase(stream);
+  streamPriorities.erase(stream);
   return status;
 }
 
@@ -5192,8 +5379,70 @@ cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attributes, const void *fu
   return cudaSuccess;
 }
 
-cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *blocks, const void *, int blockSize, size_t, unsigned) {
-  return runtimeStatus(occupancyMaxBlocks(blocks, blockSize));
+cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, const void *function, int blockSize, size_t dynamicShared) {
+  if (!blocks || !function || blockSize <= 0) return cudaErrorInvalidValue;
+  CUfunction kernel = nullptr;
+  const auto status = registeredKernel(function, &kernel);
+  if (!status) return cudaErrorInvalidDeviceFunction;
+  if (*status != CUDA_SUCCESS) return runtimeStatus(*status);
+  return runtimeStatus(cuOccupancyMaxActiveBlocksPerMultiprocessor(blocks, kernel, blockSize, dynamicShared));
+}
+
+cudaError_t cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int *blocks, const void *function, int blockSize, size_t dynamicShared,
+                                                                   unsigned flags) {
+  if (!blocks || !function || blockSize <= 0) return cudaErrorInvalidValue;
+  CUfunction kernel = nullptr;
+  const auto status = registeredKernel(function, &kernel);
+  if (!status) return cudaErrorInvalidDeviceFunction;
+  if (*status != CUDA_SUCCESS) return runtimeStatus(*status);
+  return runtimeStatus(cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(blocks, kernel, blockSize, dynamicShared, flags));
+}
+
+cudaError_t cudaOccupancyAvailableDynamicSMemPerBlock(size_t *bytes, const void *function, int blocks, int blockSize) {
+  if (!bytes || !function || blocks <= 0 || blockSize <= 0) return cudaErrorInvalidValue;
+  CUfunction kernel = nullptr;
+  const auto status = registeredKernel(function, &kernel);
+  if (!status) return cudaErrorInvalidDeviceFunction;
+  if (*status != CUDA_SUCCESS) return runtimeStatus(*status);
+  return runtimeStatus(cuOccupancyAvailableDynamicSMemPerBlock(bytes, kernel, blocks, blockSize));
+}
+
+cudaError_t cudaOccupancyMaxActiveClusters(int *clusters, const void *function, const cudaLaunchConfig_t *config) {
+  if (!clusters || !function || !config) return cudaErrorInvalidValue;
+  CUfunction kernel = nullptr;
+  const auto status = registeredKernel(function, &kernel);
+  if (!status) return cudaErrorInvalidDeviceFunction;
+  if (*status != CUDA_SUCCESS) return runtimeStatus(*status);
+  const CUlaunchConfig driver{.gridDimX = config->gridDim.x,
+                              .gridDimY = config->gridDim.y,
+                              .gridDimZ = config->gridDim.z,
+                              .blockDimX = config->blockDim.x,
+                              .blockDimY = config->blockDim.y,
+                              .blockDimZ = config->blockDim.z,
+                              .sharedMemBytes = static_cast<unsigned>(config->dynamicSmemBytes),
+                              .hStream = config->stream,
+                              .attrs = reinterpret_cast<CUlaunchAttribute *>(config->attrs),
+                              .numAttrs = config->numAttrs};
+  return runtimeStatus(cuOccupancyMaxActiveClusters(clusters, kernel, &driver));
+}
+
+cudaError_t cudaOccupancyMaxPotentialClusterSize(int *clusterSize, const void *function, const cudaLaunchConfig_t *config) {
+  if (!clusterSize || !function || !config) return cudaErrorInvalidValue;
+  CUfunction kernel = nullptr;
+  const auto status = registeredKernel(function, &kernel);
+  if (!status) return cudaErrorInvalidDeviceFunction;
+  if (*status != CUDA_SUCCESS) return runtimeStatus(*status);
+  const CUlaunchConfig driver{.gridDimX = config->gridDim.x,
+                              .gridDimY = config->gridDim.y,
+                              .gridDimZ = config->gridDim.z,
+                              .blockDimX = config->blockDim.x,
+                              .blockDimY = config->blockDim.y,
+                              .blockDimZ = config->blockDim.z,
+                              .sharedMemBytes = static_cast<unsigned>(config->dynamicSmemBytes),
+                              .hStream = config->stream,
+                              .attrs = reinterpret_cast<CUlaunchAttribute *>(config->attrs),
+                              .numAttrs = config->numAttrs};
+  return runtimeStatus(cuOccupancyMaxPotentialClusterSize(clusterSize, kernel, &driver));
 }
 
 cudaError_t cudaMalloc(void **pointer, size_t size) {
@@ -5338,7 +5587,13 @@ cudaError_t cudaStreamCreateWithFlags(cudaStream_t *stream, unsigned flags) {
   return (flags & ~cudaStreamNonBlocking) == 0 ? runtimeStatus(cuStreamCreate(stream, flags)) : cudaErrorInvalidValue;
 }
 
-cudaError_t cudaStreamCreateWithPriority(cudaStream_t *stream, unsigned flags, int) { return cudaStreamCreateWithFlags(stream, flags); }
+cudaError_t cudaStreamCreateWithPriority(cudaStream_t *stream, unsigned flags, int priority) {
+  return (flags & ~cudaStreamNonBlocking) == 0 ? runtimeStatus(cuStreamCreateWithPriority(stream, flags, priority)) : cudaErrorInvalidValue;
+}
+
+cudaError_t cudaStreamGetPriority(cudaStream_t stream, int *priority) {
+  return runtimeStatus(cuStreamGetPriority(reinterpret_cast<CUstream>(stream), priority));
+}
 
 cudaError_t cudaStreamDestroy(cudaStream_t stream) { return runtimeStatus(cuStreamDestroy_v2(stream)); }
 

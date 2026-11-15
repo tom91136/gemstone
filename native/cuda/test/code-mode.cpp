@@ -931,3 +931,37 @@ TEST_CASE("CUDA runtime cooperative launches go through the registered host stub
   CHECK(cudaLaunchCooperativeKernel(&unregistered, dim3(1), dim3(1), arguments, 0, nullptr) == cudaErrorInvalidValue);
   __cudaUnregisterFatBinary(handle);
 }
+
+TEST_CASE("CUDA occupancy calculator suggests potential block sizes and queries stream priority", "[cuda][code-mode]") {
+  FailureSession session;
+  session.loadKernel(Ptx);
+  int minGridSize = 0;
+  int blockSize = 0;
+  REQUIRE(cuOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, session.function, nullptr, 0, 0) == CUDA_SUCCESS);
+  CHECK(blockSize > 0);
+  CHECK(minGridSize > 0);
+
+  int blockSizeWithFlags = 0;
+  int minGridSizeWithFlags = 0;
+  REQUIRE(cuOccupancyMaxPotentialBlockSizeWithFlags(&minGridSizeWithFlags, &blockSizeWithFlags, session.function, nullptr, 0, 0, 0)
+          == CUDA_SUCCESS);
+  CHECK(blockSizeWithFlags == blockSize);
+  CHECK(minGridSizeWithFlags == minGridSize);
+
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreateWithPriority(&stream, 0, -1) == CUDA_SUCCESS);
+  int priority = 0;
+  REQUIRE(cuStreamGetPriority(stream, &priority) == CUDA_SUCCESS);
+  CHECK(priority == -1);
+  int defaultPriority = -1;
+  REQUIRE(cuStreamGetPriority(nullptr, &defaultPriority) == CUDA_SUCCESS);
+  CHECK(defaultPriority == 0);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+
+  cudaStream_t runtimeStream = nullptr;
+  REQUIRE(cudaStreamCreateWithPriority(&runtimeStream, 0, -2) == cudaSuccess);
+  int runtimePriority = 0;
+  REQUIRE(cudaStreamGetPriority(runtimeStream, &runtimePriority) == cudaSuccess);
+  CHECK(runtimePriority == -2);
+  REQUIRE(cudaStreamDestroy(runtimeStream) == cudaSuccess);
+}

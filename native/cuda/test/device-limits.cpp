@@ -151,3 +151,22 @@ TEST_CASE("CUDA rejects a target that conflicts with the selected device preset"
   const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
   CHECK(cuInit(0) == CUDA_ERROR_NOT_INITIALIZED);
 }
+
+TEST_CASE("CUDA occupancy calculator scales grid size with selected device preset multiprocessors", "[cuda][limits]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce RTX 5080");
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_120");
+  auto *const context = createContext();
+  CUmodule module = nullptr;
+  const std::string ptx = ".version 9.3\n.target sm_120\n.address_size 64\n.visible .entry kern() { ret; }\n";
+  REQUIRE(cuModuleLoadData(&module, ptx.c_str()) == CUDA_SUCCESS);
+  CUfunction function = nullptr;
+  REQUIRE(cuModuleGetFunction(&function, module, "kern") == CUDA_SUCCESS);
+  int minGridSize = 0;
+  int blockSize = 0;
+  REQUIRE(cuOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, function, nullptr, 0, 0) == CUDA_SUCCESS);
+  CHECK(blockSize > 0);
+  CHECK(minGridSize > 0);
+  CHECK(minGridSize % 84 == 0);
+  REQUIRE(cuModuleUnload(module) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
