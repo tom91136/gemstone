@@ -496,10 +496,10 @@ TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") 
   fs::create_directories(artifact);
   fs::create_directories(reports);
   std::ofstream(artifact / "test-programs.txt") << "hecbench_demo\t2\thecbench\nhecbench_hang\t1\thecbench\nhecbench_args\t2\thecbench\n";
-  for (const auto &[name, body] :
-       std::vector<std::pair<std::string, std::string>>{{"hecbench_demo", "#!/bin/sh\necho PASS\n"},
-                                                        {"hecbench_hang", "#!/bin/sh\nsleep 5\n"},
-                                                        {"hecbench_args", "#!/bin/sh\necho \"args: $@\"\necho PASS\n"}}) {
+  for (const auto &[name, body] : std::vector<std::pair<std::string, std::string>>{
+           {"hecbench_demo", "#!/bin/sh\necho PASS\n"},
+           {"hecbench_hang", "#!/bin/sh\nsleep 5\n"},
+           {"hecbench_args", "#!/bin/sh\necho \"args: $@\"\necho \"pwd: $(pwd)\"\necho PASS\n"}}) {
     const auto path = artifact / name;
     std::ofstream(path) << body;
     fs::permissions(path, fs::perms::owner_exec | fs::perms::owner_read, fs::perm_options::add);
@@ -529,10 +529,15 @@ TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") 
 
   configuration.reportDirectory = (reports / "args").string();
   configuration.programArguments = {{"hecbench_args", {"--flag", "custom_val"}}};
+  const auto working = directory.path / "working";
+  fs::create_directories(working);
+  configuration.programDirectories = {{"hecbench_args", working.string()}};
   const auto withArgs = executeCase(configuration, tests[2]);
   CHECK(withArgs.status == 0);
   CHECK(withArgs.classification == "pass");
-  CHECK(read(reports / "args" / "hecbench_args" / "0" / "output.log").contains("args: --flag custom_val"));
+  const auto output = read(reports / "args" / "hecbench_args" / "0" / "output.log");
+  CHECK(output.contains("args: --flag custom_val"));
+  CHECK(output.contains("pwd: " + working.string()));
 }
 
 TEST_CASE("a program whose discovery fails is one failed case and the others still run", "[driver]") {
@@ -927,7 +932,8 @@ TEST_CASE("failed tests retain both streams in full and report only the output p
                                .deviceLock = false,
                                .jitPrograms = {},
                                .jitFailures = {},
-                               .programArguments = {}};
+                               .programArguments = {},
+                               .programDirectories = {}};
   const auto result =
       executeCase(config, {.identity = "noisy failure", .program = Fixture.stem().string(), .timeoutSeconds = 10, .index = 0, .count = 1});
   INFO(result.output);
@@ -956,7 +962,8 @@ TEST_CASE("execution preserves skips environment and distinct report paths", "[d
                          .deviceLock = false,
                          .jitPrograms = {},
                          .jitFailures = {},
-                         .programArguments = {}};
+                         .programArguments = {},
+                         .programDirectories = {}};
   config.environment["EXPECTED_ENVIRONMENT"] = "value with spaces";
   config.environment["PROPAGATED_ENVIRONMENT"] = "value with spaces";
   config.environment[conformance::environment::TargetArch] = "";
@@ -1291,7 +1298,8 @@ TEST_CASE("dEQP statuses go to the case log and failure record instead of the co
                                .deviceLock = false,
                                .jitPrograms = {},
                                .jitFailures = {},
-                               .programArguments = {}};
+                               .programArguments = {},
+                               .programDirectories = {}};
   std::ostringstream const console;
   auto *const standard = std::cout.rdbuf(console.rdbuf());
   const auto passed =

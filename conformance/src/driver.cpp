@@ -756,6 +756,17 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
         programArgs.try_emplace(name, std::move(args));
     }
   }
+  std::map<std::string, std::string> programDirectories;
+  const auto directoriesFile = candidateSupport / "data/hecbench/hecbench-directories.json";
+  if (fs::is_regular_file(directoriesFile)) {
+    std::map<std::string, std::string> directories;
+    std::string buffer;
+    if (!glz::read_file_json(directories, directoriesFile.string(), buffer))
+      for (auto &[name, relative] : directories) {
+        const auto directory = candidateSupport / relative;
+        if (fs::is_directory(directory)) programDirectories[name] = directory.string();
+      }
+  }
   ExecutionConfig exec{.directory = artifact.string(),
                        .reportDirectory = reports.string(),
                        .device = {},
@@ -766,7 +777,8 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
                        .deviceLock = !configuration.direct && !configuration.isolatedLauncher,
                        .jitPrograms = {},
                        .jitFailures = {},
-                       .programArguments = std::move(programArgs)};
+                       .programArguments = std::move(programArgs),
+                       .programDirectories = std::move(programDirectories)};
   applyDeviceProbe(exec, probeDevice(configuration, artifact, environment, target.id));
   // Re-probe with the exact child environment: selection must survive visibility remapping.
   const auto verified = probeDevice(configuration, artifact, exec.environment, target.id);
@@ -863,11 +875,13 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   }
   environment[environment::TestName] = test.identity;
   environment[environment::ReportDir] = report.string();
+  const auto hecbenchDirectory = config.programDirectories ^ get_maybe(test.program);
+  const auto workingDirectory = hecbenchDirectory ? fs::path(*hecbenchDirectory) : (gtest ? fs::path(config.directory) : report);
   const auto outputPath = report / "output.log";
   std::ofstream output(outputPath, std::ios::binary);
   output.exceptions(std::ios::failbit | std::ios::badbit);
   // Save both streams as they arrive, including output preceding a timeout or crash.
-  const auto process = runProcess(launched(config.launcher, std::move(arguments)), gtest ? fs::path(config.directory) : report, environment,
+  const auto process = runProcess(launched(config.launcher, std::move(arguments)), workingDirectory, environment,
                                   std::chrono::seconds(test.timeoutSeconds), "[" + test.identity + "] ", false, &output);
   auto status = process.status;
   std::string record;

@@ -100,6 +100,8 @@ struct ExecutionConfig {
   // Programs whose warm-up failed, with the reason; their cases fail without running.
   std::map<std::string, std::string> jitFailures;
   std::map<std::string, std::vector<std::string>> programArguments;
+  // Working directory for a program whose relative data paths need the source layout.
+  std::map<std::string, std::string> programDirectories;
 };
 struct DiscoveryFailure {
   std::string message, classification;
