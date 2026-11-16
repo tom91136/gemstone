@@ -1,12 +1,13 @@
 # Ecosystem conformance
 
-Status: in progress. Step 1 is done. Step 2 (Numba) has run on the emulated `cuda-ptx` routes: 238 of 245 cases pass on each route, and the seven failures are classified below. Step 3 (Julia) has partial results: the CUDA.jl cases in the bounded workload run and fail on the emulated `cuda-ptx` routes, the `hip/gfx1030` route runs no case, and the `levelzero` route reports all four of its cases failed. Steps 4 to 7 have not started. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, which are done (its steps 3 to 7 are not marked done). Step 7 depends on `machine-identity.md`, whose steps 1 to 5 are marked done.
+Status: in progress. Step 1 is done. Step 2 (Numba) has run on the emulated `cuda-ptx` routes: 238 of 245 cases pass on each route, and the seven failures are classified below. Step 3 (Julia) has partial results: the CUDA.jl cases in the bounded workload run and fail on the emulated `cuda-ptx` routes, the `hip/gfx1030` route runs no case, and the `levelzero` route, on its rerun (Run D), passes one of its four cases on retry and fails three. Steps 4 to 7 have not started. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, which are done (its steps 3 to 7 are not marked done). Step 7 depends on `machine-identity.md`, whose steps 1 to 5 are marked done.
 
-Each result below names the route or real device it ran on and cites its log. The logs under `/var/tmp/gs/t47/` and `/var/tmp/gs/t24-ecosystem/` are outside the repository. Runs A, B, and C are directories under the worktree's `target/conformance/emulated/direct/`. Log paths in this plan that begin with a route name, such as `cuda-ptx-sm_89/`, are relative to the run directory:
+Each result below names the route or real device it ran on and cites its log. The logs under `/var/tmp/gs/t47/` and `/var/tmp/gs/t24-ecosystem/` are outside the repository. Runs A to D are directories under the worktree's `target/conformance/emulated/direct/`. Log paths in this plan that begin with a route name, such as `cuda-ptx-sm_89/`, are relative to the run directory:
 
 - Run A: `run-1794816923696879407-0`, the `interpreters-bounded` workload on `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang`, before the include list was corrected. Per route, `junit.xml` lists 241 testcases: 232 pass and 9 fail (Numba 238 cases: 232 pass, 6 fail; Julia 3 cases: all fail).
-- Run B: `run-1794818705200584085-0`, the same workload on the `levelzero` route. `junit.xml` lists 4 testcases, all failed. Log: `/var/tmp/gs/t47/emulate-levelzero.log`.
+- Run B: `run-1794818705200584085-0`, the same workload on the `levelzero` route. `junit.xml` lists 4 testcases, all failed. Log: `/var/tmp/gs/t47/emulate-levelzero.log`. Superseded by Run D, below.
 - Run C: `run-1794828293754483810-0`, the same workload on `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang` with the corrected include list (`conformance/workloads/interpreters-bounded.toml`, commit `95d826fa`). `junit.xml` lists 500 testcases, 250 per route: 476 pass and 24 fail, 12 per route. Log: `/var/tmp/gs/t47/emulate-cuda-ptx-sm89-bounded-2.log`.
+- Run D: `run-1794830667312584475-0`, the same workload on the `levelzero` route, after the `oneAPI.jls` failure history was moved aside. `junit.xml` lists 4 testcases: 3 failed and 1 passed on retry. Log: `/var/tmp/gs/t47/emulate-levelzero-3.log`.
 
 ## Goal
 
@@ -15,7 +16,7 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 ## Current state
 
 - Conformance builds C, C++, CUDA, HIP, SYCL, and OpenMP programs in containers, runs them under gemstone, and groups them into workloads such as `short`, `miniapps`, and the bounded vendor conformance test suites.
-- The `interpreters-bounded` workload runs Numba and Julia cases on the emulated `cuda-ptx` and `levelzero` routes (Runs A, B, and C). No `cuda-sass` case has run. No interpreter case has run on the `hip` route, which stops at discovery (Step 3).
+- The `interpreters-bounded` workload runs Numba and Julia cases on the emulated `cuda-ptx` and `levelzero` routes (Runs A to D). No `cuda-sass` case has run. No interpreter case has run on the `hip` route, which stops at discovery (Step 3).
 
 ## Packages
 
@@ -91,13 +92,13 @@ CUPTI, the cause of the `core` failures. The link is inferred, not confirmed by 
 
 #### oneAPI.jl
 
-Run B, emulated `levelzero` route:
+Runs B and D, emulated `levelzero` route:
 
-- `level-zero` testset (`levelzero/julia_tests_oneapi/2/output.log`): 50 pass, 1 error, of 51. The error is `ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE` at `level-zero.jl:377`. Real Intel Arc A750: 50 of 50 pass (`/var/tmp/gs/t24-ecosystem/oneapi-case-level-zero-real.log`).
-- `array` testset (`levelzero/julia_tests_oneapi/0/output.log`): 53 pass, 36 error, of 89. All 36 errors are `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE`. The source of that status is not established. Real Arc A750: 244 of 244 pass (`/var/tmp/gs/t24-ecosystem/oneapi-case-array-real.log`). An earlier t24 run logged `composite insertion requires scalar data` (`oneapi-case-array-trace.log`); the current run does not.
-- `execution` testset (`levelzero/julia_tests_oneapi/1/output.log`): 35 pass, 1 fail, 32 error, 1 broken, of 69. All 32 errors are `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE`. The failure at `execution.jl:237` (`"" == "2"`) is not analysed.
-- All four Run B cases are reported failed (`/var/tmp/gs/t47/emulate-levelzero.log`, lines 361-365).
-- `oneAPIStream.jl` fails at load with `UndefVarError: @LocalMemory not defined in Main` (`levelzero/julia_babelstream_oneapi/0/output.log`). The same error appears without gemstone (`/var/tmp/gs/t24-ecosystem/oneapi-stream-native.log`, line 3), so the emulator does not cause it. A grep of the depot's packages (`target/conformance/interpreters/julia-oneapi-9151e77dcb2fe024/packages/`) finds no `macro LocalMemory` and no `@LocalMemory`, so this is a test-artefact mismatch, not an emulator defect.
+- `level-zero` testset (`levelzero/julia_tests_oneapi/2/output.log`): Run B had 50 pass, 1 error, of 51. The error is `ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE` at `level-zero.jl:377`. It did not recur in Run D. There, attempt 1 failed at 8.08 s (line 34) and attempt 2 passed 50 of 50 in 33.7 s (lines 36-40). The first-attempt cause is not captured, so the case is classified flaky and passed on retry. Real Intel Arc A750: 50 of 50 pass (`/var/tmp/gs/t24-ecosystem/oneapi-case-level-zero-real.log`).
+- `array` testset (`levelzero/julia_tests_oneapi/0/output.log`): 53 pass, 36 error, of 89, in Run B and again in Run D. All 36 errors are `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE`. The source of that status is not established. Real Arc A750: 244 of 244 pass (`/var/tmp/gs/t24-ecosystem/oneapi-case-array-real.log`). An earlier t24 run logged `composite insertion requires scalar data` (`oneapi-case-array-trace.log`); the current run does not.
+- `execution` testset (`levelzero/julia_tests_oneapi/1/output.log`): 35 pass, 1 fail, 32 error, 1 broken, of 69. All 32 errors are `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE`. The failure at `execution.jl:237` (`"" == "2"`, from `oneAPI.@print`) is inferred to be device printf output not forwarded. No trace confirms it.
+- Run B reported all four cases failed (`/var/tmp/gs/t47/emulate-levelzero.log`, lines 361-365). Run D supersedes it: 1 passed and 3 failed (`/var/tmp/gs/t47/emulate-levelzero-3.log`, lines 50-53). The failure-marker drop that made the intermediate run select one case is recorded in the report.
+- `oneAPIStream.jl` fails at load with `UndefVarError: @LocalMemory not defined in Main` (`levelzero/julia_babelstream_oneapi/0/output.log`). The same error appears without gemstone (`/var/tmp/gs/t24-ecosystem/oneapi-stream-native.log`, line 3), so the emulator does not cause it. A grep of the depot's packages (`target/conformance/interpreters/julia-oneapi-9151e77dcb2fe024/packages/`) finds no `macro LocalMemory` and no `@LocalMemory`, so this is a test-artefact mismatch, not an emulator defect. Its junit label reads `emulator defect`, the default `classify` returns when no keyword matches (`conformance/interpreters/julia/package_tests.jl:5-12`). That label is wrong for this case.
 - The C++ SYCL BabelStream passes on the emulated `Gemstone Virtual SPIR-V GPU`, at its default double precision (`/var/tmp/gs/t24-ecosystem/levelzero-babelstream-cpp.log`, earlier t24 run; route not recorded in the log). Its `--float` option is rejected (`levelzero-babelstream-cpp-float.log`).
 
 #### KernelAbstractionsStream.jl
@@ -142,7 +143,7 @@ From `/var/tmp/gs/t47/footprint-all.log`, measured with `du`:
 - Driver version checks: packages may compare the driver version gemstone reports with the toolkit they ship, and refuse to run below it. The Numba inventory reports driver API 13030 (Run A `cuda-ptx-sm_89/python_numba/0/output.log`, line 1).
 - Targets: a wheel carries SASS for a fixed set of architectures plus PTX for the newest, so the target must be one it covers.
 - Licences: whether vendor wheels may sit in the conformance cache and package, or must be fetched at build time only.
-- Device discovery: the `hip/gfx1030` route stops at discovery before any case runs. AMDGPU.jl's Enzyme setup fails under `--list`, and `cases()` does not parse its box-format output (Step 3). The `levelzero` route reports all four cases failed, with `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE` as the dominant error, and its source is not established (Step 3).
+- Device discovery: the `hip/gfx1030` route stops at discovery before any case runs. AMDGPU.jl's Enzyme setup fails under `--list`, and `cases()` does not parse its box-format output (Step 3). The `levelzero` route, on its rerun (Run D), passes one of four cases on retry and fails three. Two of the three are `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE` (`array`, `execution`), and the source of that status is not established. The third is a babelstream test-artefact mismatch (Step 3). A failed case also drops out of the next discovery, because `cases()` ignores the failure-marker bullets.
 
 ## Non-goals
 
