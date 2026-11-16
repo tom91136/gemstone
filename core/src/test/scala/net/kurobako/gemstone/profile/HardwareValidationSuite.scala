@@ -39,7 +39,15 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   * disassembled to hold only the listed instructions. The body is 16 independent `v_fma_f32`, 4 `v_fma_f64` or 8
   * `v_rcp_f32`. The loop control follows the body (`tail`), precedes it (`head`, `head1` with one control op), sits
   * inside it (`mid`), gains independent `s_add` after the body (`add2`, `add4`, `add8`) or has the body unrolled twice.
-  * `head1` and `tail1` count with a single `s_sub_u32`.
+  * `head1` and `tail1` count with a single `s_sub_u32`. The `ctl_f4_*` and `ctl_dfma{1,2,6}_tail` rows are further
+  * loops of the same probe with 4 `v_fma_f32` and 1, 2 and 6 `v_fma_f64`.
+  *
+  * The `layout_*` rows come from the 2026-11-15 layout probe on the same card and toolchain at host load average 17 to
+  * 21: 385 inline asm loops of 4, 8 or 16 `v_fma_f32`, 4 `v_fma_f64` or 8 `v_rcp_f32` with the loop control after the
+  * body (`tail`), ahead of it (`head`) or interleaved as the compiler places it (`comp`), each at loop-top offsets of 0
+  * to 124 bytes in 4-byte steps (`a<offset>`), timed as the `ctl_*` rows in two passes of opposite order that agree to
+  * 0.33 cycles. The table is in `/var/tmp/gs/t15-round2/layout.tsv` with `p1.tsv` and `p2.tsv`; the committed rows are
+  * its calibration and hold-out points.
   *
   * The expected binding is the partition-local resource, the issue slots or a non-shared pipe, when the placement
   * leaves one wave set on a partition, or one wave on each active partition, and the case saturates it. A spread
@@ -138,17 +146,17 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_mufu_1", 1, 28.01, Some(Binding.Path)),
     Measured("stream_mufu_4", 1, 36.01, Some(Binding.Arithmetic(Pipe.Mufu))),
     Measured("stream_mufu_16", 1, 137.01, Some(Binding.Arithmetic(Pipe.Mufu))),
-    Measured("stream_mufu_16", 2, 128.43, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same2)),
-    Measured("stream_mufu_16", 4, 128.04, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same4)),
-    Measured("stream_mufu_16", 8, 128.01, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same8)),
+    Measured("stream_mufu_16_wide", 2, 128.43, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same2)),
+    Measured("stream_mufu_16_wide", 4, 128.04, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same4)),
+    Measured("stream_mufu_16_wide", 8, 128.01, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same8)),
     Measured("stream_dfma_reg_2", 1, 81.01, Some(Binding.Path)),
     Measured("stream_dfma_reg_4", 1, 113.01, Some(Binding.Path)),
     Measured("loop_control", 1, 27.01, Some(Binding.Path)),
     Measured("chain_ffma_8", 1, 39.01, Some(Binding.Path)),
     Measured("chain_ffma_8", 4, 11.88, Some(Binding.Issue), Some(same4)),
     Measured("chain_ffma_8", 8, 11.08, Some(Binding.Issue), Some(same8)),
-    Measured("stream_ffma_8", 4, 12.91, Some(Binding.Path), Some(same4)),
-    Measured("stream_ffma_8", 8, 11.54, Some(Binding.Issue), Some(same8))
+    Measured("stream_ffma_8_wide", 4, 12.91, Some(Binding.Path), Some(same4)),
+    Measured("stream_ffma_8_wide", 8, 11.54, Some(Binding.Issue), Some(same8))
   )
 
   private val gfx1036Cases = Vec(
@@ -202,8 +210,8 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_mufu_16_wide", 8, 17.84, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd2)),
     Measured("stream_mufu_16_wide", 16, 16.97, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd4)),
     Measured("stream_mufu_16_wide", 32, 16.45, Some(Binding.Arithmetic(Pipe.Mufu)), Some(eachSimd8)),
-    Measured("stream_ffma_8", 4, 10.86, Some(Binding.Issue), Some(sameSimd4)),
-    Measured("stream_ffma_8", 8, 10.40, Some(Binding.Issue), Some(sameSimd8)),
+    Measured("stream_ffma_8_wide", 4, 10.86, Some(Binding.Issue), Some(sameSimd4)),
+    Measured("stream_ffma_8_wide", 8, 10.40, Some(Binding.Issue), Some(sameSimd8)),
     Measured("ctl_f16_tail", 1, 52.00, Some(Binding.Path), Some(oneSimd)),
     Measured("ctl_f16_head", 1, 40.01, Some(Binding.Path), Some(oneSimd)),
     Measured("ctl_f16_head1", 1, 39.99, Some(Binding.Path), Some(oneSimd)),
@@ -217,7 +225,19 @@ class HardwareValidationSuite extends Suite {
     Measured("ctl_dfma4_tail_add4", 1, 71.01, None, Some(oneSimd)),
     Measured("ctl_dfma4_unroll2", 1, 138.00, None, Some(oneSimd)),
     Measured("ctl_mufu8_tail", 1, 50.00, None, Some(oneSimd)),
-    Measured("ctl_mufu8_head", 1, 41.00, None, Some(oneSimd))
+    Measured("ctl_mufu8_head", 1, 41.00, None, Some(oneSimd)),
+    Measured("ctl_f4_tail", 1, 29.01, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_f4_head", 1, 21.01, Some(Binding.Path), Some(oneSimd)),
+    Measured("ctl_dfma1_tail", 1, 22.01, None, Some(oneSimd)),
+    Measured("ctl_dfma2_tail", 1, 37.01, None, Some(oneSimd)),
+    Measured("ctl_dfma6_tail", 1, 97.01, None, Some(oneSimd)),
+    Measured("layout_f4_tail_a24", 1, 41.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_f4_head_a24", 1, 36.99, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_f8_head_a0", 1, 39.98, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_f8_head_a48", 1, 35.00, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_f16_comp_a0", 1, 44.01, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_d4_head_a32", 1, 70.00, None, Some(oneSimd)),
+    Measured("layout_m8_head_a28", 1, 54.99, None, Some(oneSimd))
   )
 
   private class State(
@@ -238,9 +258,11 @@ class HardwareValidationSuite extends Suite {
   private def at(address: Long): Fault.Location =
     Fault.Location("k", Some("f"), Some(address.unsafe), Some(Coordinates(1, 2, 3)), Some(0.unsafe))
 
+  private def branchBytes(architecture: Architecture): Long = if architecture == Architecture.sm89 then 16L else 4L
+
   private def loads(row: Row): Boolean = row.text.startsWith("LDG") || row.text.startsWith("global_load")
 
-  private def record(rows: Vec[Row], warps: Int, shared: Long): ProfileStream = {
+  private def record(rows: Vec[Row], warps: Int, shared: Long, branchBytes: Long): ProfileStream = {
     val recorder = ProfileRecorder()
     val last     = rows.size + 1
     val graph    = ControlFlowGraph(
@@ -252,7 +274,12 @@ class HardwareValidationSuite extends Suite {
     val entry   = Row("entry", None, Vec.empty, Vec.empty, Schedule.Estimated(1.unsafe[Int >= 0]))
     val exit    = Row("exit", None, Vec.empty, Vec.empty, Schedule.Estimated(1.unsafe[Int >= 0]))
     val all     = entry +: rows :+ exit
-    val offsets = Vec.tabulate(all.size)(i => 0x10L * (i + 1))
+    val offsets = rows.head.address match {
+      case Some(top) =>
+        val body = rows.map(row => row.address.getOrElse(fail(s"no address for ${row.text}")))
+        (top - branchBytes) +: body :+ (body.last + branchBytes)
+      case None => Vec.tabulate(all.size)(i => 0x10L * (i + 1))
+    }
     recorder.launched(KernelResources((32 * warps).unsafe, 32, None, shared.unsafe))
     recorder.controlFlow("k", graph, offsets)
     val order = Vec(0) ++ Vec.fill(iterations)(Vec.tabulate(rows.size)(_ + 1)).flatten :+ last
@@ -278,7 +305,7 @@ class HardwareValidationSuite extends Suite {
       shared: Long,
       placement: Option[PipelineSimulator.Placement]
   ): PipelineSimulator.Block =
-    BlockAnalysis.of(record(rows, warps, shared), architecture, placement).fold(
+    BlockAnalysis.of(record(rows, warps, shared, branchBytes(architecture)), architecture, placement).fold(
       fail(_),
       _.regions.find(_.kind == BlockAnalysis.Kind.Loop).map(_.status) match {
         case Some(BlockAnalysis.Status.Executed(timing)) => timing.block
