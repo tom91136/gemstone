@@ -65,6 +65,21 @@ object GenerateDevicePresets {
          |  return buffer;
          |}
          |
+         |constexpr uint32_t graphicsVersion(std::string_view target) noexcept {
+         |  uint32_t version = 0;
+         |  bool started = false;
+         |  for (const char character : target) {
+         |    if (!started) {
+         |      if (character < '0' || character > '9') continue;
+         |      started = true;
+         |    }
+         |    if (character >= '0' && character <= '9') version = (version << 4U) | static_cast<uint32_t>(character - '0');
+         |    else if (character >= 'a' && character <= 'f') version = (version << 4U) | static_cast<uint32_t>(character - 'a' + 10);
+         |    else break;
+         |  }
+         |  return version;
+         |}
+         |
          |inline constexpr DevicePreset devicePresets[] = {
          |${rows.mkString("\n")}
          |};

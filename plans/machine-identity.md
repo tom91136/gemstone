@@ -1,6 +1,6 @@
 # Machine identity
 
-Status: steps 1, 2, and 3 are done. Device presets hold multiprocessor count, boost clock, bus width, and L2 size per card, and CUDA, HIP, HSA, OpenCL, Level Zero, Vulkan, and NVML report the selected preset's identity and capacity and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`. Launch residency scales with the reported multiprocessor count (`multiprocessors * 32`). Discovery tool cases verify rocminfo, clinfo, sycl-ls, and vulkaninfo against preset values. NVML provides `libnvidia-ml.so.1` with device identity, memory, PCI info, clocks, and empty process lists, verified against CUDA and by `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop`. Steps 4 and 5 are not started. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
+Status: steps 1, 2, 3, and 4 are done. Device presets hold multiprocessor count, boost clock, bus width, and L2 size per card, and CUDA, HIP, HSA, OpenCL, Level Zero, Vulkan, NVML, ROCm SMI, and AMD SMI report the selected preset's identity and capacity and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`. Launch residency scales with the reported multiprocessor count (`multiprocessors * 32`). Discovery tool cases verify rocminfo, clinfo, sycl-ls, and vulkaninfo against preset values. NVML provides `libnvidia-ml.so.1` with device identity, memory, PCI info, clocks, and empty process lists, verified against CUDA and by `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop`. ROCm SMI and AMD SMI provide `librocm_smi64.so.1` and `libamd_smi.so` with the same identity and capacity and empty process lists, verified against CUDA and by `rocm-smi` and `amd-smi`. Device control returns not-supported. Step 5 is not started. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
 
 ## Goal
 
@@ -11,10 +11,10 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 ## Current state
 
 - Presets hold a name, a target, multiprocessor count, boost clock, memory data rate, bus width, L2 size, and total memory for six cards. `GEMSTONE_DEVICE` or `gemstone run --device` selects one, and an unknown name is an error.
-- CUDA, HIP, HSA, OpenCL, Level Zero, and Vulkan report the preset's name, memory, and capacity, and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`.
+- CUDA, HIP, HSA, OpenCL, Level Zero, Vulkan, NVML, ROCm SMI, and AMD SMI report the preset's name, memory, and capacity, and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`.
 - Launch residency scales with the reported multiprocessor count.
-- There is no NVML, ROCm SMI, or AMD SMI library. Level Zero has generated Sysman (`zes`) declarations and no implementation.
-- `rocminfo`, `clinfo`, `sycl-ls`, and `vulkaninfo` are not conformance cases, except for a Vulkan information workload.
+- NVML, ROCm SMI, and AMD SMI are implemented. Level Zero has generated Sysman (`zes`) declarations and no implementation.
+- `rocminfo`, `clinfo`, `sycl-ls`, `vulkaninfo`, `nvidia-smi`, `nvtop`, `rocm-smi`, and `amd-smi` are conformance cases.
 
 ## Design
 
@@ -52,9 +52,13 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 - Conformance cases for `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop` against preset values.
 - Cross-runtime check in `gemstone_preset_identity_test` verifying NVML and CUDA report identical name, UUID, bus address, and memory across all presets.
 
-### 4. ROCm SMI and AMD SMI
+### 4. ROCm SMI and AMD SMI (done)
 
-- The same for `librocm_smi64.so` and `libamd_smi.so`, with `rocm-smi` and `amd-smi` from the pinned ROCm release.
+- Generated declarations from the pinned ROCm headers in `gemstone_rocm_smi_api.h` and `gemstone_amd_smi_api.h` and implemented `librocm_smi64.so.1` and `libamd_smi.so`.
+- Implemented device enumeration, name and market name, UUID (as the 64-bit unique ID for ROCm SMI), PCI bus ID, VRAM total and usage, clocks, and empty process lists.
+- Conformance cases for `rocm-smi` and `amd-smi` against preset values.
+- Cross-runtime checks in `gemstone_preset_identity_test` verifying the libraries and CUDA report identical identity and capacity for every preset.
+- Clock, power, fan, and reset calls return not-supported.
 
 ### 5. Level Zero Sysman
 
@@ -69,9 +73,9 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 ## Risks to confirm
 
 - Whether `nvidia-smi` uses only NVML or also opens `/dev/nvidiactl` or reads `/proc/driver/nvidia`. Confirmed by strace: `nvidia-smi` runs purely against `libnvidia-ml.so.1` without opening `/dev/nvidiactl` or `/proc/driver/nvidia`. It queries internal export table symbol `nvmlInternalGetExportTable` and MIG device count; returning success allows the tool to run unmodified.
-- Whether `rocm-smi` and `amd-smi` load their libraries through a path the conformance package can redirect, or need sysfs as well.
+- Whether `rocm-smi` and `amd-smi` load their libraries through a path the conformance package can redirect, or need sysfs as well. Confirmed by strace: `rocm-smi` loads `librocm_smi64.so.1` through `ROCM_SMI_LIB_PATH` and reads `/sys/class/drm/*/power/runtime_status` only for its low-power warning; identity and capacity come from the library. `amd-smi` loads `libamd_smi.so` from its package directory and probes `/dev/dri`, `/dev/kfd`, and `/sys/module/amdgpu/initstate` while enumerating, then falls back to the library's processor handles. Both tools report the preset with no DRM or KFD nodes present, so neither needs sysfs emulation.
 - Whether `xpu-smi` needs Intel components beyond Level Zero.
-- Licence terms for taking `nvidia-smi` from the driver utilities package into a conformance image.
+- Licence terms for taking `nvidia-smi` from the driver utilities package into a conformance image. Resolved by not redistributing it: the build downloads the pinned, hashed package from NVIDIA's repository into the build tree, and the conformance package does not contain the tool.
 
 ## Non-goals
 

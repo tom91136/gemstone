@@ -62,8 +62,10 @@ object NativeAPIs {
         .getOrElse(throw IllegalArgumentException(s"$name is absent below $root"))
     }
 
-  private val cudaInclude: Path => Path = root => findParent(root.resolve("nvidia/cuda"), "cuda.h")
-  private val nvmlInclude: Path => Path = root => findParent(root.resolve("nvidia/nvml"), "nvml.h")
+  private val cudaInclude: Path => Path    = root => findParent(root.resolve("nvidia/cuda"), "cuda.h")
+  private val nvmlInclude: Path => Path    = root => findParent(root.resolve("nvidia/nvml"), "nvml.h")
+  private val rocmSmiInclude: Path => Path = _.resolve("amd/rocm_smi/include")
+  private val amdSmiInclude: Path => Path  = _.resolve("amd/amd_smi/include")
 
   val platforms: Vector[Platform] = Vector(
     Platform(
@@ -417,6 +419,99 @@ nvmlSystemGetCudaDriverVersion_v2
 nvmlSystemGetDriverVersion
 nvmlSystemGetNVMLVersion
 nvmlSystemGetProcessName""")
+      )
+    ),
+    Platform(
+      "rocm_smi",
+      Vector(Surface(
+        "rocm_smi",
+        Vector("rocm_smi/rocm_smi.h"),
+        rocmSmiInclude,
+        _.startsWith("rsmi_")
+      )),
+      Coverage.Partial(
+        Vector(Status("rsmi_status_t", "RSMI_STATUS_NOT_SUPPORTED", "gemstone_rocm_smi_unsupported")),
+        names("""
+rsmi_compute_process_gpus_get
+rsmi_compute_process_info_by_device_get
+rsmi_compute_process_info_by_pid_get
+rsmi_compute_process_info_get
+rsmi_dev_brand_get
+rsmi_dev_busy_percent_get
+rsmi_dev_drm_render_minor_get
+rsmi_dev_fan_speed_get
+rsmi_dev_gpu_clk_freq_get
+rsmi_dev_guid_get
+rsmi_dev_id_get
+rsmi_dev_market_name_get
+rsmi_dev_memory_busy_percent_get
+rsmi_dev_memory_total_get
+rsmi_dev_memory_usage_get
+rsmi_dev_name_get
+rsmi_dev_node_id_get
+rsmi_dev_partition_id_get
+rsmi_dev_pci_bandwidth_get
+rsmi_dev_pci_id_get
+rsmi_dev_power_get
+rsmi_dev_revision_get
+rsmi_dev_sku_get
+rsmi_dev_subsystem_id_get
+rsmi_dev_subsystem_name_get
+rsmi_dev_subsystem_vendor_id_get
+rsmi_dev_target_graphics_version_get
+rsmi_dev_temp_metric_get
+rsmi_dev_unique_id_get
+rsmi_dev_vendor_id_get
+rsmi_dev_vendor_name_get
+rsmi_dev_volt_metric_get
+rsmi_dev_xgmi_error_status
+rsmi_init
+rsmi_num_monitor_devices
+rsmi_shut_down
+rsmi_status_string
+rsmi_version_get
+rsmi_version_str_get""")
+      )
+    ),
+    Platform(
+      "amd_smi",
+      Vector(Surface(
+        "amd_smi",
+        Vector("amd_smi/amdsmi.h"),
+        amdSmiInclude,
+        _.startsWith("amdsmi_"),
+        defines = Vector("ENABLE_ESMI_LIB")
+      )),
+      Coverage.Partial(
+        Vector(Status("amdsmi_status_t", "AMDSMI_STATUS_NOT_SUPPORTED", "gemstone_amd_smi_unsupported")),
+        names("""
+amdsmi_get_clock_info
+amdsmi_get_gpu_asic_info
+amdsmi_get_gpu_bdf_id
+amdsmi_get_gpu_board_info
+amdsmi_get_gpu_busy_percent
+amdsmi_get_gpu_compute_process_info
+amdsmi_get_gpu_device_bdf
+amdsmi_get_gpu_device_uuid
+amdsmi_get_gpu_driver_info
+amdsmi_get_gpu_kfd_info
+amdsmi_get_gpu_memory_total
+amdsmi_get_gpu_memory_usage
+amdsmi_get_gpu_process_list
+amdsmi_get_gpu_vbios_info
+amdsmi_get_gpu_vram_info
+amdsmi_get_gpu_vram_usage
+amdsmi_get_lib_version
+amdsmi_get_power_info
+amdsmi_get_processor_handle_from_bdf
+amdsmi_get_processor_handles
+amdsmi_get_processor_type
+amdsmi_get_socket_handles
+amdsmi_get_socket_info
+amdsmi_get_temp_metric
+amdsmi_init
+amdsmi_shut_down
+amdsmi_status_code_to_string""")
       )
     ),
     Platform(

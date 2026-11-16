@@ -59,6 +59,12 @@ if(BUILD_TESTING)
   gemstone_fetch_deb(nvtop
     "http://archive.ubuntu.com/ubuntu/pool/universe/n/nvtop/nvtop_3.0.2-1_amd64.deb"
     "70431cfc6c6ae819ef77617d980670970855364e68b68377158a6ad837f45ee7")
+  gemstone_fetch_deb(rocm-smi
+    "https://repo.radeon.com/rocm/apt/7.1.1/pool/main/r/rocm-smi-lib/rocm-smi-lib_7.8.0.70101-38%7E24.04_amd64.deb"
+    "090855a6f74931d9eb8f31e1040cf07d1482bc153ee2621ecdf6d0a57f7307a8")
+  gemstone_fetch_deb(amd-smi
+    "https://repo.radeon.com/rocm/apt/7.1.1/pool/main/a/amd-smi-lib/amd-smi-lib_26.2.0.70101-38%7E24.04_amd64.deb"
+    "58580c1e9a32090273bfa7b74974649ada0a0a6118f6e1b159f4a35664ac0cda")
   foreach(dependency IN ITEMS
       "libx11-6|pool/main/libx/libx11/libx11-6_1.8.7-1build1_amd64.deb|397f84347476a3c5786b39f3ff6f0f82866eb3d8be6d2ad3efeadf019efe5b80"
       "libxcb1|pool/main/libx/libxcb/libxcb1_1.15-1ubuntu2_amd64.deb|e1c6611d11ad7398326f1bf028afc34c3b14c51d917a3426b966ed4b9687fa58"
@@ -86,6 +92,21 @@ if(BUILD_TESTING)
     "${CMAKE_BINARY_DIR}/libnvidia-ml.so.1" "${GEMSTONE_TOOL_DIRECTORY}/lib/libnvidia-ml.so.1")
   execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
     "${CMAKE_BINARY_DIR}/libnvidia-ml.so.1" "${GEMSTONE_TOOL_DIRECTORY}/lib/libnvidia-ml.so")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/librocm_smi64.so.1" "${GEMSTONE_TOOL_DIRECTORY}/lib/librocm_smi64.so.1")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/librocm_smi64.so.1" "${GEMSTONE_TOOL_DIRECTORY}/lib/librocm_smi64.so")
+  file(MAKE_DIRECTORY "${rocm-smi_ROOT}/opt/rocm-7.1.1/lib")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/librocm_smi64.so.1" "${rocm-smi_ROOT}/opt/rocm-7.1.1/lib/librocm_smi64.so.1")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/librocm_smi64.so.1" "${rocm-smi_ROOT}/opt/rocm-7.1.1/lib/librocm_smi64.so")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/libamd_smi.so.26" "${GEMSTONE_TOOL_DIRECTORY}/lib/libamd_smi.so.26")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/libamd_smi.so.26" "${GEMSTONE_TOOL_DIRECTORY}/lib/libamd_smi.so")
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E create_symlink
+    "${CMAKE_BINARY_DIR}/libamd_smi.so.26" "${amd-smi_ROOT}/opt/rocm-7.1.1/share/amd_smi/amdsmi/libamd_smi.so")
 
   set(GEMSTONE_TOOL_ROCMINFO "${rocminfo_ROOT}/opt/rocm-7.1.1/bin/rocminfo")
   set(GEMSTONE_TOOL_CLINFO "${clinfo_ROOT}/usr/bin/clinfo")
@@ -93,6 +114,8 @@ if(BUILD_TESTING)
   set(GEMSTONE_TOOL_SYCL_LS "${GEMSTONE_SYCL_LS}")
   set(GEMSTONE_TOOL_NVIDIA_SMI "${nvidia-smi_ROOT}/usr/bin/nvidia-smi")
   set(GEMSTONE_TOOL_NVTOP "${nvtop_ROOT}/usr/bin/nvtop")
+  set(GEMSTONE_TOOL_ROCM_SMI "${rocm-smi_ROOT}/opt/rocm-7.1.1/bin/rocm-smi")
+  set(GEMSTONE_TOOL_AMD_SMI "${amd-smi_ROOT}/opt/rocm-7.1.1/bin/amd-smi")
 
   set(GEMSTONE_TOOL_LIBRARY_DIRECTORIES
     "${CMAKE_BINARY_DIR}"

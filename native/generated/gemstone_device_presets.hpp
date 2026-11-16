@@ -52,6 +52,21 @@ inline std::string deviceHsaUuid(uint32_t ordinal) {
   return buffer;
 }
 
+constexpr uint32_t graphicsVersion(std::string_view target) noexcept {
+  uint32_t version = 0;
+  bool started = false;
+  for (const char character : target) {
+    if (!started) {
+      if (character < '0' || character > '9') continue;
+      started = true;
+    }
+    if (character >= '0' && character <= '9') version = (version << 4U) | static_cast<uint32_t>(character - '0');
+    else if (character >= 'a' && character <= 'f') version = (version << 4U) | static_cast<uint32_t>(character - 'a' + 10);
+    else break;
+  }
+  return version;
+}
+
 inline constexpr DevicePreset devicePresets[] = {
     {"GeForce GTX 1080", "sm_61", 20, 1733, 8589934592, 10000, 256, 2097152},
     {"GeForce GTX 980", "sm_52", 16, 1216, 4294967296, 7000, 256, 2097152},

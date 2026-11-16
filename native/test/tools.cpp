@@ -52,6 +52,16 @@ gemstone::DevicePreset nvidiaPreset() {
   throw std::runtime_error("unknown preset");
 }
 
+std::string uniqueIdText(uint32_t ordinal) {
+  const auto bytes = gemstone::deviceUuid(ordinal);
+  uint64_t unique = 0;
+  for (size_t index = 0; index < 8; ++index)
+    unique = (unique << 8U) | bytes[index];
+  char buffer[32];
+  std::snprintf(buffer, sizeof(buffer), "Unique ID: 0x%016llx", static_cast<unsigned long long>(unique));
+  return buffer;
+}
+
 std::string pciBusIdLong(uint32_t ordinal) {
   const auto address = gemstone::devicePciAddress(ordinal);
   char buffer[32];
@@ -88,6 +98,7 @@ class ToolEnvironment {
   gemstone_test::Environment openclVendors;
   gemstone_test::Environment levelZero;
   gemstone_test::Environment dtif;
+  gemstone_test::Environment rocmSmiLib;
 
 public:
   explicit ToolEnvironment(const gemstone::DevicePreset &preset)
@@ -96,7 +107,8 @@ public:
         libraryPath("LD_LIBRARY_PATH", toolLibraryPath().c_str()),
         preload(toolPreload().empty() ? std::nullopt : std::make_optional<gemstone_test::Environment>("LD_PRELOAD", toolPreload().c_str())),
         opencl("OCL_ICD_FILENAMES", GEMSTONE_OPENCL_LIBRARY), openclVendors("OCL_ICD_VENDORS", GEMSTONE_OPENCL_LIBRARY),
-        levelZero("ZE_ENABLE_ALT_DRIVERS", GEMSTONE_LEVEL_ZERO_LIBRARY), dtif("HSA_ENABLE_DTIF", "1") {}
+        levelZero("ZE_ENABLE_ALT_DRIVERS", GEMSTONE_LEVEL_ZERO_LIBRARY), dtif("HSA_ENABLE_DTIF", "1"),
+        rocmSmiLib("ROCM_SMI_LIB_PATH", GEMSTONE_TOOL_ROCM_SMI_LIB) {}
 };
 
 std::string memoryKilobytes(const gemstone::DevicePreset &preset) { return std::to_string(preset.memoryBytes / 1024); }
@@ -205,4 +217,48 @@ TEST_CASE("nvtop runs from the pinned driver utilities package", "[tools][nvtop]
   INFO(result.output);
   REQUIRE(result.status == 0);
   REQUIRE_THAT(result.output, ContainsSubstring("nvtop version"));
+}
+
+TEST_CASE("rocm-smi reports the preset identity and capacity", "[tools][rocm-smi]") {
+  const auto preset = radeon();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_ROCM_SMI, {});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring("0%"));
+}
+
+TEST_CASE("rocm-smi --showproductname --showbus --showuniqueid reports preset details", "[tools][rocm-smi]") {
+  const auto preset = radeon();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_ROCM_SMI, {"--showproductname", "--showbus", "--showuniqueid"});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.name)));
+  REQUIRE_THAT(result.output, ContainsSubstring(gemstone::devicePciBusId(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.target)));
+  REQUIRE_THAT(result.output, ContainsSubstring(uniqueIdText(0)));
+}
+
+TEST_CASE("amd-smi list reports the preset identity", "[tools][amd-smi]") {
+  const auto preset = radeon();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_AMD_SMI, {"list"});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring(gemstone::devicePciBusId(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring(uuidText(0)));
+}
+
+TEST_CASE("amd-smi static reports market name and capacity", "[tools][amd-smi]") {
+  const auto preset = radeon();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_AMD_SMI, {"static"});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.name)));
+  REQUIRE_THAT(result.output, ContainsSubstring(std::to_string(preset.multiprocessors)));
+  REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.target)));
+  REQUIRE_THAT(result.output, ContainsSubstring(memoryMegabytes(preset) + " MB"));
+  REQUIRE_THAT(result.output, ContainsSubstring("BIT_WIDTH: " + std::to_string(preset.busWidthBits)));
 }

@@ -22,7 +22,9 @@
 #include <gemstone_device_presets.hpp>
 
 #include "../rpc/test/rpc_fixture.hpp"
+#include <amd_smi/amdsmi.h>
 #include <environment_keys.hpp>
+#include <rocm_smi/rocm_smi.h>
 #include <vulkan/vulkan.h>
 
 namespace {
@@ -41,6 +43,7 @@ struct RuntimeReport {
   int32_t memoryClockMhz = 0;
   int32_t busWidthBits = 0;
   int32_t l2Bytes = 0;
+  uint64_t uniqueId = 0;
   std::array<uint8_t, 16> uuid{};
   gemstone::PciAddress pci{};
   std::string pciBusId;
@@ -214,6 +217,83 @@ RuntimeReport queryNvml(unsigned int ordinal) {
   return report;
 }
 
+uint64_t uuidPrefix(const std::array<uint8_t, 16> &uuid) {
+  uint64_t prefix = 0;
+  for (size_t index = 0; index < 8; ++index)
+    prefix = (prefix << 8U) | uuid[index];
+  return prefix;
+}
+
+RuntimeReport queryRocmSmi(uint32_t ordinal) {
+  RuntimeReport report{};
+  char name[256]{};
+  REQUIRE(rsmi_dev_name_get(ordinal, name, sizeof(name)) == RSMI_STATUS_SUCCESS);
+  report.name = name;
+  uint64_t totalMemory = 0;
+  REQUIRE(rsmi_dev_memory_total_get(ordinal, RSMI_MEM_TYPE_VRAM, &totalMemory) == RSMI_STATUS_SUCCESS);
+  report.memoryBytes = totalMemory;
+  rsmi_frequencies_t sclk{};
+  REQUIRE(rsmi_dev_gpu_clk_freq_get(ordinal, RSMI_CLK_TYPE_SYS, &sclk) == RSMI_STATUS_SUCCESS);
+  report.boostMhz = static_cast<int32_t>(sclk.frequency[0] / 1000000ULL);
+  rsmi_frequencies_t mclk{};
+  REQUIRE(rsmi_dev_gpu_clk_freq_get(ordinal, RSMI_CLK_TYPE_MEM, &mclk) == RSMI_STATUS_SUCCESS);
+  report.memoryClockMhz = static_cast<int32_t>(mclk.frequency[0] / 1000000ULL);
+  uint64_t bdfid = 0;
+  REQUIRE(rsmi_dev_pci_id_get(ordinal, &bdfid) == RSMI_STATUS_SUCCESS);
+  report.pci = {.domain = static_cast<uint32_t>(bdfid >> 32),
+                .bus = static_cast<uint32_t>((bdfid >> 8U) & 0xffU),
+                .device = static_cast<uint32_t>((bdfid >> 3U) & 0x1fU),
+                .function = static_cast<uint32_t>(bdfid & 0x7U)};
+  report.pciBusId = gemstone::devicePciBusId(ordinal);
+  REQUIRE(rsmi_dev_unique_id_get(ordinal, &report.uniqueId) == RSMI_STATUS_SUCCESS);
+  return report;
+}
+
+RuntimeReport queryAmdSmi(uint32_t ordinal) {
+  RuntimeReport report{};
+  auto *const handle = reinterpret_cast<amdsmi_processor_handle>(static_cast<uintptr_t>(ordinal + 1));
+  amdsmi_asic_info_t asic{};
+  REQUIRE(amdsmi_get_gpu_asic_info(handle, &asic) == AMDSMI_STATUS_SUCCESS);
+  report.name = asic.market_name;
+  report.multiprocessors = static_cast<int32_t>(asic.num_of_compute_units);
+  amdsmi_vram_info_t vram{};
+  REQUIRE(amdsmi_get_gpu_vram_info(handle, &vram) == AMDSMI_STATUS_SUCCESS);
+  report.memoryBytes = vram.vram_size * (1024ULL * 1024ULL);
+  report.busWidthBits = static_cast<int32_t>(vram.vram_bit_width);
+  amdsmi_clk_info_t sysClk{};
+  REQUIRE(amdsmi_get_clock_info(handle, AMDSMI_CLK_TYPE_SYS, &sysClk) == AMDSMI_STATUS_SUCCESS);
+  report.boostMhz = static_cast<int32_t>(sysClk.clk);
+  amdsmi_clk_info_t memClk{};
+  REQUIRE(amdsmi_get_clock_info(handle, AMDSMI_CLK_TYPE_MEM, &memClk) == AMDSMI_STATUS_SUCCESS);
+  report.memoryClockMhz = static_cast<int32_t>(memClk.clk);
+  amdsmi_bdf_t bdf{};
+  REQUIRE(amdsmi_get_gpu_device_bdf(handle, &bdf) == AMDSMI_STATUS_SUCCESS);
+  report.pci = {.domain = static_cast<uint32_t>(bdf.bdf.domain_number),
+                .bus = static_cast<uint32_t>(bdf.bdf.bus_number),
+                .device = static_cast<uint32_t>(bdf.bdf.device_number),
+                .function = static_cast<uint32_t>(bdf.bdf.function_number)};
+  report.pciBusId = gemstone::devicePciBusId(ordinal);
+  char uuidBuf[64]{};
+  unsigned int uuidLen = sizeof(uuidBuf);
+  REQUIRE(amdsmi_get_gpu_device_uuid(handle, &uuidLen, uuidBuf) == AMDSMI_STATUS_SUCCESS);
+  const auto hexByte = [](char c) -> uint8_t {
+    if (c >= '0' && c <= '9') return static_cast<uint8_t>(c - '0');
+    if (c >= 'a' && c <= 'f') return static_cast<uint8_t>(c - 'a' + 10);
+    if (c >= 'A' && c <= 'F') return static_cast<uint8_t>(c - 'A' + 10);
+    return 0;
+  };
+  size_t uidx = 0;
+  for (size_t i = 0; uuidBuf[i] && uuidBuf[i + 1] && uidx < report.uuid.size();) {
+    if (uuidBuf[i] == '-') {
+      ++i;
+      continue;
+    }
+    report.uuid[uidx++] = static_cast<uint8_t>((hexByte(uuidBuf[i]) << 4) | hexByte(uuidBuf[i + 1]));
+    i += 2;
+  }
+  return report;
+}
+
 } // namespace
 
 TEST_CASE("Every runtime reports the same identity and capacity for the same preset and device index", "[preset][identity]") {
@@ -248,6 +328,8 @@ TEST_CASE("Every runtime reports the same identity and capacity for the same pre
   const gemstone_test::Environment amdPresetEnv(gemstone::environment::Device, "Radeon RX 9070 XT");
   REQUIRE(hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS);
   REQUIRE(hsa_init() == HSA_STATUS_SUCCESS);
+  REQUIRE(rsmi_init(0) == RSMI_STATUS_SUCCESS);
+  REQUIRE(amdsmi_init(0) == AMDSMI_STATUS_SUCCESS);
   std::vector<hsa_agent_t> hsaGpus;
   REQUIRE(hsa_iterate_agents(
               [](hsa_agent_t agent, void *data) {
@@ -386,10 +468,49 @@ TEST_CASE("Every runtime reports the same identity and capacity for the same pre
     CHECK(nvml.pci.bus == cuda.pci.bus);
     CHECK(nvml.pci.device == cuda.pci.device);
     CHECK(nvml.pciBusId == cuda.pciBusId);
+
+    const auto rocmSmi = queryRocmSmi(ordinal);
+    CHECK(rocmSmi.name == expectedPreset.name);
+    CHECK(rocmSmi.memoryBytes == cuda.memoryBytes);
+    CHECK(rocmSmi.boostMhz == cuda.boostMhz);
+    CHECK(rocmSmi.memoryClockMhz == cuda.memoryClockMhz);
+    CHECK(rocmSmi.uniqueId == uuidPrefix(cuda.uuid));
+    CHECK(rocmSmi.pci.domain == cuda.pci.domain);
+    CHECK(rocmSmi.pci.bus == cuda.pci.bus);
+    CHECK(rocmSmi.pci.device == cuda.pci.device);
+    CHECK(rocmSmi.pciBusId == cuda.pciBusId);
+
+    const auto amdSmi = queryAmdSmi(ordinal);
+    CHECK(amdSmi.name == expectedPreset.name);
+    CHECK(amdSmi.memoryBytes == cuda.memoryBytes);
+    CHECK(amdSmi.multiprocessors == cuda.multiprocessors);
+    CHECK(amdSmi.boostMhz == cuda.boostMhz);
+    CHECK(amdSmi.memoryClockMhz == cuda.memoryClockMhz);
+    CHECK(amdSmi.busWidthBits == cuda.busWidthBits);
+    CHECK(amdSmi.uuid == cuda.uuid);
+    CHECK(amdSmi.pci.domain == cuda.pci.domain);
+    CHECK(amdSmi.pci.bus == cuda.pci.bus);
+    CHECK(amdSmi.pci.device == cuda.pci.device);
+    CHECK(amdSmi.pciBusId == cuda.pciBusId);
   }
 
+  REQUIRE(amdsmi_shut_down() == AMDSMI_STATUS_SUCCESS);
+  REQUIRE(rsmi_shut_down() == RSMI_STATUS_SUCCESS);
   REQUIRE(nvmlShutdown() == NVML_SUCCESS);
   REQUIRE(hsa_shut_down() == HSA_STATUS_SUCCESS);
   REQUIRE(hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS);
   vkDestroyInstance(vkInstance, nullptr);
+}
+
+TEST_CASE("AMD device control is not supported", "[preset][control]") {
+  const gemstone_test::Environment presetEnv(gemstone::environment::Device, "Radeon RX 9070 XT");
+  REQUIRE(rsmi_init(0) == RSMI_STATUS_SUCCESS);
+  REQUIRE(amdsmi_init(0) == AMDSMI_STATUS_SUCCESS);
+  auto *const handle = reinterpret_cast<amdsmi_processor_handle>(uintptr_t{1});
+  CHECK(rsmi_dev_fan_reset(0, 0) == RSMI_STATUS_NOT_SUPPORTED);
+  CHECK(rsmi_dev_power_cap_set(0, 0, 0) == RSMI_STATUS_NOT_SUPPORTED);
+  CHECK(amdsmi_reset_gpu(handle) == AMDSMI_STATUS_NOT_SUPPORTED);
+  CHECK(amdsmi_set_power_cap(handle, 0, 0) == AMDSMI_STATUS_NOT_SUPPORTED);
+  REQUIRE(amdsmi_shut_down() == AMDSMI_STATUS_SUCCESS);
+  REQUIRE(rsmi_shut_down() == RSMI_STATUS_SUCCESS);
 }

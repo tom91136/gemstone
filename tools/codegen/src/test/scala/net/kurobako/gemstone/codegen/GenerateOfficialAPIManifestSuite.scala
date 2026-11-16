@@ -33,6 +33,8 @@ typedef int (*cuUnversioned)(void);
       "amd/hsa/runtime/hsa-runtime/inc/hsa.h"         -> "extern void hsa_fixture(void);",
       "amd/hsa/runtime/hsa-runtime/inc/hsa_ext_amd.h" -> "",
       "amd/hsa/libhsakmt/include/hsakmt/hsakmt.h"     -> "extern void hsaKmtFixture(void);",
+      "amd/rocm_smi/include/rocm_smi/rocm_smi.h"      -> "extern int rsmi_fixture(void);",
+      "amd/amd_smi/include/amd_smi/amdsmi.h"          -> "extern int amdsmi_fixture(void);",
       "oneapi/level-zero/include/ze_ddi.h"            -> "extern int zeGetFixtureProcAddrTable(void);",
       "oneapi/level-zero/include/zes_ddi.h"           -> "",
       "oneapi/level-zero/include/zet_ddi.h"           -> "",

@@ -196,6 +196,28 @@ object References {
       ),
       Source(
         Artifact(
+          "amd-rocm-smi",
+          s"rocm_smi_lib-rocm-$HipVersion.tar.gz",
+          s"https://github.com/ROCm/rocm_smi_lib/archive/refs/tags/rocm-$HipVersion.tar.gz",
+          "f47550aeeb2827a3ae857c35e16f5a9042de70d911abab80bebe4840c9ecd4fd"
+        ),
+        "amd/rocm_smi",
+        s"rocm_smi_lib-rocm-$HipVersion",
+        Vector("include/rocm_smi/**")
+      ),
+      Source(
+        Artifact(
+          "amd-amd-smi",
+          s"amdsmi-rocm-$HipVersion.tar.gz",
+          s"https://github.com/ROCm/amdsmi/archive/refs/tags/rocm-$HipVersion.tar.gz",
+          "2a9dfafac9593d3093c3f5fc611682e712f08816414f210344ea7b719c085ff5"
+        ),
+        "amd/amd_smi",
+        s"amdsmi-rocm-$HipVersion",
+        Vector("include/amd_smi/**")
+      ),
+      Source(
+        Artifact(
           "opencl-headers",
           s"OpenCL-Headers-$OpenCLHeadersVersion.zip",
           s"https://github.com/KhronosGroup/OpenCL-Headers/archive/refs/tags/v$OpenCLHeadersVersion.zip",
@@ -241,6 +263,10 @@ object References {
            |
            |#endif
            |""".stripMargin
+      ),
+      Write(
+        "amd/rocm_smi/include/libdrm/drm.h",
+        "#pragma once\n#include <drm/drm.h>\n"
       )
     ),
     Vector(
@@ -249,6 +275,8 @@ object References {
       Expect("amd/hip/include/hip/hip_runtime_api.h"),
       Expect("amd/hip/include/hip/amd_detail/host_defines.h"),
       Expect("amd/hsa/runtime/hsa-runtime/inc/hsa.h"),
+      Expect("amd/rocm_smi/include/rocm_smi/rocm_smi.h"),
+      Expect("amd/amd_smi/include/amd_smi/amdsmi.h"),
       Expect("khronos/opencl/CL/cl.h"),
       Expect("oneapi/level-zero/include/ze_api.h"),
       Expect("khronos/vulkan/include/vulkan/vulkan.h")

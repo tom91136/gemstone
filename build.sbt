@@ -784,6 +784,8 @@ def nativeBuildArguments(
     s"-DHIP_INCLUDE_DIR=${references / "api-native/amd/hip/include"}",
     s"-DHSA_INCLUDE_DIR=${references / "api-native/amd/hsa/runtime/hsa-runtime/inc"}",
     s"-DHSAKMT_INCLUDE_DIR=${references / "api-native/amd/hsa/libhsakmt/include"}",
+    s"-DROCM_SMI_INCLUDE_DIR=${references / "api-native/amd/rocm_smi/include"}",
+    s"-DAMD_SMI_INCLUDE_DIR=${references / "api-native/amd/amd_smi/include"}",
     s"-DLEVEL_ZERO_INCLUDE_DIR=${references / "api-native/oneapi/level-zero/include"}",
     s"-DOPENCL_INCLUDE_DIR=${references / "api-native/khronos/opencl"}",
     s"-DVULKAN_INCLUDE_DIR=${references / "api-native/khronos/vulkan/include"}",
