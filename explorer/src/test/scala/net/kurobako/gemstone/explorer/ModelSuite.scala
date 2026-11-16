@@ -234,8 +234,8 @@ class ModelSuite extends Suite {
     val pair = described(AMDGPUModel, Some("gfx906"), "v_add_f64")
     assert(
       pair.contains(
-        "def v_add_f64(SRC0: UInt[64], SRC1: UInt[64]): (VDST: UInt[64]) =\n" +
-          "  (VDST = Floats.add(SRC0.asFloat, SRC1.asFloat).bits)"
+        "def v_add_f64(SRC0: UInt[64], SRC1: UInt[64], mode: UInt[32]): (VDST: UInt[64]) =\n" +
+          "  (VDST = Floats.add(SRC0.asFloat, SRC1.asFloat, mode & 12).bits)"
       ),
       pair
     )
