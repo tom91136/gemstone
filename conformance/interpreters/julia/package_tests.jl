@@ -52,7 +52,7 @@ function main()
     script = suite(package)
     isfile(script) || error("package has no test suite: $script")
     if "--list" in ARGS
-        passed, output = withenv("LD_PRELOAD" => nothing, "LD_LIBRARY_PATH" => nothing, "CUDA_VISIBLE_DEVICES" => nothing, "ROCM_PATH" => nothing) do
+        passed, output = withenv("LD_PRELOAD" => nothing, "LD_LIBRARY_PATH" => nothing, "CUDA_VISIBLE_DEVICES" => nothing, "ROCM_PATH" => nothing, "ROCR_VISIBLE_DEVICES" => nothing, "HIP_VISIBLE_DEVICES" => nothing) do
             execute(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script --list`; echo = false)
         end
         if !passed
