@@ -4,11 +4,11 @@ set(GEMSTONE_TOOL_DIRECTORY "${CMAKE_BINARY_DIR}/tools" CACHE PATH "Downloaded v
 set(GEMSTONE_SYCL_LS "" CACHE FILEPATH "sycl-ls from the pinned oneAPI toolkit")
 set(GEMSTONE_SYCL_LIBRARY_DIRECTORY "" CACHE PATH "oneAPI runtime libraries for sycl-ls")
 
-if(NOT GEMSTONE_SYCL_LS AND EXISTS "/opt/intel/oneapi/compiler/2026.1/bin/sycl-ls")
-  set(GEMSTONE_SYCL_LS "/opt/intel/oneapi/compiler/2026.1/bin/sycl-ls" CACHE FILEPATH "sycl-ls from the pinned oneAPI toolkit" FORCE)
+if(NOT GEMSTONE_SYCL_LS AND EXISTS "/opt/intel/oneapi/compiler/latest/bin/sycl-ls")
+  set(GEMSTONE_SYCL_LS "/opt/intel/oneapi/compiler/latest/bin/sycl-ls" CACHE FILEPATH "sycl-ls from the pinned oneAPI toolkit" FORCE)
 endif()
-if(NOT GEMSTONE_SYCL_LIBRARY_DIRECTORY AND EXISTS "/opt/intel/oneapi/compiler/2026.1/lib" AND EXISTS "/opt/intel/oneapi/umf/1.2/lib")
-  set(GEMSTONE_SYCL_LIBRARY_DIRECTORY "/opt/intel/oneapi/compiler/2026.1/lib;/opt/intel/oneapi/umf/1.2/lib" CACHE PATH "oneAPI runtime libraries for sycl-ls" FORCE)
+if(NOT GEMSTONE_SYCL_LIBRARY_DIRECTORY AND EXISTS "/opt/intel/oneapi/compiler/latest/lib")
+  set(GEMSTONE_SYCL_LIBRARY_DIRECTORY "/opt/intel/oneapi/compiler/latest/lib" CACHE PATH "oneAPI runtime libraries for sycl-ls" FORCE)
 endif()
 
 function(gemstone_fetch_deb name url sha256)

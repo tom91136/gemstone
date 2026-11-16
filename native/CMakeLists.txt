@@ -28,6 +28,7 @@ option(GEMSTONE_ENABLE_LEVEL_ZERO "Build the Level Zero facade" ON)
 option(GEMSTONE_ENABLE_NVML "Build the NVML facade" ON)
 option(GEMSTONE_ENABLE_ROCM_SMI "Build the ROCm SMI facade" ON)
 option(GEMSTONE_ENABLE_AMD_SMI "Build the AMD SMI facade" ON)
+set(GEMSTONE_TOOLCHAIN_IMAGE "" CACHE STRING "Toolchain image this build tree was configured against")
 
 include(cmake/Aspartame.cmake)
 include(cmake/Fmt.cmake)

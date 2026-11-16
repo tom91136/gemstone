@@ -184,6 +184,8 @@ TEST_CASE("sycl-ls reports the preset identity", "[tools][sycl-ls]") {
   if (syclLs[0] == '\0') SKIP("sycl-ls is not configured");
   const auto preset = radeon();
   const ToolEnvironment environment(preset);
+  // the Intel loader allocates with new and frees with free when ASan is preloaded
+  const gemstone_test::Environment asanOptions("ASAN_OPTIONS", "detect_leaks=0:alloc_dealloc_mismatch=0");
   const auto result = runTool(syclLs, {"--verbose"});
   INFO(result.output);
   REQUIRE((result.status == 0));

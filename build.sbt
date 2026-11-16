@@ -778,6 +778,7 @@ def nativeBuildArguments(
     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
     s"-DGEMSTONE_PREBUILT_MEMORY_FIXTURES=${toolchain.fixtures}",
     s"-DGEMSTONE_OPENCL_COMPILER_DIRECTORY=${openClCompiler / "bin/compiler"}",
+    s"-DGEMSTONE_TOOLCHAIN_IMAGE=${toolchain.image}",
     s"-DCMAKE_BUILD_TYPE=${BuildEnvironment.buildType}",
     s"-DCUDA_INCLUDE_DIR=${references / "api-native/nvidia/cuda/include"}",
     s"-DNVML_INCLUDE_DIR=${references / "api-native/nvidia/nvml/include"}",
