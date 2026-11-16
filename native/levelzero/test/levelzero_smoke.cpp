@@ -561,9 +561,18 @@ TEST_CASE("Level Zero memory free policies defer the free past recorded work", "
   ze_memory_allocation_properties_t memoryProperties{};
   memoryProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
   REQUIRE(zeMemGetAllocProperties(context, memory, &memoryProperties, nullptr) == ZE_RESULT_SUCCESS);
-  CHECK(memoryProperties.type == ZE_MEMORY_TYPE_UNKNOWN);
+  CHECK(memoryProperties.type == ZE_MEMORY_TYPE_DEVICE);
 
+  // The recorded reference keeps the deferred allocation alive until the list is destroyed;
+  // freeing another allocation then reaps it and its properties become unknown.
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *trigger = nullptr;
+  REQUIRE(zeMemAllocHost(context, &hostDesc, 64, 1, &trigger) == ZE_RESULT_SUCCESS);
   REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(context, trigger) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemGetAllocProperties(context, memory, &memoryProperties, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(memoryProperties.type == ZE_MEMORY_TYPE_UNKNOWN);
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 

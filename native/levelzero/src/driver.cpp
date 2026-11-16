@@ -1767,7 +1767,7 @@ size_t backingSize(size_t size, ze_memory_type_t type) {
   return size > std::numeric_limits<size_t>::max() - granule ? size : (size + granule - 1) / granule * granule;
 }
 
-std::vector<AllocationRef> deferredFrees;
+std::map<void *, AllocationRef, std::less<>> deferredFrees;
 
 ze_result_t releaseAllocation(const AllocationRef &allocation) {
   std::scoped_lock const rpcLock(rpcTransactionMutex);
@@ -1782,10 +1782,14 @@ void reapDeferredFrees() {
   std::vector<AllocationRef> unused;
   {
     std::scoped_lock const lock(allocationsMutex);
-    const auto idle = std::stable_partition(deferredFrees.begin(), deferredFrees.end(),
-                                            [](const AllocationRef &entry) { return entry.use_count() != 1; });
-    unused.assign(std::make_move_iterator(idle), std::make_move_iterator(deferredFrees.end()));
-    deferredFrees.erase(idle, deferredFrees.end());
+    for (auto entry = deferredFrees.begin(); entry != deferredFrees.end();) {
+      if (entry->second.use_count() != 1) {
+        ++entry;
+        continue;
+      }
+      unused.push_back(std::move(entry->second));
+      entry = deferredFrees.erase(entry);
+    }
   }
   for (const auto &allocation : unused)
     (void)releaseAllocation(allocation);
@@ -1878,7 +1882,7 @@ ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t contextHandle, const ze_me
     allocation = std::move(found->second);
     allocations.erase(found);
     if (allocation.use_count() != 1) {
-      deferredFrees.push_back(std::move(allocation));
+      deferredFrees.emplace(pointer, std::move(allocation));
       return ZE_RESULT_SUCCESS;
     }
   }
@@ -2540,16 +2544,19 @@ ze_result_t ZE_APICALL memProperties(ze_context_handle_t contextHandle, const vo
   if (device) *device = nullptr;
   const auto address = reinterpret_cast<uintptr_t>(pointer);
   std::scoped_lock const lock(allocationsMutex);
-  for (const auto &[base, allocation] : allocations) {
-    const auto start = reinterpret_cast<uintptr_t>(base);
-    if (address >= start && address - start < allocation->size) {
-      properties->type = allocation->type;
-      properties->id = allocation->id.value_or(0);
-      properties->pageSize = PageSize;
-      if (device) *device = reinterpret_cast<ze_device_handle_t>(&globalDevices[allocation->device]);
-      return ZE_RESULT_SUCCESS;
-    }
-  }
+  const auto matches = [&](const AllocationRef &allocation) {
+    const auto start = reinterpret_cast<uintptr_t>(allocation->base);
+    if (address < start || address - start >= allocation->size) return false;
+    properties->type = allocation->type;
+    properties->id = allocation->id.value_or(0);
+    properties->pageSize = PageSize;
+    if (device) *device = reinterpret_cast<ze_device_handle_t>(&globalDevices[allocation->device]);
+    return true;
+  };
+  for (const auto &entry : allocations)
+    if (matches(entry.second)) return ZE_RESULT_SUCCESS;
+  for (const auto &entry : deferredFrees)
+    if (matches(entry.second)) return ZE_RESULT_SUCCESS;
   return ZE_RESULT_SUCCESS;
 }
 std::mutex atomicAttributesMutex;
