@@ -3077,6 +3077,44 @@ ze_result_t ZE_APICALL moduleFunctionPointer(ze_module_handle_t handle, const ch
   return ZE_RESULT_SUCCESS;
 }
 
+ze_result_t ZE_APICALL moduleGetKernelNames(ze_module_handle_t handle, uint32_t *count, const char **names) {
+  auto *module = cast<Module>(handle);
+  if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  std::vector<std::string> *available = nullptr;
+  {
+    std::scoped_lock const namesLock(module->namesMutex);
+    if (!module->kernelNames) {
+      if (remote.mode() != ClientMode::Ready) return reportStatus(module->device, ZE_RESULT_ERROR_DEVICE_LOST);
+      auto described = [&] {
+        std::scoped_lock const rpcLock(rpcTransactionMutex);
+        return remote.client()->call(DescribeProgram{.program = ProgramId{static_cast<int64_t>(module->program->id)}});
+      }();
+      if (!described) {
+        recordRemoteError(described.error().detail);
+        return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+      }
+      std::vector<std::string> values;
+      values.reserve(described.value().kernels.size());
+      for (const auto &symbol : described.value().kernels) {
+        if (!module->linkageNames.empty() && !module->linkageNames.contains(symbol.name.value)) continue;
+        values.push_back(symbol.name.value);
+      }
+      module->kernelNames = std::move(values);
+    }
+    available = &*module->kernelNames;
+  }
+  if (!names || *count == 0) {
+    *count = static_cast<uint32_t>(available->size());
+    return ZE_RESULT_SUCCESS;
+  }
+  const uint32_t requested = std::min<uint32_t>(*count, static_cast<uint32_t>(available->size()));
+  for (uint32_t index = 0; index < requested; ++index)
+    names[index] = (*available)[static_cast<size_t>(index)].c_str();
+  *count = requested;
+  return ZE_RESULT_SUCCESS;
+}
+
 ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char *name, size_t *size, void **pointer) {
   auto *module = cast<Module>(handle);
   if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
@@ -3690,6 +3728,7 @@ table->pfnGetNativeBinary = moduleNativeBinary;
 table->pfnGetProperties = moduleProperties;
 table->pfnGetGlobalPointer = moduleGlobalPointer;
 table->pfnGetFunctionPointer = moduleFunctionPointer;
+table->pfnGetKernelNames = moduleGetKernelNames;
 TABLE_END
 TABLE_BEGIN(zeGetModuleBuildLogProcAddrTable, ze_module_build_log_dditable_t);
 table->pfnDestroy = buildLogDestroy;

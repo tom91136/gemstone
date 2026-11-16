@@ -605,6 +605,8 @@ struct Module final : Handle {
   std::shared_ptr<LoadedProgram> program;
   std::string buildFlags;
   std::map<std::string, std::string> linkageNames;
+  std::mutex namesMutex;
+  std::optional<std::vector<std::string>> kernelNames;
 
   [[nodiscard]] std::string linkageName(const std::string &name) const {
     const auto found = linkageNames.find(name);

@@ -293,6 +293,36 @@ TEST_CASE("Level Zero native modules accept the OpenCL program binary", "[level-
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 
+TEST_CASE("Level Zero modules list their kernel names", "[level-zero]") {
+  gemstone_test::RpcFixture const server;
+  const gemstone_test::RpcEnvironment environment(server);
+  auto [driver, device, context] = createContext();
+  ze_module_desc_t moduleDesc{};
+  moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  ze_module_handle_t module = nullptr;
+  REQUIRE(zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS);
+  uint32_t count = 0;
+  REQUIRE(zeModuleGetKernelNames(module, &count, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK((count == 1));
+  const char *names[2]{};
+  uint32_t requested = 2;
+  REQUIRE(zeModuleGetKernelNames(module, &requested, names) == ZE_RESULT_SUCCESS);
+  CHECK((requested == 1));
+  REQUIRE((names[0] != nullptr));
+  CHECK((std::strcmp(names[0], "add") == 0));
+  CHECK((names[1] == nullptr));
+  requested = 0;
+  REQUIRE(zeModuleGetKernelNames(module, &requested, names) == ZE_RESULT_SUCCESS);
+  CHECK((requested == 1));
+  CHECK((zeModuleGetKernelNames(nullptr, &count, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE));
+  CHECK((zeModuleGetKernelNames(module, nullptr, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER));
+  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
+}
+
 TEST_CASE("Level Zero kernel group sizes honour device limits and required dimensions", "[level-zero]") {
   gemstone_test::RpcFixture server;
   const gemstone_test::RpcEnvironment environment(server);
