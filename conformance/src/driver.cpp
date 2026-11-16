@@ -217,8 +217,8 @@ std::vector<std::string> listedCaseNames(std::string_view listing, std::string_v
 }
 std::string caseClassification(std::string_view output) {
   constexpr std::string_view prefix = "conformance-classification: ";
-  constexpr auto known =
-      std::to_array<std::string_view>({"emulator defect", "missing entry point", "missing code for the target", "race", "time limit"});
+  constexpr auto known = std::to_array<std::string_view>(
+      {"emulator defect", "missing entry point", "missing code for the target", "package mismatch", "race", "time limit", "unclassified"});
   std::string result;
   while (!output.empty()) {
     const auto end = output.find('\n');
@@ -865,7 +865,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
       reason = error.what();
     }
     if (process.timedOut) classification = "time limit";
-    if (status != 0 && classification.empty() && status != SkipReturnCode) classification = "emulator defect";
+    if (status != 0 && classification.empty() && status != SkipReturnCode) classification = "unclassified";
   }
   if (hecbench) {
     auto outcome = classifyHecbenchOutput(readFile(outputPath), process.timedOut);

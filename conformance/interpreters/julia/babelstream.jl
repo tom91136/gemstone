@@ -14,8 +14,10 @@ function classify(text)
         return "missing code for the target"
     elseif occursin("symbol not found", text) || occursin("CUDA_ERROR_NOT_FOUND", text)
         return "missing entry point"
+    elseif occursin("@LocalMemory not defined", text) || occursin("Device 1 out of range (1..0)", text)
+        return "package mismatch"
     end
-    return "emulator defect"
+    return "unclassified"
 end
 
 function execute(command)

@@ -527,6 +527,8 @@ TEST_CASE("case classification markers carry known failure kinds only", "[driver
   CHECK(caseClassification("noise\nconformance-classification: missing entry point\n") == "missing entry point");
   CHECK(caseClassification("conformance-classification: emulator defect\nconformance-classification: race\n") == "race");
   CHECK(caseClassification("conformance-classification: missing code for the target\n") == "missing code for the target");
+  CHECK(caseClassification("conformance-classification: package mismatch\n") == "package mismatch");
+  CHECK(caseClassification("conformance-classification: unclassified\n") == "unclassified");
   CHECK(caseClassification("nothing\n").empty());
   CHECK_THROWS(caseClassification("conformance-classification: flaky\n"));
 }

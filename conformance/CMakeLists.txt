@@ -289,6 +289,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterCacheTest.cmake")
     add_test(NAME conformance_interpreter_prepare
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterPrepareTest.cmake")
+    add_test(NAME conformance_numba_cases
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/NumbaCasesTest.cmake")
   endif()
 
   add_executable(conformance_fixture tests/fixture.cpp)

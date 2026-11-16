@@ -2,7 +2,7 @@
 
 The program speaks the conformance `cases` protocol: --list prints one case per line, --case runs one of them.
 Cases are the package's own pytest node identifiers (paths relative to numba/cuda/tests) plus a driver entry-point
-inventory and a kernel smoke case. Failures that carry a known cause print a conformance-classification marker.
+inventory and a kernel smoke case. Every failure prints a conformance-classification marker derived from its output.
 """
 
 import argparse
@@ -13,12 +13,24 @@ import sys
 import traceback
 
 
+SKIP_STATUS = 4
+
+PACKAGE_MISMATCHES = (
+    re.compile(r"AssertionError: '(?:atom|red)(?:\.shared)?\.add\.f64' not found"),
+    re.compile(r"Signature mismatch: \d+ argument types given, but function takes \d+ arguments"),
+)
+
+
 def classify(text):
     if "no kernel image is available" in text or "invalid device function" in text:
         return "missing code for the target"
     if "CUDA_ERROR_NOT_FOUND" in text or "SYMBOL_NOT_FOUND" in text:
         return "missing entry point"
-    return "emulator defect"
+    if re.search(r"CUDA_ERROR_[A-Z_]+", text):
+        return "emulator defect"
+    if any(pattern.search(text) for pattern in PACKAGE_MISMATCHES):
+        return "package mismatch"
+    return "unclassified"
 
 
 def report(kind):
@@ -57,16 +69,27 @@ def list_pytest_cases(root):
 
 def inventory():
     import cuda.bindings.driver as driver
+    from numba.cuda.cudadrv.drvapi import API_PROTOTYPES
 
     status, version = driver.cuDriverGetVersion()
     if status != driver.CUresult.CUDA_SUCCESS:
-        report("emulator defect")
+        report(classify(str(status)))
         raise SystemExit(f"cuDriverGetVersion failed: {status}")
     (status,) = driver.cuInit(0)
     if status != driver.CUresult.CUDA_SUCCESS:
-        report("missing entry point")
+        report(classify(str(status)))
         raise SystemExit(f"cuInit failed: {status}")
-    functions = sorted(
+
+    def missing_from(names):
+        missing = []
+        for name in names:
+            status, _, result = driver.cuGetProcAddress(name.encode(), version, 0)
+            if result != driver.CUdriverProcAddressQueryResult.CU_GET_PROC_ADDRESS_SUCCESS:
+                missing.append(name)
+        return missing
+
+    called = sorted(API_PROTOTYPES)
+    exposed = sorted(
         name
         for name in dir(driver)
         if name.startswith("cu")
@@ -75,18 +98,22 @@ def inventory():
         and not isinstance(getattr(driver, name), type)
     )
     # cuda-bindings also exposes the versioned C names; the unversioned binding is the one it calls.
-    names = set(functions)
-    functions = [name for name in functions if not (re.match(r"^.*_v[0-9]+$", name) and re.sub(r"_v[0-9]+$", "", name) in names)]
-    missing = []
-    for name in functions:
-        status, _, result = driver.cuGetProcAddress(name.encode(), version, 0)
-        if result != driver.CUdriverProcAddressQueryResult.CU_GET_PROC_ADDRESS_SUCCESS:
-            missing.append(name)
+    names = set(exposed)
+    exposed = [name for name in exposed if not (re.match(r"^.*_v[0-9]+$", name) and re.sub(r"_v[0-9]+$", "", name) in names)]
+    unused = missing_from(name for name in exposed if name not in API_PROTOTYPES)
+    missing = missing_from(called)
     print(f"libcuda: driver API {version}")
-    print(f"entry points referenced by cuda-bindings: {len(functions)}")
-    print(f"missing entry points: {len(missing)}")
+    print(f"entry points called by numba: {len(called)}")
+    print(f"missing entry points called by numba: {len(missing)}")
     for name in missing:
         print(f"  {name}")
+    print(f"entry points exposed by cuda-bindings and not called by numba: {len(exposed) - len(called)}")
+    print(f"missing entry points not called by numba: {len(unused)}")
+    for name in unused:
+        print(f"  {name}")
+    if missing:
+        report("missing entry point")
+        raise SystemExit(1)
 
 
 def smoke_vector_add():
@@ -115,6 +142,12 @@ def smoke_vector_add():
     print(f"vector add: {size} elements, sum {out.sum():.1f}")
 
 
+def pytest_outcomes(output):
+    lines = [line for line in output.splitlines() if line.strip()]
+    summary = lines[-1] if lines else ""
+    return {outcome: int(count) for count, outcome in re.findall(r"(\d+) (passed|failed|skipped|xfailed|xpassed|errors?)", summary)}
+
+
 def run_pytest(root, identity):
     completed = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider", identity],
@@ -125,9 +158,13 @@ def run_pytest(root, identity):
         cwd=root,
     )
     sys.stdout.write(completed.stdout)
-    if completed.returncode != 0:
-        report(classify(completed.stdout))
-    raise SystemExit(completed.returncode)
+    if completed.returncode == 0:
+        outcomes = pytest_outcomes(completed.stdout)
+        if outcomes.get("skipped", 0) > 0 and outcomes.get("passed", 0) == 0:
+            raise SystemExit(SKIP_STATUS)
+        raise SystemExit(0)
+    report(classify(completed.stdout))
+    raise SystemExit(1)
 
 
 def main():
@@ -159,8 +196,9 @@ def main():
     except SystemExit:
         raise
     except Exception:
-        traceback.print_exc()
-        report("emulator defect")
+        text = traceback.format_exc()
+        sys.stderr.write(text)
+        report(classify(text))
         raise SystemExit(1)
 
 
