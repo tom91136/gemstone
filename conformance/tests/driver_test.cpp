@@ -471,11 +471,22 @@ TEST_CASE("hecbench workloads include the corpus and the bounded selection", "[d
     CHECK(full.includePrograms ^ exists([&](const auto &fullPattern) { return conformance::globMatches(fullPattern, pattern); }));
   }
   CHECK(bounded.includePrograms ^ exists([](const auto &pattern) { return pattern == "hecbench_laplace"; }));
-  CHECK(bounded.includePrograms ^ exists([](const auto &pattern) { return pattern == "hecbench_mdh"; }));
-  CHECK(bounded.programArguments.contains("hecbench_mdh"));
-  CHECK(bounded.programArguments.at("hecbench_mdh") == std::vector<std::string>{"-itmax", "1"});
+  CHECK(bounded.includePrograms ^ none_match([](const auto &pattern) { return pattern == "hecbench_mdh"; }));
+  CHECK(bounded.programArguments.empty());
   CHECK(full.excludePrograms.empty());
   CHECK(bounded.excludePrograms.empty());
+}
+
+TEST_CASE("workload program arguments override inherited ones", "[driver][workload-budget]") {
+  const TemporaryDirectory directory;
+  std::ofstream(directory.path / "base.toml") << "specs = ['*']\n[program_arguments]\nhecbench_first = ['1']\nhecbench_second = ['2']\n";
+  std::ofstream(directory.path / "child.toml") << "extends = 'base'\nspecs = ['*']\n[program_arguments]\nhecbench_second = ['3', '4']\n";
+  RunOptions options;
+  options.workloads = directory.path;
+  options.workload = "child";
+  const auto workload = loadWorkload(options);
+  CHECK(workload.programArguments.at("hecbench_first") == std::vector<std::string>{"1"});
+  CHECK(workload.programArguments.at("hecbench_second") == std::vector<std::string>{"3", "4"});
 }
 
 TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") {

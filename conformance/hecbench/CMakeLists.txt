@@ -8,12 +8,12 @@ set(source "${hecbench_SOURCE_DIR}")
 set(staging "${CMAKE_CURRENT_BINARY_DIR}/source")
 stage_source("${source}" "${staging}")
 
-# Bounded workload: compress loop run once (5.4 s on sm_89 vs >600 s timeout under emulation at 1000 iterations).
+# Bounded workload: eight of the 1000 compress iterations (479.8 s on cuda-sass/sm_89 vs >600 s at 1000).
 patch_exact("${staging}/src/bitpacking-cuda/kernels.cu"
   "for (int n = 0; n < 1000; n++)"
-  "for (int n = 0; n < 1; n++)")
+  "for (int n = 0; n < 8; n++)")
 
-# Bounded workload: NUM 256 (3185 iterations, 193 s on SASS / 168 s on PTX; default NUM 1024 needs 27250 iterations and serial CPU reference exceeds 15 minutes).
+# Bounded workload: NUM 256 (3185 iterations, 299.9 s on cuda-sass/sm_89; default NUM 1024 needs 27250 iterations and its serial CPU reference exceeds 15 minutes).
 patch_exact("${staging}/src/laplace-cuda/kernels.h"
   "#define NUM 1024"
   "#define NUM 256")
