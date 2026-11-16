@@ -229,13 +229,18 @@ TEST_CASE("nvidia-smi --query-gpu formats identity as CSV", "[tools][nvidia-smi]
   REQUIRE_THAT(result.output, ContainsSubstring(memoryMegabytes(preset)));
 }
 
-TEST_CASE("nvtop runs from the pinned driver utilities package", "[tools][nvtop]") {
+TEST_CASE("nvtop draws the preset identity", "[tools][nvtop]") {
   const auto preset = nvidiaPreset();
   const ToolEnvironment environment(preset);
-  const auto result = runTool(GEMSTONE_TOOL_NVTOP, {"-v"});
+  char memory[32];
+  std::snprintf(memory, sizeof(memory), "%.3fGi", static_cast<double>(preset.memoryBytes) / (1024.0 * 1024.0 * 1024.0));
+  const auto result =
+      runTool("/bin/sh", {"-c", "TERM=xterm COLUMNS=200 LINES=50 timeout -s KILL 3 \"$0\" -C </dev/null 2>&1", GEMSTONE_TOOL_NVTOP});
   INFO(result.output);
-  REQUIRE(result.status == 0);
-  REQUIRE_THAT(result.output, ContainsSubstring("nvtop version"));
+  REQUIRE_THAT(result.output, ContainsSubstring("Device 0 [" + std::string(preset.name) + "]"));
+  REQUIRE_THAT(result.output, ContainsSubstring(std::to_string(preset.boostMhz) + "MHz"));
+  REQUIRE_THAT(result.output, ContainsSubstring(std::to_string(preset.memoryMTps / 2) + "MHz"));
+  REQUIRE_THAT(result.output, ContainsSubstring("0.000Gi/" + std::string(memory) + "]"));
 }
 
 TEST_CASE("rocm-smi reports the preset identity and capacity", "[tools][rocm-smi]") {

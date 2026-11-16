@@ -61,6 +61,17 @@ std::pair<int, int> parseCapability(std::string_view target) noexcept {
   return {8, 0};
 }
 
+unsigned int coresPerMultiprocessor(int major, int minor) noexcept {
+  switch (major) {
+    case 3: return 192;
+    case 5: return 128;
+    case 6: return minor == 0 ? 64 : 128;
+    case 7: return 64;
+    case 8: return minor == 0 ? 64 : 128;
+    default: return 128;
+  }
+}
+
 } // namespace
 
 extern "C" {
@@ -222,7 +233,9 @@ nvmlReturn_t nvmlDeviceGetMemoryInfo_v2(nvmlDevice_t device, nvmlMemory_v2_t *me
 
 nvmlReturn_t nvmlDeviceGetNumGpuCores(nvmlDevice_t device, unsigned int *numCores) {
   if (!numCores || !validDevice(device)) return NVML_ERROR_INVALID_ARGUMENT;
-  *numCores = static_cast<unsigned int>(activePreset().multiprocessors);
+  const auto preset = activePreset();
+  const auto [major, minor] = parseCapability(preset.target);
+  *numCores = static_cast<unsigned int>(preset.multiprocessors) * coresPerMultiprocessor(major, minor);
   return NVML_SUCCESS;
 }
 

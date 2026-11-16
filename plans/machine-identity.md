@@ -1,6 +1,6 @@
 # Machine identity
 
-Status: steps 1 to 6 are done. Device presets hold multiprocessor count, boost clock, bus width, and L2 size per card, and CUDA, HIP, HSA, OpenCL, Level Zero, Vulkan, NVML, ROCm SMI, and AMD SMI report the selected preset's identity and capacity and derive UUID, the 64-bit unique ID that HSA, ROCm SMI, and AMD SMI share, and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`. Launch residency scales with the reported multiprocessor count (`multiprocessors * 32`). Discovery tool cases verify rocminfo, clinfo, sycl-ls, and vulkaninfo against preset values; `sycl-ls` comes from the pinned oneAPI toolkit in the native toolchain image. NVML provides `libnvidia-ml.so.1` with device identity, memory, PCI info, clocks, and empty process lists, verified against CUDA and by `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop`. ROCm SMI and AMD SMI provide `librocm_smi64.so.1` and `libamd_smi.so` with the same identity and capacity and empty process lists, verified against CUDA and by `rocm-smi` and `amd-smi`. Level Zero Sysman reports the preset device properties, PCI address, one memory module, compute and copy engine groups, and empty process lists, verified by `xpu-smi` and `sycl-ls --verbose`. Device control returns not-supported. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
+Status: steps 1 to 6 are done. Device presets hold multiprocessor count, boost clock, bus width, and L2 size per card, and CUDA, HIP, HSA, OpenCL, Level Zero, NVML, ROCm SMI, and AMD SMI report the selected preset's identity and capacity, Vulkan reports its name and memory, and all of them derive UUID, the 64-bit unique ID that HSA, ROCm SMI, and AMD SMI share, and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`. Launch residency scales with the reported multiprocessor count (`multiprocessors * 32`). Native ctest cases in `native/test/tools.cpp` verify rocminfo, clinfo, sycl-ls, and vulkaninfo against preset values; `sycl-ls` comes from the pinned oneAPI toolkit in the native toolchain image. NVML provides `libnvidia-ml.so.1` with device identity, memory, PCI info, clocks, and empty process lists, verified against CUDA for every NVIDIA preset and by `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop`, which runs headless and is checked for the device name, clocks, and memory. NVML reports CUDA cores as multiprocessors times the cores per multiprocessor of the preset's compute capability. ROCm SMI and AMD SMI provide `librocm_smi64.so.1` and `libamd_smi.so` with the same identity and capacity and empty process lists, verified against HIP for every AMD preset and by `rocm-smi` and `amd-smi`. Level Zero Sysman reports the preset device properties, PCI address, one memory module, compute and copy engine groups, and empty process lists, verified by `xpu-smi` and `sycl-ls --verbose`. Device control returns not-supported. It follows `device-presets.md`, whose remaining items it takes over, and parts of `ecosystem-conformance.md` need it.
 
 ## Goal
 
@@ -11,10 +11,10 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 ## Current state
 
 - Presets hold a name, a target, multiprocessor count, boost clock, memory data rate, bus width, L2 size, and total memory for six cards. `GEMSTONE_DEVICE` or `gemstone run --device` selects one, and an unknown name is an error.
-- CUDA, HIP, HSA, OpenCL, Level Zero, Vulkan, NVML, ROCm SMI, and AMD SMI report the preset's name, memory, and capacity, and derive UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`.
+- CUDA, HIP, HSA, OpenCL, Level Zero, NVML, ROCm SMI, and AMD SMI report the preset's name, memory, and capacity. Vulkan reports its name and memory only. Every runtime derives UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`.
 - Launch residency scales with the reported multiprocessor count.
 - NVML, ROCm SMI, and AMD SMI are implemented. Level Zero implements its Sysman (`zes`) identity, memory, engine, PCI, and process queries; sensor and control families return not-supported.
-- `rocminfo`, `clinfo`, `sycl-ls`, `vulkaninfo`, `nvidia-smi`, `nvtop`, `rocm-smi`, and `amd-smi` are conformance cases.
+- `rocminfo`, `clinfo`, `sycl-ls`, `vulkaninfo`, `nvidia-smi`, `nvtop`, `rocm-smi`, and `amd-smi` have native ctest cases in `native/test/tools.cpp`, not conformance cases.
 
 ## Design
 
@@ -35,35 +35,36 @@ Gemstone stays at its layer. It provides the libraries the vendor driver provide
 
 ### 1. Preset completion (done)
 
-- Added multiprocessor count, boost clock, bus width, and L2 per card in `DevicePreset`, each checked against its source row in `references/nvidia/gpus.md`, `references/amdgpu/gpus.md`, and the whitepapers.
-- CUDA, HIP, HSA, OpenCL, Level Zero, and Vulkan report the preset's name, memory, multiprocessor count, clocks, bus width, and L2.
-- Launch capacity follows the reported multiprocessor count (`multiprocessors * 32`). On `ptx-calls` with 2688 groups, scaling from 4 multiprocessors (residency 128) to 64, 80, and 84 multiprocessors (residency 2048, 2560, and 2688) changes median launch time from 47.0 ms to 104.6 ms, 115.8 ms, and 70.0 ms, and calling-thread `Pacing` slot allocation from 42.4 KB to 572.4 KB, 713.7 KB, and 749.0 KB per launch.
+- Added multiprocessor count, boost clock, bus width, and L2 per card in `DevicePreset`, checked in `DevicePresetSuite` against the card in `Architecture` for the preset's target. That table is not checked against a source by a test. The values match the Wikipedia GeForce 900, 10, and 20 series and Radeon RX 9000 series tables. The RTX 5080 and Quadro GV100 values rest on secondary sources only. The 9070 XT data rate of 20100 MT/s is not a published figure (the specification is 20000).
+- CUDA, HIP, HSA, OpenCL, and Level Zero report the preset's name, memory, multiprocessor count, clocks, bus width, and L2, as each API exposes them. Vulkan reports the name and memory only.
+- Launch capacity follows the reported multiprocessor count (`multiprocessors * 32`), and calling-thread `Pacing` slot allocation grows with it. `WorkerPoolSuite` checks residency of 128, 512, and 2688 for 4, 16, and 84 multiprocessors. No launch-time measurement is recorded.
 - Derived UUID and PCI domain, bus, device, and function from the device index in `gemstone_device_presets.hpp`, used by every runtime and checked across runtimes in `gemstone_preset_identity_test`.
 
 ### 2. Discovery tools (done)
 
-- Conformance cases for `rocminfo`, `clinfo`, `sycl-ls`, and `vulkaninfo`. These need no new library, only correct reporting.
-- Expected values come from the preset table, not from text written into each case.
+- Native ctest cases for `rocminfo`, `clinfo`, `sycl-ls`, and `vulkaninfo`. These need no new library, only correct reporting.
+- Expected values come from the preset table. Each case fixes one preset (`Radeon RX 9070 XT`, or `GeForce GTX 1080` for the NVIDIA tools) and writes the tool's output format into the case.
 
 ### 3. NVML (done)
 
 - Generated declarations from NVML header in `gemstone_nvml_api.h` and implemented `libnvidia-ml.so.1`.
 - Implemented device handles by index, UUID, and PCI bus ID, memory info v1/v2, PCI info v2/v3/Ext, clocks, compute capability, empty process lists, event sets, and internal export table query.
-- Conformance cases for `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop` against preset values.
-- Cross-runtime check in `gemstone_preset_identity_test` verifying NVML and CUDA report identical name, UUID, bus address, and memory across all presets.
+- Native ctest cases for `nvidia-smi`, `nvidia-smi -q`, `nvidia-smi --query-gpu=... --format=csv`, and `nvtop` against preset values. `nvtop` 3.0.2 has no non-interactive mode, so its case runs it for 3 seconds with output to a pipe and checks the drawn device name, clocks, and memory.
+- `nvmlDeviceGetNumGpuCores` returns multiprocessors times the cores per multiprocessor of the preset's compute capability. The identity test compares it with the published core count of each NVIDIA card. A real RTX 4060 Ti (sm_89, 34 multiprocessors) reports 4352 through the NVIDIA driver's NVML.
+- Cross-runtime check in `gemstone_preset_identity_test` verifying NVML and CUDA report identical name, UUID, bus address, and memory for every NVIDIA preset.
 
 ### 4. ROCm SMI and AMD SMI (done)
 
 - Generated declarations from the pinned ROCm headers in `gemstone_rocm_smi_api.h` and `gemstone_amd_smi_api.h` and implemented `librocm_smi64.so.1` and `libamd_smi.so`.
 - Implemented device enumeration, name and market name, the shared 64-bit unique ID (the HSA `GPU-<hex>` UUID, the ROCm SMI unique ID, and the AMD SMI ASIC serial), the full UUID, PCI bus ID, VRAM total and usage, clocks, and empty process lists.
-- Conformance cases for `rocm-smi` and `amd-smi` against preset values.
-- Cross-runtime checks in `gemstone_preset_identity_test` verifying the libraries and CUDA report identical identity and capacity for every preset.
+- Native ctest cases for `rocm-smi` and `amd-smi` against preset values.
+- Cross-runtime checks in `gemstone_preset_identity_test` verifying HSA, ROCm SMI, AMD SMI, and HIP report identical identity and capacity for every AMD preset. CUDA rejects AMD presets and HIP rejects NVIDIA presets, so the reference runtime is CUDA for NVIDIA presets and HIP for AMD presets.
 - Clock, power, fan, and reset calls return not-supported.
 
 ### 5. Level Zero Sysman (done)
 
 - Implemented `zes` driver and device enumeration, device properties, state and process lists, PCI properties and state, one memory module with capacity, usage, and bandwidth, compute and copy engine groups with zero activity, and empty fan, power, temperature, frequency, firmware, RAS, scheduler, standby, fabric, and ECC families.
-- Conformance case for `xpu-smi discovery` against preset values; `sycl-ls --verbose` reports the same name and UUID through the loader.
+- Native ctest case for `xpu-smi discovery` against preset values; `sycl-ls --verbose` reports the same name and UUID through the loader.
 
 ### 6. AMD driver state (done)
 

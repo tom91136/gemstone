@@ -15,6 +15,8 @@
 #include <CL/cl.h>
 #include <CL/cl_ext.h>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <catch2/generators/catch_generators_range.hpp>
 #include <cuda.h>
 #include <hip/hip_runtime_api.h>
 #include <hsakmt/hsakmt.h>
@@ -41,6 +43,7 @@ struct RuntimeReport {
   std::string name;
   uint64_t memoryBytes = 0;
   int32_t multiprocessors = 0;
+  uint32_t cudaCores = 0;
   int32_t boostMhz = 0;
   int32_t memoryClockMhz = 0;
   int32_t busWidthBits = 0;
@@ -194,7 +197,7 @@ RuntimeReport queryNvml(unsigned int ordinal) {
   report.memoryClockMhz = static_cast<int32_t>(memClockMhz);
   unsigned int cores = 0;
   REQUIRE(nvmlDeviceGetNumGpuCores(handle, &cores) == NVML_SUCCESS);
-  report.multiprocessors = static_cast<int32_t>(cores);
+  report.cudaCores = cores;
   char uuidStr[64]{};
   REQUIRE(nvmlDeviceGetUUID(handle, uuidStr, sizeof(uuidStr)) == NVML_SUCCESS);
   const char *hex = std::strncmp(uuidStr, "GPU-", 4) == 0 ? uuidStr + 4 : uuidStr;
@@ -302,12 +305,34 @@ RuntimeReport queryAmdSmi(uint32_t ordinal) {
   return report;
 }
 
+bool isNvidia(const gemstone::DevicePreset &preset) { return preset.target.starts_with("sm_"); }
+
+bool isAmd(const gemstone::DevicePreset &preset) { return preset.target.starts_with("gfx"); }
+
+uint32_t publishedCudaCores(std::string_view name) {
+  static constexpr std::pair<std::string_view, uint32_t> cores[] = {{"GeForce GTX 980", 2048},
+                                                                    {"GeForce GTX 1080", 2560},
+                                                                    {"GeForce RTX 2080", 2944},
+                                                                    {"Quadro GV100", 5120},
+                                                                    {"GeForce RTX 5080", 10752}};
+  for (const auto &[card, count] : cores)
+    if (card == name) return count;
+  FAIL("no published CUDA core count for " << name);
+  return 0;
+}
+
 } // namespace
 
-TEST_CASE("Every runtime reports the same identity and capacity for the same preset and device index", "[preset][identity]") {
-  const gemstone_test::Environment presetEnv(gemstone::environment::Device, "GeForce RTX 5080");
-  REQUIRE(cuInit(0) == CUDA_SUCCESS);
-  REQUIRE(nvmlInit_v2() == NVML_SUCCESS);
+TEST_CASE("Every runtime reports the same identity and capacity for every preset and device index", "[preset][identity]") {
+  const size_t presetIndex = GENERATE(Catch::Generators::range(size_t{0}, std::size(gemstone::devicePresets)));
+  const gemstone::DevicePreset expectedPreset = gemstone::devicePresets[presetIndex];
+  INFO("preset " << expectedPreset.name);
+  const std::string presetName(expectedPreset.name);
+  const gemstone_test::Environment presetEnv(gemstone::environment::Device, presetName.c_str());
+  const bool nvidia = isNvidia(expectedPreset);
+  const bool amd = isAmd(expectedPreset);
+  if (nvidia) REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  if (nvidia) REQUIRE(nvmlInit_v2() == NVML_SUCCESS);
 
   cl_platform_id clPlatform = nullptr;
   REQUIRE(clGetPlatformIDs(1, &clPlatform, nullptr) == CL_SUCCESS);
@@ -333,191 +358,183 @@ TEST_CASE("Every runtime reports the same identity and capacity for the same pre
   std::array<VkPhysicalDevice, 2> vkDevices{};
   REQUIRE(vkEnumeratePhysicalDevices(vkInstance, &vkDeviceCount, vkDevices.data()) == VK_SUCCESS);
 
-  const gemstone_test::Environment amdPresetEnv(gemstone::environment::Device, "Radeon RX 9070 XT");
-  REQUIRE(hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS);
-  REQUIRE(hsa_init() == HSA_STATUS_SUCCESS);
-  REQUIRE(rsmi_init(0) == RSMI_STATUS_SUCCESS);
-  REQUIRE(amdsmi_init(0) == AMDSMI_STATUS_SUCCESS);
+  if (amd) {
+    REQUIRE(hsaKmtOpenKFD() == HSAKMT_STATUS_SUCCESS);
+    REQUIRE(hsa_init() == HSA_STATUS_SUCCESS);
+    REQUIRE(rsmi_init(0) == RSMI_STATUS_SUCCESS);
+    REQUIRE(amdsmi_init(0) == AMDSMI_STATUS_SUCCESS);
+  }
   std::vector<hsa_agent_t> hsaGpus;
-  REQUIRE(hsa_iterate_agents(
-              [](hsa_agent_t agent, void *data) {
-                hsa_device_type_t type{};
-                if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) == HSA_STATUS_SUCCESS && type == HSA_DEVICE_TYPE_GPU)
-                  static_cast<std::vector<hsa_agent_t> *>(data)->push_back(agent);
-                return HSA_STATUS_SUCCESS;
-              },
-              &hsaGpus)
-          == HSA_STATUS_SUCCESS);
-  REQUIRE(hsaGpus.size() == 2);
-
-  const auto preset = gemstone::devicePreset("Radeon RX 9070 XT");
-  REQUIRE(preset.has_value());
-  if (!preset.has_value()) return;
-  const gemstone::DevicePreset expectedPreset = *preset;
+  if (amd) {
+    REQUIRE(hsa_iterate_agents(
+                [](hsa_agent_t agent, void *data) {
+                  hsa_device_type_t type{};
+                  if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) == HSA_STATUS_SUCCESS && type == HSA_DEVICE_TYPE_GPU)
+                    static_cast<std::vector<hsa_agent_t> *>(data)->push_back(agent);
+                  return HSA_STATUS_SUCCESS;
+                },
+                &hsaGpus)
+            == HSA_STATUS_SUCCESS);
+    REQUIRE(hsaGpus.size() == 2);
+  }
 
   for (uint32_t ordinal = 0; ordinal < 2; ++ordinal) {
     INFO("ordinal " << ordinal);
-    const auto cuda = queryCuda(static_cast<int>(ordinal));
-    const auto hip = queryHip(static_cast<int>(ordinal));
+    const auto ref = nvidia ? queryCuda(static_cast<int>(ordinal)) : queryHip(static_cast<int>(ordinal));
     const auto opencl = queryOpenCl(clDevices[ordinal]);
     const auto levelZero = queryLevelZero(zeDevices[ordinal]);
     const auto vulkan = queryVulkan(vkDevices[ordinal]);
 
-    char hsaProductName[64]{};
-    char hsaUuid[64]{};
-    uint32_t hsaComputeUnits = 0;
-    uint32_t hsaClockMhz = 0;
-    uint32_t hsaMemoryClockMhz = 0;
-    uint32_t hsaBusWidth = 0;
-    std::array<uint32_t, 4> hsaCacheSizes{};
-    uint32_t hsaDomain = UINT32_MAX;
-    uint32_t hsaBdfid = UINT32_MAX;
-    uint64_t hsaMemoryAvail = 0;
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), hsaProductName)
-            == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID), hsaUuid) == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &hsaComputeUnits)
-            == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY), &hsaClockMhz)
-            == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY), &hsaMemoryClockMhz)
-            == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_WIDTH), &hsaBusWidth)
-            == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], HSA_AGENT_INFO_CACHE_SIZE, hsaCacheSizes.data()) == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), &hsaDomain)
-            == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &hsaBdfid) == HSA_STATUS_SUCCESS);
-    REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL), &hsaMemoryAvail)
-            == HSA_STATUS_SUCCESS);
-
     const auto expectedUuid = gemstone::deviceUuid(ordinal);
     const auto expectedPci = gemstone::devicePciAddress(ordinal);
 
-    CHECK(cuda.name == expectedPreset.name);
-    CHECK(hip.name == expectedPreset.name);
-    CHECK(std::string_view(hsaProductName) == expectedPreset.name);
+    CHECK(ref.name == expectedPreset.name);
     CHECK(opencl.name == expectedPreset.name);
     CHECK(levelZero.name == expectedPreset.name);
     CHECK(vulkan.name == expectedPreset.name);
 
-    CHECK(std::cmp_equal(cuda.memoryBytes, expectedPreset.memoryBytes));
-    CHECK(hip.memoryBytes == cuda.memoryBytes);
-    CHECK(hsaMemoryAvail == cuda.memoryBytes);
-    CHECK(opencl.memoryBytes == cuda.memoryBytes);
-    CHECK(levelZero.memoryBytes == cuda.memoryBytes);
-    CHECK(vulkan.memoryBytes == cuda.memoryBytes);
+    CHECK(std::cmp_equal(ref.memoryBytes, expectedPreset.memoryBytes));
+    CHECK(opencl.memoryBytes == ref.memoryBytes);
+    CHECK(levelZero.memoryBytes == ref.memoryBytes);
+    CHECK(vulkan.memoryBytes == ref.memoryBytes);
 
-    CHECK(cuda.multiprocessors == expectedPreset.multiprocessors);
-    CHECK(hip.multiprocessors == cuda.multiprocessors);
-    CHECK(std::cmp_equal(hsaComputeUnits, cuda.multiprocessors));
-    CHECK(opencl.multiprocessors == cuda.multiprocessors);
+    CHECK(ref.multiprocessors == expectedPreset.multiprocessors);
+    CHECK(opencl.multiprocessors == ref.multiprocessors);
 
-    CHECK(cuda.boostMhz == expectedPreset.boostMhz);
-    CHECK(hip.boostMhz == cuda.boostMhz);
-    CHECK(std::cmp_equal(hsaClockMhz, cuda.boostMhz));
-    CHECK(opencl.boostMhz == cuda.boostMhz);
+    CHECK(ref.boostMhz == expectedPreset.boostMhz);
+    CHECK(opencl.boostMhz == ref.boostMhz);
 
-    CHECK(cuda.memoryClockMhz == expectedPreset.memoryMTps / 2);
-    CHECK(hip.memoryClockMhz == cuda.memoryClockMhz);
-    CHECK(std::cmp_equal(hsaMemoryClockMhz, cuda.memoryClockMhz));
+    CHECK(ref.memoryClockMhz == expectedPreset.memoryMTps / 2);
 
-    CHECK(cuda.busWidthBits == expectedPreset.busWidthBits);
-    CHECK(hip.busWidthBits == cuda.busWidthBits);
-    CHECK(std::cmp_equal(hsaBusWidth, cuda.busWidthBits));
+    CHECK(ref.busWidthBits == expectedPreset.busWidthBits);
 
-    CHECK(cuda.l2Bytes == expectedPreset.l2Bytes);
-    CHECK(hip.l2Bytes == cuda.l2Bytes);
-    CHECK(std::cmp_equal(hsaCacheSizes[1], cuda.l2Bytes));
-    CHECK(opencl.l2Bytes == cuda.l2Bytes);
+    CHECK(ref.l2Bytes == expectedPreset.l2Bytes);
+    CHECK(opencl.l2Bytes == ref.l2Bytes);
 
-    CHECK(cuda.uuid == expectedUuid);
-    CHECK(hip.uuid == cuda.uuid);
-    CHECK(opencl.uuid == cuda.uuid);
-    CHECK(levelZero.uuid == cuda.uuid);
-    CHECK(vulkan.uuid == cuda.uuid);
-    CHECK(std::string(hsaUuid) == gemstone::deviceHsaUuid(ordinal));
-    const std::string_view hsaUuidText(hsaUuid);
-    REQUIRE(hsaUuidText.starts_with("GPU-"));
-    uint64_t hsaUnique = 0;
-    const auto hsaDigits = hsaUuidText.substr(4);
-    const auto hsaParse = std::from_chars(hsaDigits.data(), hsaDigits.data() + hsaDigits.size(), hsaUnique, 16);
-    REQUIRE(hsaParse.ec == std::errc{});
-    CHECK(hsaParse.ptr == hsaDigits.data() + hsaDigits.size());
-    CHECK(hsaUnique == gemstone::deviceUniqueId(ordinal));
-    CHECK(uuidUnique(hip.uuid) == hsaUnique);
+    CHECK(ref.uuid == expectedUuid);
+    CHECK(opencl.uuid == ref.uuid);
+    CHECK(levelZero.uuid == ref.uuid);
+    CHECK(vulkan.uuid == ref.uuid);
 
-    CHECK(cuda.pci.domain == expectedPci.domain);
-    CHECK(cuda.pci.bus == expectedPci.bus);
-    CHECK(cuda.pci.device == expectedPci.device);
-    CHECK(cuda.pci.function == expectedPci.function);
-    CHECK(hip.pci.domain == cuda.pci.domain);
-    CHECK(hip.pci.bus == cuda.pci.bus);
-    CHECK(hip.pci.device == cuda.pci.device);
-    CHECK(opencl.pci.domain == cuda.pci.domain);
-    CHECK(opencl.pci.bus == cuda.pci.bus);
-    CHECK(opencl.pci.device == cuda.pci.device);
-    CHECK(opencl.pci.function == cuda.pci.function);
-    CHECK(levelZero.pci.domain == cuda.pci.domain);
-    CHECK(levelZero.pci.bus == cuda.pci.bus);
-    CHECK(levelZero.pci.device == cuda.pci.device);
-    CHECK(levelZero.pci.function == cuda.pci.function);
-    CHECK(vulkan.pci.domain == cuda.pci.domain);
-    CHECK(vulkan.pci.bus == cuda.pci.bus);
-    CHECK(vulkan.pci.device == cuda.pci.device);
-    CHECK(vulkan.pci.function == cuda.pci.function);
-    CHECK(hsaDomain == cuda.pci.domain);
-    CHECK(hsaBdfid == cuda.pci.bdfid());
-    HsaNodeProperties kmtProps{};
-    REQUIRE(hsaKmtGetNodeProperties(1 + ordinal, &kmtProps) == HSAKMT_STATUS_SUCCESS);
-    CHECK(kmtProps.LocationId == cuda.pci.bdfid());
-    CHECK(cuda.pciBusId == gemstone::devicePciBusId(ordinal));
-    CHECK(hip.pciBusId == cuda.pciBusId);
+    CHECK(ref.pci.domain == expectedPci.domain);
+    CHECK(ref.pci.bus == expectedPci.bus);
+    CHECK(ref.pci.device == expectedPci.device);
+    CHECK(ref.pci.function == expectedPci.function);
+    CHECK(opencl.pci.domain == ref.pci.domain);
+    CHECK(opencl.pci.bus == ref.pci.bus);
+    CHECK(opencl.pci.device == ref.pci.device);
+    CHECK(opencl.pci.function == ref.pci.function);
+    CHECK(levelZero.pci.domain == ref.pci.domain);
+    CHECK(levelZero.pci.bus == ref.pci.bus);
+    CHECK(levelZero.pci.device == ref.pci.device);
+    CHECK(levelZero.pci.function == ref.pci.function);
+    CHECK(vulkan.pci.domain == ref.pci.domain);
+    CHECK(vulkan.pci.bus == ref.pci.bus);
+    CHECK(vulkan.pci.device == ref.pci.device);
+    CHECK(vulkan.pci.function == ref.pci.function);
+    CHECK(ref.pciBusId == gemstone::devicePciBusId(ordinal));
 
-    const auto nvml = queryNvml(ordinal);
-    CHECK(nvml.name == expectedPreset.name);
-    CHECK(nvml.memoryBytes == cuda.memoryBytes);
-    CHECK(nvml.multiprocessors == cuda.multiprocessors);
-    CHECK(nvml.boostMhz == cuda.boostMhz);
-    CHECK(nvml.memoryClockMhz == cuda.memoryClockMhz);
-    CHECK(nvml.uuid == cuda.uuid);
-    CHECK(nvml.pci.domain == cuda.pci.domain);
-    CHECK(nvml.pci.bus == cuda.pci.bus);
-    CHECK(nvml.pci.device == cuda.pci.device);
-    CHECK(nvml.pciBusId == cuda.pciBusId);
+    if (nvidia) {
+      const auto nvml = queryNvml(ordinal);
+      CHECK(nvml.name == expectedPreset.name);
+      CHECK(nvml.memoryBytes == ref.memoryBytes);
+      CHECK(nvml.cudaCores == publishedCudaCores(expectedPreset.name));
+      CHECK(nvml.boostMhz == ref.boostMhz);
+      CHECK(nvml.memoryClockMhz == ref.memoryClockMhz);
+      CHECK(nvml.uuid == ref.uuid);
+      CHECK(nvml.pci.domain == ref.pci.domain);
+      CHECK(nvml.pci.bus == ref.pci.bus);
+      CHECK(nvml.pci.device == ref.pci.device);
+      CHECK(nvml.pciBusId == ref.pciBusId);
+    }
 
-    const auto rocmSmi = queryRocmSmi(ordinal);
-    CHECK(rocmSmi.name == expectedPreset.name);
-    CHECK(rocmSmi.memoryBytes == cuda.memoryBytes);
-    CHECK(rocmSmi.boostMhz == cuda.boostMhz);
-    CHECK(rocmSmi.memoryClockMhz == cuda.memoryClockMhz);
-    CHECK(rocmSmi.uniqueId == uuidUnique(cuda.uuid));
-    CHECK(rocmSmi.pci.domain == cuda.pci.domain);
-    CHECK(rocmSmi.pci.bus == cuda.pci.bus);
-    CHECK(rocmSmi.pci.device == cuda.pci.device);
-    CHECK(rocmSmi.pciBusId == cuda.pciBusId);
+    if (amd) {
+      char hsaProductName[64]{};
+      char hsaUuid[64]{};
+      uint32_t hsaComputeUnits = 0;
+      uint32_t hsaClockMhz = 0;
+      uint32_t hsaMemoryClockMhz = 0;
+      uint32_t hsaBusWidth = 0;
+      std::array<uint32_t, 4> hsaCacheSizes{};
+      uint32_t hsaDomain = UINT32_MAX;
+      uint32_t hsaBdfid = UINT32_MAX;
+      uint64_t hsaMemoryAvail = 0;
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PRODUCT_NAME), hsaProductName)
+              == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_UUID), hsaUuid) == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &hsaComputeUnits)
+              == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MAX_CLOCK_FREQUENCY), &hsaClockMhz)
+              == HSA_STATUS_SUCCESS);
+      REQUIRE(
+          hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_MAX_FREQUENCY), &hsaMemoryClockMhz)
+          == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_WIDTH), &hsaBusWidth)
+              == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], HSA_AGENT_INFO_CACHE_SIZE, hsaCacheSizes.data()) == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DOMAIN), &hsaDomain)
+              == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_BDFID), &hsaBdfid)
+              == HSA_STATUS_SUCCESS);
+      REQUIRE(hsa_agent_get_info(hsaGpus[ordinal], static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_MEMORY_AVAIL), &hsaMemoryAvail)
+              == HSA_STATUS_SUCCESS);
+      CHECK(std::string_view(hsaProductName) == expectedPreset.name);
+      CHECK(hsaMemoryAvail == ref.memoryBytes);
+      CHECK(std::cmp_equal(hsaComputeUnits, ref.multiprocessors));
+      CHECK(std::cmp_equal(hsaClockMhz, ref.boostMhz));
+      CHECK(std::cmp_equal(hsaMemoryClockMhz, ref.memoryClockMhz));
+      CHECK(std::cmp_equal(hsaBusWidth, ref.busWidthBits));
+      CHECK(std::cmp_equal(hsaCacheSizes[1], ref.l2Bytes));
+      CHECK(std::string(hsaUuid) == gemstone::deviceHsaUuid(ordinal));
+      const std::string_view hsaUuidText(hsaUuid);
+      REQUIRE(hsaUuidText.starts_with("GPU-"));
+      uint64_t hsaUnique = 0;
+      const auto hsaDigits = hsaUuidText.substr(4);
+      const auto hsaParse = std::from_chars(hsaDigits.data(), hsaDigits.data() + hsaDigits.size(), hsaUnique, 16);
+      REQUIRE(hsaParse.ec == std::errc{});
+      CHECK(hsaParse.ptr == hsaDigits.data() + hsaDigits.size());
+      CHECK(hsaUnique == gemstone::deviceUniqueId(ordinal));
+      CHECK(uuidUnique(ref.uuid) == hsaUnique);
+      CHECK(hsaDomain == ref.pci.domain);
+      CHECK(hsaBdfid == ref.pci.bdfid());
+      HsaNodeProperties kmtProps{};
+      REQUIRE(hsaKmtGetNodeProperties(1 + ordinal, &kmtProps) == HSAKMT_STATUS_SUCCESS);
+      CHECK(kmtProps.LocationId == ref.pci.bdfid());
+      const auto rocmSmi = queryRocmSmi(ordinal);
+      CHECK(rocmSmi.name == expectedPreset.name);
+      CHECK(rocmSmi.memoryBytes == ref.memoryBytes);
+      CHECK(rocmSmi.boostMhz == ref.boostMhz);
+      CHECK(rocmSmi.memoryClockMhz == ref.memoryClockMhz);
+      CHECK(rocmSmi.uniqueId == uuidUnique(ref.uuid));
+      CHECK(rocmSmi.pci.domain == ref.pci.domain);
+      CHECK(rocmSmi.pci.bus == ref.pci.bus);
+      CHECK(rocmSmi.pci.device == ref.pci.device);
+      CHECK(rocmSmi.pciBusId == ref.pciBusId);
 
-    const auto amdSmi = queryAmdSmi(ordinal);
-    CHECK(amdSmi.name == expectedPreset.name);
-    CHECK(amdSmi.memoryBytes == cuda.memoryBytes);
-    CHECK(amdSmi.multiprocessors == cuda.multiprocessors);
-    CHECK(amdSmi.boostMhz == cuda.boostMhz);
-    CHECK(amdSmi.memoryClockMhz == cuda.memoryClockMhz);
-    CHECK(amdSmi.busWidthBits == cuda.busWidthBits);
-    CHECK(rocmSmi.uniqueId == hsaUnique);
-    CHECK(amdSmi.serial == hsaUnique);
-    CHECK(amdSmi.uuid == cuda.uuid);
-    CHECK(amdSmi.pci.domain == cuda.pci.domain);
-    CHECK(amdSmi.pci.bus == cuda.pci.bus);
-    CHECK(amdSmi.pci.device == cuda.pci.device);
-    CHECK(amdSmi.pciBusId == cuda.pciBusId);
+      const auto amdSmi = queryAmdSmi(ordinal);
+      CHECK(amdSmi.name == expectedPreset.name);
+      CHECK(amdSmi.memoryBytes == ref.memoryBytes);
+      CHECK(amdSmi.multiprocessors == ref.multiprocessors);
+      CHECK(amdSmi.boostMhz == ref.boostMhz);
+      CHECK(amdSmi.memoryClockMhz == ref.memoryClockMhz);
+      CHECK(amdSmi.busWidthBits == ref.busWidthBits);
+      CHECK(rocmSmi.uniqueId == hsaUnique);
+      CHECK(amdSmi.serial == hsaUnique);
+      CHECK(amdSmi.uuid == ref.uuid);
+      CHECK(amdSmi.pci.domain == ref.pci.domain);
+      CHECK(amdSmi.pci.bus == ref.pci.bus);
+      CHECK(amdSmi.pci.device == ref.pci.device);
+      CHECK(amdSmi.pciBusId == ref.pciBusId);
+    }
   }
 
-  REQUIRE(amdsmi_shut_down() == AMDSMI_STATUS_SUCCESS);
-  REQUIRE(rsmi_shut_down() == RSMI_STATUS_SUCCESS);
-  REQUIRE(nvmlShutdown() == NVML_SUCCESS);
-  REQUIRE(hsa_shut_down() == HSA_STATUS_SUCCESS);
-  REQUIRE(hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS);
+  if (amd) {
+    REQUIRE(amdsmi_shut_down() == AMDSMI_STATUS_SUCCESS);
+    REQUIRE(rsmi_shut_down() == RSMI_STATUS_SUCCESS);
+    REQUIRE(hsa_shut_down() == HSA_STATUS_SUCCESS);
+    REQUIRE(hsaKmtCloseKFD() == HSAKMT_STATUS_SUCCESS);
+  }
+  if (nvidia) REQUIRE(nvmlShutdown() == NVML_SUCCESS);
   vkDestroyInstance(vkInstance, nullptr);
 }
 
