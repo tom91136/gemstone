@@ -220,7 +220,7 @@ object CLI {
         emulation.workload
       ) ++ activeRoutes,
       root.toFile
-    ).!(ProcessLogger(line => { val _ = listBuffer.append(line).append('\n') }, _ => ()))
+    ).!(ProcessLogger(line => { val _ = listBuffer.append(line).append('\n') }, line => System.err.println(line)))
     require(listStatus == 0, s"driver program listing failed with exit code $listStatus")
     val programs       = listBuffer.toString.linesIterator.filter(_.nonEmpty).toVector
     val prepareCommand = Vector(

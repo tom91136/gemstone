@@ -33,13 +33,13 @@ static int conformanceMain(std::vector<std::string> positional = fire::arg({0, "
     }
     const auto command = positional.front();
     positional.erase(positional.begin());
-    if (command == "run" || command == "list-programs") {
+    if (command == "run") {
       conformance::driver::RunOptions c;
       c.profiles = profiles;
       c.workloads = workloads;
       c.direct = direct;
       c.dryRun = dryRun;
-      c.listPrograms = listPrograms || command == "list-programs";
+      c.listPrograms = listPrograms;
       c.artifacts = artifacts;
       c.output = output;
       c.workload = std::move(workload);
