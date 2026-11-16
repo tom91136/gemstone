@@ -57,7 +57,7 @@ if(BUILD_TESTING)
     "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/nvidia-utils-580_580.65.06-0ubuntu1_amd64.deb"
     "5af89f7fe38be8cbff553245b45d1b31a8ac0e2a073e16990046bf2464360d85")
   gemstone_fetch_deb(nvtop
-    "http://archive.ubuntu.com/ubuntu/pool/universe/n/nvtop/nvtop_3.0.2-1_amd64.deb"
+    "http://archive.ubuntu.com/ubuntu/pool/multiverse/n/nvtop/nvtop_3.0.2-1_amd64.deb"
     "70431cfc6c6ae819ef77617d980670970855364e68b68377158a6ad837f45ee7")
   gemstone_fetch_deb(rocm-smi
     "https://repo.radeon.com/rocm/apt/7.1.1/pool/main/r/rocm-smi-lib/rocm-smi-lib_7.8.0.70101-38%7E24.04_amd64.deb"
