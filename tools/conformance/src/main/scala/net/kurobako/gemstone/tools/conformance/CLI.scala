@@ -114,16 +114,19 @@ object CLI {
       )(_ => value)
     }
 
+  private[conformance] def routeMatches(route: String, selector: String, inventory: Vector[String]): Boolean = {
+    val shared = route.replaceFirst("^cuda-(ptx|sass)/", "cuda/")
+    if (inventory.contains(selector)) route == selector
+    else Vector(route, shared).exists(name => name == selector || name.startsWith(s"$selector/"))
+  }
+
   private def routes(emulation: Emulation): Vector[String] = {
     val inventory =
       Process(Vector("cmake", s"-DCONFORMANCE_BUILD_PROFILE=${emulation.profile}", "-P", s"${emulation.routes}"))
         .!!.linesIterator.filter(_.nonEmpty).toVector
     require(inventory.nonEmpty, s"conformance build profile ${emulation.profile} has no routes")
-    def matches(route: String, selector: String): Boolean = {
-      val shared = route.replaceFirst("^cuda-(ptx|sass)/", "cuda/")
-      Vector(route, shared).exists(name => name == selector || name.startsWith(s"$selector/"))
-    }
-    val selectors = emulation.selectors.filterNot(_ == "all")
+    def matches(route: String, selector: String): Boolean = routeMatches(route, selector, inventory)
+    val selectors                                         = emulation.selectors.filterNot(_ == "all")
     require(
       !emulation.selectors.contains("all") || emulation.selectors.sizeIs == 1,
       "all cannot be combined with target selectors"
