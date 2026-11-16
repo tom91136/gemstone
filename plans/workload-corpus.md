@@ -1,6 +1,6 @@
 # Workload corpus
 
-Status: in progress. Step 1 and T42 are done. Step 2's sweep, classification, and hardware triage are done: 28 verified passes, 43 completion only, 369 benchmark failures on the RTX 4060 Ti, 66 time limits, and 30 emulator defects open. Step 3 (HIP, SYCL, OpenMP) not started. Triage uses `concurrency-checking.md` to separate races from emulator defects.
+Status: in progress. Step 1 and T42 are done. Step 2's harness is fixed: the manifest now comes from the Makefile run targets and the runtime data tree, the hardware rerun classifies 478 of 535 programs as pass or completion, and the emulation rerun of those 478 is partial (shards 0 to 3). Step 3 (HIP, SYCL, OpenMP) not started. Triage uses `concurrency-checking.md` to separate races from emulator defects.
 
 ## Goal
 
@@ -50,44 +50,44 @@ Triage of the first failing benchmarks on the cuda sm_89 vendor artifact, compar
 - `mdh`: the same loader defect. The benchmark's shipped inputs make its check vacuous: `gendata` sets `size[iatom]` to `natom` (5877) and `xkappa` is 0.0736, so `-xkappa * (dist - size[iatom])` is about +432 for every atom pair. `expf` overflows to `+inf` on both CPU and GPU, `fabsf(inf - inf) > 1e-3f` is false, and the program prints PASS without comparing a finite value. With `-itmax 1` and the default 1e11 instruction budget the first kernel is cut off after 61 s and the later launches fail, so the case prints FAIL in 64 s. A probe with a 1e12 budget reported 333-406 s per kernel on SASS, which exceeds the 600 s case limit for three kernels, and 20-38 s on PTX. The default `itmax 100` is dominated by the benchmark's serial CPU reference (6.4 s per iteration), which exceeds the case timeout on hardware too. No argument changes the hardcoded inputs, so the check cannot be made meaningful this way; mdh is not counted as verified and is not in the bounded workload.
 - `laplace`: the same loader defect, reported as unsupported cubin text relocation `0x4a` because the per-object relocatable image was selected instead of the linked cubin. A reduced `NUM 256` build passes on both routes with the same 3185 iterations and norms as hardware (SASS 299.9 s, PTX 168 s). The shipped `NUM 1024` default needs 27,250 GPU iterations at 16 times the grid size, and its serial CPU reference alone exceeds 15 minutes on this host, so it is a time limit.
 
-Full sweep at the 600 s case limit:
+Harness correction and reclassification:
 
-The 537 built programs were split into 48 interleaved case shards and run through `cuda-sass/sm_89` with the `benchmarks.yaml` arguments. Every case was then run with the same artifact and arguments on the RTX 4060 Ti. `cmp` is the one exception: its shipped arguments hang for 600 s on hardware and exceed 20 G under emulation, so it was triaged separately. 536 cases are classified below, plus `cmp` as a hardware time limit.
+The first classification called 369 programs benchmark failures because the artifact manifest only carried the 144 `benchmarks.yaml` `test.args`. The per-benchmark Makefile `run:` targets were ignored, so 550 programs ran with no arguments (for example `adamw` and `atan2` printed their usage lines), and every case ran in its report directory, so relative data paths such as `../data/bfs/graph1MW_6.txt` did not resolve. That was a harness defect, not a benchmark failure, and it invalidated the emulator comparison for those programs.
+
+- The artifact now generates its manifest from the pinned source: `make -n run` expands each benchmark's `run:` target, including make variables and line continuations. The `benchmarks.yaml` arguments override the run target when present, preserving the smaller upstream test configuration. Programs with no run target or with shell syntax in it are listed in `hecbench-unparsed-runs.txt`.
+- The files the run target and the source literals open relative to the benchmark directory are copied into a source-shaped tree under `data/hecbench/tree/`, and the driver runs each case with that tree as its working directory. Paths that do not exist are listed in `hecbench-missing-data.txt`; most are outputs, and the remainder are sibling-model data (for example `urng-sycl`, `sobel-sycl`) or data HeCBench does not ship (`daphne`, `resnet-kernels`, `tpacf`).
+- The generated tree is 1.1 GiB. The support artifact grows by that amount.
+- Test-first: `conformance_hecbench` now builds synthetic Makefiles with a fixed argument list, a make variable, a missing data file, a shell target, and a yaml override, and checks the manifest, the copied data, and the two reports. The build also fails if a program whose run target returns arguments ends up with an empty manifest entry.
+- The driver test runs a case in a configured directory and checks its reported working directory as well as its arguments.
+
+Hardware rerun with the corrected manifest on the RTX 4060 Ti (535 programs; `cmp` and `si` are triaged separately):
 
 | Result | Cases |
 | --- | --- |
-| Verified pass | 28 |
-| Completion only | 43 |
-| Benchmark fails on the RTX 4060 Ti too | 369 |
-| Time limit, hardware pass | 39 |
-| Time limit, hardware completion | 23 |
-| Time limit, hardware fail | 3 |
-| Time limit, hardware hang | 1 |
-| Emulator defect, hardware pass | 23 |
-| Emulator defect, hardware completion | 7 |
+| Pass | 289 |
+| Completion only | 189 |
+| Fail | 48 |
+| Time limit | 9 |
 
-Verified passes: adam, adv, asta, bitpacking, bwt, chemv, concurrentKernels, fdtd3d, fpc, heat2d, histogram, hwt1d, keccaktreehash, laplace, laplace3d, layout, merge, nbody, overlap, pad, page-rank, particle-diffusion, pathfinder, pointwise, sc, segsort, triad, winograd.
+That replaces the earlier 369 benchmark failures. 478 programs pass or complete on hardware. The 48 failures are mostly missing data (`aes`, `bicgstab`, `daphne`, `deredundancy`, `egs`, `leukocyte`, `lr`, `mace`, `minibude`, `minimap2`, `mpc`, `sobel`, `ss`, `tgvnn`, `tonemapping`, `urng`, `word2vec`) and programs whose own check fails on this GPU (`assert`, `attention-paged`, `blockScan`, `channelShuffle`, `flip`, `nbody`, `storeKVCache`, `topk`, and others). `si` exceeds 32 GiB of host memory and is not run; `cmp` hangs for 600 s.
 
-Completion only: ace, amgmk, bfs, bonds, btree, cfd, clock, cobahh, crs, dispatch, divergence, eikonal, ert, extend2, fpdc, gaussian, gemv, gpp, grep, hmm, lavaMD, lci, lid-driven-cavity, local-ht, logan, lr, matrixT, metropolis, miniFE, minimap2, minimod, myocyte, nms, nn, particlefilter, pointerchase, qtclustering, quantAQLM, s3d, streamCreateCopyDestroy, testSNAP, voxelization, word2vec.
+Emulation rerun with the corrected manifest:
+
+The 478 hardware pass/completion programs were split into 48 interleaved shards. Shards 0 to 3 are complete (38 cases); the rest are not rerun. Of the 38, 5 pass, 6 complete, 6 fail, and 21 hit the 600 s limit. The time-limit fraction is too high to finish the full rerun in the time available: the emulator is 20 to 200 times slower than the RTX 4060 Ti, and the Makefile run targets are sized for hardware. The old emulator classifications for the other 440 programs are invalid because they ran without arguments.
+
+New or confirmed emulator defects in the 38 rerun cases, compared with hardware:
+
+- `abacus` still fails with `operation not supported`; the reduced `abacus 4 1 4 0.04 1` case reproduces it in 2.3 s.
+- `blas-dot`, `fsm`, `sddmm-batch`, and `sdma` fail under emulation but pass on hardware. `streamcluster` fails under emulation and completes on hardware.
+- The first classification's defect list was built on the broken harness and is superseded by this list until the full emulation rerun is done.
 
 Argument changes and measured times:
 
-- `bitpacking`: 1000 to 8 compress iterations, 479.8 s alone and 441.7 s in the bounded workload.
-- `laplace`: `NUM 1024` to 256, 3185 iterations, 299.9 s alone and 538.0 s in the bounded workload.
+- `bitpacking`: 1000 to 8 compress iterations, 441.7 s in the bounded workload.
+- `laplace`: `NUM 1024` to 256, 3185 iterations, 538.0 s in the bounded workload.
 - `softmax`: `repeat` 100 to 32, keeping the shipped slice count and size, 439.9 s. The shipped arguments exceed 600 s under emulation and pass on hardware.
 - `mdh`: not bounded; see above.
-- The other 62 time limits keep their shipped arguments. They pass or complete on hardware, so the limit reflects emulation speed, not workload size. Shrinking each one needs its own measured search; the largest groups are the BLAS batched kernels, the convolution and stencil kernels, and the Monte Carlo kernels.
-
-Emulator defects, compared with hardware:
-
-- `operation not supported` from a kernel build, launch, or a later memory call: abacus, gsplat3d, sheath, megablocks, tbe, rle, rmsnorm-rope, mlaDecode, asyncAllocation, radixsort2, stiff-ode. The CUDA runtime turns a failed kernel build into `CUDA_ERROR_NOT_SUPPORTED` without the compiler's diagnostic; the detail is needed to name the instruction. A reduced `abacus 4 1 4 0.04 1` case fails at the same `cudaMemcpy` in 2.3 s and passes on hardware.
-- Wrong results: hausdorff, p4, filter, minisweep, asmooth, linearprobing, perplexity, hybridsort, logprob, bspline-vgh, accuracy. `accuracy 512 1024 10 2` fails its own check in 3.6 s under emulation and passes in 0.36 s on hardware, so the large case's time limit hides a correctness defect.
-- Unknown error: softmax-online, perlin.
-- No output or a crash after the final timing line: logic-rewrite, merkle, aop, bgmv, vdi.
-- Argument handling: libor prints its usage line under emulation but runs on hardware.
-- Timeout: tpacf exceeds 600 s under emulation with no output, while hardware times out at 600 s too.
-
-369 benchmarks fail on the RTX 4060 Ti with the shipped arguments, so their emulator failures are not defects in Gemstone. Most exit in under a second with their own FAIL line; common causes are missing input files, arguments the program rejects, and benchmarks whose check is wrong on this GPU. The corpus needs a per-benchmark input and argument pass before these can be used as conformance cases.
+- The time limits in the 38 rerun cases keep their shipped arguments in this pass. Shrinking them needs a per-program measured search; the current set is dominated by the large neural, BLAS, and stencil kernels.
 - The `cuda-ptx` artifact does not carry HeCBench because `BUILD_HECBENCH` is fatbin-only, so the PTX comparison compiled the same sources with `-gencode arch=compute_89,code=compute_89` and ran them through `GEMSTONE_CUDA_CODE_MODE=ptx`.
 
 ### 3. Other models
@@ -126,7 +126,7 @@ Step 1 at the same commit:
 
 Ticket T42 (bounded arguments):
 
-- Default test arguments from `benchmarks.yaml` are extracted during configure to `data/hecbench/hecbench-arguments.json` (144 programs with test arguments). The conformance driver reads them from the support artifact and merges workload `program_arguments` over them.
+- Default test arguments from `benchmarks.yaml` now override the per-benchmark Makefile `run:` target (144 programs have yaml arguments). The artifact generates `data/hecbench/hecbench-arguments.json` and `data/hecbench/hecbench-directories.json` after the build, and installs the source-shaped data tree the run targets need. The conformance driver merges workload `program_arguments` over the generated arguments and runs each program in its data directory.
 - `bitpacking`: `main()` takes no command-line arguments. Shipped `kernels.cu` runs 1000 compress iterations and exceeds 600 s under emulation. The staging patch runs 8 iterations, measured at 479.8 s alone and 441.7 s in the bounded workload on `cuda-sass/sm_89`, passing all six sizes. Eight is the largest count that stays under 600 s at both measured per-iteration rates (60 s and 72 s); nine would exceed it at the slower rate.
 - `laplace`: `main(void)` takes no command-line arguments. Shipped `NUM 1024` needs 27,250 GPU iterations and its serial CPU reference exceeds 15 minutes. The staging patch uses `NUM 256` (3185 iterations), measured at 299.9 s alone and 538.0 s alongside `bitpacking` in the bounded workload on `cuda-sass/sm_89`, passing with the same norms as hardware. The next step, 512, multiplies both the grid and the iteration count.
 - `mdh`: `-itmax 1` is the smallest argument and brings the GPU work within reach, but the process still runs the serial CPU reference and three kernels, so it exceeds 600 s once each kernel is allowed to complete. At the default 1e11 instruction budget the first kernel is cut off after 61 s and the later launches fail, and the case prints FAIL in 64 s. Its inputs are hardcoded (`size[iatom]` is `natom` 5877 and `xkappa` is 0.0736), so `-xkappa * (dist - size[iatom])` is about +432 for every pair; `expf` overflows to `+inf` on both sides and the comparator's NaN test prints PASS without checking a value. No command-line input changes that, and the benchmark source is not patched to hide it. `mdh` is therefore not in the bounded workload and is not counted as a verified pass.
