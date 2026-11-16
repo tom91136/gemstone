@@ -1,6 +1,6 @@
 # Workload corpus
 
-Status: in progress. Step 1 is done. T42 bounds bitpacking and laplace; mdh is unverified and outside the bounded workload. Step 2 (CUDA sm_89 runs) in progress. Triage uses `concurrency-checking.md` to separate races from emulator defects.
+Status: in progress. Step 1 and T42 are done. Step 2's sweep, classification, and hardware triage are done: 28 verified passes, 43 completion only, 369 benchmark failures on the RTX 4060 Ti, 66 time limits, and 30 emulator defects open. Step 3 (HIP, SYCL, OpenMP) not started. Triage uses `concurrency-checking.md` to separate races from emulator defects.
 
 ## Goal
 
@@ -49,6 +49,45 @@ Triage of the first failing benchmarks on the cuda sm_89 vendor artifact, compar
 - `chemv` and `winograd`: the same loader defect. Both pass on hardware and, after the fix, on `cuda-sass/sm_89` (86 s and 29 s) and on PTX.
 - `mdh`: the same loader defect. The benchmark's shipped inputs make its check vacuous: `gendata` sets `size[iatom]` to `natom` (5877) and `xkappa` is 0.0736, so `-xkappa * (dist - size[iatom])` is about +432 for every atom pair. `expf` overflows to `+inf` on both CPU and GPU, `fabsf(inf - inf) > 1e-3f` is false, and the program prints PASS without comparing a finite value. With `-itmax 1` and the default 1e11 instruction budget the first kernel is cut off after 61 s and the later launches fail, so the case prints FAIL in 64 s. A probe with a 1e12 budget reported 333-406 s per kernel on SASS, which exceeds the 600 s case limit for three kernels, and 20-38 s on PTX. The default `itmax 100` is dominated by the benchmark's serial CPU reference (6.4 s per iteration), which exceeds the case timeout on hardware too. No argument changes the hardcoded inputs, so the check cannot be made meaningful this way; mdh is not counted as verified and is not in the bounded workload.
 - `laplace`: the same loader defect, reported as unsupported cubin text relocation `0x4a` because the per-object relocatable image was selected instead of the linked cubin. A reduced `NUM 256` build passes on both routes with the same 3185 iterations and norms as hardware (SASS 299.9 s, PTX 168 s). The shipped `NUM 1024` default needs 27,250 GPU iterations at 16 times the grid size, and its serial CPU reference alone exceeds 15 minutes on this host, so it is a time limit.
+
+Full sweep at the 600 s case limit:
+
+The 537 built programs were split into 48 interleaved case shards and run through `cuda-sass/sm_89` with the `benchmarks.yaml` arguments. Every case was then run with the same artifact and arguments on the RTX 4060 Ti. `cmp` is the one exception: its shipped arguments hang for 600 s on hardware and exceed 20 G under emulation, so it was triaged separately. 536 cases are classified below, plus `cmp` as a hardware time limit.
+
+| Result | Cases |
+| --- | --- |
+| Verified pass | 28 |
+| Completion only | 43 |
+| Benchmark fails on the RTX 4060 Ti too | 369 |
+| Time limit, hardware pass | 39 |
+| Time limit, hardware completion | 23 |
+| Time limit, hardware fail | 3 |
+| Time limit, hardware hang | 1 |
+| Emulator defect, hardware pass | 23 |
+| Emulator defect, hardware completion | 7 |
+
+Verified passes: adam, adv, asta, bitpacking, bwt, chemv, concurrentKernels, fdtd3d, fpc, heat2d, histogram, hwt1d, keccaktreehash, laplace, laplace3d, layout, merge, nbody, overlap, pad, page-rank, particle-diffusion, pathfinder, pointwise, sc, segsort, triad, winograd.
+
+Completion only: ace, amgmk, bfs, bonds, btree, cfd, clock, cobahh, crs, dispatch, divergence, eikonal, ert, extend2, fpdc, gaussian, gemv, gpp, grep, hmm, lavaMD, lci, lid-driven-cavity, local-ht, logan, lr, matrixT, metropolis, miniFE, minimap2, minimod, myocyte, nms, nn, particlefilter, pointerchase, qtclustering, quantAQLM, s3d, streamCreateCopyDestroy, testSNAP, voxelization, word2vec.
+
+Argument changes and measured times:
+
+- `bitpacking`: 1000 to 8 compress iterations, 479.8 s.
+- `laplace`: `NUM 1024` to 256, 3185 iterations, 299.9 s.
+- `softmax`: `repeat` 100 to 32, keeping the shipped slice count and size, 439.9 s. The shipped arguments exceed 600 s under emulation and pass on hardware.
+- `mdh`: not bounded; see above.
+- The other 62 time limits keep their shipped arguments. They pass or complete on hardware, so the limit reflects emulation speed, not workload size. Shrinking each one needs its own measured search; the largest groups are the BLAS batched kernels, the convolution and stencil kernels, and the Monte Carlo kernels.
+
+Emulator defects, compared with hardware:
+
+- `operation not supported` from a kernel build, launch, or a later memory call: abacus, gsplat3d, sheath, megablocks, tbe, rle, rmsnorm-rope, mlaDecode, asyncAllocation, radixsort2, stiff-ode. The CUDA runtime turns a failed kernel build into `CUDA_ERROR_NOT_SUPPORTED` without the compiler's diagnostic; the detail is needed to name the instruction. A reduced `abacus 4 1 4 0.04 1` case fails at the same `cudaMemcpy` in 2.3 s and passes on hardware.
+- Wrong results: hausdorff, p4, filter, minisweep, asmooth, linearprobing, perplexity, hybridsort, logprob, bspline-vgh, accuracy. `accuracy 512 1024 10 2` fails its own check in 3.6 s under emulation and passes in 0.36 s on hardware, so the large case's time limit hides a correctness defect.
+- Unknown error: softmax-online, perlin.
+- No output or a crash after the final timing line: logic-rewrite, merkle, aop, bgmv, vdi.
+- Argument handling: libor prints its usage line under emulation but runs on hardware.
+- Timeout: tpacf exceeds 600 s under emulation with no output, while hardware times out at 600 s too.
+
+369 benchmarks fail on the RTX 4060 Ti with the shipped arguments, so their emulator failures are not defects in Gemstone. Most exit in under a second with their own FAIL line; common causes are missing input files, arguments the program rejects, and benchmarks whose check is wrong on this GPU. The corpus needs a per-benchmark input and argument pass before these can be used as conformance cases.
 - The `cuda-ptx` artifact does not carry HeCBench because `BUILD_HECBENCH` is fatbin-only, so the PTX comparison compiled the same sources with `-gencode arch=compute_89,code=compute_89` and ran them through `GEMSTONE_CUDA_CODE_MODE=ptx`.
 
 ### 3. Other models
