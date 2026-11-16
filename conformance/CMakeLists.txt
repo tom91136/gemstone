@@ -178,7 +178,6 @@ endif()
 set(CONFORMANCE_INTERPRETER_DIRECTORY "" CACHE PATH "Interpreter environment cache the shims resolve by default")
 set(CONFORMANCE_INTERPRETER_PACKAGES "" CACHE STRING "Interpreter packages whose shims this artifact installs")
 string(REPLACE "," ";" CONFORMANCE_INTERPRETER_PACKAGES "${CONFORMANCE_INTERPRETER_PACKAGES}")
-set(CONFORMANCE_INTERPRETER_IMAGE "" CACHE STRING "Container image the Julia cases run in")
 set(CONFORMANCE_TIMEOUT_INTERPRETER 900)
 include(dependencies.cmake)
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
@@ -286,6 +285,10 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/OffloadKeyTest.cmake")
     add_test(NAME conformance_interpreter_shim
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterShimTest.cmake")
+    add_test(NAME conformance_interpreter_cache
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterCacheTest.cmake")
+    add_test(NAME conformance_interpreter_prepare
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterPrepareTest.cmake")
   endif()
 
   add_executable(conformance_fixture tests/fixture.cpp)

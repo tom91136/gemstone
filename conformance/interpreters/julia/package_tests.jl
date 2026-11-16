@@ -11,14 +11,16 @@ function classify(text)
     return "emulator defect"
 end
 
-function execute(command)
+function execute(command; echo = true)
     path, io = mktemp()
     process = Base.run(pipeline(command, stdout = io, stderr = io); wait = false)
     wait(process)
     close(io)
     output = read(path, String)
     rm(path)
-    print(output)
+    if echo
+        print(output)
+    end
     return success(process), output
 end
 
@@ -35,7 +37,8 @@ end
 function cases(output)
     names = String[]
     for line in split(output, '\n')
-        match(r"^ - (.+)$", line) === nothing || push!(names, match(r"^ - (.+)$", line).captures[1])
+        m = match(r"^ - (.*?)(?:\s+\([0-9.]+s\))?$", line)
+        m === nothing || push!(names, m.captures[1])
     end
     if isempty(names)
         list = match(r"Available tests to run: \[(.*)\]", output)
@@ -49,8 +52,14 @@ function main()
     script = suite(package)
     isfile(script) || error("package has no test suite: $script")
     if "--list" in ARGS
-        passed, output = execute(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script --list`)
-        passed || (println("conformance-classification: ", classify(output)); return 1)
+        passed, output = withenv("LD_PRELOAD" => nothing, "LD_LIBRARY_PATH" => nothing, "CUDA_VISIBLE_DEVICES" => nothing, "ROCM_PATH" => nothing) do
+            execute(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script --list`; echo = false)
+        end
+        if !passed
+            println(stderr, output)
+            println("conformance-classification: ", classify(output))
+            return 1
+        end
         for name in cases(output)
             println(name)
         end

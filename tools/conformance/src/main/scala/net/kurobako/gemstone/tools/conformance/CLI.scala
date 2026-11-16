@@ -199,7 +199,21 @@ object CLI {
   }
 
   private def emulate(emulation: Emulation): Int = {
-    val root       = emulation.suite.root
+    val root            = emulation.suite.root
+    val activeRoutes    = routes(emulation)
+    val prepareScript   = root.resolve("conformance/interpreters/Prepare.cmake")
+    val directoryOption = sys.env.get(conformanceEnvironment.InterpreterDirectory).toVector.map(dir =>
+      s"-D${conformanceEnvironment.InterpreterDirectory}=$dir"
+    )
+    val prepareCommand = Vector(
+      "cmake",
+      s"-DCONFORMANCE=${root.resolve("conformance").toAbsolutePath}",
+      s"-DWORKLOAD=${emulation.workload}",
+      s"-DWORKLOADS=${emulation.workloads.toAbsolutePath}",
+      s"-DROUTES=${activeRoutes.mkString(";")}"
+    ) ++ directoryOption ++ Vector("-P", s"${prepareScript.toAbsolutePath}")
+    val status = Process(prepareCommand, root.toFile).!
+    require(status == 0, s"interpreter preparation failed with exit code $status")
     val processors = positive(environment.ThreadCount, sys.runtime.availableProcessors())
     val jobs       = positive(conformanceEnvironment.JobCount, math.max(1, math.min(16, processors / 2)))
     val workers    = positive(environment.ExecutionThreadCount, math.max(1, math.min(64, processors / 2)))
@@ -274,7 +288,7 @@ object CLI {
         run(
           emulation.suite,
           Vector("--direct", "--workloads", s"${emulation.workloads}", "--workload", emulation.workload) ++
-            (if (emulation.dryRun) Vector("--dry-run") else Vector.empty) ++ routes(emulation) ++
+            (if (emulation.dryRun) Vector("--dry-run") else Vector.empty) ++ activeRoutes ++
             Vector("--isolated-launcher", "--launcher", "--", "/bin/sh", s"$script"),
           settings
         )
