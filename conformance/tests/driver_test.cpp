@@ -1544,3 +1544,26 @@ TEST_CASE("tiers nest and the release programs are selected only by all", "[driv
     CHECK(all.excludeCases.empty());
   }
 }
+
+TEST_CASE("driver lists selected programs for routes and workload", "[driver][list-programs]") {
+  TemporaryDirectory directory;
+  const auto artifacts = directory.path / "artifacts";
+  const auto artifact = artifacts / "opencl";
+  fs::create_directories(artifact);
+  std::ofstream(artifact / "artifact.toml") << "backend = 'opencl'\n";
+  std::ofstream(artifact / "test-programs.txt") << "first_prog\t10\tcatch2\nsecond_prog\t10\tcatch2\nthird_prog\t10\tcatch2\n";
+  for (const auto *name : {"first_prog", "second_prog", "third_prog"})
+    fs::copy_file(Fixture, artifact / (std::string(name) + Fixture.extension().string()));
+  const auto workloads = directory.path / "workloads";
+  fs::create_directories(workloads);
+  std::ofstream(workloads / "custom.toml") << "include_programs = ['first_*', 'third_*']\nexclude_programs = ['third_*']\n";
+  const auto output = directory.path / "output";
+  const auto result = runProcess({Driver.string(), "run", "--list-programs", "--direct", "--artifacts", artifacts.string(), "--output",
+                                  output.string(), "--workloads", workloads.string(), "--workload", "custom", "opencl"},
+                                 directory.path, baseEnvironment(), 10s, {}, true);
+  INFO(result.output);
+  INFO(result.error);
+  REQUIRE(result.status == 0);
+  CHECK(result.output == "first_prog\n");
+  CHECK_FALSE(fs::exists(output));
+}

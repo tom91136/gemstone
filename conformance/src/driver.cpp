@@ -80,7 +80,8 @@ bool validIdentifier(std::string_view value) {
 // A single path component: an identifier that is not a directory reference.
 bool validName(std::string_view value) { return validIdentifier(value) && value != "." && value != ".."; }
 void validateRunOptions(RunOptions &c) {
-  if (c.artifacts.empty() || c.output.empty()) throw std::invalid_argument("run requires --artifacts and --output");
+  if (c.artifacts.empty() || (!c.listPrograms && c.output.empty()))
+    throw std::invalid_argument(c.listPrograms ? "list-programs requires --artifacts" : "run requires --artifacts and --output");
   if (c.direct) {
     if (!c.profiles.empty() || c.machine) throw std::invalid_argument("--direct cannot use --profiles or --machine");
     if (c.workloads.empty()) throw std::invalid_argument("--direct requires --workloads");
@@ -93,7 +94,7 @@ void validateRunOptions(RunOptions &c) {
   if (c.workloads.empty()) c.workloads = c.profiles.parent_path() / "workloads";
   c.workloads = fs::absolute(c.workloads).lexically_normal();
   c.artifacts = fs::absolute(c.artifacts).lexically_normal();
-  c.output = fs::absolute(c.output).lexically_normal();
+  if (!c.output.empty()) c.output = fs::absolute(c.output).lexically_normal();
 }
 uint32_t positiveSetting(const char *name, uint32_t fallback) {
   const auto *raw = std::getenv(name);
@@ -1120,6 +1121,17 @@ int32_t run(RunOptions configuration) {
   for (const auto &target : targets)
     (void)validateArtifact(artifactDirectory(configuration, target), target);
   const auto workload = loadWorkload(configuration);
+  if (configuration.listPrograms) {
+    std::set<std::string> programs;
+    for (const auto &target : targets) {
+      const auto artifact = artifactDirectory(configuration, target);
+      for (const auto &program : testPrograms(artifact, workload))
+        programs.insert(program.name);
+    }
+    for (const auto &program : programs)
+      std::cout << program << '\n';
+    return 0;
+  }
   const auto root = configuration.output / name;
   fs::create_directories(root);
   fs::path reports;

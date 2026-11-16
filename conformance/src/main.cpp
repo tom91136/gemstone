@@ -16,8 +16,9 @@ static int conformanceMain(std::vector<std::string> positional = fire::arg({0, "
                            const std::string &artifacts = fire::arg("--artifacts", ""),
                            const std::string &output = fire::arg("--output", ""), const std::string &machine = fire::arg("--machine", ""),
                            std::string workload = fire::arg("--workload", "short"), bool direct = fire::arg("--direct"),
-                           bool dryRun = fire::arg("--dry-run"), const std::string &workloads = fire::arg("--workloads", ""),
-                           bool isolated = fire::arg("--isolated-launcher"), bool launcher = fire::arg("--launcher")) {
+                           bool dryRun = fire::arg("--dry-run"), bool listPrograms = fire::arg("--list-programs"),
+                           const std::string &workloads = fire::arg("--workloads", ""), bool isolated = fire::arg("--isolated-launcher"),
+                           bool launcher = fire::arg("--launcher")) {
   try {
     if (positional.empty()) throw std::invalid_argument("expected run");
     // Fire keeps arguments after -- positional. Its raw argument API preserves
@@ -32,12 +33,13 @@ static int conformanceMain(std::vector<std::string> positional = fire::arg({0, "
     }
     const auto command = positional.front();
     positional.erase(positional.begin());
-    if (command == "run") {
+    if (command == "run" || command == "list-programs") {
       conformance::driver::RunOptions c;
       c.profiles = profiles;
       c.workloads = workloads;
       c.direct = direct;
       c.dryRun = dryRun;
+      c.listPrograms = listPrograms || command == "list-programs";
       c.artifacts = artifacts;
       c.output = output;
       c.workload = std::move(workload);

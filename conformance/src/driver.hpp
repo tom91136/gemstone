@@ -40,6 +40,7 @@ struct RunOptions {
   bool isolatedLauncher = false;
   bool direct = false;
   bool dryRun = false;
+  bool listPrograms = false;
   uint32_t threads = availableThreadCount();
   double timeoutScale = 1.0;
 };

@@ -205,12 +205,28 @@ object CLI {
     val directoryOption = sys.env.get(conformanceEnvironment.InterpreterDirectory).toVector.map(dir =>
       s"-D${conformanceEnvironment.InterpreterDirectory}=$dir"
     )
+    val listBuffer = new StringBuilder
+    val listStatus = Process(
+      Vector(
+        s"${emulation.suite.executable}",
+        "run",
+        "--list-programs",
+        "--direct",
+        "--artifacts",
+        s"${emulation.suite.artifacts}",
+        "--workloads",
+        s"${emulation.workloads.toAbsolutePath}",
+        "--workload",
+        emulation.workload
+      ) ++ activeRoutes,
+      root.toFile
+    ).!(ProcessLogger(line => { val _ = listBuffer.append(line).append('\n') }, _ => ()))
+    require(listStatus == 0, s"driver program listing failed with exit code $listStatus")
+    val programs       = listBuffer.toString.linesIterator.filter(_.nonEmpty).toVector
     val prepareCommand = Vector(
       "cmake",
       s"-DCONFORMANCE=${root.resolve("conformance").toAbsolutePath}",
-      s"-DWORKLOAD=${emulation.workload}",
-      s"-DWORKLOADS=${emulation.workloads.toAbsolutePath}",
-      s"-DROUTES=${activeRoutes.mkString(";")}"
+      s"-DPROGRAMS=${programs.mkString(";")}"
     ) ++ directoryOption ++ Vector("-P", s"${prepareScript.toAbsolutePath}")
     val status = Process(prepareCommand, root.toFile).!
     require(status == 0, s"interpreter preparation failed with exit code $status")

@@ -2,7 +2,6 @@ cmake_minimum_required(VERSION 3.25)
 
 get_filename_component(conformance "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(prepare_script "${conformance}/interpreters/Prepare.cmake")
-set(workloads "${conformance}/workloads")
 
 if(NOT EXISTS "${prepare_script}")
   message(FATAL_ERROR "Missing interpreter preparation script: ${prepare_script}")
@@ -12,14 +11,12 @@ function(fail text)
   message(FATAL_ERROR "${text}")
 endfunction()
 
-function(check_selection routes workload expected)
+function(check_mapping programs expected)
   execute_process(
     COMMAND "${CMAKE_COMMAND}"
       "-DCONFORMANCE=${conformance}"
       "-DMODE=query"
-      "-DROUTES=${routes}"
-      "-DWORKLOAD=${workload}"
-      "-DWORKLOADS=${workloads}"
+      "-DPROGRAMS=${programs}"
       -P "${prepare_script}"
     OUTPUT_VARIABLE output
     ERROR_VARIABLE error
@@ -27,19 +24,21 @@ function(check_selection routes workload expected)
     OUTPUT_STRIP_TRAILING_WHITESPACE
   )
   if(NOT status EQUAL 0)
-    fail("Query failed for routes '${routes}' workload '${workload}': ${error}")
+    fail("Query failed for programs '${programs}': ${error}")
   endif()
   set(actual "${output}")
   if(NOT actual STREQUAL expected)
-    fail("Selection mismatch for routes '${routes}' workload '${workload}': expected '${expected}', got '${actual}'")
+    fail("Mapping mismatch for programs '${programs}': expected '${expected}', got '${actual}'")
   endif()
 endfunction()
 
-check_selection("cuda/clang-sm_90a" "interpreters-bounded" "numba;julia-cuda")
-check_selection("hip/clang-gfx950" "interpreters-bounded" "julia-amdgpu")
-check_selection("sycl-shard-0" "interpreters-bounded" "julia-oneapi")
-check_selection("opencl/clang" "interpreters-bounded" "")
-check_selection("vulkan/vendor" "interpreters-bounded" "")
-check_selection("cuda/clang-sm_90a" "opencl-cts-bounded" "")
-check_selection("cuda/clang-sm_90a" "xlong" "numba;julia-cuda")
-check_selection("all" "interpreters-bounded" "numba;julia-cuda;julia-amdgpu;julia-oneapi")
+check_mapping("python_numba" "numba")
+check_mapping("julia_babelstream_cuda" "julia-cuda")
+check_mapping("julia_tests_cuda" "julia-cuda")
+check_mapping("python_numba;julia_babelstream_cuda" "numba;julia-cuda")
+check_mapping("julia_babelstream_amdgpu;julia_tests_amdgpu" "julia-amdgpu")
+check_mapping("julia_babelstream_oneapi;julia_tests_oneapi" "julia-oneapi")
+check_mapping("other_program;native_test" "")
+check_mapping("python_numba;other_program" "numba")
+check_mapping("python_numba;julia_babelstream_cuda;julia_babelstream_amdgpu;julia_babelstream_oneapi" "numba;julia-cuda;julia-amdgpu;julia-oneapi")
+check_mapping("" "")
