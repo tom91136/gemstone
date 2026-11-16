@@ -150,7 +150,7 @@ object References {
           "nvidia-cuda-nvml-dev",
           "cuda-nvml-dev",
           CudaAPIPackage,
-          "495184653dfcf34d5e6aa6db9f13d04bcf39684ecd367ce3006ee7762c176670"
+          "2dd478ee55c6042c82b1f45d3ba418db4d9cc5fbdb9fc854b6712ebb3fba206a"
         ),
         "nvidia/nvml",
         CudaTarget,
