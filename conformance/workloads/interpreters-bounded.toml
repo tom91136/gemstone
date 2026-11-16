@@ -22,6 +22,8 @@ include_cases = [
   "core/cudadrv",
   "core/array",
   "core/broadcast",
+  "device/array",
+  "device/execution_control",
   "array",
   "execution",
   "level-zero",

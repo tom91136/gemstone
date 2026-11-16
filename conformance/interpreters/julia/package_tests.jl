@@ -8,7 +8,7 @@ function classify(text)
     elseif occursin("symbol not found", text) || occursin("CUDA_ERROR_NOT_FOUND", text)
         return "missing entry point"
     end
-    return "emulator defect"
+    return "unclassified"
 end
 
 function execute(command; echo = true)
@@ -37,8 +37,19 @@ end
 function cases(output)
     names = String[]
     for line in split(output, '\n')
-        m = match(r"^ - (.*?)(?:\s+\([0-9.]+s\))?$", line)
+        m = match(r"^ [-\u00d7] (.*?)(?:\s+\([0-9.]+s\))?$", line)
         m === nothing || push!(names, m.captures[1])
+    end
+    if isempty(names)
+        boxed = false
+        for line in split(output, '\n')
+            if occursin(r"^\u250c Info: Available tests:", line)
+                boxed = true
+            elseif boxed
+                m = match(r"^\u2502 (.+)$", line)
+                m === nothing ? (boxed = false) : push!(names, m.captures[1])
+            end
+        end
     end
     if isempty(names)
         list = match(r"Available tests to run: \[(.*)\]", output)
@@ -47,14 +58,20 @@ function cases(output)
     return names
 end
 
+const LISTING_WRAPPER = "import Pkg; Pkg.add(::Vector{String}; kwargs...) = nothing; include(popfirst!(ARGS))"
+
+function list_suite(script)
+    return withenv("LD_PRELOAD" => nothing, "LD_LIBRARY_PATH" => nothing, "CUDA_VISIBLE_DEVICES" => nothing, "ROCM_PATH" => nothing, "ROCR_VISIBLE_DEVICES" => nothing, "HIP_VISIBLE_DEVICES" => nothing) do
+        execute(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -e $LISTING_WRAPPER $script --list`; echo = false)
+    end
+end
+
 function main()
     package = ARGS[1]
     script = suite(package)
     isfile(script) || error("package has no test suite: $script")
     if "--list" in ARGS
-        passed, output = withenv("LD_PRELOAD" => nothing, "LD_LIBRARY_PATH" => nothing, "CUDA_VISIBLE_DEVICES" => nothing, "ROCM_PATH" => nothing, "ROCR_VISIBLE_DEVICES" => nothing, "HIP_VISIBLE_DEVICES" => nothing) do
-            execute(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script --list`; echo = false)
-        end
+        passed, output = list_suite(script)
         if !passed
             println(stderr, output)
             println("conformance-classification: ", classify(output))
@@ -77,4 +94,6 @@ function main()
     return 0
 end
 
-exit(main())
+if abspath(PROGRAM_FILE) == @__FILE__
+    exit(main())
+end

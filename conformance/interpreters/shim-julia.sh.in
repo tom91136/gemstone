@@ -15,6 +15,13 @@ IFS=:
 for library in ${LD_PRELOAD-}; do
   case "$(basename "$library")" in libamdhip64.so*) export ROCM_PATH="$(dirname "$library")" ;; esac
 done
+for directory in ${LD_LIBRARY_PATH-}; do
+  if [ -z "${ROCM_PATH-}" ]; then
+    for library in "$directory"/libamdhip64.so*; do
+      [ -e "$library" ] && export ROCM_PATH="$directory" && break
+    done
+  fi
+done
 IFS=$saved_ifs
 
 exec "$julia" --startup-file=no --project="$project" \
