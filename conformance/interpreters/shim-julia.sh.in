@@ -1,52 +1,21 @@
-#!/bin/bash
-# Julia 1.9 refuses to start under the host's SELinux execstack policy, so the case runs in the route's image with the
-# client's loader paths, RPC socket, and environment mounted. Everything else is the pinned depot beside the interpreter.
+#!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 base=${CONFORMANCE_INTERPRETER_DIRECTORY:-@CONFORMANCE_INTERPRETER_DIRECTORY@}
 depot="$base/@PACKAGE@-@KEY@"
-image=${CONFORMANCE_INTERPRETER_IMAGE:-@IMAGE@}
-container=${CONFORMANCE_CONTAINER_EXECUTABLE:-podman}
 julia="$base/julia-@JULIA@/bin/julia"
 project="$depot/environment/@PROJECT@"
 
-arguments=(run --rm --security-opt label=disable --userns keep-id --user "$(id -u):$(id -g)"
-  --memory=16g --cgroup-parent=agents.slice
-  --network none --env-host --env HOME=/tmp --workdir /tmp
-  --env "JULIA_DEPOT_PATH=$depot" --env JULIA_PKG_OFFLINE=true --env "JULIA_NUM_THREADS=${JULIA_NUM_THREADS:-1}"
-  --mount "type=bind,source=$base,target=$base"
-  --mount "type=bind,source=$root,target=$root,readonly")
+export JULIA_DEPOT_PATH="$depot"
+export JULIA_PKG_OFFLINE=true
+export JULIA_NUM_THREADS="${JULIA_NUM_THREADS:-1}"
+
 saved_ifs=$IFS
 IFS=:
-mounted_dirs=()
-for directory in ${LD_LIBRARY_PATH-}; do
-  [ -d "$directory" ] && mounted_dirs+=("$(readlink -f "$directory")")
-done
 for library in ${LD_PRELOAD-}; do
-  [ -d "$(dirname "$library")" ] && mounted_dirs+=("$(readlink -f "$(dirname "$library")")")
-  case "$(basename "$library")" in libamdhip64.so*) arguments+=(--env "ROCM_PATH=$(dirname "$library")") ;; esac
+  case "$(basename "$library")" in libamdhip64.so*) export ROCM_PATH="$(dirname "$library")" ;; esac
 done
 IFS=$saved_ifs
-unset directory library
-if [ ${#mounted_dirs[@]} -gt 0 ]; then
-  for dir in $(printf '%s\n' "${mounted_dirs[@]}" | sort -u); do
-    if [ -n "$dir" ] && [ "$dir" != "$base" ] && [ "$dir" != "$root" ]; then
-      arguments+=(--mount "type=bind,source=$dir,target=$dir,readonly")
-    fi
-  done
-fi
-mounted_sessions=()
-for endpoint in $(env | sed -n 's/^.*=unix:\/\///p'); do
-  if [ -e "$endpoint" ] || [ -d "$(dirname "$endpoint")" ]; then
-    mounted_sessions+=("$(readlink -f "$(dirname "$endpoint")")")
-  fi
-done
-if [ ${#mounted_sessions[@]} -gt 0 ]; then
-  for session in $(printf '%s\n' "${mounted_sessions[@]}" | sort -u); do
-    if [ -n "$session" ] && [ "$session" != "$base" ] && [ "$session" != "$root" ]; then
-      arguments+=(--mount "type=bind,source=$session,target=$session")
-    fi
-  done
-fi
-exec "$container" "${arguments[@]}" "$image" "$julia" --startup-file=no --project="$project" \
+
+exec "$julia" --startup-file=no --project="$project" \
   "$root/data/interpreters/@SCRIPT@" @ARGUMENTS@ "$@"

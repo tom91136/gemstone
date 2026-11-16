@@ -132,18 +132,6 @@ pinned_dependency(hecbench_fmt SOURCE_ONLY
   URL https://codeload.github.com/fmtlib/fmt/tar.gz/refs/tags/7.1.2
   URL_HASH SHA256=4119a1c34dff91631e1d0a3707428f764f1ea22fe3cd5e70af5b4ccd5513831c)
 
-# Interpreter environments are built from these toolchains and cached by lock file; only the downloads are shared with
-# the source cache, never their installed payloads.
-set(conformance_python_release 3.12.16+20261110)
-pinned_dependency(cpython DOWNLOAD_NO_EXTRACT YES
-  URL https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-x86_64-unknown-linux-gnu-install_only.tar.gz
-  URL_HASH SHA256=c2f87d4b4e8db3abddb0f116c6ccfc503d0cbdbb9ee8faacddad1b679ec12e99
-  FILENAME cpython-3.12.16.tar.gz)
-set(conformance_julia_release 1.13.4)
-pinned_dependency(julia DOWNLOAD_NO_EXTRACT YES
-  URL https://julialang-s3.julialang.org/bin/linux/x64/1.13/julia-1.13.4-linux-x86_64.tar.gz
-  URL_HASH SHA256=cf1658f13b91facccd57d41464d7125a0e48a1d24f49062d71532d04d4ec4130
-  FILENAME julia-1.13.4.tar.gz)
 
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/Hecbench.cmake")
 if(DEPENDENCY_CACHE_MODE STREQUAL "populate" OR CONFORMANCE_BUILD_HECBENCH)

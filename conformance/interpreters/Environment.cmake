@@ -1,5 +1,15 @@
 include("${CMAKE_CURRENT_LIST_DIR}/Packages.cmake")
 
+set(conformance_python_release 3.12.16+20261110)
+set(conformance_python_url "https://github.com/astral-sh/python-build-standalone/releases/download/20261110/cpython-3.12.16%2B20261110-x86_64-unknown-linux-gnu-install_only.tar.gz")
+set(conformance_python_sha256 "c2f87d4b4e8db3abddb0f116c6ccfc503d0cbdbb9ee8faacddad1b679ec12e99")
+set(conformance_python_archive "cpython-3.12.16.tar.gz")
+
+set(conformance_julia_release 1.13.4)
+set(conformance_julia_url "https://julialang-s3.julialang.org/bin/linux/x64/1.13/julia-1.13.4-linux-x86_64.tar.gz")
+set(conformance_julia_sha256 "cf1658f13b91facccd57d41464d7125a0e48a1d24f49062d71532d04d4ec4130")
+set(conformance_julia_archive "julia-1.13.4.tar.gz")
+
 # The key names the environment cache entry: the lock file, the installer, and the interpreter pin. Paths are relative
 # so that identical checkouts on different hosts share an environment.
 function(conformance_interpreter_environment_key package output)

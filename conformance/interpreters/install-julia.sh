@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds one Julia depot into the interpreter cache. Runs in the route's container image; packages and their artifacts
+# Builds one Julia depot into the interpreter cache; packages and their artifacts
 # are fetched here only, and the checked-in manifest is the lock file.
 set -eu
 

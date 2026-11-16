@@ -1,6 +1,5 @@
 #!/bin/sh
-# Builds one Python environment into the interpreter cache. Runs in the route's container image so the wheels match the
-# artifact's libc; the interpreter itself is the pinned standalone build in the cache.
+# Builds one Python environment into the interpreter cache. The interpreter itself is the pinned standalone build in the cache.
 set -eu
 
 cache=$1

@@ -14,18 +14,17 @@ set(KEY 0123456789abcdef)
 set(SCRIPT julia/babelstream.jl)
 set(ARGUMENTS amdgpu)
 set(PROJECT babelstream)
-set(IMAGE image)
 set(JULIA 1.13.4)
 configure_file("${interpreters}/shim-julia.sh.in" "${directory}/shim" @ONLY)
 file(CHMOD "${directory}/shim" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-file(WRITE "${directory}/container" "#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
-file(CHMOD "${directory}/container" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-file(MAKE_DIRECTORY "${directory}/base" "${directory}/native" "${directory}/other")
+file(MAKE_DIRECTORY "${directory}/base/julia-1.13.4/bin" "${directory}/native" "${directory}/other")
+file(WRITE "${directory}/base/julia-1.13.4/bin/julia"
+  "#!/bin/sh\nif [ -n \"\${ROCM_PATH-}\" ]; then echo \"ROCM_PATH=\$ROCM_PATH\"; fi\nprintf '%s\\n' \"$@\"\n")
+file(CHMOD "${directory}/base/julia-1.13.4/bin/julia" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 
 function(shim_arguments preload output)
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env
-      "CONFORMANCE_CONTAINER_EXECUTABLE=${directory}/container"
       "CONFORMANCE_INTERPRETER_DIRECTORY=${directory}/base"
       "LD_PRELOAD=${preload}"
       "${directory}/shim"
