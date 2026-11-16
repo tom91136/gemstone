@@ -1,7 +1,6 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -96,6 +95,8 @@ std::string toolLibraryPath() {
 std::string toolPreload() {
   std::string preload;
   if (const auto *sanitizer = GEMSTONE_SANITIZER_PRELOAD; sanitizer[0] != '\0') preload = sanitizer;
+  if (!preload.empty()) preload.append(":");
+  preload.append(GEMSTONE_HSA_LIBRARY);
   if (const auto inherited = gemstone::environment::text("LD_PRELOAD"); inherited && !inherited->empty()) {
     if (!preload.empty()) preload.append(":");
     preload.append(*inherited);
@@ -110,7 +111,7 @@ class ToolEnvironment {
   gemstone_test::Environment device;
   gemstone_test::Environment target;
   gemstone_test::Environment libraryPath;
-  std::optional<gemstone_test::Environment> preload;
+  gemstone_test::Environment preload;
   gemstone_test::Environment opencl;
   gemstone_test::Environment openclVendors;
   gemstone_test::Environment levelZero;
@@ -121,8 +122,7 @@ public:
   explicit ToolEnvironment(const gemstone::DevicePreset &preset)
       : device(gemstone::environment::Device, std::string(preset.name).c_str()),
         target(gemstone::environment::TargetArch, std::string(preset.target).c_str()),
-        libraryPath("LD_LIBRARY_PATH", toolLibraryPath().c_str()),
-        preload(toolPreload().empty() ? std::nullopt : std::make_optional<gemstone_test::Environment>("LD_PRELOAD", toolPreload().c_str())),
+        libraryPath("LD_LIBRARY_PATH", toolLibraryPath().c_str()), preload("LD_PRELOAD", toolPreload().c_str()),
         opencl("OCL_ICD_FILENAMES", GEMSTONE_OPENCL_LIBRARY), openclVendors("OCL_ICD_VENDORS", GEMSTONE_OPENCL_LIBRARY),
         levelZero("ZE_ENABLE_ALT_DRIVERS", GEMSTONE_LEVEL_ZERO_LIBRARY), dtif("HSA_ENABLE_DTIF", "1"),
         rocmSmiLib("ROCM_SMI_LIB_PATH", GEMSTONE_TOOL_ROCM_SMI_LIB) {}

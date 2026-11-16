@@ -43,6 +43,7 @@ gemstone_require_abi_implementations(
   EXPORT "hsaKmt*")
 
 add_library(gemstone_hsa_runtime SHARED
+  src/amdgpu_state.cpp
   src/runtime.cpp
   ../generated/hsa/gemstone_hsa_unsupported.cpp
 )
@@ -51,12 +52,13 @@ target_include_directories(gemstone_hsa_runtime SYSTEM PUBLIC ${HSA_INCLUDE_DIR}
 target_include_directories(gemstone_hsa_runtime PUBLIC include)
 target_compile_definitions(gemstone_hsa_runtime PRIVATE GEMSTONE_HSA_RUNTIME_LIBRARY=1)
 gemstone_project_target(gemstone_hsa_runtime)
-target_link_libraries(gemstone_hsa_runtime PRIVATE gemstone_hsa_core gemstone_execution_client)
+target_link_libraries(gemstone_hsa_runtime PRIVATE gemstone_hsa_core gemstone_execution_client ${CMAKE_DL_LIBS})
 gemstone_require_abi_implementations(
   TARGET gemstone_hsa_runtime
   PLATFORM hsa
   FORCE_INCLUDE
-  EXPORT "hsa_*" "gemstone_hsa_*")
+  EXPORT "hsa_*" "gemstone_hsa_*" "open" "open64" "openat" "openat64" "stat" "stat64" "lstat" "lstat64" "fstatat"
+    "fstatat64" "access" "faccessat")
 
 if(BUILD_TESTING)
   gemstone_memory_client(hsa gemstone_hsa_runtime)
@@ -79,6 +81,9 @@ if(BUILD_TESTING)
   add_executable(gemstone_hsa_hostcall_test test/hostcall_test.cpp)
   target_link_libraries(gemstone_hsa_hostcall_test PRIVATE gemstone_hsa_core)
   gemstone_test_target(gemstone_hsa_hostcall_test)
+  add_executable(gemstone_hsa_amdgpu_state_test test/amdgpu_state_test.cpp)
+  target_link_libraries(gemstone_hsa_amdgpu_state_test PRIVATE gemstone_hsa_runtime ${CMAKE_DL_LIBS})
+  gemstone_test_target(gemstone_hsa_amdgpu_state_test)
   add_executable(gemstone_hsa_target_test test/target_test.cpp)
   target_include_directories(gemstone_hsa_target_test PRIVATE include ../generated/amdgpu ${GEMSTONE_NATIVE_INCLUDE_DIRECTORY})
   gemstone_test_target(gemstone_hsa_target_test)
@@ -95,6 +100,7 @@ if(BUILD_TESTING)
   gemstone_discover_tests(gemstone_hsa_aql_execution_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_runtime_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_multi_device_test TEST_PREFIX "hsa/")
+  gemstone_discover_tests(gemstone_hsa_amdgpu_state_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_target_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_images_test TEST_PREFIX "hsa/")
   gemstone_discover_tests(gemstone_hsa_hostcall_test TEST_PREFIX "hsa/")
