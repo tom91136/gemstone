@@ -666,13 +666,14 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
         auto message = fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
                                    deqp ? listingPath.string() : listing.error);
         auto classification = caseClassification(listing.output + listing.error);
-        tests.push_back({.identity = "discovery",
-                         .program = program.name,
-                         .timeoutSeconds = 1,
-                         .index = 0,
-                         .count = 1,
-                         .discoveryFailure = std::move(message),
-                         .discoveryClassification = classification.empty() ? "unclassified" : std::move(classification)});
+        tests.push_back(
+            {.identity = "discovery",
+             .program = program.name,
+             .timeoutSeconds = 1,
+             .index = 0,
+             .count = 1,
+             .discoveryFailure = DiscoveryFailure{.message = std::move(message),
+                                                  .classification = classification.empty() ? "unclassified" : std::move(classification)}});
         continue;
       }
       if (deqp) {
@@ -775,11 +776,11 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
             .output = "SKIP " + test.identity + ": machine profile\n",
             .message = "machine profile",
             .classification = {}};
-  if (!test.discoveryFailure.empty())
+  if (test.discoveryFailure)
     return {.status = 1,
-            .output = fmt::format("conformance: {}\n", test.discoveryFailure),
-            .message = test.discoveryFailure,
-            .classification = test.discoveryClassification};
+            .output = fmt::format("conformance: {}\n", test.discoveryFailure->message),
+            .message = test.discoveryFailure->message,
+            .classification = test.discoveryFailure->classification};
   if (const auto failure = config.jitFailures ^ get_maybe(test.program)) {
     auto message = fmt::format("JIT warm-up of {} failed: {}", test.program, *failure);
     return {.status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message), .classification = {}};

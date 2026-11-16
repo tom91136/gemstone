@@ -98,10 +98,13 @@ struct ExecutionConfig {
   // Programs whose warm-up failed, with the reason; their cases fail without running.
   std::map<std::string, std::string> jitFailures;
 };
+struct DiscoveryFailure {
+  std::string message, classification;
+};
 struct ScheduledCase {
   std::string identity, program;
   uint32_t timeoutSeconds, index, count;
-  std::string discoveryFailure = {}, discoveryClassification = {};
+  std::optional<DiscoveryFailure> discoveryFailure = std::nullopt;
 };
 struct TargetExecution {
   std::string id;
