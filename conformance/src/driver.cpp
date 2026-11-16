@@ -662,9 +662,19 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
         log.close();
         if (!log) throw std::runtime_error("cannot write discovery log: " + listingPath.string());
       }
-      if (listing.status != 0)
-        throw std::runtime_error(fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
-                                             deqp ? listingPath.string() : listing.error));
+      if (listing.status != 0) {
+        auto message = fmt::format("test discovery failed for {}/{} (exit {}): {}", id, program.name, listing.status,
+                                   deqp ? listingPath.string() : listing.error);
+        auto classification = caseClassification(listing.output + listing.error);
+        tests.push_back({.identity = "discovery",
+                         .program = program.name,
+                         .timeoutSeconds = 1,
+                         .index = 0,
+                         .count = 1,
+                         .discoveryFailure = std::move(message),
+                         .discoveryClassification = classification.empty() ? "unclassified" : std::move(classification)});
+        continue;
+      }
       if (deqp) {
         std::ifstream input(listingPath);
         names = deqpCaseNames(input);
@@ -765,6 +775,11 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
             .output = "SKIP " + test.identity + ": machine profile\n",
             .message = "machine profile",
             .classification = {}};
+  if (!test.discoveryFailure.empty())
+    return {.status = 1,
+            .output = fmt::format("conformance: {}\n", test.discoveryFailure),
+            .message = test.discoveryFailure,
+            .classification = test.discoveryClassification};
   if (const auto failure = config.jitFailures ^ get_maybe(test.program)) {
     auto message = fmt::format("JIT warm-up of {} failed: {}", test.program, *failure);
     return {.status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message), .classification = {}};

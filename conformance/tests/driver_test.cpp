@@ -510,6 +510,43 @@ TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") 
   CHECK(limited.status != 0);
 }
 
+TEST_CASE("a program whose discovery fails is one failed case and the others still run", "[driver]") {
+  const TemporaryDirectory directory;
+  const auto artifact = directory.path / "artifact";
+  const auto reports = directory.path / "reports";
+  fs::create_directories(artifact);
+  fs::create_directories(reports);
+  std::ofstream(artifact / "test-programs.txt") << "alpha_broken\t2\tcases\nbeta_listed\t2\tcases\ngamma_marked\t2\tcases\n";
+  for (const auto &[name, body] : std::vector<std::pair<std::string, std::string>>{
+           {"alpha_broken", "#!/bin/sh\necho 'ERROR: LoadError: CUDA driver not found' >&2\nexit 1\n"},
+           {"beta_listed", "#!/bin/sh\necho one\necho two\n"},
+           {"gamma_marked", "#!/bin/sh\necho 'conformance-classification: missing entry point'\nexit 1\n"}}) {
+    const auto path = artifact / name;
+    std::ofstream(path) << body;
+    fs::permissions(path, fs::perms::owner_exec | fs::perms::owner_read, fs::perm_options::add);
+  }
+  Workload workload;
+  workload.specs = {"*"};
+  const RunOptions options;
+  const auto tests = discoverCases(options, workload, artifact, {}, "cuda-sass/sm_86", reports);
+  REQUIRE(tests.size() == 4);
+  CHECK(tests[0].program == "alpha_broken");
+  CHECK(tests[1].program == "beta_listed");
+  CHECK(tests[1].identity == "one");
+  CHECK(tests[2].identity == "two");
+  CHECK(tests[3].program == "gamma_marked");
+
+  ExecutionConfig configuration;
+  configuration.directory = artifact.string();
+  configuration.reportDirectory = (reports / "run").string();
+  const auto broken = executeCase(configuration, tests[0]);
+  CHECK(broken.status == 1);
+  CHECK(broken.classification == "unclassified");
+  CHECK(broken.output.contains("test discovery failed for cuda-sass/sm_86/alpha_broken (exit 1)"));
+  CHECK(broken.output.contains("CUDA driver not found"));
+  CHECK(executeCase(configuration, tests[3]).classification == "missing entry point");
+}
+
 TEST_CASE("case inventories accept package test identifiers and reject malformed lines", "[driver]") {
   const auto names = listedCaseNames("# collected by the package suite\n"
                                      "cudadrv/test_driver.py::test_init\n"

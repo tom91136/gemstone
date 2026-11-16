@@ -101,6 +101,7 @@ struct ExecutionConfig {
 struct ScheduledCase {
   std::string identity, program;
   uint32_t timeoutSeconds, index, count;
+  std::string discoveryFailure = {}, discoveryClassification = {};
 };
 struct TargetExecution {
   std::string id;
