@@ -8,6 +8,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <thread>
 #include <vector>
 
 namespace gemstone::graph {
@@ -161,6 +162,8 @@ inline bool divert(Work &work) {
   return true;
 }
 
+enum class CaptureMode { Global, ThreadLocal, Relaxed };
+
 template <class Stream, class Event> class Captures {
 public:
   struct Info {
@@ -180,11 +183,13 @@ public:
     return true;
   }
 
-  Outcome begin(Stream stream) {
+  Outcome begin(Stream stream, CaptureMode mode) {
     std::scoped_lock const lock(mutex);
     if (captures.contains(stream)) return Outcome::Unsupported;
     auto session = std::make_shared<Session>();
     session->origin = stream;
+    session->mode = mode;
+    session->owner = std::this_thread::get_id();
     captures.emplace(stream, std::move(session));
     return Outcome::Ok;
   }
@@ -244,6 +249,22 @@ public:
     return conflict;
   }
 
+  /** Invalidates the captures that a capture-unsafe call from this thread, in the given thread mode, would corrupt. */
+  bool prohibit(CaptureMode threadMode) {
+    std::scoped_lock const lock(mutex);
+    if (threadMode == CaptureMode::Relaxed) return false;
+    const auto self = std::this_thread::get_id();
+    bool conflict = false;
+    for (const auto &entry : captures) {
+      const auto &session = entry.second;
+      if (session->mode == CaptureMode::Relaxed) continue;
+      if (session->owner != self && !(session->mode == CaptureMode::Global && threadMode == CaptureMode::Global)) continue;
+      session->invalidated = true;
+      conflict = true;
+    }
+    return conflict;
+  }
+
   void forget(Event event) {
     std::scoped_lock const lock(mutex);
     events.erase(event);
@@ -266,6 +287,8 @@ private:
   struct Session {
     std::unique_ptr<Graph> graph = std::make_unique<Graph>();
     Stream origin{};
+    CaptureMode mode = CaptureMode::Global;
+    std::thread::id owner;
     std::map<Stream, std::vector<Node *>> frontier;
     bool invalidated = false;
   };

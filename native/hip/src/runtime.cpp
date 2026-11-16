@@ -2336,7 +2336,7 @@ extern "C" hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCapture
   if (mode != hipStreamCaptureModeGlobal && mode != hipStreamCaptureModeThreadLocal && mode != hipStreamCaptureModeRelaxed)
     return remember(hipErrorInvalidValue);
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
-  return remember(graphResult(captures.begin(stream)));
+  return remember(graphResult(captures.begin(stream, static_cast<gemstone::graph::CaptureMode>(mode))));
 }
 extern "C" hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t *graph) {
   if (!graph) return remember(hipErrorInvalidValue);

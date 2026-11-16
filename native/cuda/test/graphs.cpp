@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <catch2/catch_test_macros.hpp>
@@ -425,5 +426,98 @@ TEST_CASE("legacy instantiate entry points forward to graph instantiation", "[cu
   REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
   REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
   REQUIRE(cuMemFree_v2(target) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("thread capture mode exchange returns the previous mode and starts as global", "[cuda][graph][capture][mode]") {
+  auto *const context = createContext();
+  CHECK(cuThreadExchangeStreamCaptureMode(nullptr) == CUDA_ERROR_INVALID_VALUE);
+  auto mode = CU_STREAM_CAPTURE_MODE_RELAXED;
+  REQUIRE(cuThreadExchangeStreamCaptureMode(&mode) == CUDA_SUCCESS);
+  CHECK(mode == CU_STREAM_CAPTURE_MODE_GLOBAL);
+  mode = CU_STREAM_CAPTURE_MODE_THREAD_LOCAL;
+  REQUIRE(cuThreadExchangeStreamCaptureMode(&mode) == CUDA_SUCCESS);
+  CHECK(mode == CU_STREAM_CAPTURE_MODE_RELAXED);
+
+  CUstreamCaptureMode other = CU_STREAM_CAPTURE_MODE_THREAD_LOCAL;
+  CUresult exchanged = CUDA_ERROR_UNKNOWN;
+  std::thread([&] { exchanged = cuThreadExchangeStreamCaptureMode(&other); }).join();
+  CHECK(exchanged == CUDA_SUCCESS);
+  CHECK(other == CU_STREAM_CAPTURE_MODE_GLOBAL);
+
+  mode = CU_STREAM_CAPTURE_MODE_GLOBAL;
+  REQUIRE(cuThreadExchangeStreamCaptureMode(&mode) == CUDA_SUCCESS);
+  CHECK(mode == CU_STREAM_CAPTURE_MODE_THREAD_LOCAL);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+namespace {
+
+struct UnsafeCalls {
+  CUresult allocate = CUDA_SUCCESS;
+  CUresult free = CUDA_SUCCESS;
+  CUresult allocateHost = CUDA_SUCCESS;
+};
+
+UnsafeCalls callUnsafe(CUcontext context, CUstreamCaptureMode threadMode, CUdeviceptr victim) {
+  (void)cuCtxSetCurrent(context);
+  (void)cuThreadExchangeStreamCaptureMode(&threadMode);
+  UnsafeCalls result;
+  CUdeviceptr device = 0;
+  result.allocate = cuMemAlloc_v2(&device, 256);
+  if (result.allocate == CUDA_SUCCESS) (void)cuMemFree_v2(device);
+  result.free = cuMemFree_v2(victim);
+  void *host = nullptr;
+  result.allocateHost = cuMemAllocHost_v2(&host, 256);
+  if (result.allocateHost == CUDA_SUCCESS) (void)cuMemFreeHost(host);
+  return result;
+}
+
+} // namespace
+
+TEST_CASE("capture modes decide which threads may make capture-unsafe calls", "[cuda][graph][capture][mode]") {
+  auto *const context = createContext();
+  constexpr auto Global = CU_STREAM_CAPTURE_MODE_GLOBAL;
+  constexpr auto ThreadLocal = CU_STREAM_CAPTURE_MODE_THREAD_LOCAL;
+  constexpr auto Relaxed = CU_STREAM_CAPTURE_MODE_RELAXED;
+  struct Row {
+    CUstreamCaptureMode capture;
+    CUstreamCaptureMode thread;
+    bool sameThread;
+    bool prohibited;
+  };
+  // measured on a CUDA 13.5 driver: cuMemAlloc, cuMemFree and cuMemAllocHost all return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED
+  const Row rows[] = {
+      {Global, Global, true, true},        {Global, ThreadLocal, true, true},        {Global, Relaxed, true, false},
+      {ThreadLocal, Global, true, true},   {ThreadLocal, ThreadLocal, true, true},   {ThreadLocal, Relaxed, true, false},
+      {Relaxed, Global, true, false},      {Relaxed, ThreadLocal, true, false},      {Relaxed, Relaxed, true, false},
+      {Global, Global, false, true},       {Global, ThreadLocal, false, false},      {Global, Relaxed, false, false},
+      {ThreadLocal, Global, false, false}, {ThreadLocal, ThreadLocal, false, false}, {ThreadLocal, Relaxed, false, false},
+      {Relaxed, Global, false, false},     {Relaxed, ThreadLocal, false, false},     {Relaxed, Relaxed, false, false},
+  };
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  for (const auto &row : rows) {
+    DYNAMIC_SECTION("capture " << row.capture << " thread " << row.thread << (row.sameThread ? " same" : " other")) {
+      const auto victim = allocate(256);
+      REQUIRE(cuStreamBeginCapture_v2(stream, row.capture) == CUDA_SUCCESS);
+      UnsafeCalls calls;
+      if (row.sameThread) calls = callUnsafe(context, row.thread, victim);
+      else std::thread([&] { calls = callUnsafe(context, row.thread, victim); }).join();
+      const auto expected = row.prohibited ? CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED : CUDA_SUCCESS;
+      CHECK(calls.allocate == expected);
+      CHECK(calls.free == expected);
+      CHECK(calls.allocateHost == expected);
+      CUgraph graph = nullptr;
+      CHECK(cuStreamEndCapture(stream, &graph) == (row.prohibited ? CUDA_ERROR_STREAM_CAPTURE_INVALIDATED : CUDA_SUCCESS));
+      if (graph) REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+      if (row.sameThread) {
+        CUstreamCaptureMode restore = CU_STREAM_CAPTURE_MODE_GLOBAL;
+        REQUIRE(cuThreadExchangeStreamCaptureMode(&restore) == CUDA_SUCCESS);
+      }
+      if (calls.free != CUDA_SUCCESS) REQUIRE(cuMemFree_v2(victim) == CUDA_SUCCESS);
+    }
+  }
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }

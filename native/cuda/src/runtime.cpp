@@ -231,6 +231,12 @@ using gemstone::graph::Kind;
 using gemstone::graph::Outcome;
 
 gemstone::graph::Captures<CUstream, CUevent> captures;
+thread_local CUstreamCaptureMode threadCaptureMode = CU_STREAM_CAPTURE_MODE_GLOBAL;
+
+CUresult unlessCaptureProhibits() {
+  return captures.prohibit(static_cast<gemstone::graph::CaptureMode>(threadCaptureMode)) ? CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED
+                                                                                         : CUDA_SUCCESS;
+}
 
 CUresult graphResult(Outcome outcome) {
   switch (outcome) {
@@ -2983,9 +2989,13 @@ CUresult cuDevicePrimaryCtxReset_v2(CUdevice device) {
   return CUDA_SUCCESS;
 }
 
-CUresult cuMemAlloc_v2(CUdeviceptr *pointer, size_t size) { return allocate(pointer, size, nullptr); }
+CUresult cuMemAlloc_v2(CUdeviceptr *pointer, size_t size) {
+  if (const auto status = unlessCaptureProhibits(); status != CUDA_SUCCESS) return status;
+  return allocate(pointer, size, nullptr);
+}
 
 CUresult cuMemFree_v2(CUdeviceptr pointer) {
+  if (const auto status = unlessCaptureProhibits(); status != CUDA_SUCCESS) return status;
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
   if (pointer == 0) return CUDA_SUCCESS;
   if (const auto mirrored = freeMirror(pointer)) return *mirrored;
@@ -3001,7 +3011,10 @@ CUresult cuMemAllocManaged(CUdeviceptr *pointer, size_t size, unsigned) {
   return status;
 }
 
-CUresult cuMemAllocHost_v2(void **pointer, size_t size) { return mirroredAllocate(pointer, size, true); }
+CUresult cuMemAllocHost_v2(void **pointer, size_t size) {
+  if (const auto status = unlessCaptureProhibits(); status != CUDA_SUCCESS) return status;
+  return mirroredAllocate(pointer, size, true);
+}
 
 CUresult cuMemAllocHost(void **pointer, unsigned size) { return cuMemAllocHost_v2(pointer, size); }
 
@@ -4966,7 +4979,13 @@ CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode) {
     return CUDA_ERROR_INVALID_VALUE;
   if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
   if (!contextIsLive(activeContext())) return CUDA_ERROR_INVALID_CONTEXT;
-  return graphResult(captures.begin(stream));
+  return graphResult(captures.begin(stream, static_cast<gemstone::graph::CaptureMode>(mode)));
+}
+
+CUresult cuThreadExchangeStreamCaptureMode(CUstreamCaptureMode *mode) {
+  if (!mode) return CUDA_ERROR_INVALID_VALUE;
+  std::swap(threadCaptureMode, *mode);
+  return CUDA_SUCCESS;
 }
 
 CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
@@ -5581,7 +5600,7 @@ cudaError_t cudaFree(void *pointer) { return runtimeStatus(cuMemFree_v2(reinterp
 
 cudaError_t cudaMallocHost(void **pointer, size_t size) {
   const auto status = ensureRuntimeContext();
-  return runtimeStatus(status == CUDA_SUCCESS ? mirroredAllocate(pointer, size, true) : status);
+  return runtimeStatus(status == CUDA_SUCCESS ? cuMemAllocHost_v2(pointer, size) : status);
 }
 
 cudaError_t cudaHostAlloc(void **pointer, size_t size, unsigned flags) {
