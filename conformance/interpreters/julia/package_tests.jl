@@ -58,11 +58,11 @@ function cases(output)
     return names
 end
 
-const LISTING_WRAPPER = "import Pkg; Pkg.add(::Vector{String}; kwargs...) = nothing; include(popfirst!(ARGS))"
+const LISTING_WRAPPER = joinpath(@__DIR__, "listing.jl")
 
 function list_suite(script)
     return withenv("CUDA_VISIBLE_DEVICES" => nothing, "ROCR_VISIBLE_DEVICES" => nothing, "HIP_VISIBLE_DEVICES" => nothing) do
-        execute(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) -e $LISTING_WRAPPER $script --list`; echo = false)
+        execute(`$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $LISTING_WRAPPER $script --list`; echo = false)
     end
 end
 

@@ -45,7 +45,10 @@ if("python" IN_LIST languages)
     DESTINATION data/interpreters/python COMPONENT architecture)
 endif()
 if("julia" IN_LIST languages)
-  install(FILES "${CMAKE_CURRENT_LIST_DIR}/julia/babelstream.jl" "${CMAKE_CURRENT_LIST_DIR}/julia/package_tests.jl"
+  install(FILES
+    "${CMAKE_CURRENT_LIST_DIR}/julia/babelstream.jl"
+    "${CMAKE_CURRENT_LIST_DIR}/julia/package_tests.jl"
+    "${CMAKE_CURRENT_LIST_DIR}/julia/listing.jl"
     DESTINATION data/interpreters/julia COMPONENT architecture)
   set(babelstream_julia "${DEPENDENCY_CACHE}/babelstream_julia")
   if(NOT EXISTS "${babelstream_julia}/src/julia/BabelStream.jl/src")
