@@ -477,9 +477,9 @@ UnsafeCalls callUnsafe(CUcontext context, CUstreamCaptureMode threadMode, CUdevi
 
 TEST_CASE("capture modes decide which threads may make capture-unsafe calls", "[cuda][graph][capture][mode]") {
   auto *const context = createContext();
-  constexpr auto Global = CU_STREAM_CAPTURE_MODE_GLOBAL;
-  constexpr auto ThreadLocal = CU_STREAM_CAPTURE_MODE_THREAD_LOCAL;
-  constexpr auto Relaxed = CU_STREAM_CAPTURE_MODE_RELAXED;
+  constexpr auto global = CU_STREAM_CAPTURE_MODE_GLOBAL;
+  constexpr auto threadLocal = CU_STREAM_CAPTURE_MODE_THREAD_LOCAL;
+  constexpr auto relaxed = CU_STREAM_CAPTURE_MODE_RELAXED;
   struct Row {
     CUstreamCaptureMode capture;
     CUstreamCaptureMode thread;
@@ -487,13 +487,16 @@ TEST_CASE("capture modes decide which threads may make capture-unsafe calls", "[
     bool prohibited;
   };
   // measured on a CUDA 13.5 driver: cuMemAlloc, cuMemFree and cuMemAllocHost all return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED
+  const auto make = [](CUstreamCaptureMode owner, CUstreamCaptureMode caller, bool sameThread, bool prohibited) {
+    return Row{.capture = owner, .thread = caller, .sameThread = sameThread, .prohibited = prohibited};
+  };
   const Row rows[] = {
-      {Global, Global, true, true},        {Global, ThreadLocal, true, true},        {Global, Relaxed, true, false},
-      {ThreadLocal, Global, true, true},   {ThreadLocal, ThreadLocal, true, true},   {ThreadLocal, Relaxed, true, false},
-      {Relaxed, Global, true, false},      {Relaxed, ThreadLocal, true, false},      {Relaxed, Relaxed, true, false},
-      {Global, Global, false, true},       {Global, ThreadLocal, false, false},      {Global, Relaxed, false, false},
-      {ThreadLocal, Global, false, false}, {ThreadLocal, ThreadLocal, false, false}, {ThreadLocal, Relaxed, false, false},
-      {Relaxed, Global, false, false},     {Relaxed, ThreadLocal, false, false},     {Relaxed, Relaxed, false, false},
+      make(global, global, true, true),        make(global, threadLocal, true, true),        make(global, relaxed, true, false),
+      make(threadLocal, global, true, true),   make(threadLocal, threadLocal, true, true),   make(threadLocal, relaxed, true, false),
+      make(relaxed, global, true, false),      make(relaxed, threadLocal, true, false),      make(relaxed, relaxed, true, false),
+      make(global, global, false, true),       make(global, threadLocal, false, false),      make(global, relaxed, false, false),
+      make(threadLocal, global, false, false), make(threadLocal, threadLocal, false, false), make(threadLocal, relaxed, false, false),
+      make(relaxed, global, false, false),     make(relaxed, threadLocal, false, false),     make(relaxed, relaxed, false, false),
   };
   CUstream stream = nullptr;
   REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
