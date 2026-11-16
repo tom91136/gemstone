@@ -136,8 +136,11 @@ inline std::vector<uint8_t> variableObjectFixture() {
   std::memcpy(header.e_ident, ELFMAG, SELFMAG);
   header.e_ident[EI_CLASS] = ELFCLASS64;
   header.e_ident[EI_DATA] = ELFDATA2LSB;
+  header.e_ident[EI_VERSION] = EV_CURRENT;
   header.e_machine = EM_AMDGPU;
   header.e_type = ET_DYN;
+  header.e_version = EV_CURRENT;
+  header.e_ehsize = sizeof(header);
   header.e_shoff = sizeof(header);
   header.e_shentsize = sizeof(Elf64_Shdr);
   header.e_shnum = count;

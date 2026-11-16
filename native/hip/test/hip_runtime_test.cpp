@@ -1365,3 +1365,231 @@ TEST_CASE("HIP context creation selects the device and tracks the current contex
   REQUIRE((hipCtxPopCurrent(&current) == hipSuccess));
   CHECK((current == first));
 }
+TEST_CASE("HIP memory pools account for stream-ordered allocations", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  hipMemPoolProps props{};
+  props.allocType = hipMemAllocationTypePinned;
+  props.handleTypes = hipMemHandleTypePosixFileDescriptor;
+  props.location.type = hipMemLocationTypeDevice;
+  props.location.id = 0;
+  hipMemPool_t pool = nullptr;
+  REQUIRE((hipMemPoolCreate(&pool, &props) == hipSuccess));
+  REQUIRE((pool != nullptr));
+  hipMemPool_t defaultPool = nullptr;
+  REQUIRE((hipDeviceGetDefaultMemPool(&defaultPool, 0) == hipSuccess));
+  hipMemPool_t current = nullptr;
+  REQUIRE((hipDeviceGetMemPool(&current, 0) == hipSuccess));
+  CHECK((current == defaultPool));
+  REQUIRE((hipDeviceSetMemPool(0, pool) == hipSuccess));
+  REQUIRE((hipDeviceGetMemPool(&current, 0) == hipSuccess));
+  CHECK((current == pool));
+
+  uint64_t threshold = 1 << 20;
+  REQUIRE((hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold) == hipSuccess));
+  uint64_t observed = 0;
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolAttrReleaseThreshold, &observed) == hipSuccess));
+  CHECK((observed == threshold));
+  int reuse = 0;
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolReuseAllowOpportunistic, &reuse) == hipSuccess));
+  CHECK((reuse == 1));
+  int disabled = 0;
+  REQUIRE((hipMemPoolSetAttribute(pool, hipMemPoolReuseAllowOpportunistic, &disabled) == hipSuccess));
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolReuseAllowOpportunistic, &reuse) == hipSuccess));
+  CHECK((reuse == 0));
+
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+  void *pointer = nullptr;
+  REQUIRE((hipMallocFromPoolAsync(&pointer, 4096, pool, stream) == hipSuccess));
+  REQUIRE((pointer != nullptr));
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &observed) == hipSuccess));
+  CHECK((observed == 4096));
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &observed) == hipSuccess));
+  CHECK((observed == 4096));
+  REQUIRE((hipMemsetAsync(pointer, 0x5a, 4096, stream) == hipSuccess));
+  REQUIRE((hipFreeAsync(pointer, stream) == hipSuccess));
+  REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &observed) == hipSuccess));
+  CHECK((observed == 0));
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &observed) == hipSuccess));
+  CHECK((observed == 4096));
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemHigh, &observed) == hipSuccess));
+  CHECK((observed == 4096));
+  REQUIRE((hipMemPoolTrimTo(pool, 0) == hipSuccess));
+  REQUIRE((hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &observed) == hipSuccess));
+  CHECK((observed == 0));
+  REQUIRE((hipDeviceSetMemPool(0, defaultPool) == hipSuccess));
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+
+  hipMemPoolProps invalidProps = props;
+  invalidProps.allocType = hipMemAllocationTypeInvalid;
+  hipMemPool_t invalid = nullptr;
+  CHECK((hipMemPoolCreate(&invalid, &invalidProps) == hipErrorInvalidValue));
+  invalidProps = props;
+  invalidProps.location.id = 7;
+  CHECK((hipMemPoolCreate(&invalid, &invalidProps) == hipErrorInvalidValue));
+  CHECK((hipMemPoolGetAttribute(nullptr, hipMemPoolAttrReleaseThreshold, &observed) == hipErrorInvalidValue));
+  uint64_t reset = 1;
+  CHECK((hipMemPoolSetAttribute(pool, hipMemPoolAttrUsedMemHigh, &reset) == hipErrorInvalidValue));
+  CHECK((hipDeviceSetMemPool(0, reinterpret_cast<hipMemPool_t>(uintptr_t{0x77})) == hipErrorInvalidValue));
+}
+
+TEST_CASE("HIP typed asynchronous fills write their element widths", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  void *memory = nullptr;
+  REQUIRE((hipMalloc(&memory, 32) == hipSuccess));
+  std::array<uint8_t, 32> values{};
+  values.fill(0xee);
+  REQUIRE((hipMemcpy(memory, values.data(), values.size(), hipMemcpyHostToDevice) == hipSuccess));
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+  const auto read = [&] { REQUIRE((hipMemcpy(values.data(), memory, values.size(), hipMemcpyDeviceToHost) == hipSuccess)); };
+  REQUIRE((hipMemsetD8Async(reinterpret_cast<hipDeviceptr_t>(memory), 0x7f, 5, stream) == hipSuccess));
+  REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
+  read();
+  for (size_t index = 0; index < values.size(); ++index)
+    CHECK((values[index] == (index < 5 ? 0x7f : 0xee)));
+  REQUIRE((hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(memory), 0xbeef, 3, stream) == hipSuccess));
+  REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
+  read();
+  for (size_t index = 0; index < 3; ++index)
+    CHECK((values[(index * 2)] == 0xef && values[(index * 2) + 1] == 0xbe));
+  CHECK((values[6] == 0xee));
+  REQUIRE((hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(memory), 0x01234567, 2, stream) == hipSuccess));
+  REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
+  read();
+  for (size_t index = 0; index < 2; ++index)
+    CHECK((values[(index * 4)] == 0x67 && values[(index * 4) + 1] == 0x45 && values[(index * 4) + 2] == 0x23
+           && values[(index * 4) + 3] == 0x01));
+  CHECK((values[8] == 0xee));
+  hipStream_t destroyed = nullptr;
+  REQUIRE((hipStreamCreate(&destroyed) == hipSuccess));
+  REQUIRE((hipStreamDestroy(destroyed) == hipSuccess));
+  CHECK((hipMemsetD8Async(reinterpret_cast<hipDeviceptr_t>(memory), 1, 1, destroyed) == hipErrorInvalidResourceHandle));
+  CHECK((hipMemsetD16Async(reinterpret_cast<hipDeviceptr_t>(memory), 1, 1, destroyed) == hipErrorInvalidResourceHandle));
+  CHECK((hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(memory), 1, 1, destroyed) == hipErrorInvalidResourceHandle));
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+  REQUIRE((hipFree(memory) == hipSuccess));
+}
+
+TEST_CASE("HIP module globals resolve by name", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  fixture.programCatalogue({{.name = "add", .linkageName = "add.kd"}},
+                           {{.name = "arbitrary_data", .virtualAddress = 0x1004, .size = 8, .pointerOffsets = {}}});
+  const std::vector<uint8_t> initial{5, 6, 7, 8, 9, 10, 11, 12};
+  fixture.expectGlobalBinding("arbitrary_data", 0, initial);
+  const auto image = gemstone::hsa::test::variableKernelObjectFixture();
+  hipModule_t module = nullptr;
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  hipDeviceptr_t pointer = nullptr;
+  size_t bytes = 0;
+  REQUIRE((hipModuleGetGlobal(&pointer, &bytes, module, "arbitrary_data") == hipSuccess));
+  REQUIRE((pointer != nullptr));
+  CHECK((bytes == initial.size()));
+  std::array<uint8_t, 8> observed{};
+  REQUIRE((hipMemcpy(observed.data(), pointer, observed.size(), hipMemcpyDeviceToHost) == hipSuccess));
+  CHECK((observed == std::array<uint8_t, 8>{5, 6, 7, 8, 9, 10, 11, 12}));
+  REQUIRE((hipModuleGetGlobal(nullptr, &bytes, module, "arbitrary_data") == hipSuccess));
+  CHECK((bytes == initial.size()));
+  REQUIRE((hipModuleGetGlobal(&pointer, nullptr, module, "arbitrary_data") == hipSuccess));
+  hipDeviceptr_t absent = nullptr;
+  CHECK((hipModuleGetGlobal(&absent, &bytes, module, "absent") == hipErrorNotFound));
+  CHECK((hipModuleGetGlobal(nullptr, nullptr, module, "absent") == hipErrorNotFound));
+  CHECK((hipModuleGetGlobal(&pointer, &bytes, module, nullptr) == hipErrorInvalidValue));
+  fixture.checkGlobalBindings();
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
+TEST_CASE("HIP function attributes and module occupancy follow the device model", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1150");
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module = nullptr;
+  hipFunction_t function = nullptr;
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  int value = -1;
+  REQUIRE((hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, function) == hipSuccess));
+  CHECK((value == 1024));
+  REQUIRE((hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_BINARY_VERSION, function) == hipSuccess));
+  CHECK((value == 900));
+  REQUIRE((hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function) == hipSuccess));
+  CHECK((value == 0));
+  CHECK((hipFuncGetAttribute(&value, HIP_FUNC_ATTRIBUTE_MAX, function) == hipErrorInvalidValue));
+  CHECK((hipFuncGetAttribute(nullptr, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, function) == hipErrorInvalidValue));
+  int grid = 0;
+  int block = 0;
+  REQUIRE((hipModuleOccupancyMaxPotentialBlockSize(&grid, &block, function, 0, 0) == hipSuccess));
+  const auto model = gemstone::hsa::deviceModel("gfx1150");
+  int blocksPerProcessor = 0;
+  REQUIRE((hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&blocksPerProcessor, function, block, 0) == hipSuccess));
+  CHECK((block == 1024));
+  CHECK((blocksPerProcessor == static_cast<int>(model.threadsPerProcessor()) / block));
+  CHECK((grid == blocksPerProcessor * static_cast<int>(model.processors())));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
+TEST_CASE("HIP streams report their priority and capture mode exchanges", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  hipStream_t normal = nullptr;
+  hipStream_t high = nullptr;
+  hipStream_t low = nullptr;
+  hipStream_t clamped = nullptr;
+  REQUIRE((hipStreamCreate(&normal) == hipSuccess));
+  REQUIRE((hipStreamCreateWithPriority(&high, 0, -1) == hipSuccess));
+  REQUIRE((hipStreamCreateWithPriority(&low, 0, 1) == hipSuccess));
+  REQUIRE((hipStreamCreateWithPriority(&clamped, 0, 7) == hipSuccess));
+  int priority = -2;
+  REQUIRE((hipStreamGetPriority(normal, &priority) == hipSuccess));
+  CHECK((priority == 0));
+  REQUIRE((hipStreamGetPriority(high, &priority) == hipSuccess));
+  CHECK((priority == -1));
+  REQUIRE((hipStreamGetPriority(low, &priority) == hipSuccess));
+  CHECK((priority == 1));
+  REQUIRE((hipStreamGetPriority(clamped, &priority) == hipSuccess));
+  CHECK((priority == 1));
+  REQUIRE((hipStreamGetPriority(nullptr, &priority) == hipSuccess));
+  CHECK((priority == 0));
+  CHECK((hipStreamGetPriority(normal, nullptr) == hipErrorInvalidValue));
+  REQUIRE((hipStreamDestroy(normal) == hipSuccess));
+  CHECK((hipStreamGetPriority(normal, &priority) == hipErrorInvalidResourceHandle));
+  REQUIRE((hipStreamDestroy(high) == hipSuccess));
+  REQUIRE((hipStreamDestroy(low) == hipSuccess));
+  REQUIRE((hipStreamDestroy(clamped) == hipSuccess));
+
+  hipStreamCaptureMode mode = hipStreamCaptureModeRelaxed;
+  REQUIRE((hipThreadExchangeStreamCaptureMode(&mode) == hipSuccess));
+  CHECK((mode == hipStreamCaptureModeGlobal));
+  mode = hipStreamCaptureModeThreadLocal;
+  REQUIRE((hipThreadExchangeStreamCaptureMode(&mode) == hipSuccess));
+  CHECK((mode == hipStreamCaptureModeRelaxed));
+  CHECK((hipThreadExchangeStreamCaptureMode(nullptr) == hipErrorInvalidValue));
+}
+
+TEST_CASE("HIP IPC handles identify device allocations", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  void *first = nullptr;
+  void *second = nullptr;
+  REQUIRE((hipMalloc(&first, 64) == hipSuccess));
+  REQUIRE((hipMalloc(&second, 64) == hipSuccess));
+  hipIpcMemHandle_t firstHandle{};
+  hipIpcMemHandle_t secondHandle{};
+  hipIpcMemHandle_t repeated{};
+  REQUIRE((hipIpcGetMemHandle(&firstHandle, first) == hipSuccess));
+  REQUIRE((hipIpcGetMemHandle(&secondHandle, second) == hipSuccess));
+  REQUIRE((hipIpcGetMemHandle(&repeated, first) == hipSuccess));
+  CHECK((std::memcmp(&firstHandle, &secondHandle, sizeof(firstHandle)) != 0));
+  CHECK((std::memcmp(&firstHandle, &repeated, sizeof(firstHandle)) == 0));
+  std::array<uint8_t, 4> ordinary{};
+  CHECK((hipIpcGetMemHandle(&repeated, ordinary.data()) == hipErrorInvalidValue));
+  CHECK((hipIpcGetMemHandle(nullptr, first) == hipErrorInvalidValue));
+  CHECK((hipIpcGetMemHandle(&repeated, nullptr) == hipErrorInvalidValue));
+  REQUIRE((hipFree(second) == hipSuccess));
+  REQUIRE((hipFree(first) == hipSuccess));
+}

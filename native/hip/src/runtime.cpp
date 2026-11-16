@@ -287,17 +287,34 @@ struct Gpu {
 struct DeviceAllocation {
   size_t size = 0;
   int device = 0;
+  hipMemPool_t pool = nullptr;
+};
+
+struct MemoryPool {
+  int device = 0;
+  uint64_t releaseThreshold = 0;
+  uint64_t reserved = 0;
+  uint64_t used = 0;
+  uint64_t reservedHigh = 0;
+  uint64_t usedHigh = 0;
+  bool eventDependencies = true;
+  bool opportunistic = true;
+  bool internalDependencies = true;
 };
 
 struct State {
   std::mutex lock;
   bool initialised = false;
   std::array<uint32_t, gemstone::MaximumDeviceCount> primaryContextReferences{};
+  std::array<MemoryPool, gemstone::MaximumDeviceCount> defaultPools;
+  std::array<hipMemPool_t, gemstone::MaximumDeviceCount> currentPools{};
+  std::unordered_map<hipMemPool_t, std::unique_ptr<MemoryPool>> pools;
   bool atexitRegistered = false;
   std::vector<Gpu> gpus;
   hsa_region_t kernargRegion{};
   gemstone::PeerAccess peers;
   std::unordered_map<hipStream_t, int> streamDevices;
+  std::unordered_map<hipStream_t, int> streamPriorities;
   std::unordered_map<void **, std::shared_ptr<Module>> modules;
   std::vector<std::weak_ptr<Module>> driverModules;
   std::unordered_map<const void *, FunctionBinding> kernels;
@@ -327,6 +344,7 @@ bool validStream(hipStream_t stream) { return commands().hasStream(stream); }
 
 thread_local hipError_t lastError = hipSuccess;
 thread_local int currentDevice = 0;
+thread_local hipStreamCaptureMode threadCaptureMode = hipStreamCaptureModeGlobal;
 thread_local LaunchConfiguration launchConfiguration;
 
 // Queued work reports through its completion; the synchronising caller records that status as its own error.
@@ -440,6 +458,37 @@ bool ensureInitialised() {
 }
 
 bool validDevice(int device) { return device >= 0 && static_cast<uint32_t>(device) < gemstone::deviceCount(); }
+
+namespace {
+
+hipMemPool_t defaultMemoryPool(State &runtime, int device) {
+  auto &pool = runtime.defaultPools[static_cast<size_t>(device)];
+  pool.device = device;
+  return reinterpret_cast<hipMemPool_t>(&pool);
+}
+
+MemoryPool *memoryPool(State &runtime, hipMemPool_t handle) {
+  for (int device = 0; validDevice(device); ++device)
+    if (handle == defaultMemoryPool(runtime, device)) return &runtime.defaultPools[static_cast<size_t>(device)];
+  const auto found = runtime.pools.find(handle);
+  return found == runtime.pools.end() ? nullptr : found->second.get();
+}
+
+hipMemPool_t currentMemoryPool(State &runtime, int device) {
+  return runtime.currentPools[static_cast<size_t>(device)] ? runtime.currentPools[static_cast<size_t>(device)]
+                                                           : defaultMemoryPool(runtime, device);
+}
+
+void accountPoolAllocation(MemoryPool &pool, size_t size) {
+  pool.used += size;
+  pool.reserved += size;
+  pool.usedHigh = std::max(pool.usedHigh, pool.used);
+  pool.reservedHigh = std::max(pool.reservedHigh, pool.reserved);
+}
+
+void accountPoolRelease(MemoryPool &pool, size_t size) { pool.used -= std::min<uint64_t>(pool.used, size); }
+
+} // namespace
 
 int streamDevice(hipStream_t stream) {
   auto &runtime = state();
@@ -1298,19 +1347,142 @@ extern "C" hipError_t hipMemGetInfo(size_t *free, size_t *total) {
   return remember(hipSuccess);
 }
 
+static hipError_t allocateDeviceMemory(void **pointer, size_t size, int device, hipMemPool_t poolHandle);
+
 extern "C" hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t *pool, int device) {
-  if (!pool || !validDevice(device)) return remember(hipErrorInvalidValue);
+  if (!pool) return remember(hipErrorInvalidValue);
+  if (!validDevice(device)) return remember(hipErrorInvalidDevice);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  *pool = reinterpret_cast<hipMemPool_t>(uintptr_t(1));
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  *pool = defaultMemoryPool(runtime, device);
   return remember(hipSuccess);
 }
 
-extern "C" hipError_t hipMallocAsync(void **pointer, size_t size, hipStream_t) { return hipMalloc(pointer, size); }
+extern "C" hipError_t hipDeviceGetMemPool(hipMemPool_t *pool, int device) {
+  if (!pool || !validDevice(device)) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  *pool = currentMemoryPool(runtime, device);
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipDeviceSetMemPool(int device, hipMemPool_t pool) {
+  if (!pool || !validDevice(device)) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  const auto *value = memoryPool(runtime, pool);
+  if (!value) return remember(hipErrorInvalidValue);
+  if (value->device != device) return remember(hipErrorInvalidDevice);
+  runtime.currentPools[static_cast<size_t>(device)] = pool;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipMemPoolCreate(hipMemPool_t *pool, const hipMemPoolProps *properties) {
+  if (!pool || !properties) return remember(hipErrorInvalidValue);
+  if (properties->allocType != hipMemAllocationTypePinned) return remember(hipErrorInvalidValue);
+  if (properties->location.type != hipMemLocationTypeDevice || !validDevice(properties->location.id)) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto value = std::make_unique<MemoryPool>();
+  value->device = properties->location.id;
+  value->releaseThreshold = 0;
+  *pool = reinterpret_cast<hipMemPool_t>(value.get());
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  runtime.pools.emplace(*pool, std::move(value));
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipMemPoolGetAttribute(hipMemPool_t pool, hipMemPoolAttr attribute, void *value) {
+  if (!pool || !value) return remember(hipErrorInvalidValue);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  const auto *found = memoryPool(runtime, pool);
+  if (!found) return remember(hipErrorInvalidValue);
+  switch (attribute) {
+    case hipMemPoolReuseFollowEventDependencies: *static_cast<int *>(value) = found->eventDependencies ? 1 : 0; break;
+    case hipMemPoolReuseAllowOpportunistic: *static_cast<int *>(value) = found->opportunistic ? 1 : 0; break;
+    case hipMemPoolReuseAllowInternalDependencies: *static_cast<int *>(value) = found->internalDependencies ? 1 : 0; break;
+    case hipMemPoolAttrReleaseThreshold: *static_cast<uint64_t *>(value) = found->releaseThreshold; break;
+    case hipMemPoolAttrReservedMemCurrent: *static_cast<uint64_t *>(value) = found->reserved; break;
+    case hipMemPoolAttrReservedMemHigh: *static_cast<uint64_t *>(value) = found->reservedHigh; break;
+    case hipMemPoolAttrUsedMemCurrent: *static_cast<uint64_t *>(value) = found->used; break;
+    case hipMemPoolAttrUsedMemHigh: *static_cast<uint64_t *>(value) = found->usedHigh; break;
+    default: return remember(hipErrorInvalidValue);
+  }
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipMemPoolSetAttribute(hipMemPool_t pool, hipMemPoolAttr attribute, void *value) {
+  if (!pool || !value) return remember(hipErrorInvalidValue);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  auto *found = memoryPool(runtime, pool);
+  if (!found) return remember(hipErrorInvalidValue);
+  switch (attribute) {
+    case hipMemPoolReuseFollowEventDependencies: found->eventDependencies = *static_cast<int *>(value) != 0; break;
+    case hipMemPoolReuseAllowOpportunistic: found->opportunistic = *static_cast<int *>(value) != 0; break;
+    case hipMemPoolReuseAllowInternalDependencies: found->internalDependencies = *static_cast<int *>(value) != 0; break;
+    case hipMemPoolAttrReleaseThreshold: found->releaseThreshold = *static_cast<uint64_t *>(value); break;
+    case hipMemPoolAttrReservedMemHigh:
+      if (*static_cast<uint64_t *>(value) != 0) return remember(hipErrorInvalidValue);
+      found->reservedHigh = 0;
+      break;
+    case hipMemPoolAttrUsedMemHigh:
+      if (*static_cast<uint64_t *>(value) != 0) return remember(hipErrorInvalidValue);
+      found->usedHigh = 0;
+      break;
+    default: return remember(hipErrorInvalidValue);
+  }
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipMallocAsync(void **pointer, size_t size, hipStream_t stream) {
+  if (!pointer) return remember(hipErrorInvalidValue);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  const int device = streamDevice(stream);
+  auto &runtime = state();
+  hipMemPool_t pool = nullptr;
+  {
+    std::scoped_lock const guard(runtime.lock);
+    pool = currentMemoryPool(runtime, device);
+  }
+  return allocateDeviceMemory(pointer, size, device, pool);
+}
+
+extern "C" hipError_t hipMallocFromPoolAsync(void **pointer, size_t size, hipMemPool_t pool, hipStream_t stream) {
+  if (!pointer || !pool) return remember(hipErrorInvalidValue);
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  int device = -1;
+  {
+    std::scoped_lock const guard(runtime.lock);
+    const auto *found = memoryPool(runtime, pool);
+    if (!found) return remember(hipErrorInvalidValue);
+    device = found->device;
+  }
+  return allocateDeviceMemory(pointer, size, device, pool);
+}
+
 extern "C" hipError_t hipFreeAsync(void *pointer, hipStream_t stream) {
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
   return remember(enqueueCommand(stream, [=] { return hipFree(pointer); }));
 }
-extern "C" hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t) { return remember(!pool ? hipErrorInvalidValue : hipSuccess); }
+
+extern "C" hipError_t hipMemPoolTrimTo(hipMemPool_t pool, size_t minBytesToKeep) {
+  if (!pool) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  auto *found = memoryPool(runtime, pool);
+  if (!found) return remember(hipErrorInvalidValue);
+  found->reserved = std::min<uint64_t>(found->reserved, std::max<uint64_t>(found->used, minBytesToKeep));
+  return remember(hipSuccess);
+}
 
 extern "C" hipError_t hipDeviceGetAttribute(int *value, hipDeviceAttribute_t attribute, int device) {
   if (!environmentAccepted()) return remember(hipErrorNotInitialized);
@@ -1473,6 +1645,32 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipGetDeviceProperties(void *propertie
   return remember(hipSuccess);
 }
 
+static hipError_t allocateDeviceMemory(void **pointer, size_t size, int device, hipMemPool_t poolHandle) {
+  if (!pointer) return remember(hipErrorInvalidValue);
+  if (size == 0) {
+    *pointer = nullptr;
+    return remember(hipSuccess);
+  }
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  const hsa_status_t status = hsa_memory_allocate(gpuRegion(device), size, pointer);
+  if (traceHip("allocations"))
+    std::fprintf(stderr, "Gemstone HIP malloc size=%zu status=%d pointer=%p\n", size, static_cast<int>(status),
+                 !pointer ? nullptr : *pointer);
+  if (status == HSA_STATUS_SUCCESS) {
+    auto &runtime = state();
+    std::scoped_lock const guard(runtime.lock);
+    runtime.deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = device, .pool = poolHandle});
+    if (poolHandle)
+      if (auto *pool = memoryPool(runtime, poolHandle)) accountPoolAllocation(*pool, size);
+    for (int peer = 0; validDevice(peer); ++peer)
+      if (peer != device && runtime.peers.enabled(static_cast<uint32_t>(peer), static_cast<uint32_t>(device))) {
+        const hsa_agent_t agent = gpuAgent(peer);
+        (void)hsa_amd_agents_allow_access(1, &agent, nullptr, *pointer);
+      }
+  }
+  return remember(mapHsa(status));
+}
+
 extern "C" hipError_t hipMalloc(void **pointer, size_t size) {
   if (!pointer) return remember(hipErrorInvalidValue);
   if (size == 0) {
@@ -1480,20 +1678,7 @@ extern "C" hipError_t hipMalloc(void **pointer, size_t size) {
     return remember(hipSuccess);
   }
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  const int device = currentDevice;
-  const hsa_status_t status = hsa_memory_allocate(gpuRegion(device), size, pointer);
-  if (traceHip("allocations"))
-    std::fprintf(stderr, "Gemstone HIP malloc size=%zu status=%d pointer=%p\n", size, int(status), !pointer ? nullptr : *pointer);
-  if (status == HSA_STATUS_SUCCESS) {
-    std::scoped_lock const guard(state().lock);
-    state().deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = device});
-    for (int peer = 0; validDevice(peer); ++peer)
-      if (peer != device && state().peers.enabled(static_cast<uint32_t>(peer), static_cast<uint32_t>(device))) {
-        const hsa_agent_t agent = gpuAgent(peer);
-        (void)hsa_amd_agents_allow_access(1, &agent, nullptr, *pointer);
-      }
-  }
-  return remember(mapHsa(status));
+  return allocateDeviceMemory(pointer, size, currentDevice, nullptr);
 }
 
 extern "C" hipError_t hipFree(void *pointer) {
@@ -1502,11 +1687,30 @@ extern "C" hipError_t hipFree(void *pointer) {
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
   const hsa_status_t status = hsa_memory_free(pointer);
   if (status == HSA_STATUS_SUCCESS) {
-    std::scoped_lock const guard(state().lock);
-    state().managedAllocations.erase(pointer);
-    state().deviceAllocations.erase(pointer);
+    auto &runtime = state();
+    std::scoped_lock const guard(runtime.lock);
+    runtime.managedAllocations.erase(pointer);
+    const auto found = runtime.deviceAllocations.find(pointer);
+    if (found != runtime.deviceAllocations.end()) {
+      if (found->second.pool)
+        if (auto *pool = memoryPool(runtime, found->second.pool)) accountPoolRelease(*pool, found->second.size);
+      runtime.deviceAllocations.erase(found);
+    }
   }
   return remember(mapHsa(status));
+}
+
+extern "C" hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t *handle, void *pointer) {
+  if (!handle || !pointer) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  const auto found = runtime.deviceAllocations.find(pointer);
+  if (found == runtime.deviceAllocations.end()) return remember(hipErrorInvalidValue);
+  std::memset(handle, 0, sizeof(*handle));
+  std::memcpy(handle->reserved, &pointer, sizeof(pointer));
+  std::memcpy(handle->reserved + sizeof(pointer), &found->second.size, sizeof(size_t));
+  return remember(hipSuccess);
 }
 
 extern "C" hipError_t hipMemcpy(void *destination, const void *source, size_t size, hipMemcpyKind kind) {
@@ -1831,6 +2035,33 @@ extern "C" hipError_t hipMemsetAsync(void *destination, int value, size_t size, 
   return remember(enqueueCommand(stream, [=] { return hipMemset(destination, value, size); }));
 }
 
+namespace {
+hipError_t fill16(hipDeviceptr_t destination, unsigned short value, size_t count) {
+  if (!destination && count != 0) return hipErrorInvalidValue;
+  if (count == 0) return hipSuccess;
+  if (!ensureInitialised()) return hipErrorNoDevice;
+  const uint32_t pair = static_cast<uint32_t>(value) * 0x00010001U;
+  if (count % 2 == 0) return mapHsa(hsa_amd_memory_fill(destination, pair, count / 2));
+  if (count > 1)
+    if (const auto status = mapHsa(hsa_amd_memory_fill(destination, pair, (count - 1) / 2)); status != hipSuccess) return status;
+  auto *last = static_cast<unsigned char *>(destination) + ((count - 1) * sizeof(value));
+  return hipMemcpy(last, &value, sizeof(value), hipMemcpyHostToDevice);
+}
+} // namespace
+
+extern "C" hipError_t hipMemsetD8Async(hipDeviceptr_t destination, unsigned char value, size_t count, hipStream_t stream) {
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return hipMemsetD8(destination, value, count); }));
+}
+extern "C" hipError_t hipMemsetD16Async(hipDeviceptr_t destination, unsigned short value, size_t count, hipStream_t stream) {
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return fill16(destination, value, count); }));
+}
+extern "C" hipError_t hipMemsetD32Async(hipDeviceptr_t destination, int value, size_t count, hipStream_t stream) {
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  return remember(enqueueCommand(stream, [=] { return hipMemsetD32(destination, value, count); }));
+}
+
 extern "C" GEMSTONE_PUBLIC_API hipError_t __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shared, hipStream_t stream) {
   launchConfiguration = LaunchConfiguration{.grid = grid, .block = block, .shared = shared, .stream = stream};
   return remember(hipSuccess);
@@ -1863,11 +2094,8 @@ extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, 
   return hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(blocks, functionAddress, blockSize, shared, 0);
 }
 
-extern "C" hipError_t hipOccupancyMaxPotentialBlockSize(int *minGridSize, int *blockSize, const void *functionAddress, size_t shared,
-                                                        int blockSizeLimit) {
-  if (!minGridSize || !blockSize || !functionAddress) return remember(hipErrorInvalidValue);
-  if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  if (!resolveKernel(functionAddress, currentDevice)) return remember(hipErrorInvalidDeviceFunction);
+namespace {
+hipError_t potentialBlockSize(int *minGridSize, int *blockSize, size_t shared, int blockSizeLimit) {
   const uint32_t limit = blockSizeLimit > 0 ? std::min<uint32_t>(static_cast<uint32_t>(blockSizeLimit), MaxBlockThreads) : MaxBlockThreads;
   uint64_t bestResident = 0;
   uint32_t best = 0;
@@ -1878,10 +2106,19 @@ extern "C" hipError_t hipOccupancyMaxPotentialBlockSize(int *minGridSize, int *b
       best = threads;
     }
   }
-  if (best == 0) return remember(hipErrorLaunchOutOfResources);
+  if (best == 0) return hipErrorLaunchOutOfResources;
   *blockSize = static_cast<int>(best);
   *minGridSize = residentBlocks(best, shared) * static_cast<int>(gemstone::hsa::deviceModel().processors());
-  return remember(hipSuccess);
+  return hipSuccess;
+}
+} // namespace
+
+extern "C" hipError_t hipOccupancyMaxPotentialBlockSize(int *minGridSize, int *blockSize, const void *functionAddress, size_t shared,
+                                                        int blockSizeLimit) {
+  if (!minGridSize || !blockSize || !functionAddress) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  if (!resolveKernel(functionAddress, currentDevice)) return remember(hipErrorInvalidDeviceFunction);
+  return remember(potentialBlockSize(minGridSize, blockSize, shared, blockSizeLimit));
 }
 
 extern "C" hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attributes, const void *functionAddress) {
@@ -1891,6 +2128,26 @@ extern "C" hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attributes,
   std::memset(attributes, 0, sizeof(*attributes));
   attributes->binaryVersion = 900;
   attributes->maxThreadsPerBlock = MaxBlockThreads;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipFuncGetAttribute(int *value, hipFunction_attribute attribute, hipFunction_t function) {
+  if (!value || !function) return remember(hipErrorInvalidValue);
+  auto *handle = functionHandle(function);
+  if (!handle->kernel || !handle->module->loaded) return remember(hipErrorInvalidDeviceFunction);
+  switch (attribute) {
+    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: *value = MaxBlockThreads; break;
+    case HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_NUM_REGS:
+    case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
+    case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
+    case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT: *value = 0; break;
+    case HIP_FUNC_ATTRIBUTE_BINARY_VERSION: *value = 900; break;
+    case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: *value = static_cast<int>(DeviceSharedMemoryPerBlock); break;
+    default: return remember(hipErrorInvalidValue);
+  }
   return remember(hipSuccess);
 }
 
@@ -1936,18 +2193,25 @@ extern "C" const char *hipGetErrorName(hipError_t error) {
 }
 extern "C" const char *hipGetErrorString(hipError_t error) { return hipGetErrorName(error); }
 
-extern "C" hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags) {
+namespace {
+hipError_t createStream(hipStream_t *stream, unsigned int flags, int priority) {
   if (!stream) return remember(hipErrorInvalidValue);
   auto *const created = static_cast<hipStream_t>(commands().createStream((flags & hipStreamNonBlocking) != 0));
   {
     std::scoped_lock const guard(state().lock);
     state().streamDevices.emplace(created, currentDevice);
+    state().streamPriorities.emplace(created, std::clamp(priority, -1, 1));
   }
   *stream = created;
   return remember(hipSuccess);
 }
-extern "C" hipError_t hipStreamCreate(hipStream_t *stream) { return hipStreamCreateWithFlags(stream, 0); }
-extern "C" hipError_t hipStreamCreateWithPriority(hipStream_t *stream, unsigned int, int) { return hipStreamCreate(stream); }
+} // namespace
+
+extern "C" hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags) { return createStream(stream, flags, 0); }
+extern "C" hipError_t hipStreamCreate(hipStream_t *stream) { return createStream(stream, 0, 0); }
+extern "C" hipError_t hipStreamCreateWithPriority(hipStream_t *stream, unsigned int flags, int priority) {
+  return createStream(stream, flags, priority);
+}
 extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
   if (const auto pending = static_cast<hipError_t>(commands().wait(commands().snapshot(stream))); pending != hipSuccess)
     return remember(pending);
@@ -1955,6 +2219,7 @@ extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
     if (!commands().destroyStream(stream)) return remember(hipErrorInvalidResourceHandle);
     std::scoped_lock const guard(state().lock);
     state().streamDevices.erase(stream);
+    state().streamPriorities.erase(stream);
   }
   return remember(hipSuccess);
 }
@@ -1983,6 +2248,18 @@ extern "C" hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t *device
   if (!device) return remember(hipErrorInvalidValue);
   if (sentinelStream(stream) || !validStream(stream)) return remember(hipErrorInvalidResourceHandle);
   *device = streamDevice(stream);
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipStreamGetPriority(hipStream_t stream, int *priority) {
+  if (!priority) return remember(hipErrorInvalidValue);
+  if (!stream || sentinelStream(stream)) {
+    *priority = 0;
+    return remember(hipSuccess);
+  }
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  std::scoped_lock const guard(state().lock);
+  const auto found = state().streamPriorities.find(stream);
+  *priority = found == state().streamPriorities.end() ? 0 : found->second;
   return remember(hipSuccess);
 }
 extern "C" int hipGetStreamDeviceId(hipStream_t stream) { return stream && !sentinelStream(stream) ? streamDevice(stream) : currentDevice; }
@@ -2071,6 +2348,11 @@ extern "C" hipError_t hipStreamGetCaptureInfo(hipStream_t stream, hipStreamCaptu
 extern "C" hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus *status, unsigned long long *id,
                                                  hipGraph_t *graph, const hipGraphNode_t **dependencies, size_t *count) {
   return remember(captureInfo(stream, status, id, graph, dependencies, count));
+}
+extern "C" hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode *mode) {
+  if (!mode) return remember(hipErrorInvalidValue);
+  std::swap(threadCaptureMode, *mode);
+  return remember(hipSuccess);
 }
 extern "C" hipError_t hipLaunchHostFunc(hipStream_t stream, hipHostFn_t fn, void *userData) {
   if (!fn) return remember(hipErrorInvalidValue);
@@ -2274,6 +2556,34 @@ extern "C" hipError_t hipModuleGetFunction(hipFunction_t *function, hipModule_t 
   return remember(hipSuccess);
 }
 
+extern "C" hipError_t hipModuleGetGlobal(hipDeviceptr_t *dptr, size_t *bytes, hipModule_t module, const char *name) {
+  if (!module || !name) return remember(hipErrorInvalidValue);
+  auto *handle = moduleHandle(module);
+  if (!handle->module || !handle->module->loaded) return remember(hipErrorInvalidResourceHandle);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  if (!ensureModuleLoaded(handle->module, currentDevice)) return remember(hipErrorInvalidImage);
+  hsa_executable_t executable{};
+  {
+    std::scoped_lock const guard(handle->module->lock);
+    executable = handle->module->instances[static_cast<size_t>(currentDevice)].executable;
+  }
+  if (executable.handle == 0) return remember(hipErrorInvalidResourceHandle);
+  hsa_executable_symbol_t symbol{};
+  const hsa_agent_t agent = gpuAgent(currentDevice);
+  if (hsa_executable_get_symbol_by_name(executable, name, &agent, &symbol) != HSA_STATUS_SUCCESS) return remember(hipErrorNotFound);
+  hsa_symbol_kind_t kind{};
+  uint32_t size = 0;
+  uint64_t address = 0;
+  if (hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &kind) != HSA_STATUS_SUCCESS
+      || kind != HSA_SYMBOL_KIND_VARIABLE
+      || hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE, &size) != HSA_STATUS_SUCCESS
+      || hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, &address) != HSA_STATUS_SUCCESS)
+    return remember(hipErrorNotFound);
+  if (dptr) *dptr = reinterpret_cast<hipDeviceptr_t>(address);
+  if (bytes) *bytes = size;
+  return remember(hipSuccess);
+}
+
 extern "C" hipError_t hipModuleLaunchKernel(hipFunction_t function, unsigned int gridX, unsigned int gridY, unsigned int gridZ,
                                             unsigned int blockX, unsigned int blockY, unsigned int blockZ, unsigned int shared,
                                             hipStream_t stream, void **args, void **extra) {
@@ -2302,6 +2612,12 @@ extern "C" hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int *bl
   if (!functionHandle(function)->kernel || !functionHandle(function)->module->loaded) return remember(hipErrorInvalidDeviceFunction);
   *blocks = residentBlocks(static_cast<uint64_t>(blockSize), shared);
   return remember(hipSuccess);
+}
+extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSize(int *minGridSize, int *blockSize, hipFunction_t function, size_t shared,
+                                                              int blockSizeLimit) {
+  if (!minGridSize || !blockSize || !function) return remember(hipErrorInvalidValue);
+  if (!functionHandle(function)->kernel || !functionHandle(function)->module->loaded) return remember(hipErrorInvalidDeviceFunction);
+  return remember(potentialBlockSize(minGridSize, blockSize, shared, blockSizeLimit));
 }
 extern "C" hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t function, unsigned int gridX, unsigned int gridY, unsigned int gridZ,
                                                        unsigned int blockX, unsigned int blockY, unsigned int blockZ, unsigned int shared,
