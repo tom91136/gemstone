@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/Hecbench.cmake")
 
-foreach(variable IN ITEMS SOURCE BUILD TARGETS PREREQUISITES PROGRAMS BUILT FAILURES CXXOPTS FMT CUDA_ARCH JOBS TIMEOUT)
+foreach(variable IN ITEMS SOURCE BUILD DATA TARGETS PREREQUISITES PROGRAMS BUILT FAILURES CXXOPTS FMT CUDA_ARCH JOBS TIMEOUT)
   if(NOT DEFINED ${variable} OR "${${variable}}" STREQUAL "")
     message(FATAL_ERROR "${variable} is required")
   endif()
@@ -210,3 +210,10 @@ foreach(candidate IN LISTS candidates)
 endforeach()
 list(LENGTH candidates candidate_count)
 message(STATUS "HeCBench built ${program_count} of ${candidate_count} selected benchmarks")
+
+file(MAKE_DIRECTORY "${DATA}/tree")
+hecbench_generate_invocations("${SOURCE}" "${TARGETS}" "${BUILT}" "${DATA}/tree"
+  "${DATA}/hecbench-arguments.json"
+  "${DATA}/hecbench-directories.json"
+  "${DATA}/hecbench-missing-data.txt"
+  "${DATA}/hecbench-unparsed-runs.txt")

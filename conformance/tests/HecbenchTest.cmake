@@ -164,4 +164,69 @@ if(NOT yaml_args STREQUAL expected_args)
   message(FATAL_ERROR "benchmark arguments changed: expected [${expected_args}], got [${yaml_args}]")
 endif()
 
+# The run target is the invocation upstream maintains; every program with a parseable one must get its arguments,
+# independent of whether benchmarks.yaml has a test entry.
+write("${directory}/runs/benchmarks.yaml" [=[
+alpha:
+  test:
+    args: ["1", "2"]
+gamma:
+  test:
+    args: []
+]=])
+foreach(name IN ITEMS alpha beta gamma delta epsilon zeta)
+  write("${directory}/runs/src/${name}-cuda/CMakeLists.txt" "")
+endforeach()
+write("${directory}/runs/src/alpha-cuda/Makefile" "run:\n\t./main 10 20\n")
+write("${directory}/runs/src/beta-cuda/Makefile" "SIZE=32\nREPEAT=4\nrun:\n\t./main \$(SIZE) \$(REPEAT)\n")
+write("${directory}/runs/src/gamma-cuda/Makefile" "run:\n\t./main\n")
+write("${directory}/runs/src/delta-cuda/Makefile" "run:\n\t./main -i data/input.dat\n")
+write("${directory}/runs/src/delta-cuda/data/input.dat" "payload\n")
+write("${directory}/runs/src/epsilon-cuda/Makefile" "run:\n\t./main -i data/missing.dat\n")
+write("${directory}/runs/src/zeta-cuda/Makefile" "run:\n\tfor x in a b; do ./main \$\$x; done\n")
+set(target_lines)
+set(built_lines)
+foreach(name IN ITEMS alpha beta gamma delta epsilon zeta)
+  list(APPEND target_lines "${name}|${name}-cuda|hecbench_${name}")
+  list(APPEND built_lines "hecbench_${name}|/nonexistent/hecbench_${name}")
+endforeach()
+list(JOIN target_lines "\n" target_text)
+list(JOIN built_lines "\n" built_text)
+file(WRITE "${directory}/runs/targets.txt" "${target_text}\n")
+file(WRITE "${directory}/runs/built.txt" "${built_text}\n")
+file(MAKE_DIRECTORY "${directory}/runs/tree")
+hecbench_generate_invocations(
+  "${directory}/runs"
+  "${directory}/runs/targets.txt"
+  "${directory}/runs/built.txt"
+  "${directory}/runs/tree"
+  "${directory}/runs/arguments.json"
+  "${directory}/runs/directories.json"
+  "${directory}/runs/missing.txt"
+  "${directory}/runs/unparsed.txt")
+file(READ "${directory}/runs/arguments.json" runs)
+if(NOT runs MATCHES "\"hecbench_alpha\": \\[\"1\", \"2\"\\]")
+  message(FATAL_ERROR "yaml arguments did not override the run target: ${runs}")
+endif()
+if(NOT runs MATCHES "\"hecbench_beta\": \\[\"32\", \"4\"\\]")
+  message(FATAL_ERROR "run target variables were not expanded: ${runs}")
+endif()
+if(NOT runs MATCHES "\"hecbench_gamma\": \\[\\]")
+  message(FATAL_ERROR "a run target without arguments gained some: ${runs}")
+endif()
+if(NOT runs MATCHES "\"hecbench_delta\": \\[\"-i\", \"data/input.dat\"\\]")
+  message(FATAL_ERROR "run target arguments changed: ${runs}")
+endif()
+if(NOT EXISTS "${directory}/runs/tree/src/delta-cuda/data/input.dat")
+  message(FATAL_ERROR "data referenced by a run target was not copied")
+endif()
+file(READ "${directory}/runs/missing.txt" missing)
+if(NOT missing MATCHES "hecbench_epsilon\\|data/missing.dat")
+  message(FATAL_ERROR "missing data was not reported: ${missing}")
+endif()
+file(READ "${directory}/runs/unparsed.txt" unparsed)
+if(NOT unparsed MATCHES "hecbench_zeta")
+  message(FATAL_ERROR "a shell run target was not reported: ${unparsed}")
+endif()
+
 file(REMOVE_RECURSE "${directory}")

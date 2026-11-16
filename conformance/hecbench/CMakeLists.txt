@@ -103,6 +103,7 @@ add_custom_target(conformance_hecbench_artifact
   COMMAND "${CMAKE_COMMAND}"
     "-DSOURCE=${staging}"
     "-DBUILD=${CMAKE_CURRENT_BINARY_DIR}/build"
+    "-DDATA=${CMAKE_CURRENT_BINARY_DIR}/hecbench-data"
     "-DTARGETS=${CMAKE_CURRENT_BINARY_DIR}/targets.txt"
     "-DPREREQUISITES=${CMAKE_CURRENT_BINARY_DIR}/prerequisites.txt"
     "-DPROGRAMS=${CMAKE_CURRENT_BINARY_DIR}/hecbench-programs.txt"
@@ -117,12 +118,16 @@ add_custom_target(conformance_hecbench_artifact
   COMMENT "Building HeCBench CUDA benchmarks"
   VERBATIM)
 
-hecbench_benchmark_arguments("${source}/benchmarks.yaml" benchmark_args)
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hecbench-arguments.json" "${benchmark_args}\n")
-
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/hecbench-data/tree")
+install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/hecbench-data/tree/"
+  DESTINATION data/hecbench/tree COMPONENT support)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hecbench-data/hecbench-arguments.json"
+  "${CMAKE_CURRENT_BINARY_DIR}/hecbench-data/hecbench-directories.json"
+  "${CMAKE_CURRENT_BINARY_DIR}/hecbench-data/hecbench-missing-data.txt"
+  "${CMAKE_CURRENT_BINARY_DIR}/hecbench-data/hecbench-unparsed-runs.txt"
+  DESTINATION data/hecbench COMPONENT support)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hecbench-licences.csv"
   "${CMAKE_CURRENT_BINARY_DIR}/hecbench-excluded.txt"
-  "${CMAKE_CURRENT_BINARY_DIR}/hecbench-arguments.json"
   DESTINATION data/hecbench COMPONENT support)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hecbench-build-failures.txt"
   DESTINATION data/hecbench COMPONENT architecture OPTIONAL)
