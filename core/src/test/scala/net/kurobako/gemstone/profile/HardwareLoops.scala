@@ -1503,6 +1503,84 @@ object HardwareLoops {
       row(0x8733cL, "v_rcp_f32 v7, v7", "mufu", "v7", "v7", est(1)),
       row(0x87340L, "v_rcp_f32 v6, v6", "mufu", "v6", "v6", est(1)),
       row(0x87344L, "s_cbranch_scc1 -11", "-", "scc", "", est(1))
+    ),
+    "layout_f8_comp_a20" -> Vec(
+      row(0x63a14L, "s_add_i32 s17, s17, -1", "-", "s17", "s17 scc", est(1)),
+      row(0x63a18L, "v_fma_f32 v3, v3, s5, s6", "fma", "v3 s5 s6", "v3", est(1)),
+      row(0x63a20L, "s_cmp_lg_u32 s17, 0", "-", "s17", "scc", est(1)),
+      row(0x63a24L, "v_fma_f32 v4, v4, s5, s6", "fma", "v4 s5 s6", "v4", est(1)),
+      row(0x63a2cL, "v_fma_f32 v5, v5, s5, s6", "fma", "v5 s5 s6", "v5", est(1)),
+      row(0x63a34L, "v_fma_f32 v10, v10, s5, s6", "fma", "v10 s5 s6", "v10", est(1)),
+      row(0x63a3cL, "v_fma_f32 v9, v9, s5, s6", "fma", "v9 s5 s6", "v9", est(1)),
+      row(0x63a44L, "v_fma_f32 v8, v8, s5, s6", "fma", "v8 s5 s6", "v8", est(1)),
+      row(0x63a4cL, "v_fma_f32 v7, v7, s5, s6", "fma", "v7 s5 s6", "v7", est(1)),
+      row(0x63a54L, "v_fma_f32 v6, v6, s5, s6", "fma", "v6 s5 s6", "v6", est(1)),
+      row(0x63a5cL, "s_cbranch_scc1 -19", "-", "scc", "", est(1))
+    ),
+    "layout_f8_tail_a40" -> Vec(
+      row(0x5f428L, "v_fma_f32 v3, v3, s5, s6", "fma", "v3 s5 s6", "v3", est(1)),
+      row(0x5f430L, "v_fma_f32 v4, v4, s5, s6", "fma", "v4 s5 s6", "v4", est(1)),
+      row(0x5f438L, "v_fma_f32 v5, v5, s5, s6", "fma", "v5 s5 s6", "v5", est(1)),
+      row(0x5f440L, "v_fma_f32 v10, v10, s5, s6", "fma", "v10 s5 s6", "v10", est(1)),
+      row(0x5f448L, "v_fma_f32 v9, v9, s5, s6", "fma", "v9 s5 s6", "v9", est(1)),
+      row(0x5f450L, "v_fma_f32 v8, v8, s5, s6", "fma", "v8 s5 s6", "v8", est(1)),
+      row(0x5f458L, "v_fma_f32 v7, v7, s5, s6", "fma", "v7 s5 s6", "v7", est(1)),
+      row(0x5f460L, "v_fma_f32 v6, v6, s5, s6", "fma", "v6 s5 s6", "v6", est(1)),
+      row(0x5f468L, "s_add_i32 s17, s17, -1", "-", "s17", "s17 scc", est(1)),
+      row(0x5f46cL, "s_cmp_lg_u32 s17, 0", "-", "s17", "scc", est(1)),
+      row(0x5f470L, "s_cbranch_scc1 -19", "-", "scc", "", est(1))
+    ),
+    "layout_d4v_head_a24" -> Vec(
+      row(0x80ed8L, "s_add_i32 s16, s16, -1", "-", "s16", "s16 scc", est(1)),
+      row(0x80edcL, "s_cmp_lg_u32 s16, 0", "-", "s16", "scc", est(1)),
+      row(0x80ee0L, "v_fma_f64 v[1:2], v[1:2], v[11:12], v[13:14]", "fp64", "v1 v2 v11 v12 v13 v14", "v1 v2", est(1)),
+      row(0x80ee8L, "v_fma_f64 v[3:4], v[3:4], v[11:12], v[13:14]", "fp64", "v3 v4 v11 v12 v13 v14", "v3 v4", est(1)),
+      row(0x80ef0L, "v_fma_f64 v[5:6], v[5:6], v[11:12], v[13:14]", "fp64", "v5 v6 v11 v12 v13 v14", "v5 v6", est(1)),
+      row(0x80ef8L, "v_fma_f64 v[7:8], v[7:8], v[11:12], v[13:14]", "fp64", "v7 v8 v11 v12 v13 v14", "v7 v8", est(1)),
+      row(0x80f00L, "s_cbranch_scc1 -11", "-", "scc", "", est(1))
+    ),
+    "layout_d4v_tail_a8" -> Vec(
+      row(0x7e6c8L, "v_fma_f64 v[1:2], v[1:2], v[11:12], v[13:14]", "fp64", "v1 v2 v11 v12 v13 v14", "v1 v2", est(1)),
+      row(0x7e6d0L, "v_fma_f64 v[3:4], v[3:4], v[11:12], v[13:14]", "fp64", "v3 v4 v11 v12 v13 v14", "v3 v4", est(1)),
+      row(0x7e6d8L, "v_fma_f64 v[5:6], v[5:6], v[11:12], v[13:14]", "fp64", "v5 v6 v11 v12 v13 v14", "v5 v6", est(1)),
+      row(0x7e6e0L, "v_fma_f64 v[7:8], v[7:8], v[11:12], v[13:14]", "fp64", "v7 v8 v11 v12 v13 v14", "v7 v8", est(1)),
+      row(0x7e6e8L, "s_add_i32 s16, s16, -1", "-", "s16", "s16 scc", est(1)),
+      row(0x7e6ecL, "s_cmp_lg_u32 s16, 0", "-", "s16", "scc", est(1)),
+      row(0x7e6f0L, "s_cbranch_scc1 -11", "-", "scc", "", est(1))
+    ),
+    "layout_f16_tail_a60" -> Vec(
+      row(0x696fcL, "v_fma_f32 v3, v3, s5, s6", "fma", "v3 s5 s6", "v3", est(1)),
+      row(0x69704L, "v_fma_f32 v4, v4, s5, s6", "fma", "v4 s5 s6", "v4", est(1)),
+      row(0x6970cL, "v_fma_f32 v5, v5, s5, s6", "fma", "v5 s5 s6", "v5", est(1)),
+      row(0x69714L, "v_fma_f32 v6, v6, s5, s6", "fma", "v6 s5 s6", "v6", est(1)),
+      row(0x6971cL, "v_fma_f32 v7, v7, s5, s6", "fma", "v7 s5 s6", "v7", est(1)),
+      row(0x69724L, "v_fma_f32 v8, v8, s5, s6", "fma", "v8 s5 s6", "v8", est(1)),
+      row(0x6972cL, "v_fma_f32 v9, v9, s5, s6", "fma", "v9 s5 s6", "v9", est(1)),
+      row(0x69734L, "v_fma_f32 v10, v10, s5, s6", "fma", "v10 s5 s6", "v10", est(1)),
+      row(0x6973cL, "v_fma_f32 v11, v11, s5, s6", "fma", "v11 s5 s6", "v11", est(1)),
+      row(0x69744L, "v_fma_f32 v12, v12, s5, s6", "fma", "v12 s5 s6", "v12", est(1)),
+      row(0x6974cL, "v_fma_f32 v13, v13, s5, s6", "fma", "v13 s5 s6", "v13", est(1)),
+      row(0x69754L, "v_fma_f32 v18, v18, s5, s6", "fma", "v18 s5 s6", "v18", est(1)),
+      row(0x6975cL, "v_fma_f32 v17, v17, s5, s6", "fma", "v17 s5 s6", "v17", est(1)),
+      row(0x69764L, "v_fma_f32 v16, v16, s5, s6", "fma", "v16 s5 s6", "v16", est(1)),
+      row(0x6976cL, "v_fma_f32 v15, v15, s5, s6", "fma", "v15 s5 s6", "v15", est(1)),
+      row(0x69774L, "v_fma_f32 v14, v14, s5, s6", "fma", "v14 s5 s6", "v14", est(1)),
+      row(0x6977cL, "s_add_i32 s17, s17, -1", "-", "s17", "s17 scc", est(1)),
+      row(0x69780L, "s_cmp_lg_u32 s17, 0", "-", "s17", "scc", est(1)),
+      row(0x69784L, "s_cbranch_scc1 -35", "-", "scc", "", est(1))
+    ),
+    "layout_m8_tail_a40" -> Vec(
+      row(0x85728L, "v_rcp_f32 v3, v3", "mufu", "v3", "v3", est(1)),
+      row(0x8572cL, "v_rcp_f32 v4, v4", "mufu", "v4", "v4", est(1)),
+      row(0x85730L, "v_rcp_f32 v5, v5", "mufu", "v5", "v5", est(1)),
+      row(0x85734L, "v_rcp_f32 v10, v10", "mufu", "v10", "v10", est(1)),
+      row(0x85738L, "v_rcp_f32 v9, v9", "mufu", "v9", "v9", est(1)),
+      row(0x8573cL, "v_rcp_f32 v8, v8", "mufu", "v8", "v8", est(1)),
+      row(0x85740L, "v_rcp_f32 v7, v7", "mufu", "v7", "v7", est(1)),
+      row(0x85744L, "v_rcp_f32 v6, v6", "mufu", "v6", "v6", est(1)),
+      row(0x85748L, "s_add_i32 s16, s16, -1", "-", "s16", "s16 scc", est(1)),
+      row(0x8574cL, "s_cmp_lg_u32 s16, 0", "-", "s16", "scc", est(1)),
+      row(0x85750L, "s_cbranch_scc1 -11", "-", "scc", "", est(1))
     )
   )
 

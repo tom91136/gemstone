@@ -32,7 +32,7 @@ object BlockAnalysis {
 
   private type Counted = (ProfileStream.Instruction, Profile.Counters)
   private type Lookup  = Map[(String, Long), Counted]
-  private type Slot    = (Long, Option[Counted])
+  private type Slot    = (Long, Option[Counted], Extent)
 
   private case class Span(kind: Kind, header: Int, blocks: Vec[Int], latches: Vec[Int])
 
@@ -78,9 +78,10 @@ object BlockAnalysis {
     val cfg   = graph.graph
     val slots = span.blocks.flatMap(block => cfg.blocks(block).first to cfg.blocks(block).last).map { index =>
       val address = graph.offsets(index)
-      (address, lookup.get((graph.kernel, address)))
+      val end     = if (index + 1 < graph.offsets.size) graph.offsets(index + 1) else address + 1
+      (address, lookup.get((graph.kernel, address)), Extent(address, end))
     }
-    val members = slots.map { case (address, entry) =>
+    val members = slots.map { case (address, entry, _) =>
       Member(address, entry.map(_._1.text), entry.fold(0L)(_._2.issues))
     }
     val closing        = span.latches.map(block => graph.offsets(cfg.blocks(block).last)).toSet
@@ -100,14 +101,17 @@ object BlockAnalysis {
       closing: Set[Long],
       placement: Option[PipelineSimulator.Placement]
   ): Either[String, Timing] = {
-    val lowered = slots.map { case (address, entry) =>
-      opOf(profile.architecture, address, entry, closing.contains(address))
+    val lowered = slots.map { case (address, entry, extent) =>
+      opOf(profile.architecture, address, entry, closing.contains(address), extent)
     }
     for {
       _     <- lowered.collectFirst { case Left(reason) => reason }.toLeft(())
       _     <- unevenAt(members).toLeft(())
       block <- simulated(profile, kind, lowered.collect { case Right(op) => op }, placement)
-    } yield Timing(block, slots.zip(lowered).collect { case ((address, _), Right(op)) if op.pipe.isEmpty => address })
+    } yield Timing(
+      block,
+      slots.zip(lowered).collect { case ((address, _, _), Right(op)) if op.pipe.isEmpty => address }
+    )
   }
 
   private def unevenAt(members: Vec[Member]): Option[String] =
@@ -132,7 +136,8 @@ object BlockAnalysis {
       architecture: Architecture,
       address: Long,
       entry: Option[Counted],
-      backEdge: Boolean
+      backEdge: Boolean,
+      extent: Extent
   ): Either[String, Op] =
     entry match {
       case None                          => Left(s"no profile entry at ${hex(address)}")
@@ -150,7 +155,8 @@ object BlockAnalysis {
           Some(stallOf(schedule)),
           trafficOf(counters),
           backEdge,
-          rate = NvidiaLatency.operandRate(architecture, instruction.text)
+          rate = NvidiaLatency.operandRate(architecture, instruction.text),
+          span = Some(extent)
         )
     }
 

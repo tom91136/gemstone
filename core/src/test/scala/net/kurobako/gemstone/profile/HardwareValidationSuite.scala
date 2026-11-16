@@ -47,7 +47,8 @@ import net.kurobako.gemstone.vm.LaunchObserver.*
   * body (`tail`), ahead of it (`head`) or interleaved as the compiler places it (`comp`), each at loop-top offsets of 0
   * to 124 bytes in 4-byte steps (`a<offset>`), timed as the `ctl_*` rows in two passes of opposite order that agree to
   * 0.33 cycles. The table is in `/var/tmp/gs/t15-round2/layout.tsv` with `p1.tsv` and `p2.tsv`; the committed rows are
-  * its calibration and hold-out points.
+  * its calibration and hold-out points. The 8-FMA and 4-DFMA register-operand loops (`layout_f8_*`, `layout_d4v_*`)
+  * were held out of the front-end fit.
   *
   * The expected binding is the partition-local resource, the issue slots or a non-shared pipe, when the placement
   * leaves one wave set on a partition, or one wave on each active partition, and the case saturates it. A spread
@@ -237,7 +238,13 @@ class HardwareValidationSuite extends Suite {
     Measured("layout_f8_head_a48", 1, 35.00, Some(Binding.Path), Some(oneSimd)),
     Measured("layout_f16_comp_a0", 1, 44.01, Some(Binding.Path), Some(oneSimd)),
     Measured("layout_d4_head_a32", 1, 70.00, None, Some(oneSimd)),
-    Measured("layout_m8_head_a28", 1, 54.99, None, Some(oneSimd))
+    Measured("layout_m8_head_a28", 1, 54.99, None, Some(oneSimd)),
+    Measured("layout_f8_comp_a20", 1, 41.99, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_f8_tail_a40", 1, 45.34, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_d4v_head_a24", 1, 63.91, None, Some(oneSimd)),
+    Measured("layout_d4v_tail_a8", 1, 67.01, None, Some(oneSimd)),
+    Measured("layout_f16_tail_a60", 1, 55.47, Some(Binding.Path), Some(oneSimd)),
+    Measured("layout_m8_tail_a40", 1, 62.00, None, Some(oneSimd))
   )
 
   private class State(

@@ -181,8 +181,25 @@ class ArchitectureSuite extends Suite {
   }
 
   test("gfx1036 back-edge redirect is the loop-control probe") {
-    assertEquals(Architecture.gfx1036.branchRedirect.map(_.value), Some(22))
+    assertEquals(Architecture.gfx1036.branchRedirect.map(_.value), Some(23))
     assertEquals(Architecture.gfx1036.branchRedirect.map(_.source.kind), Some("probed"))
+  }
+
+  test("gfx1036 front end and pipe queue are the loop-control and layout probes") {
+    val gfx = Architecture.gfx1036
+    assertEquals(gfx.fetchLine.map(_.value), Some(64))
+    assertEquals(gfx.lineRedirect.map(_.value), Some(11))
+    assertEquals(gfx.conditionLatency.map(_.value), Some(11))
+    assertEquals(gfx.scalarAfter.view.mapValues(_.value).toMap, Map(Pipe.Fma -> 3))
+    assertEquals(gfx.pipeQueue.view.mapValues(_.value).toMap, Map(Pipe.Fp64 -> 1, Pipe.Mufu -> 1))
+    val sources = gfx.fetchLine.toVector ++ gfx.lineRedirect ++ gfx.conditionLatency ++ gfx.scalarAfter.values ++
+      gfx.pipeQueue.values
+    assert(sources.forall(_.source.kind == "probed"))
+    val sm = Architecture.sm89
+    assertEquals(
+      (sm.fetchLine, sm.lineRedirect, sm.conditionLatency, sm.scalarAfter, sm.pipeQueue),
+      (None, None, None, Map.empty, Map.empty)
+    )
   }
 
   test("gfx1036 fp64 rate matches its probe") {

@@ -1214,10 +1214,21 @@ object Architecture {
   )
 
   private val gfx1036Redirect = Source.Probed(
-    "taken s_cbranch back-edge of a loop of 16 independent v_fma_f32 with the counter decrement and compare ahead " +
-      "of them, so only the branch follows the FMAs: 40.01 cycles per trip, the branch issuing 18 cycles in, " +
-      "which leaves 22 before the next trip issues; with a single control op ahead of the FMAs 39.99, leaving 23; " +
-      "timed with clock64 on one wave, median of 201 launches each (2026-11-15)",
+    "taken s_cbranch back-edge of a loop crossing a 64-byte line, fitted with the other front-end constants to the " +
+      "360 calibration cells of the 2026-11-15 layout, loop-control and back-edge probes: mean error 1.69 cycles, " +
+      "worst 9.0, 96 further layout cells held out with mean error 1.85 and worst 7.1 " +
+      "(/var/tmp/gs/t15-round4/fit3.log)",
+    "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
+    "Linux 7.3.3 amdgpu",
+    "ROCm 7.2 hipcc"
+  )
+
+  private val gfx1036FrontEnd = Source.Probed(
+    "385 inline asm loops of 4 to 16 v_fma_f32, 4 v_fma_f64 or 8 v_rcp_f32 with the control ahead of, after or " +
+      "through the body at loop-top offsets of 0 to 124 bytes, whose cycles per trip step by 12 where the loop " +
+      "crosses a 64-byte line, with the loop-control and back-edge probes; line redirect 11, condition latency 11, " +
+      "scalar op after a v_fma 3 and one-op pipe queues fitted to the 360 calibration cells " +
+      "(/var/tmp/gs/t15-round4/fit3.log, 2026-11-15)",
     "Ryzen 9 9950X3D integrated GPU, gfx1036, one WGP",
     "Linux 7.3.3 amdgpu",
     "ROCm 7.2 hipcc"
@@ -1246,8 +1257,13 @@ object Architecture {
     latency = rdnaProbeLatency(gfx1036Latency),
     pipeLatency = Map(Pipe.Fma -> Sourced(5, gfx1036Chain)),
     waveIssueCycles = Some(Sourced(1.0, gfx1036Issue)),
-    branchRedirect = Some(Sourced(22, gfx1036Redirect)),
-    issueOrder = Some(Sourced(Architecture.IssueOrder.OldestFirst, gfx1036IssueOrder))
+    branchRedirect = Some(Sourced(23, gfx1036Redirect)),
+    issueOrder = Some(Sourced(Architecture.IssueOrder.OldestFirst, gfx1036IssueOrder)),
+    fetchLine = Some(Sourced(64, gfx1036FrontEnd)),
+    lineRedirect = Some(Sourced(11, gfx1036FrontEnd)),
+    conditionLatency = Some(Sourced(11, gfx1036FrontEnd)),
+    scalarAfter = Map(Pipe.Fma -> Sourced(3, gfx1036FrontEnd)),
+    pipeQueue = Map(Pipe.Fp64 -> Sourced(1, gfx1036FrontEnd), Pipe.Mufu -> Sourced(1, gfx1036FrontEnd))
   )
 
   private def rdna2(name: String): Architecture =
@@ -1538,7 +1554,21 @@ case class Architecture(
     /** Cycles a pipe cannot start a loop trip after its first result, when one warp per partition is resident; the
       * partitions sharing the pipe split it.
       */
-    pipeRestart: Map[Pipe, Architecture.Sourced[Int]] = Map.empty
+    pipeRestart: Map[Pipe, Architecture.Sourced[Int]] = Map.empty,
+    /** Bytes of one instruction fetch line. A loop that sits within one line stays in the wave's instruction buffer. */
+    fetchLine: Option[Architecture.Sourced[Int]] = None,
+    /** Cycles a taken back-edge costs when its loop sits within one fetch line, in place of `branchRedirect`, which a
+      * loop crossing a line boundary pays.
+      */
+    lineRedirect: Option[Architecture.Sourced[Int]] = None,
+    /** Cycles after the op that wrote a back-edge's condition before the back-edge can issue. */
+    conditionLatency: Option[Architecture.Sourced[Int]] = None,
+    /** Cycles an op without a pipe waits after an op issued to the given pipe. */
+    scalarAfter: Map[Pipe, Architecture.Sourced[Int]] = Map.empty,
+    /** Ops a pipe holds in its input queue besides the one it runs. A queued op starts when the pipe frees and its
+      * result counts from then. The wave's next op for a vector pipe waits one cycle short of the pipe's interval.
+      */
+    pipeQueue: Map[Pipe, Architecture.Sourced[Int]] = Map.empty
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */
@@ -1589,7 +1619,12 @@ case class Architecture(
       waveIssueCycles = waveIssueCycles.map(inherit(_)),
       branchRedirect = branchRedirect.map(inherit(_)),
       issueOrder = issueOrder.map(inherit(_)),
-      pipeRestart = pipeRestart.view.mapValues(inherit(_)).toMap
+      pipeRestart = pipeRestart.view.mapValues(inherit(_)).toMap,
+      fetchLine = fetchLine.map(inherit(_)),
+      lineRedirect = lineRedirect.map(inherit(_)),
+      conditionLatency = conditionLatency.map(inherit(_)),
+      scalarAfter = scalarAfter.view.mapValues(inherit(_)).toMap,
+      pipeQueue = pipeQueue.view.mapValues(inherit(_)).toMap
     )
   }
 

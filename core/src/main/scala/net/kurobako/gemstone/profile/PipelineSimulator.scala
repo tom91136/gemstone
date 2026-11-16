@@ -16,6 +16,9 @@ object PipelineSimulator {
     val none: Traffic = Traffic()
   }
 
+  /** The bytes an op occupies, `end` exclusive. */
+  case class Extent(start: Long, end: Long)
+
   case class Op(
       pipe: Option[Pipe],
       lanes: Int,
@@ -26,7 +29,8 @@ object PipelineSimulator {
       stall: Option[Architecture.Sourced[Int]] = None,
       traffic: Traffic = Traffic.none,
       backEdge: Boolean = false,
-      rate: Option[Architecture.Sourced[Double]] = None
+      rate: Option[Architecture.Sourced[Double]] = None,
+      span: Option[Extent] = None
   )
 
   object Stream {
@@ -90,12 +94,16 @@ object PipelineSimulator {
     var stalls: Map[Stall, Long]                   = Map.empty
     val ready: mutable.Map[String, Long]           = mutable.Map.empty[String, Long]
     var restarts: Map[ProfileReport.Binding, Long] = Map.empty
+    var scalarFrom: Long                           = 0L
+    var vectorFrom: Long                           = 0L
+    val condition: mutable.Map[String, Long]       = mutable.Map.empty[String, Long]
   }
 
   private type Signature = (
       Int,
-      Vec[(Long, Long, Map[String, Long], Map[ProfileReport.Binding, Long])],
-      Map[ProfileReport.Binding, Long]
+      Vec[(Long, Long, Long, Long, Map[String, Long], Map[String, Long], Map[ProfileReport.Binding, Long])],
+      Map[ProfileReport.Binding, Long],
+      Map[ProfileReport.Binding, Vec[Long]]
   )
 
   private case class Mark(time: Long, positions: Vec[Long], busy: Map[ProfileReport.Binding, Long], issued: Long)
@@ -137,11 +145,22 @@ object PipelineSimulator {
     val order      = architecture.issueOrder.map(_.value).getOrElse(Architecture.IssueOrder.RoundRobin)
     // A spread placement models the same waves on every active partition; their mix comes from
     // several workgroups, so the single-partition age order is only applied when one is active.
-    val scheduled   = if (active == 1) order else Architecture.IssueOrder.RoundRobin
-    val busyUntil   = mutable.Map.empty[ProfileReport.Binding, Long]
-    val busyCycles  = mutable.Map.empty[ProfileReport.Binding, Long]
-    val timeline    = mutable.ArrayBuffer.empty[Entry]
-    val sources     = mutable.Set(rates.issues.source, architecture.limits.partitions.source)
+    val scheduled  = if (active == 1) order else Architecture.IssueOrder.RoundRobin
+    val busyUntil  = mutable.Map.empty[ProfileReport.Binding, Long]
+    val queued     = mutable.Map.empty[ProfileReport.Binding, Vec[Long]]
+    val busyCycles = mutable.Map.empty[ProfileReport.Binding, Long]
+    val timeline   = mutable.ArrayBuffer.empty[Entry]
+    val sources    = mutable.Set(rates.issues.source, architecture.limits.partitions.source)
+    val spans      = stream.period.fold(Vec.empty[Extent])(p => Vec.tabulate(p)(stream.op(_).flatMap(_.span)).flatten)
+    val redirect   = architecture.branchRedirect.map { crossing =>
+      val within = for {
+        line   <- architecture.fetchLine
+        inside <- architecture.lineRedirect
+        if spans.nonEmpty && stream.period.contains(spans.size)
+        if spans.map(_.start / line.value).min == spans.map(span => (span.end - 1) / line.value).max
+      } yield Architecture.Sourced(inside.value, inside.source)
+      within.getOrElse(crossing)
+    }
     val marks       = mutable.Map.empty[Signature, Mark]
     var issuedSlots = 0L
 
@@ -184,6 +203,15 @@ object PipelineSimulator {
       rates.loads.flatMap(claim(ProfileReport.Binding.Loads, op.traffic.loads, _, active, Vec.empty))
     ).flatten
 
+    def depth(resource: ProfileReport.Binding): Int = resource match {
+      case ProfileReport.Binding.Arithmetic(pipe) => architecture.pipeQueue.get(pipe).fold(0)(_.value)
+      case _                                      => 0
+    }
+
+    def accepts(demand: Claim, t: Long): Boolean =
+      busyUntil.getOrElse(demand.resource, 0L) <= t ||
+        queued.getOrElse(demand.resource, Vec.empty[Long]).count(_ > t) < depth(demand.resource)
+
     def cycle(t: Long, start: Int): Int = {
       var used = 0
       var next = start
@@ -194,34 +222,60 @@ object PipelineSimulator {
           stream.op(warp.position) match {
             case None     => warp.done = true
             case Some(op) =>
-              val cost    = math.min(op.issue, slots)
-              val held    = warp.next > t
-              val ready   = op.reads.forall(r => warp.ready.getOrElse(r, 0L) <= t)
+              val cost  = math.min(op.issue, slots)
+              val held  = warp.next > t || (if (op.pipe.isDefined) warp.vectorFrom else warp.scalarFrom) > t
+              val gated = architecture.conditionLatency.filter(_ => op.backEdge)
+              val ready = op.reads.forall(r => warp.ready.getOrElse(r, 0L) <= t) &&
+                (gated.isEmpty || op.reads.forall(r => warp.condition.getOrElse(r, 0L) <= t))
               val demands = claims(op)
-              val free    = demands.forall(demand => busyUntil.getOrElse(demand.resource, 0L) <= t)
+              val free    = demands.forall(accepts(_, t))
               if (!held && ready && free && used + cost <= slots) {
+                val starts =
+                  demands.map(demand => demand.resource -> math.max(t, busyUntil.getOrElse(demand.resource, 0L)))
+                val begin = op.pipe.flatMap(pipe =>
+                  starts.collectFirst {
+                    case (ProfileReport.Binding.Arithmetic(`pipe`), start) => start
+                  }
+                ).getOrElse(t)
                 val latency              = op.latency.value.toLong
                 val (iteration, opIndex) = stream.period match {
                   case Some(p) => (warp.position / p, (warp.position % p).toInt)
                   case None    => (0L, warp.position.toInt)
                 }
-                demands.foreach { demand =>
-                  busyUntil(demand.resource) = t + demand.cycles
+                demands.zip(starts).foreach { case (demand, (_, begins)) =>
+                  busyUntil(demand.resource) = begins + demand.cycles
+                  if (depth(demand.resource) > 0)
+                    queued(demand.resource) = queued.getOrElse(demand.resource, Vec.empty[Long]).filter(_ > t) :+ begins
                   busyCycles(demand.resource) = busyCycles.getOrElse(demand.resource, 0L) + demand.cycles
                   sources ++= demand.sources
                 }
-                op.writes.foreach(r => warp.ready(r) = math.max(warp.ready.getOrElse(r, 0L), t + latency))
+                op.writes.foreach(r => warp.ready(r) = math.max(warp.ready.getOrElse(r, 0L), begin + latency))
+                architecture.conditionLatency.foreach(condition =>
+                  op.writes.foreach(r => warp.condition(r) = t + condition.value)
+                )
+                gated.foreach(condition => sources += condition.source)
+                op.pipe.foreach { pipe =>
+                  val after = architecture.scalarAfter.get(pipe)
+                  after.foreach(a => sources += a.source)
+                  warp.scalarFrom = t + after.fold(0L)(_.value.toLong)
+                  val queue = architecture.pipeQueue.get(pipe)
+                  queue.foreach(q => sources += q.source)
+                  val cycles = demands.collectFirst {
+                    case demand if demand.resource == ProfileReport.Binding.Arithmetic(pipe) => demand.cycles
+                  }
+                  warp.vectorFrom = t + queue.flatMap(_ => cycles).fold(1L)(c => math.max(1L, c - 1L))
+                }
                 sources += op.latency.source
                 op.stall.foreach(stall => sources += stall.source)
-                val taken = architecture.branchRedirect.filter(_ => op.backEdge)
+                val taken = redirect.filter(_ => op.backEdge)
                 taken.foreach(redirect => sources += redirect.source)
                 val restarted = op.pipe.filter(pipe => architecture.pipeRestart.contains(pipe) && op.rate.isEmpty)
                 restarted.foreach { pipe =>
                   val binding = ProfileReport.Binding.Arithmetic(pipe)
                   if (!warp.restarts.contains(binding))
-                    warp.restarts = warp.restarts.updated(binding, t + latency)
+                    warp.restarts = warp.restarts.updated(binding, begin + latency)
                 }
-                timeline += Entry(index, iteration, opIndex, warp.dispatch, t, t + latency, warp.stalls)
+                timeline += Entry(index, iteration, opIndex, warp.dispatch, t, begin + latency, warp.stalls)
                 warp.position += 1
                 val hold = math.max(1, op.stall.fold(1)(_.value))
                 warp.next = t + taken.fold(hold)(redirect => math.max(hold, redirect.value)).toLong
@@ -268,11 +322,15 @@ object PipelineSimulator {
             (
               warp.position % p,
               math.max(0L, warp.next - t),
+              math.max(0L, warp.scalarFrom - t),
+              math.max(0L, warp.vectorFrom - t),
               ahead(warp.ready, t),
+              ahead(warp.condition, t),
               ahead(warp.restarts, t)
             )
           ),
-          ahead(busyUntil, t)
+          ahead(busyUntil, t),
+          queued.view.mapValues(_.filter(_ > t).map(_ - t)).filter(_._2.nonEmpty).toMap
         )
         marks.get(key) match {
           case Some(mark) =>

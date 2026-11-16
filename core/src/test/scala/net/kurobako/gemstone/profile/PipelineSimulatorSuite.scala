@@ -126,6 +126,60 @@ class PipelineSimulatorSuite extends Suite {
     assertEquals(block.binding, Binding.Arithmetic(Pipe.Fp64))
   }
 
+  private val lone = Placement(Vec(1, 0, 0, 0))
+
+  private def at(ops: Vec[Op], start: Long, bytes: Vec[Long]): Vec[Op] = {
+    val starts = bytes.scanLeft(start)(_ + _)
+    ops.zip(starts.zip(bytes)).map { case (op, (address, size)) =>
+      op.copy(span = Some(Extent(address, address + size)))
+    }
+  }
+
+  test("a loop within one fetch line pays the line redirect and a crossing loop the full one") {
+    val body = Vec.fill(4)(op(pipe = Some(Pipe.Fma))) ++ Vec(
+      op(writes = Vec("s0", "scc")),
+      op(reads = Vec("s0"), writes = Vec("scc")),
+      op(reads = Vec("scc")).copy(backEdge = true)
+    )
+    val sizes  = Vec(8L, 8L, 8L, 8L, 4L, 4L, 4L)
+    val within = run(Architecture.gfx1036, at(body, 0x40L, sizes), warps = 1, lone)
+    val across = run(Architecture.gfx1036, at(body, 0x58L, sizes), warps = 1, lone)
+    assertEqualsDouble(within.cyclesPerIteration, 29.0, 1e-9)
+    assertEqualsDouble(across.cyclesPerIteration, 41.0, 1e-9)
+    assertEqualsDouble(run(Architecture.gfx1036, body, warps = 1, lone).cyclesPerIteration, 41.0, 1e-9)
+  }
+
+  test("an op without a pipe waits the scalar-after cycles behind an fma op") {
+    val body   = Vec(op(pipe = Some(Pipe.Fma)), op(), op(), op().copy(backEdge = true))
+    val issues = run(Architecture.gfx1036, body, warps = 1, lone).entries.filter(_.iteration == 0L).map(_.issue)
+    assertEquals(issues, Vec(0L, 3L, 4L, 5L))
+    val plain = Architecture.gfx1036.copy(scalarAfter = Map.empty)
+    assertEquals(run(plain, body, warps = 1, lone).entries.filter(_.iteration == 0L).map(_.issue), Vec(0L, 1L, 2L, 3L))
+  }
+
+  test("a back-edge waits the condition latency after the op that wrote its condition") {
+    val body   = Vec(op(writes = Vec("scc")), op(reads = Vec("scc")).copy(backEdge = true))
+    val issues = run(Architecture.gfx1036, body, warps = 1, lone).entries.filter(_.iteration == 0L).map(_.issue)
+    assertEquals(issues, Vec(0L, 11L))
+    val plain = Architecture.gfx1036.copy(conditionLatency = None)
+    assertEquals(run(plain, body, warps = 1, lone).entries.filter(_.iteration == 0L).map(_.issue), Vec(0L, 1L))
+  }
+
+  test("a queued pipe op holds the next pipe op but not a scalar op") {
+    val body   = Vec(op(pipe = Some(Pipe.Fp64), latency = 20), op(), op(pipe = Some(Pipe.Fma)))
+    val issues = run(Architecture.gfx1036, body, warps = 1, lone).entries.filter(_.iteration == 0L).map(_.issue)
+    assertEquals(issues, Vec(0L, 1L, 15L))
+  }
+
+  test("the fp64 pipe takes its next op into its queue one cycle before it frees") {
+    val body    = Vec(op(pipe = Some(Pipe.Fp64), latency = 20), op(pipe = Some(Pipe.Fp64), latency = 20))
+    val entries = run(Architecture.gfx1036, body, warps = 1, lone).entries.filter(_.iteration == 0L)
+    assertEquals(entries.map(_.issue), Vec(0L, 15L))
+    assertEquals(entries.map(_.retire), Vec(20L, 36L))
+    val plain = Architecture.gfx1036.copy(pipeQueue = Map.empty)
+    assertEquals(run(plain, body, warps = 1, lone).entries.filter(_.iteration == 0L).map(_.issue), Vec(0L, 16L))
+  }
+
   test("two warps on one partition contend for issue slots while two partitions do not") {
     val body     = Vec(op(), op(), op(), op())
     val together = PipelineSimulator.simulate(
@@ -149,9 +203,16 @@ class PipelineSimulatorSuite extends Suite {
   }
 
   test("gfx1036 gives the oldest wave on a partition priority") {
-    val body  = Vec.fill(8)(op(pipe = Some(Pipe.Mufu))) :+ op(stall = Some(21))
+    val body  = Vec.fill(8)(op(pipe = Some(Pipe.Fma))) :+ op(stall = Some(21))
     val block = run(Architecture.gfx1036, body, warps = 2, Placement(Vec(2, 0, 0, 0)))
     assertEquals(block.entries.sortBy(_.issue).take(5).map(_.warp), Vec(0, 0, 0, 0, 0))
+  }
+
+  test("a younger wave takes the pipe queue while the oldest is held") {
+    val body   = Vec.fill(8)(op(pipe = Some(Pipe.Mufu))) :+ op(stall = Some(21))
+    val block  = run(Architecture.gfx1036, body, warps = 2, Placement(Vec(2, 0, 0, 0)))
+    val sorted = block.entries.sortBy(_.issue)
+    assertEquals(sorted.take(5).map(_.warp), Vec(0, 1, 0, 0, 0))
   }
 
   test("gfx1036 oldest-first reports the slowest wave") {
