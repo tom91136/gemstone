@@ -1990,7 +1990,12 @@ extern "C" hipError_t hipPointerGetAttributes(hipPointerAttribute_t *attributes,
   info.size = sizeof(info);
   const auto status = hsa_amd_pointer_info(pointer, &info, nullptr, nullptr, nullptr);
   if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));
-  if (info.type == HSA_EXT_POINTER_TYPE_UNKNOWN) return remember(hipErrorInvalidValue);
+  if (info.type == HSA_EXT_POINTER_TYPE_UNKNOWN) {
+    std::memset(attributes, 0, sizeof(*attributes));
+    attributes->type = hipMemoryTypeHost;
+    attributes->device = hipInvalidDeviceId;
+    return remember(hipSuccess);
+  }
   hsa_device_type_t owner{};
   if (hsa_agent_get_info(info.agentOwner, HSA_AGENT_INFO_DEVICE, &owner) != HSA_STATUS_SUCCESS) return remember(hipErrorInvalidDevice);
   std::memset(attributes, 0, sizeof(*attributes));

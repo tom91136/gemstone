@@ -572,14 +572,16 @@ void pointerAttributes() {
   const gemstone_test::RpcEnvironment environment(fixture);
   uint8_t ordinary[32]{};
   hipPointerAttribute_t info{};
-  REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipErrorInvalidValue));
+  REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipSuccess));
+  CHECK((info.type == hipMemoryTypeHost && info.device == -2 && info.hostPointer == nullptr && info.devicePointer == nullptr));
   REQUIRE((hipHostRegister(ordinary, sizeof(ordinary), 0) == hipSuccess));
   for (size_t const offset : {size_t{0}, size_t{7}, sizeof(ordinary) - 1}) {
     REQUIRE((hipPointerGetAttributes(&info, ordinary + offset) == hipSuccess));
     REQUIRE((info.type == hipMemoryTypeHost && info.isManaged == 0 && info.hostPointer == ordinary + offset));
   }
   REQUIRE((hipHostUnregister(ordinary) == hipSuccess));
-  REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipErrorInvalidValue));
+  REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipSuccess));
+  CHECK((info.type == hipMemoryTypeHost && info.device == -2 && info.hostPointer == nullptr));
   for (const auto kind : {hipMemoryTypeHost, hipMemoryTypeDevice, hipMemoryTypeManaged}) {
     void *pointer = nullptr;
     if (kind == hipMemoryTypeHost) REQUIRE((hipHostMalloc(&pointer, 32, 0) == hipSuccess));
@@ -591,7 +593,8 @@ void pointerAttributes() {
     }
     if (kind == hipMemoryTypeHost) REQUIRE((hipHostFree(pointer) == hipSuccess));
     else REQUIRE((hipFree(pointer) == hipSuccess));
-    REQUIRE((hipPointerGetAttributes(&info, pointer) == hipErrorInvalidValue));
+    REQUIRE((hipPointerGetAttributes(&info, pointer) == hipSuccess));
+    CHECK((info.type == hipMemoryTypeHost && info.device == -2 && info.hostPointer == nullptr));
   }
   REQUIRE((fixture.launches.load() == 0));
 }
@@ -610,7 +613,8 @@ void deviceResetLifetime() {
   REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
   REQUIRE((hipDeviceReset() == hipSuccess));
   hipPointerAttribute_t attributes{};
-  REQUIRE((hipPointerGetAttributes(&attributes, memory) == hipErrorInvalidValue));
+  REQUIRE((hipPointerGetAttributes(&attributes, memory) == hipSuccess));
+  CHECK((attributes.type == hipMemoryTypeHost && attributes.device == hipInvalidDeviceId));
   REQUIRE((hipFree(memory) == hipErrorInvalidDevicePointer));
   REQUIRE((hipStreamQuery(stream) == hipErrorInvalidResourceHandle));
   REQUIRE((hipEventQuery(event) == hipErrorInvalidResourceHandle));
@@ -986,7 +990,8 @@ TEST_CASE("HIP registered subranges retain ownership and permit address reuse", 
     CHECK((info.type == hipMemoryTypeHost));
     REQUIRE((hipHostUnregister(host.data() + 9) == hipSuccess));
     host[1] = iteration;
-    CHECK((hipPointerGetAttributes(&info, host.data() + 1) == hipErrorInvalidValue));
+    REQUIRE((hipPointerGetAttributes(&info, host.data() + 1) == hipSuccess));
+    CHECK((info.type == hipMemoryTypeHost && info.device == hipInvalidDeviceId));
   }
 }
 
