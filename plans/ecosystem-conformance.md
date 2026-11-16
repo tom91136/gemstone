@@ -1,11 +1,12 @@
 # Ecosystem conformance
 
-Status: in progress. Step 1 is done. Step 2 (Numba) has run on the emulated `cuda-ptx` routes: 232 of 238 cases pass on each route, and the six failures are classified below. Step 3 (Julia) has partial results: the `hip/gfx1030` route is blocked at discovery, and the `levelzero` route reports all four of its cases failed. Steps 4 to 7 have not started. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, which are done (its steps 3 to 7 are not marked done). Step 7 depends on `machine-identity.md`, whose steps 1 to 5 are marked done.
+Status: in progress. Step 1 is done. Step 2 (Numba) has run on the emulated `cuda-ptx` routes: 238 of 245 cases pass on each route, and the seven failures are classified below. Step 3 (Julia) has partial results: the CUDA.jl cases in the bounded workload run and fail on the emulated `cuda-ptx` routes, the `hip/gfx1030` route runs no case, and the `levelzero` route reports all four of its cases failed. Steps 4 to 7 have not started. It depends on `concurrency-checking.md` steps 1 and 2 to classify failures, which are done (its steps 3 to 7 are not marked done). Step 7 depends on `machine-identity.md`, whose steps 1 to 5 are marked done.
 
-Each result below names the route or real device it ran on and cites its log. The logs under `/var/tmp/gs/t47/` and `/var/tmp/gs/t24-ecosystem/` are outside the repository. Run A and Run B are directories under the worktree's `target/conformance/emulated/direct/`. Log paths in this plan that begin with a route name, such as `cuda-ptx-sm_89/`, are relative to the run directory:
+Each result below names the route or real device it ran on and cites its log. The logs under `/var/tmp/gs/t47/` and `/var/tmp/gs/t24-ecosystem/` are outside the repository. Runs A, B, and C are directories under the worktree's `target/conformance/emulated/direct/`. Log paths in this plan that begin with a route name, such as `cuda-ptx-sm_89/`, are relative to the run directory:
 
-- Run A: `run-1794816923696879407-0`, the `interpreters-bounded` workload on `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang`. Per route, `junit.xml` lists 241 testcases: 232 pass and 9 fail (Numba 238 cases: 232 pass, 6 fail; Julia 3 cases: all fail).
-- Run B: `run-1794818705200584085-0`, the same workload on the `levelzero` route. `junit.xml` lists 4 testcases, all failed.
+- Run A: `run-1794816923696879407-0`, the `interpreters-bounded` workload on `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang`, before the include list was corrected. Per route, `junit.xml` lists 241 testcases: 232 pass and 9 fail (Numba 238 cases: 232 pass, 6 fail; Julia 3 cases: all fail).
+- Run B: `run-1794818705200584085-0`, the same workload on the `levelzero` route. `junit.xml` lists 4 testcases, all failed. Log: `/var/tmp/gs/t47/emulate-levelzero.log`.
+- Run C: `run-1794828293754483810-0`, the same workload on `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang` with the corrected include list (`conformance/workloads/interpreters-bounded.toml`, commit `95d826fa`). `junit.xml` lists 500 testcases, 250 per route: 476 pass and 24 fail, 12 per route. Log: `/var/tmp/gs/t47/emulate-cuda-ptx-sm89-bounded-2.log`.
 
 ## Goal
 
@@ -14,7 +15,7 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 ## Current state
 
 - Conformance builds C, C++, CUDA, HIP, SYCL, and OpenMP programs in containers, runs them under gemstone, and groups them into workloads such as `short`, `miniapps`, and the bounded vendor conformance test suites.
-- The `interpreters-bounded` workload runs Numba and Julia cases on the emulated `cuda-ptx` and `levelzero` routes (Run A and Run B). No `cuda-sass` case has run. No interpreter case has run on the `hip` route, which stops at discovery (Step 3).
+- The `interpreters-bounded` workload runs Numba and Julia cases on the emulated `cuda-ptx` and `levelzero` routes (Runs A, B, and C). No `cuda-sass` case has run. No interpreter case has run on the `hip` route, which stops at discovery (Step 3).
 
 ## Packages
 
@@ -45,12 +46,12 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 ### 2. Numba
 
 - Bounded subsets of the driver and kernel tests in `numba-cuda`.
-- Completed (Run A, emulated `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang`):
-  - 238 bounded cases per route: 232 pass and 6 fail. The six are the same on both routes. The occupancy case `cudadrv/test_cuda_driver.py::TestCudaDriver::test_cuda_driver_occupancy` passes on both routes (Run A `junit.xml`).
+- Completed (Runs A and C, emulated `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang`):
+  - Run A: 238 bounded cases per route, 232 pass and 6 fail. Run C: 245 per route, 238 pass and 7 fail. The failing cases are the same on both routes. The occupancy case `cudadrv/test_cuda_driver.py::TestCudaDriver::test_cuda_driver_occupancy` passes on both routes (Run A and Run C `junit.xml`).
   - Failing cases:
     - `cudapy/test_atomics.py`: `test_atomic_add_double`, `_2`, and `_3`. Each fails at its `assertIn` for `red.shared.add.f64` before any launch. The test expects the `red` form for runtime versions above (12, 1). The emulated NVVM is release 13.3 and emits `atom.shared.add.f64` (`cuda-ptx-sm_89/python_numba/75/output.log`). The real RTX 4060 Ti (NVVM 11.6, runtime (11, 6)) takes the `atom` branch and passes these three (`/var/tmp/gs/t47/numba-real-atomics.log`). Classification: unresolved. The emulated runtime version is not traced.
     - `cudapy/test_atomics.py`: `test_atomic_add_double_global`, `_2`, and `_3`. The test expects `red.add.f64`. The emulated PTX has `atom.global.add.f64` (`cuda-ptx-sm_89/python_numba/78/output.log`, `79`, and `80`). On the real RTX 4060 Ti the same three fail, asserting `atom.add.f64` (`numba-real-atomics.log`). Classification: the test's expected PTX does not match the PTX the toolkit emits. Left red.
-  - Not selected by the bounded workload: `cudapy/test_reduction.py::TestReduction::test_max_reduce`. On the real RTX 4060 Ti it fails with `TypeError: Signature mismatch: 2 argument types given, but function takes 1 arguments` at `numba/cuda/kernels/reduction.py:241` (`/var/tmp/gs/t47/numba-real-max-reduce.log`). The emulated result is unknown.
+  - `cudapy/test_reduction.py::TestReduction::test_max_reduce`: not selected in Run A, whose include pattern named `cudapy/test_reduce.py`. Run C selects the whole module: its other six cases pass on each route, and `test_max_reduce` fails on both routes with `TypeError: Signature mismatch: 2 argument types given, but function takes 1 arguments` at `numba/cuda/kernels/reduction.py:241`, through `untyped_passes.py:105`, before any launch (`cuda-ptx-sm_89/python_numba/224/output.log`). The real RTX 4060 Ti fails the same way (`/var/tmp/gs/t47/numba-real-max-reduce.log`), so the error does not come from the emulator.
 
 ### 3. Julia
 
@@ -61,11 +62,13 @@ Run GPU packages from Python and Julia unchanged under gemstone, with their vend
 
 #### CUDA.jl
 
-Run A, emulated, `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang`:
+Runs A and C, emulated, `cuda-ptx/sm_89` and `cuda-ptx/sm_89/clang`:
 
-- `core/initialization` and `core/cudadrv` fail on both routes at start with `CUPTI.CUPTIError(code=CUPTI.CUptiResult(0x00000001))` (`cuda-ptx-sm_89/julia_tests_cuda/1/output.log` and `/0/output.log`). Real RTX 4060 Ti baselines: `core/initialization` 63 of 63 pass in 29.2 s (`/var/tmp/gs/t47/cupti-baseline-init.log`); `core/cudadrv` 2216 pass and 1 broken of 2217 in 45.4 s (`cupti-baseline-cudadrv.log`).
-- `julia_babelstream_cuda/babelstream` fails on both routes. The log shows `Failed to load compiled kernel image`, then `CUDA error: operation not supported (code 801)` from `cuThreadExchangeStreamCaptureMode`, reached through `relaxed_capture_mode` (`cudadrv/graph.jl:53`) (`cuda-ptx-sm_89/julia_babelstream_cuda/0/output.log`). The stub at `native/generated/cuda/gemstone_cuda_unsupported.cpp:279` returns 801. Classification: emulator gap, an unimplemented entry point.
-- Run A's `junit.xml` has no testcase for `base/array` or `base/broadcast`, although the include list names them. The reason is not established.
+- Run A: `core/initialization` and `core/cudadrv` fail on both routes at start with `CUPTI.CUPTIError(code=CUPTI.CUptiResult(0x00000001))` (`cuda-ptx-sm_89/julia_tests_cuda/1/output.log` and `/0/output.log`).
+- Run C: all four `core` cases fail on both routes with the same error: `core/array` (`julia_tests_cuda/0`), `core/broadcast` (`/1`), `core/cudadrv` (`/2`), and `core/initialization` (`/3`). Each stops at its first CUPTI call and prints no testset result line, so no per-case pass count exists (Run C `output.log` files).
+- Real RTX 4060 Ti baselines: `core/initialization` 63 of 63 pass in 29.2 s (`/var/tmp/gs/t47/cupti-baseline-init.log`); `core/cudadrv` 2216 pass and 1 broken of 2217 in 45.4 s (`/var/tmp/gs/t47/cupti-baseline-cudadrv.log`).
+- `julia_babelstream_cuda/babelstream` fails on both routes in Runs A and C. The log shows `Failed to load compiled kernel image`, then `CUDA error: operation not supported (code 801)` from `cuThreadExchangeStreamCaptureMode`, reached through `relaxed_capture_mode` (`cudadrv/graph.jl:53`) (`cuda-ptx-sm_89/julia_babelstream_cuda/0/output.log`). The stub at `native/generated/cuda/gemstone_cuda_unsupported.cpp:279` returns 801. Classification: emulator gap, an unimplemented entry point.
+- Run A's include list named `base/array` and `base/broadcast`, but the package's `--list` output names them `core/array` and `core/broadcast` (`/var/tmp/gs/t47/cuda-list-direct.log`, lines 1-2), so neither was selected. Commit `95d826fa` fixes the names, and Run C selects both.
 
 Earlier t24 runs, not repeated on this branch. The build revision is not recorded:
 
@@ -75,14 +78,14 @@ Earlier t24 runs, not repeated on this branch. The build revision is not recorde
 
 CUPTI, the cause of the `core` failures. The link is inferred, not confirmed by disassembly:
 
-- Real driver (`cupti-trace/tables.log`): `CUPTI.version()` requests export table `7cb63f9b9ca48e42a484beb66e6aed7f` (lines 27-29: status 0, first word 560, which `tables.py` reads as a size) and table `d7bd8af8e7acca4abdbcfb1f1b3fcf33` (lines 99-101: status 0, first word 112). After the version call returns 13.4.1 (line 117), table `d7bd8af8...` is requested again and returns status 4, `CUDA_ERROR_DEINITIALIZED` (lines 118-119). Why the second request is made is not established.
-- Emulator (`cupti-trace/emu-export.log`, lines 46-47): the first request, for `7cb63f9b9ca48e42a484beb66e6aed7f`, returns `CUDA_ERROR_INVALID_VALUE` with a null table. The second table is never requested. `cuptiGetVersion` returns `CUPTI_ERROR_INVALID_PARAMETER` (`cupti-trace/probe.log`).
-- The link between the failed first request and the version error is inferred from call order. libcupti's handling of that failure is not disassembled. The table contents are not identified, so no fix is implemented.
+- Real driver, RTX 4060 Ti (`/var/tmp/gs/t47/cupti-trace/tables.log`): `CUPTI.version()` requests export table `7cb63f9b9ca48e42a484beb66e6aed7f` (lines 27-29: status 0, first word 560, which `tables.py` reads as a size) and table `d7bd8af8e7acca4abdbcfb1f1b3fcf33` (lines 99-101: status 0, first word 112). After the version call returns 13.4.1 (line 117), table `d7bd8af8...` is requested again and returns status 4, `CUDA_ERROR_DEINITIALIZED` (lines 118-119). Why the second request is made is not established.
+- Emulator (`/var/tmp/gs/t47/cupti-trace/emu-export.log`, lines 46-47): the first request, for `7cb63f9b9ca48e42a484beb66e6aed7f`, returns `CUDA_ERROR_INVALID_VALUE` with a null table. The second table is never requested. `cuptiGetVersion` returns `CUPTI_ERROR_INVALID_PARAMETER` (`/var/tmp/gs/t47/cupti-trace/probe.log`).
+- The link between the failed first request and the version error is inferred from call order. libcupti's handling of that failure is not disassembled. The table contents are not identified, so no fix is implemented. A static check of libcupti (`libcupti.so.2026.3.1`, in the Julia depot artefact `julia-cuda-2f323917ba77a1e0`) finds the three table UUIDs at file offsets 0x506ac0, 0x506c30, and 0x506e00. Its function at 0x387a70 requests several table UUIDs in sequence. The caller and resolver are not identified.
 
 #### AMDGPU.jl
 
 - `device/array`: 22 of 22 pass, and `device/execution_control`: 5 of 5 pass, both on emulated `Gemstone gfx1036`. These are earlier t24 runs; the logs do not record the route (`/var/tmp/gs/t24-ecosystem/amdgpu-committed-device-array.log`, `amdgpu-committed-device-execution_control.log`).
-- `hip/gfx1030` route: blocked at discovery in `julia_tests_amdgpu`. The log records `hipErrorNoDevice`, and no case runs (`/var/tmp/gs/t47/emulate-hip-gfx1030-3.log`, line 37). The cause under emulation is not established. Direct vendor probes without the emulator reproduce the error when both `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES=0` are set (`/var/tmp/gs/t47/uuid-probe-index0.log`, `uuid-probe-uuid.log`), and report one device without them (`uuid-probe-none.log`, `uuid-probe-hip0.log`). The probe logs do not print their selector values, so this mapping rests on the file names. The HIP probe sets these selectors (`conformance/src/device_runtime.cpp:302`), discovery runs with them (`conformance/src/driver.cpp:745-747`), and the `--list` branch of `conformance/interpreters/julia/package_tests.jl` does not clear them. That is an untested hypothesis under emulation.
+- `hip/gfx1030` route: blocked at discovery in `julia_tests_amdgpu`. Before the selector fix, discovery logged `hipErrorNoDevice` (`/var/tmp/gs/t47/emulate-hip-gfx1030-3.log`, line 37). Direct vendor probes without the emulator reproduce the error when both `ROCR_VISIBLE_DEVICES` and `HIP_VISIBLE_DEVICES=0` are set (`/var/tmp/gs/t47/uuid-probe-index0.log`, `uuid-probe-uuid.log`), and report one device without them (`uuid-probe-none.log`, `uuid-probe-hip0.log`). The probe logs do not print their selector values, so this mapping rests on the file names. The HIP probe sets these selectors (`conformance/src/device_runtime.cpp:302`), and discovery runs with them (`conformance/src/driver.cpp:745-747`). Commit `204e211e` clears both selectors in the `--list` branch of `conformance/interpreters/julia/package_tests.jl`. The rerun (`/var/tmp/gs/t47/emulate-hip-gfx1030-4.log`) has no `hipErrorNoDevice` and fails earlier: `test discovery failed for hip-gfx1030/julia_tests_amdgpu (exit 1)` at line 55, from `Unsatisfiable requirements detected for package Enzyme [7da242da]` at line 161. AMDGPU.jl's `test/runtests.jl` (lines 62-69, in the depot `julia-amdgpu-2842773f81864b0b`) calls `Pkg.add(["EnzymeCore", "Enzyme"])` when a test key starting with `enzyme` remains after `filter_tests!`. Whether `--list` removes those keys is not established. The `cases()` parser (`conformance/interpreters/julia/package_tests.jl`, lines 37-48) also does not read the boxed test list AMDGPU.jl prints, so a successful `--list` would still yield no cases.
 - `AMDGPUStream.jl` on the hip route fails with `Device 1 out of range (1..0)` (`/var/tmp/gs/t24-ecosystem/amdgpu-stream-2.log`, gemstone, `--apis hip`). The same error appears without gemstone (`amdgpu-stream-native.log`, line 1), so the emulator does not cause it. Why BabelStream sees one device is not established.
 - The C++ HIP BabelStream on `Gemstone gfx1030` passes (`/var/tmp/gs/t24-ecosystem/hip-babelstream-cpp2.log`, earlier t24 run).
 
@@ -94,7 +97,7 @@ Run B, emulated `levelzero` route:
 - `array` testset (`levelzero/julia_tests_oneapi/0/output.log`): 53 pass, 36 error, of 89. All 36 errors are `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE`. The source of that status is not established. Real Arc A750: 244 of 244 pass (`/var/tmp/gs/t24-ecosystem/oneapi-case-array-real.log`). An earlier t24 run logged `composite insertion requires scalar data` (`oneapi-case-array-trace.log`); the current run does not.
 - `execution` testset (`levelzero/julia_tests_oneapi/1/output.log`): 35 pass, 1 fail, 32 error, 1 broken, of 69. All 32 errors are `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE`. The failure at `execution.jl:237` (`"" == "2"`) is not analysed.
 - All four Run B cases are reported failed (`/var/tmp/gs/t47/emulate-levelzero.log`, lines 361-365).
-- `oneAPIStream.jl` fails at load with `UndefVarError: @LocalMemory not defined in Main` (`levelzero/julia_babelstream_oneapi/0/output.log`). The same error appears without gemstone (`/var/tmp/gs/t24-ecosystem/oneapi-stream-native.log`, line 3), so the emulator does not cause it. The cause is not established.
+- `oneAPIStream.jl` fails at load with `UndefVarError: @LocalMemory not defined in Main` (`levelzero/julia_babelstream_oneapi/0/output.log`). The same error appears without gemstone (`/var/tmp/gs/t24-ecosystem/oneapi-stream-native.log`, line 3), so the emulator does not cause it. A grep of the depot's packages (`target/conformance/interpreters/julia-oneapi-9151e77dcb2fe024/packages/`) finds no `macro LocalMemory` and no `@LocalMemory`, so this is a test-artefact mismatch, not an emulator defect.
 - The C++ SYCL BabelStream passes on the emulated `Gemstone Virtual SPIR-V GPU`, at its default double precision (`/var/tmp/gs/t24-ecosystem/levelzero-babelstream-cpp.log`, earlier t24 run; route not recorded in the log). Its `--float` option is rejected (`levelzero-babelstream-cpp-float.log`).
 
 #### KernelAbstractionsStream.jl
@@ -139,7 +142,7 @@ From `/var/tmp/gs/t47/footprint-all.log`, measured with `du`:
 - Driver version checks: packages may compare the driver version gemstone reports with the toolkit they ship, and refuse to run below it. The Numba inventory reports driver API 13030 (Run A `cuda-ptx-sm_89/python_numba/0/output.log`, line 1).
 - Targets: a wheel carries SASS for a fixed set of architectures plus PTX for the newest, so the target must be one it covers.
 - Licences: whether vendor wheels may sit in the conformance cache and package, or must be fetched at build time only.
-- Device discovery: the `hip/gfx1030` route stops at `hipErrorNoDevice` before any case runs, and the cause under emulation is not established (Step 3). The `levelzero` route reports all four cases failed, with `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE` as the dominant error, and its source is not established (Step 3).
+- Device discovery: the `hip/gfx1030` route stops at discovery before any case runs. AMDGPU.jl's Enzyme setup fails under `--list`, and `cases()` does not parse its box-format output (Step 3). The `levelzero` route reports all four cases failed, with `ZE_RESULT_ERROR_UNSUPPORTED_FEATURE` as the dominant error, and its source is not established (Step 3).
 
 ## Non-goals
 
