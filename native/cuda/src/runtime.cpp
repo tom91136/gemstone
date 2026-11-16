@@ -241,6 +241,7 @@ CUresult graphResult(Outcome outcome) {
     case Outcome::Isolation: return CUDA_ERROR_STREAM_CAPTURE_ISOLATION;
     case Outcome::Unmatched: return CUDA_ERROR_STREAM_CAPTURE_UNMATCHED;
     case Outcome::TopologyChanged: return CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE;
+    case Outcome::Invalidated: return CUDA_ERROR_STREAM_CAPTURE_INVALIDATED;
   }
   return CUDA_ERROR_UNKNOWN;
 }
@@ -2533,6 +2534,36 @@ namespace {
 std::mutex streamContextMutex;
 std::map<CUstream, CUcontext> streamContexts;
 std::map<CUstream, int> streamPriorities;
+std::map<CUevent, CUcontext> eventContexts;
+std::map<CUcontext, std::vector<gemstone::CommandQueue::Ticket>> contextWaits;
+
+std::vector<CUstream> contextStreamsLocked(CUcontext context) {
+  std::vector<CUstream> streams;
+  for (const auto &[stream, owner] : streamContexts)
+    if (owner == context) streams.push_back(stream);
+  if (activeContext() == context) {
+    streams.push_back(CU_STREAM_LEGACY);
+    streams.push_back(CU_STREAM_PER_THREAD);
+  }
+  return streams;
+}
+
+std::vector<gemstone::CommandQueue::Ticket> &pendingWaitsLocked(CUcontext context) {
+  auto &waits = contextWaits[context];
+  std::erase_if(waits, [](const auto &ticket) { return commands().ready(ticket); });
+  return waits;
+}
+
+void registerStream(CUstream created, int priority) {
+  std::vector<gemstone::CommandQueue::Ticket> waits;
+  {
+    std::scoped_lock const lock{streamContextMutex};
+    streamContexts.emplace(created, activeContext());
+    streamPriorities.emplace(created, priority);
+    waits = pendingWaitsLocked(activeContext());
+  }
+  if (!waits.empty()) commands().submit(created, [] { return 0; }, std::move(waits));
+}
 } // namespace
 
 extern "C" {
@@ -2732,12 +2763,43 @@ CUresult cuCtxDestroy_v2(CUcontext context) {
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
   if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
   untrackContext(context);
+  std::scoped_lock const lock{streamContextMutex};
+  contextWaits.erase(context);
   return CUDA_SUCCESS;
 }
 
 CUresult cuCtxSynchronize() { return contextIsLive(activeContext()) ? waitCommands() : CUDA_ERROR_INVALID_CONTEXT; }
 
 CUresult cuCtxSynchronize_v2(CUcontext) { return cuCtxSynchronize(); }
+
+CUresult cuCtxRecordEvent(CUcontext context, CUevent event) {
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  std::scoped_lock const lock{streamContextMutex};
+  const auto owner = eventContexts.find(event);
+  if (owner == eventContexts.end() || owner->second != context) return CUDA_ERROR_INVALID_HANDLE;
+  const auto streams = contextStreamsLocked(context);
+  if (captures.invalidate(streams)) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+  const std::vector<const void *> targets(streams.begin(), streams.end());
+  if (!commands().recordContextEvent(event, targets)) return CUDA_ERROR_INVALID_HANDLE;
+  captures.forget(event);
+  return CUDA_SUCCESS;
+}
+
+CUresult cuCtxWaitEvent(CUcontext context, CUevent event) {
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  std::vector<CUstream> streams;
+  {
+    std::scoped_lock const lock{streamContextMutex};
+    const auto ticket = commands().eventTicket(event);
+    if (!ticket) return CUDA_ERROR_INVALID_HANDLE;
+    streams = contextStreamsLocked(context);
+    if (captures.invalidate(streams, event)) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
+    pendingWaitsLocked(context).push_back(*ticket);
+  }
+  for (auto *const stream : streams)
+    commands().waitEvent(stream, event);
+  return CUDA_SUCCESS;
+}
 
 CUresult cuCtxGetCurrent(CUcontext *context) {
   if (!context) return CUDA_ERROR_INVALID_VALUE;
@@ -4793,11 +4855,7 @@ CUresult cuStreamAddCallback(CUstream stream, CUstreamCallback callback, void *u
 CUresult cuStreamCreate(CUstream *stream, unsigned flags) {
   if (!stream) return CUDA_ERROR_INVALID_VALUE;
   auto *const created = static_cast<CUstream>(commands().createStream((flags & CU_STREAM_NON_BLOCKING) != 0));
-  {
-    std::scoped_lock const lock{streamContextMutex};
-    streamContexts.emplace(created, activeContext());
-    streamPriorities.emplace(created, 0);
-  }
+  registerStream(created, 0);
   *stream = created;
   return CUDA_SUCCESS;
 }
@@ -4805,11 +4863,7 @@ CUresult cuStreamCreate(CUstream *stream, unsigned flags) {
 CUresult cuStreamCreateWithPriority(CUstream *stream, unsigned flags, int priority) {
   if (!stream) return CUDA_ERROR_INVALID_VALUE;
   auto *const created = static_cast<CUstream>(commands().createStream((flags & CU_STREAM_NON_BLOCKING) != 0));
-  {
-    std::scoped_lock const lock{streamContextMutex};
-    streamContexts.emplace(created, activeContext());
-    streamPriorities.emplace(created, priority);
-  }
+  registerStream(created, priority);
   *stream = created;
   return CUDA_SUCCESS;
 }
@@ -5144,11 +5198,21 @@ CUresult cuStreamGetCaptureInfo_v3(CUstream stream, CUstreamCaptureStatus *statu
 
 CUresult cuEventCreate(CUevent *event, unsigned) {
   if (!event) return CUDA_ERROR_INVALID_VALUE;
-  *event = static_cast<CUevent>(commands().createEvent());
+  auto *const created = static_cast<CUevent>(commands().createEvent());
+  {
+    std::scoped_lock const lock{streamContextMutex};
+    eventContexts.emplace(created, activeContext());
+  }
+  *event = created;
   return CUDA_SUCCESS;
 }
 
-CUresult cuEventDestroy_v2(CUevent event) { return commands().destroyEvent(event) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_HANDLE; }
+CUresult cuEventDestroy_v2(CUevent event) {
+  if (!commands().destroyEvent(event)) return CUDA_ERROR_INVALID_HANDLE;
+  std::scoped_lock const lock{streamContextMutex};
+  eventContexts.erase(event);
+  return CUDA_SUCCESS;
+}
 
 CUresult cuEventElapsedTime_v2(float *milliseconds, CUevent, CUevent) {
   if (!milliseconds) return CUDA_ERROR_INVALID_VALUE;

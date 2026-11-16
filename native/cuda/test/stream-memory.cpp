@@ -300,3 +300,190 @@ TEST_CASE("async copy from pageable memory is staged before returning", "[cuda][
   REQUIRE(cuMemFree_v2(device) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+namespace {
+
+struct Observation {
+  const std::atomic<bool> *produced;
+  std::atomic<bool> seen{false};
+};
+
+void CUDA_CB observe(void *state) {
+  auto *observation = static_cast<Observation *>(state);
+  observation->seen.store(observation->produced->load());
+}
+
+struct Drain {
+  Drain() = default;
+  Drain(const Drain &) = delete;
+  Drain &operator=(const Drain &) = delete;
+  ~Drain() { cuCtxSynchronize(); }
+};
+
+} // namespace
+
+TEST_CASE("context event captures the work submitted before it is recorded", "[cuda][context][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+
+  std::atomic<bool> beforeOnStream{false};
+  std::atomic<bool> beforeOnDefault{false};
+  std::atomic<bool> afterOnStream{false};
+  const Drain drain{};
+  REQUIRE(cuLaunchHostFunc(stream, delayStream, &beforeOnStream) == CUDA_SUCCESS);
+  REQUIRE(cuLaunchHostFunc(nullptr, delayStream, &beforeOnDefault) == CUDA_SUCCESS);
+  REQUIRE(cuCtxRecordEvent(context, event) == CUDA_SUCCESS);
+  REQUIRE(cuLaunchHostFunc(stream, delayStream, &afterOnStream) == CUDA_SUCCESS);
+
+  CHECK(cuEventQuery(event) == CUDA_ERROR_NOT_READY);
+  REQUIRE(cuEventSynchronize(event) == CUDA_SUCCESS);
+  CHECK(beforeOnStream.load());
+  CHECK(beforeOnDefault.load());
+  CHECK_FALSE(afterOnStream.load());
+
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+  CHECK(afterOnStream.load());
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("context event ignores work submitted to other contexts", "[cuda][context][event]") {
+  auto *const first = createContext();
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+  CUcontext second = nullptr;
+  REQUIRE(cuCtxCreate_v2(&second, 0, 0) == CUDA_SUCCESS);
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+
+  std::atomic<bool> delayed{false};
+  const Drain drain{};
+  REQUIRE(cuLaunchHostFunc(stream, delayStream, &delayed) == CUDA_SUCCESS);
+  REQUIRE(cuCtxRecordEvent(first, event) == CUDA_SUCCESS);
+  CHECK(cuEventQuery(event) == CUDA_SUCCESS);
+  CHECK_FALSE(delayed.load());
+
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+  CHECK(delayed.load());
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(second) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(first) == CUDA_SUCCESS);
+}
+
+TEST_CASE("context event rejects events of other contexts and destroyed contexts", "[cuda][context][event]") {
+  auto *const first = createContext();
+  CUevent recorded = nullptr;
+  REQUIRE(cuEventCreate(&recorded, 0) == CUDA_SUCCESS);
+  CUcontext second = nullptr;
+  REQUIRE(cuCtxCreate_v2(&second, 0, 0) == CUDA_SUCCESS);
+  CHECK(cuCtxRecordEvent(second, recorded) == CUDA_ERROR_INVALID_HANDLE);
+
+  REQUIRE(cuEventDestroy_v2(recorded) == CUDA_SUCCESS);
+  CHECK(cuCtxRecordEvent(first, recorded) == CUDA_ERROR_INVALID_HANDLE);
+  CHECK(cuCtxWaitEvent(first, recorded) == CUDA_ERROR_INVALID_HANDLE);
+
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(first) == CUDA_SUCCESS);
+  CHECK(cuCtxRecordEvent(first, event) == CUDA_ERROR_INVALID_CONTEXT);
+  CHECK(cuCtxWaitEvent(first, event) == CUDA_ERROR_INVALID_CONTEXT);
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(second) == CUDA_SUCCESS);
+}
+
+TEST_CASE("context record is unsupported while a stream of the context captures", "[cuda][context][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_RELAXED) == CUDA_SUCCESS);
+  CHECK(cuCtxRecordEvent(context, event) == CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+  CUgraph graph = nullptr;
+  CHECK(cuStreamEndCapture(stream, &graph) == CUDA_ERROR_STREAM_CAPTURE_INVALIDATED);
+
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("context wait is unsupported while a stream of the context captures", "[cuda][context][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_RELAXED) == CUDA_SUCCESS);
+  CHECK(cuCtxWaitEvent(context, event) == CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+  CUgraph graph = nullptr;
+  CHECK(cuStreamEndCapture(stream, &graph) == CUDA_ERROR_STREAM_CAPTURE_INVALIDATED);
+
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("context wait is unsupported for an event captured by another context", "[cuda][context][event]") {
+  auto *const capturing = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_RELAXED) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(event, stream) == CUDA_SUCCESS);
+  CUcontext other = nullptr;
+  REQUIRE(cuCtxCreate_v2(&other, 0, 0) == CUDA_SUCCESS);
+  CHECK(cuCtxWaitEvent(other, event) == CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+  CUgraph graph = nullptr;
+  CHECK(cuStreamEndCapture(stream, &graph) == CUDA_ERROR_STREAM_CAPTURE_INVALIDATED);
+
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(other) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(capturing) == CUDA_SUCCESS);
+}
+
+TEST_CASE("context wait orders existing and later streams after the recorded work", "[cuda][context][event]") {
+  auto *const producer = createContext();
+  CUstream produce = nullptr;
+  REQUIRE(cuStreamCreate(&produce, 0) == CUDA_SUCCESS);
+  std::atomic<bool> produced{false};
+  Observation existingSeen{.produced = &produced};
+  Observation laterSeen{.produced = &produced};
+  const Drain drain{};
+  REQUIRE(cuLaunchHostFunc(produce, delayStream, &produced) == CUDA_SUCCESS);
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+  REQUIRE(cuCtxRecordEvent(producer, event) == CUDA_SUCCESS);
+
+  auto *const consumer = createContext();
+  CUstream existing = nullptr;
+  REQUIRE(cuStreamCreate(&existing, 0) == CUDA_SUCCESS);
+  REQUIRE(cuCtxWaitEvent(consumer, event) == CUDA_SUCCESS);
+  CHECK_FALSE(produced.load());
+
+  CUstream later = nullptr;
+  REQUIRE(cuStreamCreate(&later, 0) == CUDA_SUCCESS);
+  REQUIRE(cuLaunchHostFunc(existing, observe, &existingSeen) == CUDA_SUCCESS);
+  REQUIRE(cuLaunchHostFunc(later, observe, &laterSeen) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(existing) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(later) == CUDA_SUCCESS);
+  CHECK(existingSeen.seen.load());
+  CHECK(laterSeen.seen.load());
+
+  REQUIRE(cuStreamDestroy_v2(later) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(existing) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(consumer) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(produce) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(produce) == CUDA_SUCCESS);
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(producer) == CUDA_SUCCESS);
+}

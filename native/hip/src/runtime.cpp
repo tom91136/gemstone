@@ -105,6 +105,7 @@ hipError_t graphResult(gemstone::graph::Outcome outcome) {
     case gemstone::graph::Outcome::Isolation: return hipErrorStreamCaptureIsolation;
     case gemstone::graph::Outcome::Unmatched: return hipErrorStreamCaptureUnmatched;
     case gemstone::graph::Outcome::TopologyChanged: return hipErrorGraphExecUpdateFailure;
+    case gemstone::graph::Outcome::Invalidated: return hipErrorStreamCaptureInvalidated;
   }
   return hipErrorUnknown;
 }

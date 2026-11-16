@@ -260,6 +260,17 @@ public:
     drainStopped(lock);
     return true;
   }
+  bool recordContextEvent(const void *event, const std::vector<const void *> &targets) {
+    std::scoped_lock const lock(mutex);
+    const auto found = events.find(event);
+    if (found == events.end()) return false;
+    auto joined = std::make_shared<Completion>();
+    joined->join = true;
+    for (const auto *target : targets)
+      if (const auto stream = streams.find(streamKey(target)); stream != streams.end()) frontier(stream->second, joined->dependencies);
+    found->second = std::move(joined);
+    return true;
+  }
   /** The completion of the event's latest record; empty when the event is unknown. */
   std::optional<Ticket> eventTicket(const void *event) {
     std::scoped_lock const lock(mutex);

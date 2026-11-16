@@ -14,7 +14,7 @@ namespace gemstone::graph {
 
 enum class Kind { Kernel, Memcpy, Memset, Host, Empty, Work };
 
-enum class Outcome { Ok, InvalidValue, InvalidHandle, Unsupported, Isolation, Unmatched, TopologyChanged };
+enum class Outcome { Ok, InvalidValue, InvalidHandle, Unsupported, Isolation, Unmatched, TopologyChanged, Invalidated };
 
 using Work = std::function<int32_t()>;
 
@@ -197,6 +197,7 @@ public:
     if (session->origin != stream) return Outcome::Unmatched;
     std::erase_if(captures, [&](const auto &entry) { return entry.second == session; });
     std::erase_if(events, [&](const auto &entry) { return entry.second.session == session; });
+    if (session->invalidated) return Outcome::Invalidated;
     result = std::move(session->graph);
     return Outcome::Ok;
   }
@@ -228,6 +229,26 @@ public:
     return Outcome::Ok;
   }
 
+  bool invalidate(const std::vector<Stream> &streams, Event event = {}) {
+    std::scoped_lock const lock(mutex);
+    bool conflict = false;
+    for (const auto &stream : streams)
+      if (const auto capture = captures.find(stream); capture != captures.end()) {
+        capture->second->invalidated = true;
+        conflict = true;
+      }
+    if (const auto recorded = events.find(event); recorded != events.end()) {
+      recorded->second.session->invalidated = true;
+      conflict = true;
+    }
+    return conflict;
+  }
+
+  void forget(Event event) {
+    std::scoped_lock const lock(mutex);
+    events.erase(event);
+  }
+
   bool capturing(Stream stream) {
     std::scoped_lock const lock(mutex);
     return captures.contains(stream);
@@ -246,6 +267,7 @@ private:
     std::unique_ptr<Graph> graph = std::make_unique<Graph>();
     Stream origin{};
     std::map<Stream, std::vector<Node *>> frontier;
+    bool invalidated = false;
   };
 
   struct Recorded {
