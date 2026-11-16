@@ -59,7 +59,7 @@ trap 'if ((pulled)); then "$container" image rm "$image"; fi' EXIT
 (cd "$build" && ctest --show-only=json-v1) | jq -r --arg build "$build" '
   def values($t; $k): [$t.properties[]? | select(.name == $k) | .value | if type == "array" then .[] else . end];
   .tests | to_entries[] | .key as $index | .value as $t
-  | select(($t.command[0] | startswith($build + "/")) and (any(values($t; "LABELS")[]; . == "opencl-compiler") | not))
+  | select(($t.command[0] | startswith($build + "/")) and (any(values($t; "LABELS")[]; . == "opencl-compiler" or . == "vendor-tool") | not))
   | (values($t; "WORKING_DIRECTORY") | .[0] // $build) as $dir
   | (values($t; "TIMEOUT") | .[0] // 1500) as $limit
   | (values($t; "SKIP_RETURN_CODE") | .[0] // "") as $skip

@@ -344,7 +344,10 @@ if(BUILD_TESTING)
     GEMSTONE_SANITIZER_PRELOAD="${GEMSTONE_SANITIZER_PRELOAD}")
   add_dependencies(gemstone_tools_test gemstone_cuda gemstone_hsa_runtime gemstone_hip_runtime gemstone_opencl gemstone_vulkan
     gemstone_levelzero level_zero_loader gemstone_nvml gemstone_rocm_smi gemstone_amd_smi)
-  gemstone_discover_tests(gemstone_tools_test TEST_PREFIX "tools/" DISCOVERY_MODE PRE_TEST PROPERTIES TIMEOUT 120)
+  gemstone_discover_tests(gemstone_tools_test TEST_PREFIX "tools/" TEST_SPEC "~[nvidia-smi]" DISCOVERY_MODE PRE_TEST
+    PROPERTIES TIMEOUT 120 LABELS vendor-tool)
+  gemstone_discover_tests(gemstone_tools_test TEST_PREFIX "tools/" TEST_SPEC "[nvidia-smi]" DISCOVERY_MODE PRE_TEST
+    PROPERTIES TIMEOUT 120)
 
   if(GEMSTONE_ENABLE_CUDA AND GEMSTONE_ENABLE_HSA AND GEMSTONE_ENABLE_HIP
       AND GEMSTONE_ENABLE_OPENCL AND GEMSTONE_ENABLE_VULKAN AND GEMSTONE_ENABLE_LEVEL_ZERO
