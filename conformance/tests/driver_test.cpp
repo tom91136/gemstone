@@ -1546,7 +1546,7 @@ TEST_CASE("tiers nest and the release programs are selected only by all", "[driv
 }
 
 TEST_CASE("driver lists selected programs for routes and workload", "[driver][list-programs]") {
-  TemporaryDirectory directory;
+  const TemporaryDirectory directory;
   const auto artifacts = directory.path / "artifacts";
   const auto artifact = artifacts / "opencl";
   fs::create_directories(artifact);
