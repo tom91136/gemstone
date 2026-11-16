@@ -62,6 +62,15 @@ std::string uniqueIdText(uint32_t ordinal) {
   return buffer;
 }
 
+std::string reversedUuidText(uint32_t ordinal) {
+  const auto bytes = gemstone::deviceUuid(ordinal);
+  char buffer[40];
+  std::snprintf(buffer, sizeof(buffer), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", bytes[15], bytes[14],
+                bytes[13], bytes[12], bytes[11], bytes[10], bytes[9], bytes[8], bytes[7], bytes[6], bytes[5], bytes[4], bytes[3], bytes[2],
+                bytes[1], bytes[0]);
+  return buffer;
+}
+
 std::string pciBusIdLong(uint32_t ordinal) {
   const auto address = gemstone::devicePciAddress(ordinal);
   char buffer[32];
@@ -261,4 +270,19 @@ TEST_CASE("amd-smi static reports market name and capacity", "[tools][amd-smi]")
   REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.target)));
   REQUIRE_THAT(result.output, ContainsSubstring(memoryMegabytes(preset) + " MB"));
   REQUIRE_THAT(result.output, ContainsSubstring("BIT_WIDTH: " + std::to_string(preset.busWidthBits)));
+}
+
+TEST_CASE("xpu-smi discovery reports the preset identity and capacity", "[tools][xpu-smi]") {
+  const auto preset = radeon();
+  const ToolEnvironment environment(preset);
+  const auto result = runTool(GEMSTONE_TOOL_XPU_SMI, {"discovery", "-d", "0"});
+  INFO(result.output);
+  REQUIRE(result.status == 0);
+  REQUIRE_THAT(result.output, ContainsSubstring(std::string(preset.name)));
+  REQUIRE_THAT(result.output, ContainsSubstring("PCI BDF Address: " + gemstone::devicePciBusId(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring("SOC UUID: " + reversedUuidText(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring("Serial Number: " + uuidText(0)));
+  REQUIRE_THAT(result.output, ContainsSubstring("Core Clock Rate: " + std::to_string(preset.boostMhz) + " MHz"));
+  REQUIRE_THAT(result.output, ContainsSubstring("Memory Physical Size: " + memoryMegabytes(preset)));
+  REQUIRE_THAT(result.output, ContainsSubstring("Memory Bus Width: " + std::to_string(preset.busWidthBits)));
 }

@@ -31,6 +31,7 @@
 #include <aspartame/map.hpp>
 #include <aspartame/vector.hpp>
 #include <ze_ddi.h>
+#include <zes_api.h>
 #include <zes_ddi.h>
 #include <zet_ddi.h>
 
@@ -3570,6 +3571,340 @@ ze_result_t ZE_APICALL kernelName(ze_kernel_handle_t handle, size_t *size, char 
                                                                                              : ZE_RESULT_ERROR_INVALID_SIZE;
 }
 
+gemstone::DevicePreset sysmanPreset() {
+  if (const auto preset = gemstone::environment::selectedDevicePreset()) return *preset;
+  return gemstone::devicePresets[0];
+}
+
+zes_device_handle_t sysmanHandle(uint32_t ordinal) { return reinterpret_cast<zes_device_handle_t>(&globalDevices[ordinal]); }
+
+bool sysmanOrdinal(zes_device_handle_t handle, uint32_t &ordinal) {
+  auto *device = cast<Device>(handle);
+  if (!device) return false;
+  ordinal = deviceOrdinal(device);
+  return ordinal < gemstone::deviceCount();
+}
+
+void sysmanCopy(char *destination, size_t size, std::string_view value) noexcept {
+  std::snprintf(destination, size, "%.*s", static_cast<int>(value.size()), value.data());
+}
+
+std::string sysmanUuidText(uint32_t ordinal) {
+  const auto bytes = gemstone::deviceUuid(ordinal);
+  char buffer[40];
+  std::snprintf(buffer, sizeof(buffer), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", bytes[0], bytes[1],
+                bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+                bytes[14], bytes[15]);
+  return buffer;
+}
+
+uint64_t sysmanTimestamp() {
+  return static_cast<uint64_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now().time_since_epoch()).count());
+}
+
+zes_pci_speed_t sysmanPciSpeed() { return {.gen = 4, .width = 16, .maxBandwidth = -1}; }
+
+ze_result_t sysmanInit(zes_init_flags_t) { return ZE_RESULT_SUCCESS; }
+
+ze_result_t sysmanDriverGet(uint32_t *count, zes_driver_handle_t *drivers) {
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (!drivers || *count == 0) {
+    *count = 1;
+    return ZE_RESULT_SUCCESS;
+  }
+  drivers[0] = reinterpret_cast<zes_driver_handle_t>(&globalDriver);
+  *count = 1;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceGet(zes_driver_handle_t handle, uint32_t *count, zes_device_handle_t *devices) {
+  if (!cast<Driver>(handle)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  std::vector<uint32_t> visible;
+  if (const auto result = visibleDevices(visible); result != ZE_RESULT_SUCCESS) return result;
+  if (!devices) {
+    *count = static_cast<uint32_t>(visible.size());
+    return ZE_RESULT_SUCCESS;
+  }
+  const auto written = std::min(*count, static_cast<uint32_t>(visible.size()));
+  for (uint32_t index = 0; index < written; ++index)
+    devices[index] = sysmanHandle(visible[index]);
+  *count = written;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceGetProperties(zes_device_handle_t handle, zes_device_properties_t *properties) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto stype = properties->stype;
+  auto *const next = properties->pNext;
+  std::memset(properties, 0, sizeof(*properties));
+  properties->stype = stype;
+  properties->pNext = next;
+  properties->core.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+  if (const auto result = deviceProperties(reinterpret_cast<ze_device_handle_t>(&globalDevices[ordinal]), &properties->core);
+      result != ZE_RESULT_SUCCESS)
+    return result;
+  properties->numSubdevices = 0;
+  const auto preset = sysmanPreset();
+  sysmanCopy(properties->serialNumber, sizeof(properties->serialNumber), sysmanUuidText(ordinal));
+  sysmanCopy(properties->boardNumber, sizeof(properties->boardNumber), gemstone::devicePciBusId(ordinal));
+  sysmanCopy(properties->brandName, sizeof(properties->brandName), "Gemstone");
+  sysmanCopy(properties->modelName, sizeof(properties->modelName), preset.name);
+  sysmanCopy(properties->vendorName, sizeof(properties->vendorName), "Intel(R) Corporation");
+  sysmanCopy(properties->driverVersion, sizeof(properties->driverVersion), "gemstone");
+  for (auto *extension = static_cast<zes_base_properties_t *>(next); extension;
+       extension = static_cast<zes_base_properties_t *>(extension->pNext)) {
+    if (extension->stype != ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES) continue;
+    auto *extended = reinterpret_cast<zes_device_ext_properties_t *>(extension);
+    const auto uuid = gemstone::deviceUuid(ordinal);
+    std::memcpy(extended->uuid.id, uuid.data(), uuid.size());
+    extended->type = ZES_DEVICE_TYPE_GPU;
+    extended->flags = 0;
+  }
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceGetState(zes_device_handle_t handle, zes_device_state_t *state) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!state) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto stype = state->stype;
+  const auto *const next = state->pNext;
+  std::memset(state, 0, sizeof(*state));
+  state->stype = stype;
+  state->pNext = next;
+  state->reset = 0;
+  state->repaired = ZES_REPAIR_STATUS_UNSUPPORTED;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceProcessesGetState(zes_device_handle_t handle, uint32_t *count, zes_process_state_t *processes) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  (void)processes;
+  *count = 0;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDevicePciGetProperties(zes_device_handle_t handle, zes_pci_properties_t *properties) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto stype = properties->stype;
+  auto *const next = properties->pNext;
+  std::memset(properties, 0, sizeof(*properties));
+  properties->stype = stype;
+  properties->pNext = next;
+  const auto address = gemstone::devicePciAddress(ordinal);
+  properties->address = {.domain = address.domain, .bus = address.bus, .device = address.device, .function = address.function};
+  properties->maxSpeed = sysmanPciSpeed();
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDevicePciGetState(zes_device_handle_t handle, zes_pci_state_t *state) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!state) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto stype = state->stype;
+  const auto *const next = state->pNext;
+  std::memset(state, 0, sizeof(*state));
+  state->stype = stype;
+  state->pNext = next;
+  state->status = ZES_PCI_LINK_STATUS_GOOD;
+  state->speed = sysmanPciSpeed();
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDevicePciGetBars(zes_device_handle_t handle, uint32_t *count, zes_pci_bar_properties_t *bars) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  (void)bars;
+  *count = 0;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDevicePciGetStats(zes_device_handle_t handle, zes_pci_stats_t *stats) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!stats) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  std::memset(stats, 0, sizeof(*stats));
+  stats->timestamp = sysmanTimestamp();
+  stats->speed = sysmanPciSpeed();
+  return ZE_RESULT_SUCCESS;
+}
+
+template <class Handle> ze_result_t sysmanEmptyEnum(zes_device_handle_t handle, uint32_t *count, Handle *handles) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  (void)handles;
+  *count = 0;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceEnumEngineGroups(zes_device_handle_t handle, uint32_t *count, zes_engine_handle_t *engines) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  constexpr std::array groups{ZES_ENGINE_GROUP_COMPUTE_ALL, ZES_ENGINE_GROUP_COPY_ALL};
+  if (!engines) {
+    *count = static_cast<uint32_t>(groups.size());
+    return ZE_RESULT_SUCCESS;
+  }
+  const auto written = std::min(*count, static_cast<uint32_t>(groups.size()));
+  for (uint32_t index = 0; index < written; ++index)
+    engines[index] = reinterpret_cast<zes_engine_handle_t>(static_cast<uintptr_t>(groups[index]));
+  *count = written;
+  return ZE_RESULT_SUCCESS;
+}
+
+zes_engine_group_t sysmanEngineGroup(zes_engine_handle_t handle) {
+  return static_cast<zes_engine_group_t>(reinterpret_cast<uintptr_t>(handle));
+}
+
+ze_result_t sysmanEngineGetProperties(zes_engine_handle_t handle, zes_engine_properties_t *properties) {
+  const auto group = sysmanEngineGroup(handle);
+  if (group != ZES_ENGINE_GROUP_COMPUTE_ALL && group != ZES_ENGINE_GROUP_COPY_ALL) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto stype = properties->stype;
+  auto *const next = properties->pNext;
+  std::memset(properties, 0, sizeof(*properties));
+  properties->stype = stype;
+  properties->pNext = next;
+  properties->type = group;
+  properties->onSubdevice = false;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanEngineGetActivity(zes_engine_handle_t handle, zes_engine_stats_t *stats) {
+  const auto group = sysmanEngineGroup(handle);
+  if (group != ZES_ENGINE_GROUP_COMPUTE_ALL && group != ZES_ENGINE_GROUP_COPY_ALL) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!stats) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  stats->activeTime = 0;
+  stats->timestamp = sysmanTimestamp();
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanEngineGetActivityExt(zes_engine_handle_t handle, uint32_t *count, zes_engine_stats_t *stats) {
+  const auto group = sysmanEngineGroup(handle);
+  if (group != ZES_ENGINE_GROUP_COMPUTE_ALL && group != ZES_ENGINE_GROUP_COPY_ALL) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (!stats || *count == 0) {
+    *count = 1;
+    return ZE_RESULT_SUCCESS;
+  }
+  stats[0].activeTime = 0;
+  stats[0].timestamp = sysmanTimestamp();
+  *count = 1;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceEnumMemoryModules(zes_device_handle_t handle, uint32_t *count, zes_mem_handle_t *modules) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (!modules || *count == 0) {
+    *count = 1;
+    return ZE_RESULT_SUCCESS;
+  }
+  modules[0] = reinterpret_cast<zes_mem_handle_t>(uintptr_t{1});
+  *count = 1;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanMemoryGetProperties(zes_mem_handle_t handle, zes_mem_properties_t *properties) {
+  if (reinterpret_cast<uintptr_t>(handle) != 1) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto stype = properties->stype;
+  auto *const next = properties->pNext;
+  std::memset(properties, 0, sizeof(*properties));
+  properties->stype = stype;
+  properties->pNext = next;
+  const auto preset = sysmanPreset();
+  properties->type = ZES_MEM_TYPE_GDDR6;
+  properties->onSubdevice = false;
+  properties->location = ZES_MEM_LOC_DEVICE;
+  properties->physicalSize = static_cast<uint64_t>(preset.memoryBytes);
+  properties->busWidth = preset.busWidthBits;
+  properties->numChannels = -1;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanMemoryGetState(zes_mem_handle_t handle, zes_mem_state_t *state) {
+  if (reinterpret_cast<uintptr_t>(handle) != 1) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!state) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  const auto stype = state->stype;
+  const auto *const next = state->pNext;
+  std::memset(state, 0, sizeof(*state));
+  state->stype = stype;
+  state->pNext = next;
+  const auto bytes = static_cast<uint64_t>(sysmanPreset().memoryBytes);
+  state->health = ZES_MEM_HEALTH_OK;
+  state->free = bytes;
+  state->size = bytes;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanMemoryGetBandwidth(zes_mem_handle_t handle, zes_mem_bandwidth_t *bandwidth) {
+  if (reinterpret_cast<uintptr_t>(handle) != 1) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!bandwidth) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  std::memset(bandwidth, 0, sizeof(*bandwidth));
+  const auto preset = sysmanPreset();
+  bandwidth->maxBandwidth = static_cast<uint64_t>(preset.memoryMTps) * 1000000ULL * static_cast<uint64_t>(preset.busWidthBits) / 8ULL;
+  bandwidth->timestamp = sysmanTimestamp();
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceGetSubDevicePropertiesExp(zes_device_handle_t handle, uint32_t *count, zes_subdevice_exp_properties_t *properties) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!count) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  (void)properties;
+  *count = 0;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceEccAvailable(zes_device_handle_t handle, ze_bool_t *available) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!available) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *available = false;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceEccConfigurable(zes_device_handle_t handle, ze_bool_t *configurable) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!configurable) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *configurable = false;
+  return ZE_RESULT_SUCCESS;
+}
+
+ze_result_t sysmanDeviceGetEccState(zes_device_handle_t handle, zes_device_ecc_properties_t *properties) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!properties) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+}
+
+ze_result_t sysmanDeviceReset(zes_device_handle_t handle, ze_bool_t) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  return ZE_RESULT_ERROR_INSUFFICIENT_PERMISSIONS;
+}
+
+ze_result_t sysmanDevicePciLinkSpeedUpdateExt(zes_device_handle_t handle, ze_bool_t, zes_device_action_t *action) {
+  uint32_t ordinal = 0;
+  if (!sysmanOrdinal(handle, ordinal)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!action) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  return ZE_RESULT_ERROR_UNSUPPORTED_FEATURE;
+}
+
 template <class T> ze_result_t emptyTable(ze_api_version_t version, T *table) {
   const auto checked = checkVersion(version, table);
   if (checked == ZE_RESULT_SUCCESS) *table = {};
@@ -3807,20 +4142,66 @@ EMPTY_TABLE(zeGetRTASBuilderProcAddrTable, ze_rtas_builder_dditable_t)
 EMPTY_TABLE(zeGetRTASParallelOperationExpProcAddrTable, ze_rtas_parallel_operation_exp_dditable_t)
 EMPTY_TABLE(zeGetRTASParallelOperationProcAddrTable, ze_rtas_parallel_operation_dditable_t)
 
-EMPTY_TABLE(zesGetDeviceExpProcAddrTable, zes_device_exp_dditable_t)
-EMPTY_TABLE(zesGetDeviceProcAddrTable, zes_device_dditable_t)
+TABLE_BEGIN(zesGetDeviceExpProcAddrTable, zes_device_exp_dditable_t);
+table->pfnGetSubDevicePropertiesExp = sysmanDeviceGetSubDevicePropertiesExp;
+table->pfnEnumActiveVFExp = sysmanEmptyEnum<zes_vf_handle_t>;
+table->pfnEnumEnabledVFExp = sysmanEmptyEnum<zes_vf_handle_t>;
+TABLE_END
+TABLE_BEGIN(zesGetDeviceProcAddrTable, zes_device_dditable_t);
+table->pfnGetProperties = sysmanDeviceGetProperties;
+table->pfnGetState = sysmanDeviceGetState;
+table->pfnReset = sysmanDeviceReset;
+table->pfnProcessesGetState = sysmanDeviceProcessesGetState;
+table->pfnPciGetProperties = sysmanDevicePciGetProperties;
+table->pfnPciGetState = sysmanDevicePciGetState;
+table->pfnPciGetBars = sysmanDevicePciGetBars;
+table->pfnPciGetStats = sysmanDevicePciGetStats;
+table->pfnEnumDiagnosticTestSuites = sysmanEmptyEnum<zes_diag_handle_t>;
+table->pfnEnumEngineGroups = sysmanDeviceEnumEngineGroups;
+table->pfnEnumFabricPorts = sysmanEmptyEnum<zes_fabric_port_handle_t>;
+table->pfnEnumFans = sysmanEmptyEnum<zes_fan_handle_t>;
+table->pfnEnumFirmwares = sysmanEmptyEnum<zes_firmware_handle_t>;
+table->pfnEnumFrequencyDomains = sysmanEmptyEnum<zes_freq_handle_t>;
+table->pfnEnumLeds = sysmanEmptyEnum<zes_led_handle_t>;
+table->pfnEnumMemoryModules = sysmanDeviceEnumMemoryModules;
+table->pfnEnumPerformanceFactorDomains = sysmanEmptyEnum<zes_perf_handle_t>;
+table->pfnEnumPowerDomains = sysmanEmptyEnum<zes_pwr_handle_t>;
+table->pfnEnumPsus = sysmanEmptyEnum<zes_psu_handle_t>;
+table->pfnEnumRasErrorSets = sysmanEmptyEnum<zes_ras_handle_t>;
+table->pfnEnumSchedulers = sysmanEmptyEnum<zes_sched_handle_t>;
+table->pfnEnumStandbyDomains = sysmanEmptyEnum<zes_standby_handle_t>;
+table->pfnEnumTemperatureSensors = sysmanEmptyEnum<zes_temp_handle_t>;
+table->pfnEccAvailable = sysmanDeviceEccAvailable;
+table->pfnEccConfigurable = sysmanDeviceEccConfigurable;
+table->pfnGetEccState = sysmanDeviceGetEccState;
+table->pfnGet = sysmanDeviceGet;
+table->pfnEnumOverclockDomains = sysmanEmptyEnum<zes_overclock_handle_t>;
+table->pfnPciLinkSpeedUpdateExt = sysmanDevicePciLinkSpeedUpdateExt;
+TABLE_END
 EMPTY_TABLE(zesGetDiagnosticsProcAddrTable, zes_diagnostics_dditable_t)
 EMPTY_TABLE(zesGetDriverExpProcAddrTable, zes_driver_exp_dditable_t)
-EMPTY_TABLE(zesGetDriverProcAddrTable, zes_driver_dditable_t)
-EMPTY_TABLE(zesGetEngineProcAddrTable, zes_engine_dditable_t)
+TABLE_BEGIN(zesGetDriverProcAddrTable, zes_driver_dditable_t);
+table->pfnGet = sysmanDriverGet;
+TABLE_END
+TABLE_BEGIN(zesGetEngineProcAddrTable, zes_engine_dditable_t);
+table->pfnGetProperties = sysmanEngineGetProperties;
+table->pfnGetActivity = sysmanEngineGetActivity;
+table->pfnGetActivityExt = sysmanEngineGetActivityExt;
+TABLE_END
 EMPTY_TABLE(zesGetFabricPortProcAddrTable, zes_fabric_port_dditable_t)
 EMPTY_TABLE(zesGetFanProcAddrTable, zes_fan_dditable_t)
 EMPTY_TABLE(zesGetFirmwareExpProcAddrTable, zes_firmware_exp_dditable_t)
 EMPTY_TABLE(zesGetFirmwareProcAddrTable, zes_firmware_dditable_t)
 EMPTY_TABLE(zesGetFrequencyProcAddrTable, zes_frequency_dditable_t)
-EMPTY_TABLE(zesGetGlobalProcAddrTable, zes_global_dditable_t)
+TABLE_BEGIN(zesGetGlobalProcAddrTable, zes_global_dditable_t);
+table->pfnInit = sysmanInit;
+TABLE_END
 EMPTY_TABLE(zesGetLedProcAddrTable, zes_led_dditable_t)
-EMPTY_TABLE(zesGetMemoryProcAddrTable, zes_memory_dditable_t)
+TABLE_BEGIN(zesGetMemoryProcAddrTable, zes_memory_dditable_t);
+table->pfnGetProperties = sysmanMemoryGetProperties;
+table->pfnGetState = sysmanMemoryGetState;
+table->pfnGetBandwidth = sysmanMemoryGetBandwidth;
+TABLE_END
 EMPTY_TABLE(zesGetOverclockProcAddrTable, zes_overclock_dditable_t)
 EMPTY_TABLE(zesGetPerformanceFactorProcAddrTable, zes_performance_factor_dditable_t)
 EMPTY_TABLE(zesGetPowerProcAddrTable, zes_power_dditable_t)

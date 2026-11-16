@@ -1,10 +1,14 @@
 #include <array>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <utility>
 
 #include <catch2/catch_test_macros.hpp>
 #include <ze_api.h>
+#include <zes_api.h>
 
 #include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
@@ -20,6 +24,15 @@ const std::string Endpoint = fixture.endpoint();
 const gemstone_test::Environment RpcEndpoint(gemstone::environment::RpcEndpoint, Endpoint.c_str());
 const gemstone_test::Environment RpcClient(gemstone::environment::RpcClientId, "42");
 const gemstone_test::Environment DeviceCount(gemstone::environment::DeviceCount, "2");
+
+std::string uuidText(uint32_t ordinal) {
+  const auto bytes = gemstone::deviceUuid(ordinal);
+  char buffer[40];
+  std::snprintf(buffer, sizeof(buffer), "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", bytes[0], bytes[1],
+                bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
+                bytes[14], bytes[15]);
+  return buffer;
+}
 
 struct Node {
   ze_driver_handle_t driver;
@@ -298,4 +311,78 @@ TEST_CASE("Level Zero device lost is per device", "[level-zero][multi-device]") 
   CAPTURE(outcome.output);
   CHECK(outcome.signal == 0);
   CHECK(outcome.exitCode == 0);
+}
+
+TEST_CASE("Sysman reports the preset identity, memory, and engines", "[level-zero][sysman]") {
+  const gemstone_test::Environment presetEnv(gemstone::environment::Device, "Radeon RX 9070 XT");
+  REQUIRE(zesInit(0) == ZE_RESULT_SUCCESS);
+  uint32_t driverCount = 1;
+  zes_driver_handle_t sysmanDriver = nullptr;
+  REQUIRE(zesDriverGet(&driverCount, &sysmanDriver) == ZE_RESULT_SUCCESS);
+  REQUIRE(driverCount == 1);
+  uint32_t deviceCount = 0;
+  REQUIRE(zesDeviceGet(sysmanDriver, &deviceCount, nullptr) == ZE_RESULT_SUCCESS);
+  REQUIRE(deviceCount == 2);
+  std::array<zes_device_handle_t, 2> sysmanDevices{};
+  REQUIRE(zesDeviceGet(sysmanDriver, &deviceCount, sysmanDevices.data()) == ZE_RESULT_SUCCESS);
+
+  auto *const driver = firstDriver();
+  uint32_t coreCount = 2;
+  std::array<ze_device_handle_t, 2> coreDevices{};
+  REQUIRE(zeDeviceGet(driver, &coreCount, coreDevices.data()) == ZE_RESULT_SUCCESS);
+
+  const auto preset = gemstone::devicePreset("Radeon RX 9070 XT");
+  REQUIRE(preset.has_value());
+  if (!preset.has_value()) return;
+  for (uint32_t index = 0; index < 2; ++index) {
+    INFO("ordinal " << index);
+    zes_device_properties_t properties{};
+    properties.stype = ZES_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+    zes_device_ext_properties_t extended{};
+    extended.stype = ZES_STRUCTURE_TYPE_DEVICE_EXT_PROPERTIES;
+    properties.pNext = &extended;
+    REQUIRE(zesDeviceGetProperties(sysmanDevices[index], &properties) == ZE_RESULT_SUCCESS);
+    CHECK(std::string_view(properties.modelName) == preset->name);
+    CHECK(std::string(properties.serialNumber) == uuidText(index));
+    CHECK(std::string(properties.boardNumber) == gemstone::devicePciBusId(index));
+
+    ze_device_properties_t core{};
+    core.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+    REQUIRE(zeDeviceGetProperties(coreDevices[index], &core) == ZE_RESULT_SUCCESS);
+    CHECK(std::memcmp(extended.uuid.id, core.uuid.id, ZE_MAX_DEVICE_UUID_SIZE) == 0);
+
+    uint32_t memoryCount = 0;
+    REQUIRE(zesDeviceEnumMemoryModules(sysmanDevices[index], &memoryCount, nullptr) == ZE_RESULT_SUCCESS);
+    REQUIRE(memoryCount == 1);
+    zes_mem_handle_t memory = nullptr;
+    REQUIRE(zesDeviceEnumMemoryModules(sysmanDevices[index], &memoryCount, &memory) == ZE_RESULT_SUCCESS);
+    zes_mem_properties_t memoryProperties{};
+    memoryProperties.stype = ZES_STRUCTURE_TYPE_MEM_PROPERTIES;
+    REQUIRE(zesMemoryGetProperties(memory, &memoryProperties) == ZE_RESULT_SUCCESS);
+    CHECK(std::cmp_equal(memoryProperties.physicalSize, preset->memoryBytes));
+    CHECK(memoryProperties.busWidth == preset->busWidthBits);
+    zes_mem_state_t memoryState{};
+    memoryState.stype = ZES_STRUCTURE_TYPE_MEM_STATE;
+    REQUIRE(zesMemoryGetState(memory, &memoryState) == ZE_RESULT_SUCCESS);
+    CHECK(std::cmp_equal(memoryState.free, preset->memoryBytes));
+    CHECK(std::cmp_equal(memoryState.size, preset->memoryBytes));
+
+    uint32_t engineCount = 0;
+    REQUIRE(zesDeviceEnumEngineGroups(sysmanDevices[index], &engineCount, nullptr) == ZE_RESULT_SUCCESS);
+    CHECK(engineCount == 2);
+    std::array<zes_engine_handle_t, 2> engines{};
+    REQUIRE(zesDeviceEnumEngineGroups(sysmanDevices[index], &engineCount, engines.data()) == ZE_RESULT_SUCCESS);
+    for (auto *const engine : engines) {
+      zes_engine_properties_t engineProperties{};
+      engineProperties.stype = ZES_STRUCTURE_TYPE_ENGINE_PROPERTIES;
+      REQUIRE(zesEngineGetProperties(engine, &engineProperties) == ZE_RESULT_SUCCESS);
+      zes_engine_stats_t stats{};
+      REQUIRE(zesEngineGetActivity(engine, &stats) == ZE_RESULT_SUCCESS);
+      CHECK(stats.activeTime == 0);
+    }
+
+    uint32_t processCount = 1;
+    REQUIRE(zesDeviceProcessesGetState(sysmanDevices[index], &processCount, nullptr) == ZE_RESULT_SUCCESS);
+    CHECK(processCount == 0);
+  }
 }

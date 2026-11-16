@@ -65,6 +65,9 @@ if(BUILD_TESTING)
   gemstone_fetch_deb(amd-smi
     "https://repo.radeon.com/rocm/apt/7.1.1/pool/main/a/amd-smi-lib/amd-smi-lib_26.2.0.70101-38%7E24.04_amd64.deb"
     "58580c1e9a32090273bfa7b74974649ada0a0a6118f6e1b159f4a35664ac0cda")
+  gemstone_fetch_deb(xpu-smi
+    "https://github.com/intel/xpumanager/releases/download/v2.3.0/xpu-smi_2.3.0-1.24.04_amd64.deb"
+    "eb30a37967b404c83b4b2ddd76b6a927ef8c25961d672e1ff0c0bc4633f795f0")
   foreach(dependency IN ITEMS
       "libx11-6|pool/main/libx/libx11/libx11-6_1.8.7-1build1_amd64.deb|397f84347476a3c5786b39f3ff6f0f82866eb3d8be6d2ad3efeadf019efe5b80"
       "libxcb1|pool/main/libx/libxcb/libxcb1_1.15-1ubuntu2_amd64.deb|e1c6611d11ad7398326f1bf028afc34c3b14c51d917a3426b966ed4b9687fa58"
@@ -77,7 +80,9 @@ if(BUILD_TESTING)
       "libdrm2|pool/main/libd/libdrm/libdrm2_2.4.120-2build1_amd64.deb|f5fb4e7ce17921cc466fb7911abf91495ffb181b36772f68e2e82cb621703112"
       "libdrm-amdgpu1|pool/main/libd/libdrm/libdrm-amdgpu1_2.4.120-2build1_amd64.deb|e149d4daea33f58853b8013fd6c24888429ce7716a4b26d1a1f45181b5a4e73e"
       "libelf1t64|pool/main/e/elfutils/libelf1t64_0.190-1.1build4_amd64.deb|b277e52769302778bd052376ac6687b52954b6605dd5f781bff8631e3504d58f"
-      "libnuma1|pool/main/n/numactl/libnuma1_2.0.18-1build1_amd64.deb|508daa855e99959acaa945e6a89d218e0be6b5727fd28773580942ff37cf5805")
+      "libnuma1|pool/main/n/numactl/libnuma1_2.0.18-1build1_amd64.deb|508daa855e99959acaa945e6a89d218e0be6b5727fd28773580942ff37cf5805"
+      "libhwloc15|pool/universe/h/hwloc/libhwloc15_2.10.0-1build1_amd64.deb|45acb4e6676f968d0f32ff1c5115cad0b61165931afa1a59282bda6f00d13c3b"
+      "libpciaccess0|pool/main/libp/libpciaccess/libpciaccess0_0.17-3build1_amd64.deb|deef4184b5b4ae4d87574ee5abbf2f2707ef81d153729620c65912591fd5cfdc")
     string(REPLACE "|" ";" fields "${dependency}")
     list(GET fields 0 name)
     list(GET fields 1 file)
@@ -116,6 +121,7 @@ if(BUILD_TESTING)
   set(GEMSTONE_TOOL_NVTOP "${nvtop_ROOT}/usr/bin/nvtop")
   set(GEMSTONE_TOOL_ROCM_SMI "${rocm-smi_ROOT}/opt/rocm-7.1.1/bin/rocm-smi")
   set(GEMSTONE_TOOL_AMD_SMI "${amd-smi_ROOT}/opt/rocm-7.1.1/bin/amd-smi")
+  set(GEMSTONE_TOOL_XPU_SMI "${xpu-smi_ROOT}/usr/bin/xpu-smi")
 
   set(GEMSTONE_TOOL_LIBRARY_DIRECTORIES
     "${CMAKE_BINARY_DIR}"
@@ -126,7 +132,7 @@ if(BUILD_TESTING)
     list(APPEND GEMSTONE_TOOL_LIBRARY_DIRECTORIES ${_gemstone_sycl_libs})
   endif()
   foreach(dependency IN ITEMS libx11-6 libxcb1 libxau6 libxdmcp6 libwayland-client0 libffi8 libbsd0 libmd0 libdrm2
-      libdrm-amdgpu1 libelf1t64 libnuma1)
+      libdrm-amdgpu1 libelf1t64 libnuma1 libhwloc15 libpciaccess0)
     list(APPEND GEMSTONE_TOOL_LIBRARY_DIRECTORIES "${${dependency}_ROOT}/usr/lib/x86_64-linux-gnu")
   endforeach()
   list(FILTER GEMSTONE_TOOL_LIBRARY_DIRECTORIES EXCLUDE REGEX "^$")
