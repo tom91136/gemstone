@@ -376,7 +376,8 @@ TEST_CASE("xlong includes the same bounded CTS selections as standalone workload
     const auto bounded = loadWorkload(options);
     REQUIRE(bounded.specs.size() == 1);
     CHECK(full.specs.front().starts_with(bounded.specs.front()));
-    CHECK(full.excludePrograms == bounded.excludePrograms);
+    for (const auto &pattern : bounded.excludePrograms)
+      CHECK(full.excludePrograms ^ contains(pattern));
     CHECK(full.vulkanCases == bounded.vulkanCases);
   }
   options.workload = "short";
@@ -419,6 +420,25 @@ TEST_CASE("iteration workloads retain every miniapp", "[driver][workload-budget]
         }
         const Catch::TestCaseInfo unrelated("", {"core/copy", "[unified]"}, {__FILE__, __LINE__});
         CHECK_FALSE(selection.matches(unrelated));
+      }
+    }
+  }
+}
+
+TEST_CASE("iteration workloads leave the HeCBench corpus to its own workloads", "[driver][workload-budget]") {
+  for (const auto *name : {"short", "long", "xlong"}) {
+    DYNAMIC_SECTION(name) {
+      RunOptions options;
+      options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
+      options.workload = name;
+      const auto workload = loadWorkload(options);
+      const auto matches = [](const std::string &program) {
+        return [&program](const auto &pattern) { return conformance::globMatches(pattern, program); };
+      };
+      for (const std::string program : {"hecbench_lud", "hecbench_bfs"}) {
+        CAPTURE(program);
+        CHECK((workload.excludePrograms ^ exists(matches(program))
+               || (!workload.includePrograms.empty() && workload.includePrograms ^ none_match(matches(program)))));
       }
     }
   }

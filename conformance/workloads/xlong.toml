@@ -1,6 +1,7 @@
 # What CI runs: long plus the vendor suites, the rocThrust-semantic cases and the heavy Level Zero CTS families.
+# HeCBench runs through its own workloads.
 extends = "long"
-exclude_programs = ["opencl_cts_thread_dimensions", "sycl_cts_full_conformance_*"]
+exclude_programs = ["opencl_cts_thread_dimensions", "sycl_cts_full_conformance_*", "hecbench_*"]
 exclude_cases = []
 add_levelzero_cases = [
   "InterdependCMDListsPairSameEngineTypeParameterization/zeTestMixedCMDListsInterdependPairSameEngineType.*",

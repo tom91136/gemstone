@@ -1,4 +1,4 @@
-# Fast local iteration: compact unified matrices, bounded CTS and all miniapps, without the vendor suites,
+# Fast local iteration: compact unified matrices, bounded CTS and all miniapps, without the vendor suites, HeCBench,
 # the rocThrust-semantic cases or the release-only programs.
 # Vulkan has one regression example per semantic family; long adds parameter variants.
 # Defer measured long OpenCL copies/shuffles and SYCL copies/wide types to long.
@@ -45,6 +45,7 @@ exclude_programs = [
   "sycl_cts_pointers",
   "sycl_cts_property",
   "vendor_*",
+  "hecbench_*",
 ]
 exclude_cases = ["algorithms/roc-thrust-semantic/*"]
 levelzero_cases = [
