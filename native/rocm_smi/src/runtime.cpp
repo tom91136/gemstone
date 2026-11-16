@@ -122,11 +122,7 @@ rsmi_status_t rsmi_dev_pci_bandwidth_get(uint32_t dvInd, rsmi_pcie_bandwidth_t *
 rsmi_status_t rsmi_dev_unique_id_get(uint32_t dvInd, uint64_t *id) {
   if (!id) return RSMI_STATUS_INVALID_ARGS;
   if (!validOrdinal(dvInd)) return RSMI_STATUS_INPUT_OUT_OF_BOUNDS;
-  const auto bytes = gemstone::deviceUuid(dvInd);
-  uint64_t unique = 0;
-  for (size_t index = 0; index < 8; ++index)
-    unique = (unique << 8U) | bytes[index];
-  *id = unique;
+  *id = gemstone::deviceUniqueId(dvInd);
   return RSMI_STATUS_SUCCESS;
 }
 

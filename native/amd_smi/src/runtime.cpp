@@ -142,6 +142,7 @@ amdsmi_status_t amdsmi_get_gpu_kfd_info(amdsmi_processor_handle processorHandle,
 amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processorHandle, amdsmi_asic_info_t *info) {
   if (!info || !validHandle(processorHandle)) return AMDSMI_STATUS_INVAL;
   const auto preset = activePreset();
+  const uint32_t ordinal = toOrdinal(processorHandle);
   std::memset(info, 0, sizeof(*info));
   std::snprintf(info->market_name, sizeof(info->market_name), "%.*s", static_cast<int>(preset.name.size()), preset.name.data());
   info->vendor_id = 0x1002U;
@@ -149,7 +150,8 @@ amdsmi_status_t amdsmi_get_gpu_asic_info(amdsmi_processor_handle processorHandle
   info->subvendor_id = 0x1002U;
   info->device_id = 0x744cU;
   info->rev_id = 0;
-  std::snprintf(info->asic_serial, sizeof(info->asic_serial), "0x0000000000000000");
+  std::snprintf(info->asic_serial, sizeof(info->asic_serial), "0x%016llx",
+                static_cast<unsigned long long>(gemstone::deviceUniqueId(ordinal)));
   info->oam_id = 0xFFFFFFFFU;
   info->num_of_compute_units = static_cast<uint32_t>(preset.multiprocessors);
   info->target_graphics_version = gemstone::graphicsVersion(preset.target);

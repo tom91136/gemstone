@@ -1,8 +1,10 @@
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <cstring>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -44,6 +46,7 @@ struct RuntimeReport {
   int32_t busWidthBits = 0;
   int32_t l2Bytes = 0;
   uint64_t uniqueId = 0;
+  uint64_t serial = 0;
   std::array<uint8_t, 16> uuid{};
   gemstone::PciAddress pci{};
   std::string pciBusId;
@@ -217,11 +220,11 @@ RuntimeReport queryNvml(unsigned int ordinal) {
   return report;
 }
 
-uint64_t uuidPrefix(const std::array<uint8_t, 16> &uuid) {
-  uint64_t prefix = 0;
-  for (size_t index = 0; index < 8; ++index)
-    prefix = (prefix << 8U) | uuid[index];
-  return prefix;
+uint64_t uuidUnique(const std::array<uint8_t, 16> &uuid) {
+  uint64_t unique = 0;
+  for (size_t index = 8; index < 16; ++index)
+    unique = (unique << 8U) | uuid[index];
+  return unique;
 }
 
 RuntimeReport queryRocmSmi(uint32_t ordinal) {
@@ -256,6 +259,11 @@ RuntimeReport queryAmdSmi(uint32_t ordinal) {
   REQUIRE(amdsmi_get_gpu_asic_info(handle, &asic) == AMDSMI_STATUS_SUCCESS);
   report.name = asic.market_name;
   report.multiprocessors = static_cast<int32_t>(asic.num_of_compute_units);
+  const std::string_view serialText(asic.asic_serial);
+  const auto serialDigits = serialText.starts_with("0x") ? serialText.substr(2) : serialText;
+  const auto serialParse = std::from_chars(serialDigits.data(), serialDigits.data() + serialDigits.size(), report.serial, 16);
+  REQUIRE(serialParse.ec == std::errc{});
+  REQUIRE(serialParse.ptr == serialDigits.data() + serialDigits.size());
   amdsmi_vram_info_t vram{};
   REQUIRE(amdsmi_get_gpu_vram_info(handle, &vram) == AMDSMI_STATUS_SUCCESS);
   report.memoryBytes = vram.vram_size * (1024ULL * 1024ULL);
@@ -429,6 +437,15 @@ TEST_CASE("Every runtime reports the same identity and capacity for the same pre
     CHECK(levelZero.uuid == cuda.uuid);
     CHECK(vulkan.uuid == cuda.uuid);
     CHECK(std::string(hsaUuid) == gemstone::deviceHsaUuid(ordinal));
+    const std::string_view hsaUuidText(hsaUuid);
+    REQUIRE(hsaUuidText.starts_with("GPU-"));
+    uint64_t hsaUnique = 0;
+    const auto hsaDigits = hsaUuidText.substr(4);
+    const auto hsaParse = std::from_chars(hsaDigits.data(), hsaDigits.data() + hsaDigits.size(), hsaUnique, 16);
+    REQUIRE(hsaParse.ec == std::errc{});
+    CHECK(hsaParse.ptr == hsaDigits.data() + hsaDigits.size());
+    CHECK(hsaUnique == gemstone::deviceUniqueId(ordinal));
+    CHECK(uuidUnique(hip.uuid) == hsaUnique);
 
     CHECK(cuda.pci.domain == expectedPci.domain);
     CHECK(cuda.pci.bus == expectedPci.bus);
@@ -474,7 +491,7 @@ TEST_CASE("Every runtime reports the same identity and capacity for the same pre
     CHECK(rocmSmi.memoryBytes == cuda.memoryBytes);
     CHECK(rocmSmi.boostMhz == cuda.boostMhz);
     CHECK(rocmSmi.memoryClockMhz == cuda.memoryClockMhz);
-    CHECK(rocmSmi.uniqueId == uuidPrefix(cuda.uuid));
+    CHECK(rocmSmi.uniqueId == uuidUnique(cuda.uuid));
     CHECK(rocmSmi.pci.domain == cuda.pci.domain);
     CHECK(rocmSmi.pci.bus == cuda.pci.bus);
     CHECK(rocmSmi.pci.device == cuda.pci.device);
@@ -487,6 +504,8 @@ TEST_CASE("Every runtime reports the same identity and capacity for the same pre
     CHECK(amdSmi.boostMhz == cuda.boostMhz);
     CHECK(amdSmi.memoryClockMhz == cuda.memoryClockMhz);
     CHECK(amdSmi.busWidthBits == cuda.busWidthBits);
+    CHECK(rocmSmi.uniqueId == hsaUnique);
+    CHECK(amdSmi.serial == hsaUnique);
     CHECK(amdSmi.uuid == cuda.uuid);
     CHECK(amdSmi.pci.domain == cuda.pci.domain);
     CHECK(amdSmi.pci.bus == cuda.pci.bus);

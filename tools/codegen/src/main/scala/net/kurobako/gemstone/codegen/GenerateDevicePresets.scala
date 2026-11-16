@@ -57,11 +57,17 @@ object GenerateDevicePresets {
          |  return uuid;
          |}
          |
-         |inline std::string deviceHsaUuid(uint32_t ordinal) {
+         |constexpr uint64_t deviceUniqueId(uint32_t ordinal) noexcept {
          |  const auto bytes = deviceUuid(ordinal);
+         |  uint64_t unique = 0;
+         |  for (size_t index = 8; index < 16; ++index)
+         |    unique = (unique << 8U) | bytes[index];
+         |  return unique;
+         |}
+         |
+         |inline std::string deviceHsaUuid(uint32_t ordinal) {
          |  char buffer[24];
-         |  std::snprintf(buffer, sizeof(buffer), "GPU-%02x%02x%02x%02x%02x%02x%02x%02x", bytes[8], bytes[9], bytes[10], bytes[11], bytes[12],
-         |                bytes[13], bytes[14], bytes[15]);
+         |  std::snprintf(buffer, sizeof(buffer), "GPU-%016llx", static_cast<unsigned long long>(deviceUniqueId(ordinal)));
          |  return buffer;
          |}
          |

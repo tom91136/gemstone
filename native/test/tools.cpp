@@ -52,14 +52,22 @@ gemstone::DevicePreset nvidiaPreset() {
   throw std::runtime_error("unknown preset");
 }
 
-std::string uniqueIdText(uint32_t ordinal) {
+std::string uniqueIdHex(uint32_t ordinal) {
   const auto bytes = gemstone::deviceUuid(ordinal);
   uint64_t unique = 0;
-  for (size_t index = 0; index < 8; ++index)
+  for (size_t index = 8; index < 16; ++index)
     unique = (unique << 8U) | bytes[index];
-  char buffer[32];
-  std::snprintf(buffer, sizeof(buffer), "Unique ID: 0x%016llx", static_cast<unsigned long long>(unique));
+  char buffer[17];
+  std::snprintf(buffer, sizeof(buffer), "%016llx", static_cast<unsigned long long>(unique));
   return buffer;
+}
+
+std::string uniqueIdText(uint32_t ordinal) { return "Unique ID: 0x" + uniqueIdHex(ordinal); }
+
+std::string upperHex(std::string text) {
+  for (char &character : text)
+    if (character >= 'a' && character <= 'f') character = static_cast<char>(character - 'a' + 'A');
+  return text;
 }
 
 std::string reversedUuidText(uint32_t ordinal) {
@@ -285,4 +293,22 @@ TEST_CASE("xpu-smi discovery reports the preset identity and capacity", "[tools]
   REQUIRE_THAT(result.output, ContainsSubstring("Core Clock Rate: " + std::to_string(preset.boostMhz) + " MHz"));
   REQUIRE_THAT(result.output, ContainsSubstring("Memory Physical Size: " + memoryMegabytes(preset)));
   REQUIRE_THAT(result.output, ContainsSubstring("Memory Bus Width: " + std::to_string(preset.busWidthBits)));
+}
+
+TEST_CASE("AMD tools agree on the device unique ID", "[tools][rocminfo][rocm-smi][amd-smi]") {
+  const auto preset = radeon();
+  const ToolEnvironment environment(preset);
+  const auto rocminfo = runTool(GEMSTONE_TOOL_ROCMINFO, {});
+  INFO(rocminfo.output);
+  REQUIRE(rocminfo.status == 0);
+  const auto rocmSmi = runTool(GEMSTONE_TOOL_ROCM_SMI, {"--showuniqueid"});
+  INFO(rocmSmi.output);
+  REQUIRE(rocmSmi.status == 0);
+  const auto amdSmi = runTool(GEMSTONE_TOOL_AMD_SMI, {"static"});
+  INFO(amdSmi.output);
+  REQUIRE(amdSmi.status == 0);
+  const auto expected = uniqueIdHex(0);
+  REQUIRE_THAT(rocminfo.output, ContainsSubstring("GPU-" + expected));
+  REQUIRE_THAT(rocmSmi.output, ContainsSubstring("Unique ID: 0x" + expected));
+  REQUIRE_THAT(amdSmi.output, ContainsSubstring("ASIC_SERIAL: 0x" + upperHex(expected)));
 }
