@@ -72,8 +72,8 @@ Completion only: ace, amgmk, bfs, bonds, btree, cfd, clock, cobahh, crs, dispatc
 
 Argument changes and measured times:
 
-- `bitpacking`: 1000 to 8 compress iterations, 479.8 s.
-- `laplace`: `NUM 1024` to 256, 3185 iterations, 299.9 s.
+- `bitpacking`: 1000 to 8 compress iterations, 479.8 s alone and 441.7 s in the bounded workload.
+- `laplace`: `NUM 1024` to 256, 3185 iterations, 299.9 s alone and 538.0 s in the bounded workload.
 - `softmax`: `repeat` 100 to 32, keeping the shipped slice count and size, 439.9 s. The shipped arguments exceed 600 s under emulation and pass on hardware.
 - `mdh`: not bounded; see above.
 - The other 62 time limits keep their shipped arguments. They pass or complete on hardware, so the limit reflects emulation speed, not workload size. Shrinking each one needs its own measured search; the largest groups are the BLAS batched kernels, the convolution and stencil kernels, and the Monte Carlo kernels.
@@ -127,8 +127,8 @@ Step 1 at the same commit:
 Ticket T42 (bounded arguments):
 
 - Default test arguments from `benchmarks.yaml` are extracted during configure to `data/hecbench/hecbench-arguments.json` (144 programs with test arguments). The conformance driver reads them from the support artifact and merges workload `program_arguments` over them.
-- `bitpacking`: `main()` takes no command-line arguments. Shipped `kernels.cu` runs 1000 compress iterations and exceeds 600 s under emulation. The staging patch runs 8 iterations, measured at 479.8 s on `cuda-sass/sm_89`, passing all six sizes. Eight is the largest count that stays under 600 s at both measured per-iteration rates (60 s and 72 s); nine would exceed it at the slower rate.
-- `laplace`: `main(void)` takes no command-line arguments. Shipped `NUM 1024` needs 27,250 GPU iterations and its serial CPU reference exceeds 15 minutes. The staging patch uses `NUM 256` (3185 iterations), measured at 299.9 s on `cuda-sass/sm_89`, passing with the same norms as hardware. The next step, 512, multiplies both the grid and the iteration count.
+- `bitpacking`: `main()` takes no command-line arguments. Shipped `kernels.cu` runs 1000 compress iterations and exceeds 600 s under emulation. The staging patch runs 8 iterations, measured at 479.8 s alone and 441.7 s in the bounded workload on `cuda-sass/sm_89`, passing all six sizes. Eight is the largest count that stays under 600 s at both measured per-iteration rates (60 s and 72 s); nine would exceed it at the slower rate.
+- `laplace`: `main(void)` takes no command-line arguments. Shipped `NUM 1024` needs 27,250 GPU iterations and its serial CPU reference exceeds 15 minutes. The staging patch uses `NUM 256` (3185 iterations), measured at 299.9 s alone and 538.0 s alongside `bitpacking` in the bounded workload on `cuda-sass/sm_89`, passing with the same norms as hardware. The next step, 512, multiplies both the grid and the iteration count.
 - `mdh`: `-itmax 1` is the smallest argument and brings the GPU work within reach, but the process still runs the serial CPU reference and three kernels, so it exceeds 600 s once each kernel is allowed to complete. At the default 1e11 instruction budget the first kernel is cut off after 61 s and the later launches fail, and the case prints FAIL in 64 s. Its inputs are hardcoded (`size[iatom]` is `natom` 5877 and `xkappa` is 0.0736), so `-xkappa * (dist - size[iatom])` is about +432 for every pair; `expf` overflows to `+inf` on both sides and the comparator's NaN test prints PASS without checking a value. No command-line input changes that, and the benchmark source is not patched to hide it. `mdh` is therefore not in the bounded workload and is not counted as a verified pass.
 
 ## Risks to confirm
