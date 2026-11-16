@@ -1334,3 +1334,34 @@ TEST_CASE("HIP registered kernel launch as the first call loads the module", "[h
   CHECK((outcome.signal == SIGABRT));
   CHECK(outcome.output.contains("kernarg buffer or allocation pointer is invalid"));
 }
+
+TEST_CASE("HIP context creation selects the device and tracks the current context", "[hip]") {
+  const gemstone_test::Environment count(gemstone::environment::DeviceCount, "2");
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  REQUIRE((hipInit(0) == hipSuccess));
+  hipCtx_t current = nullptr;
+  REQUIRE((hipCtxGetCurrent(&current) == hipSuccess));
+  CHECK((current != nullptr));
+  hipCtx_t first = nullptr;
+  REQUIRE((hipCtxCreate(&first, 0, 0) == hipSuccess));
+  REQUIRE((first != nullptr));
+  REQUIRE((hipCtxGetCurrent(&current) == hipSuccess));
+  CHECK((current == first));
+  hipCtx_t second = nullptr;
+  REQUIRE((hipCtxCreate(&second, 0, 1) == hipSuccess));
+  REQUIRE((second != nullptr));
+  CHECK((second != first));
+  int device = -1;
+  REQUIRE((hipGetDevice(&device) == hipSuccess));
+  CHECK((device == 1));
+  REQUIRE((hipCtxSetCurrent(first) == hipSuccess));
+  REQUIRE((hipGetDevice(&device) == hipSuccess));
+  CHECK((device == 0));
+  REQUIRE((hipCtxGetCurrent(&current) == hipSuccess));
+  CHECK((current == first));
+  hipCtx_t invalid = nullptr;
+  CHECK((hipCtxCreate(&invalid, 0, 2) == hipErrorInvalidValue));
+  REQUIRE((hipCtxPopCurrent(&current) == hipSuccess));
+  CHECK((current == first));
+}

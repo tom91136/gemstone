@@ -163,7 +163,8 @@ cudaStreamAttachMemAsync cudaStreamBeginCapture cudaStreamEndCapture"""),
       Coverage.Partial(
         Vector(Status("hipError_t", "hipErrorNotSupported", "gemstone_hip_unsupported")),
         names("""
-hipArrayGetInfo hipCreateChannelDesc hipCreateSurfaceObject hipCreateTextureObject hipCtxPopCurrent hipCtxPushCurrent
+hipArrayGetInfo hipCreateChannelDesc hipCreateSurfaceObject hipCreateTextureObject hipCtxCreate hipCtxGetCurrent
+hipCtxPopCurrent hipCtxPushCurrent hipCtxSetCurrent
 hipDestroySurfaceObject hipDestroyTextureObject hipDeviceCanAccessPeer hipDeviceComputeCapability hipDeviceDisablePeerAccess
 hipDeviceEnablePeerAccess hipDeviceGet hipDeviceGetAttribute hipDeviceGetByPCIBusId
 hipDeviceGetDefaultMemPool hipDeviceGetLimit hipDeviceGetName hipDeviceGetP2PAttribute hipDeviceGetPCIBusId hipDeviceGetUuid

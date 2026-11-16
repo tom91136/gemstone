@@ -1039,6 +1039,51 @@ std::optional<int> contextDevice(hipCtx_t context) {
 }
 } // namespace
 
+extern "C" hipError_t hipCtxCreate(hipCtx_t *ctx, unsigned int flags, hipDevice_t device) {
+  (void)flags;
+  if (!ctx) return remember(hipErrorInvalidValue);
+  if (!validDevice(device)) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  auto &references = runtime.primaryContextReferences[static_cast<size_t>(device)];
+  if (references == UINT32_MAX) return remember(hipErrorOutOfMemory);
+  hipCtx_t created = primaryContext(device);
+  try {
+    contextStack.push_back(currentContext);
+  } catch (...) {
+    return remember(hipErrorOutOfMemory);
+  }
+  ++references;
+  currentContext = created;
+  currentDevice = device;
+  *ctx = created;
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipCtxGetCurrent(hipCtx_t *ctx) {
+  if (!ctx) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  *ctx = primaryContext(currentDevice);
+  return remember(hipSuccess);
+}
+
+extern "C" hipError_t hipCtxSetCurrent(hipCtx_t context) {
+  if (!context) {
+    if (!contextStack.empty()) {
+      contextStack.pop_back();
+    }
+    return remember(hipSuccess);
+  }
+  const auto device = contextDevice(context);
+  if (!device) return remember(hipErrorInvalidContext);
+  currentDevice = *device;
+  currentContext = context;
+  if (!contextStack.empty()) contextStack.pop_back();
+  contextStack.push_back(context);
+  return remember(hipSuccess);
+}
+
 extern "C" hipError_t hipDevicePrimaryCtxRetain(hipCtx_t *context, hipDevice_t device) {
   if (!context || !validDevice(device)) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
