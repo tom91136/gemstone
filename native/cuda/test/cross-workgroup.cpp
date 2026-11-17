@@ -956,3 +956,17 @@ TEST_CASE("CUDA driver lookup exposes known unsupported APIs and ordinary stream
   REQUIRE(threadId != legacyId);
   check(library.load<CUresult (*)(CUcontext)>("cuCtxDestroy_v2")(context));
 }
+
+TEST_CASE("CUDA tools driver-state table reports an initialised driver", "[cuda][integration]") {
+  const SharedLibrary library{cudaLibraryPath().c_str()};
+  check(library.load<CUresult (*)(unsigned)>("cuInit")(0));
+  const std::array<unsigned char, 16> driverStateId{0xd7, 0xbd, 0x8a, 0xf8, 0xe7, 0xac, 0xca, 0x4a,
+                                                    0xbd, 0xbc, 0xfb, 0x1f, 0x1b, 0x3f, 0xcf, 0x33};
+  const void *table = nullptr;
+  check(library.load<CUresult (*)(const void **, const void *)>("cuGetExportTable")(&table, driverStateId.data()));
+  const auto *const entries = static_cast<const void *const *>(table);
+  const auto driverState = reinterpret_cast<CUresult (*)(int *)>(reinterpret_cast<uintptr_t>(entries[3]));
+  int state = -1;
+  check(driverState(&state));
+  REQUIRE(state == 0);
+}

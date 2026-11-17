@@ -29,6 +29,14 @@ if(BUILD_TESTING)
   target_link_libraries(cuda_process_exit_test PRIVATE gemstone_cuda)
   add_test(NAME cuda/process-exit COMMAND cuda_process_exit_test)
   gemstone_set_tests_properties(cuda/process-exit PROPERTIES TIMEOUT 10)
+  add_executable(cuda_tools_export_tables_exit_test test/tools-export-tables-exit.cpp)
+  gemstone_project_target(cuda_tools_export_tables_exit_test)
+  target_include_directories(cuda_tools_export_tables_exit_test SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}")
+  target_link_libraries(cuda_tools_export_tables_exit_test PRIVATE ${CMAKE_DL_LIBS})
+  add_dependencies(cuda_tools_export_tables_exit_test gemstone_cuda)
+  add_test(NAME cuda/tools-export-tables-exit COMMAND cuda_tools_export_tables_exit_test)
+  gemstone_set_tests_properties(cuda/tools-export-tables-exit PROPERTIES TIMEOUT 10
+    ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:gemstone_cuda>")
   gemstone_memory_client(cuda gemstone_cuda)
   add_test(NAME cuda/header-compatibility COMMAND ${CMAKE_COMMAND}
     "-DCUDA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}"

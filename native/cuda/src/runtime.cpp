@@ -223,6 +223,7 @@ CUresult failureStatus(gemstone::execution::FailureKind kind, ProgramEncoding en
 }
 
 std::atomic<bool> executionShuttingDown{false};
+std::atomic<bool> driverInitialised{false};
 gemstone::CommandQueue &commands();
 
 CUresult waitCommands() { return executionShuttingDown.load() ? CUDA_ERROR_DEINITIALIZED : queueStatus(commands().waitAll()); }
@@ -1886,6 +1887,10 @@ const unsigned char DriverMetadataInterfaceId[16] = {0x21, 0x31, 0x8c, 0x60, 0x9
                                                      0x8c, 0xa6, 0x41, 0xff, 0x73, 0x24, 0xc8, 0xf2};
 const unsigned char ModuleEnumerationId[16] = {0x6e, 0x16, 0x3f, 0xbe, 0xb9, 0x58, 0x44, 0x4d,
                                                0x83, 0x5c, 0xe1, 0x82, 0xaf, 0xf1, 0x99, 0x1e};
+const unsigned char ToolsDriverStateId[16] = {0xd7, 0xbd, 0x8a, 0xf8, 0xe7, 0xac, 0xca, 0x4a,
+                                              0xbd, 0xbc, 0xfb, 0x1f, 0x1b, 0x3f, 0xcf, 0x33};
+const unsigned char ToolsCallbackRegistryId[16] = {0x7c, 0xb6, 0x3f, 0x9b, 0x9c, 0xa4, 0x8e, 0x42,
+                                                   0xa4, 0x84, 0xbe, 0xb6, 0x6e, 0x6a, 0xed, 0x7f};
 
 // Buffer sizes are fixed by the CUDA tools-runtime callback ABI.
 constexpr size_t ToolsRuntimeCallbackBuffer1Words = 1024;
@@ -2208,9 +2213,54 @@ const void *moduleEnumerationTable[8] = {reinterpret_cast<const void *>(static_c
                                          nullptr,
                                          reinterpret_cast<const void *>(moduleEnumerateFunctions)};
 
+constexpr int ToolsDriverInitialised = 0;
+constexpr int ToolsDriverDeinitialised = 1;
+constexpr int ToolsDriverUninitialised = 2;
+
+CUresult toolsDriverState(int *state) {
+  if (!state) return CUDA_ERROR_INVALID_VALUE;
+  if (executionShuttingDown.load()) *state = ToolsDriverDeinitialised;
+  else *state = driverInitialised.load() ? ToolsDriverInitialised : ToolsDriverUninitialised;
+  return CUDA_SUCCESS;
+}
+
+constexpr size_t ToolsDriverStateWords = 14;
+const std::array<const void *, ToolsDriverStateWords> ToolsDriverStateTable = [] {
+  std::array<const void *, ToolsDriverStateWords> table{};
+  table[0] = reinterpret_cast<const void *>(ToolsDriverStateWords * sizeof(void *));
+  table[3] = reinterpret_cast<const void *>(toolsDriverState);
+  return table;
+}();
+
+std::mutex toolsCallbackRegistryMutex;
+void **toolsCallbacks = nullptr;
+unsigned toolsCallbackCount = 0;
+
+// The first caller's table and count stay registered for the process; later calls index into them.
+CUresult toolsCallbackSlot(void **callback, void **callbacks, unsigned index, unsigned count) {
+  if (!callback || !callbacks) return CUDA_ERROR_INVALID_HANDLE;
+  std::scoped_lock const lock{toolsCallbackRegistryMutex};
+  if (!toolsCallbacks) {
+    toolsCallbacks = callbacks;
+    toolsCallbackCount = count;
+  }
+  const bool present = index < toolsCallbackCount;
+  *callback = present ? toolsCallbacks[index] : nullptr;
+  return present ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+}
+
+constexpr size_t ToolsCallbackRegistryWords = 70;
+const std::array<const void *, ToolsCallbackRegistryWords> ToolsCallbackRegistryTable = [] {
+  std::array<const void *, ToolsCallbackRegistryWords> table{};
+  table[0] = reinterpret_cast<const void *>(ToolsCallbackRegistryWords * sizeof(void *));
+  table[67] = reinterpret_cast<const void *>(toolsCallbackSlot);
+  return table;
+}();
+
 struct ExportTable {
-  const unsigned char *id;
-  const void *table;
+  const unsigned char *id = nullptr;
+  const void *table = nullptr;
+  bool refusedAfterTeardown = false;
 };
 
 const std::array ExportTables{
@@ -2223,6 +2273,8 @@ const std::array ExportTables{
     ExportTable{.id = ContextChecksId, .table = contextChecksTable},
     ExportTable{.id = DriverMetadataInterfaceId, .table = DriverMetadataInterfaceTable.data()},
     ExportTable{.id = ModuleEnumerationId, .table = moduleEnumerationTable},
+    ExportTable{.id = ToolsDriverStateId, .table = ToolsDriverStateTable.data(), .refusedAfterTeardown = true},
+    ExportTable{.id = ToolsCallbackRegistryId, .table = ToolsCallbackRegistryTable.data(), .refusedAfterTeardown = true},
 };
 
 void *libraryHandle() {
@@ -2577,7 +2629,9 @@ extern "C" {
 CUresult cuInit(unsigned flags) {
   if (flags != 0) return CUDA_ERROR_INVALID_VALUE;
   if (deviceCountValue() == 0) return CUDA_ERROR_NO_DEVICE;
-  return executionReady();
+  const auto ready = executionReady();
+  if (ready == CUDA_SUCCESS) driverInitialised.store(true);
+  return ready;
 }
 
 CUresult cuDriverGetVersion(int *version) {
@@ -5264,6 +5318,7 @@ CUresult cuGetExportTable(const void **table, const CUuuid *id) {
   if (!table || !id) return CUDA_ERROR_INVALID_VALUE;
   for (const auto &entry : ExportTables)
     if (std::memcmp(id, entry.id, sizeof(CUuuid)) == 0) {
+      if (entry.refusedAfterTeardown && executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
       *table = entry.table;
       return CUDA_SUCCESS;
     }

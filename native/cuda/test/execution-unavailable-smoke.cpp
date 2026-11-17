@@ -202,6 +202,25 @@ bool resolvedEntryPointsBehave() {
          && name == std::string_view{"CUDA_ERROR_NOT_FOUND"};
 }
 
+using ExportTableQuery = CUresult (*)(const void **, const void *);
+using DriverStateQuery = CUresult (*)(int *);
+using CallbackSlotQuery = CUresult (*)(void **, void **, unsigned, unsigned);
+
+constexpr std::array<unsigned char, 16> ToolsDriverStateId{0xd7, 0xbd, 0x8a, 0xf8, 0xe7, 0xac, 0xca, 0x4a,
+                                                           0xbd, 0xbc, 0xfb, 0x1f, 0x1b, 0x3f, 0xcf, 0x33};
+constexpr std::array<unsigned char, 16> ToolsCallbackRegistryId{0x7c, 0xb6, 0x3f, 0x9b, 0x9c, 0xa4, 0x8e, 0x42,
+                                                                0xa4, 0x84, 0xbe, 0xb6, 0x6e, 0x6a, 0xed, 0x7f};
+
+const void *const *toolsTable(const std::array<unsigned char, 16> &id) {
+  const auto query = reinterpret_cast<ExportTableQuery>(dlsym(RTLD_DEFAULT, "cuGetExportTable"));
+  const void *table = nullptr;
+  return query && query(&table, id.data()) == CUDA_SUCCESS ? static_cast<const void *const *>(table) : nullptr;
+}
+
+template <class Function> Function tableEntry(const void *const *table, size_t index) {
+  return reinterpret_cast<Function>(reinterpret_cast<uintptr_t>(table[index]));
+}
+
 } // namespace
 
 TEST_CASE("CUDA facade fails closed without execution service", "[cuda]") {
@@ -243,4 +262,39 @@ TEST_CASE("CUDA runtime channel descriptors carry their components", "[cuda]") {
   const auto descriptor = cudaCreateChannelDesc(8, 16, 0, 32, cudaChannelFormatKindFloat);
   CHECK((descriptor.x == 8 && descriptor.y == 16 && descriptor.z == 0 && descriptor.w == 32));
   CHECK((descriptor.f == cudaChannelFormatKindFloat));
+}
+
+TEST_CASE("CUDA tools driver-state table validates its output", "[cuda]") {
+  const auto *const table = toolsTable(ToolsDriverStateId);
+  REQUIRE((table != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(table[0]) == 112));
+  const auto query = tableEntry<DriverStateQuery>(table, 3);
+  REQUIRE((query != nullptr));
+  CHECK((query(nullptr) == CUDA_ERROR_INVALID_VALUE));
+}
+
+TEST_CASE("CUDA tools callback registry keeps the first table and bounds-checks slots", "[cuda]") {
+  const auto *const table = toolsTable(ToolsCallbackRegistryId);
+  REQUIRE((table != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(table[0]) == 560));
+  const auto slot = tableEntry<CallbackSlotQuery>(table, 67);
+  REQUIRE((slot != nullptr));
+  void *first[4] = {reinterpret_cast<void *>(0xa0), reinterpret_cast<void *>(0xa1), reinterpret_cast<void *>(0xa2),
+                    reinterpret_cast<void *>(0xa3)};
+  void *second[4] = {reinterpret_cast<void *>(0xb0), reinterpret_cast<void *>(0xb1), reinterpret_cast<void *>(0xb2),
+                     reinterpret_cast<void *>(0xb3)};
+  void *out = reinterpret_cast<void *>(0x77);
+  CHECK((slot(nullptr, first, 1, 4) == CUDA_ERROR_INVALID_HANDLE));
+  CHECK((slot(&out, nullptr, 1, 4) == CUDA_ERROR_INVALID_HANDLE));
+  CHECK((out == reinterpret_cast<void *>(0x77)));
+  CHECK((slot(&out, first, 4, 4) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((out == nullptr));
+  CHECK((slot(&out, first, 2, 4) == CUDA_SUCCESS));
+  CHECK((out == reinterpret_cast<void *>(0xa2)));
+  CHECK((slot(&out, second, 1, 2) == CUDA_SUCCESS));
+  CHECK((out == reinterpret_cast<void *>(0xa1)));
+  CHECK((slot(&out, second, 3, 2) == CUDA_SUCCESS));
+  CHECK((out == reinterpret_cast<void *>(0xa3)));
+  CHECK((slot(&out, second, 4, 2) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((out == nullptr));
 }
