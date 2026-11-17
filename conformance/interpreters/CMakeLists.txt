@@ -50,12 +50,12 @@ if("julia" IN_LIST languages)
     "${CMAKE_CURRENT_LIST_DIR}/julia/package_tests.jl"
     "${CMAKE_CURRENT_LIST_DIR}/julia/listing.jl"
     DESTINATION data/interpreters/julia COMPONENT architecture)
-  set(babelstream_julia "${DEPENDENCY_CACHE}/babelstream_julia")
-  if(NOT EXISTS "${babelstream_julia}/src/julia/JuliaStream.jl/src")
-    message(FATAL_ERROR "The BabelStream Julia source is missing from ${babelstream_julia}")
+  set(babelstream "${DEPENDENCY_CACHE}/babelstream")
+  if(NOT EXISTS "${babelstream}/src/julia/JuliaStream.jl/src")
+    message(FATAL_ERROR "The BabelStream Julia source is missing from ${babelstream}")
   endif()
-  install(DIRECTORY "${babelstream_julia}/src/julia/JuliaStream.jl/src/"
+  install(DIRECTORY "${babelstream}/src/julia/JuliaStream.jl/src/"
     DESTINATION data/interpreters/julia/babelstream/src COMPONENT architecture)
-  install(FILES "${babelstream_julia}/LICENSE"
+  install(FILES "${babelstream}/LICENSE"
     DESTINATION licences RENAME BabelStream-julia.txt COMPONENT support)
 endif()

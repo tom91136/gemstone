@@ -47,9 +47,6 @@ pinned_dependency(levelzero_headers SOURCE_ONLY
   URL https://codeload.github.com/oneapi-src/level-zero/tar.gz/934714b278f850d164627eeaaa043eee02785a9e
   URL_HASH SHA256=ec16e5f6a21443080494fe9ebeae5ea36de003124211d58ae3e3ae5eccfd1940)
 pinned_dependency(babelstream SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/5cb9445483786f3502b12b8faab8414f8c5873b1
-  URL_HASH SHA256=3f6d3e600feed6933254f28bd135cef9b068e0186d0942f3089d42f24d0a39d9)
-pinned_dependency(babelstream_julia SOURCE_ONLY
   URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/a992a272c31505a3f5c190bc96a668afa54102b7
   URL_HASH SHA256=465eebed0068914919b61f6d5c2e3f7ea7783ce44aaceae0e430659498ebeb8d)
 pinned_dependency(minibude SOURCE_ONLY

@@ -37,9 +37,8 @@ function(babelstream_adapt model source)
     file(WRITE "${path}" "${content}")
     if(CONFORMANCE_COMPILER STREQUAL "clang")
       patch_exact("${source}/src/cuda-tuned/model.cmake"
-        [=["-forward-unknown-to-host-compiler" "-arch=${CUDA_ARCH}"
-      "--extended-lambda" ]=]
-        [=["--cuda-gpu-arch=${CUDA_ARCH}" ]=])
+        [=[    set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "-forward-unknown-to-host-compiler" "-arch=${CUDA_ARCH}" ${CUDA_EXTRA_FLAGS})]=]
+        [=[    set(CMAKE_CUDA_FLAGS ${CMAKE_CUDA_FLAGS} "--cuda-gpu-arch=${CUDA_ARCH}" ${CUDA_EXTRA_FLAGS})]=])
     endif()
   endif()
   if(model MATCHES "^(ocl|sycl2020-(acc|usm))$")
