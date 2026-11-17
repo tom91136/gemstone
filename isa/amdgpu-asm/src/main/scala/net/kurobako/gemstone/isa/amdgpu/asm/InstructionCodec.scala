@@ -1042,7 +1042,7 @@ private object InstructionCodec {
             val index   = if (field == EncodingField.ATTR) number else number & 63
             val channel =
               if (field == EncodingField.ATTR) layout.get(word, EncodingField.ATTR_CHAN).toInt else number >> 6
-            Some(Operand.Identifier(s"attr$index.${"xyzw" (channel)}"))
+            Option.when(channel < 4)(Operand.Identifier(s"attr$index.${"xyzw" (channel)}"))
           } else if (info.kind == OperandKind.PARAM)
             InterpolationParameters.lift(number).map(Operand.Identifier(_))
           else if (field == EncodingField.SDST && LaneModifiers.sdwa(layout) && layout.get(word, EncodingField.SD) == 0)

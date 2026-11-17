@@ -34,26 +34,26 @@ final class AMDGPUMoves private (
     window: Window,
     base: Vec[Instruction],
     uses: Vec[RegisterUse],
-    scratch: Vec[String]
+    scratch: Vec[String],
+    tables: AMDGPUMoves.Tables
 ) {
   import AMDGPUMoves.*
 
-  private val mode      = TargetMode(target)
-  private val code      = CodeObject.decode(image).toOption.get
-  private val exec      = ImplicitState.units(ImplicitState.Exec, mode.waveSize).toSet
-  private val written   = uses.flatMap(use => unitsOf(use, use.writes)).toSet
-  private val writable  = written ++ scratch
-  private val canonical = mutable.Map.empty[String, Option[Instruction]]
-  private val original  = each(base)(settled(_)).getOrElse(base).map(Printer.render(_))
+  private val mode     = TargetMode(target)
+  private val code     = CodeObject.decode(image).toOption.get
+  private val exec     = ImplicitState.units(ImplicitState.Exec, mode.waveSize).toSet
+  private val written  = uses.flatMap(use => unitsOf(use, use.writes)).toSet
+  private val writable = written ++ scratch
+  private val original = each(base)(settled(_)).getOrElse(base).map(Printer.render(_))
 
   private val defined: Vec[Set[String]] =
     uses.scanLeft(window.liveIn)((live, use) => live ++ unitsOf(use, use.writes))
 
-  private val opcodes: Vec[Opcode] = InstructionDefs.definitions.toVec.filter(_.encodings(target).nonEmpty)
-    .sortBy(_.mnemonic.raw)
+  private def canonical: mutable.Map[String, Option[Instruction]] = tables.canonical
 
-  private val classes: Map[String, Vec[Opcode]] =
-    opcodes.flatMap(opcode => opcode.encodings(target).map(signature(_)).distinct.map(_ -> opcode)).groupMap(_._1)(_._2)
+  private def opcodes: Vec[Opcode] = tables.opcodes
+
+  private def classes: Map[String, Vec[Opcode]] = tables.classes
 
   private def shapes(instruction: Instruction): Vec[(Metadata.Encoding, Vec[OperandInfo])] =
     instruction.definition.encodings(target).map(encoding => encoding -> encoding.operands.filterNot(_.implicitOperand))
@@ -118,7 +118,7 @@ final class AMDGPUMoves private (
           chunks,
           kept ++ named.zip(effects(named)).collect {
             case (sequence, Some(used)) if sound(used) =>
-              Candidate(kind, sequence)
+              Candidate(kind, sequence, used)
           }
         )
       }
@@ -235,6 +235,11 @@ final class AMDGPUMoves private (
     val random = Random(seed)
     Kind.values.toVec.flatMap(candidates(_, random, limit))
   }
+
+  def from(sequence: Vec[Instruction]): Either[String, AMDGPUMoves] =
+    effects(Vec(sequence)).headOption.flatten.toRight("the sequence does not compile in this kernel").map { used =>
+      AMDGPUMoves(image, function, targetName, target, window, sequence, used, scratch, tables)
+    }
 }
 
 object AMDGPUMoves {
@@ -242,7 +247,13 @@ object AMDGPUMoves {
     case Opcode, Swap, Delete, Insert, Immediate
   }
 
-  case class Candidate(kind: Kind, instructions: Vec[Instruction])
+  case class Candidate(kind: Kind, instructions: Vec[Instruction], uses: Vec[RegisterUse])
+
+  private final class Tables(
+      val opcodes: Vec[Opcode],
+      val classes: Map[String, Vec[Opcode]],
+      val canonical: mutable.Map[String, Option[Instruction]]
+  )
 
   private val ChunkSize      = 48
   private val InsertAttempts = 48
@@ -307,6 +318,15 @@ object AMDGPUMoves {
       val top = named0.iterator.flatMap(_.stripPrefix(prefix).toIntOption).maxOption.getOrElse(-1) + 1 + ScratchSize
       Vec.from(0 until top).map(index => s"$prefix$index").filterNot(busy).take(ScratchSize)
     }
-    AMDGPUMoves(image, function, target, named, window, base, windowUses, pool)
+    AMDGPUMoves(image, function, target, named, window, base, windowUses, pool, catalogue(named))
+  }
+
+  private def catalogue(target: Target): Tables = {
+    val opcodes = InstructionDefs.definitions.toVec.filter(_.encodings(target).nonEmpty).sortBy(_.mnemonic.raw)
+    val classes =
+      opcodes.flatMap(opcode => opcode.encodings(target).map(signature(_)).distinct.map(_ -> opcode)).groupMap(_._1)(
+        _._2
+      )
+    Tables(opcodes, classes, mutable.Map.empty)
   }
 }

@@ -40,7 +40,7 @@ object WindowFixtures {
 
   val vectorCopy: Vec[Byte] = Hex.parse(codeObjects.vectorCopyGfx906).toOption.get
 
-  private def patched(source: String): Vec[Byte] = {
+  def patched(source: String): Vec[Byte] = {
     val code = AMDGPUModel.assemble(source, Some("gfx906")).map(hex => Hex.parse(hex).toOption.get).toOption.get
     withCode(code)
   }

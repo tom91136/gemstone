@@ -7,6 +7,7 @@ import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
+import scala.util.Try
 
 class BinarySuite extends Suite {
   private val HalfLiteral = "0.5".r
@@ -549,5 +550,11 @@ class BinarySuite extends Suite {
       case CodecError.InvalidEncoding(message) => message.contains("SSRC0 code 209 is outside the src domain on rdna3")
       case _                                   => false
     })
+  }
+
+  test("an attribute operand whose channel bits exceed xyzw is not decoded into one") {
+    val decoded = Try(Binary.decode(hex("01 00 77 d2 04 eb 01 00"), TargetMode(Target("gfx906"))))
+    assert(decoded.isSuccess, decoded)
+    assert(decoded.toOption.flatMap(_.toOption).forall(value => !Printer.render(value).contains("attr")), decoded)
   }
 }
