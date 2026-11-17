@@ -1,6 +1,6 @@
 # Workload corpus
 
-Status: in progress. Step 1 and T42 are done. Step 2's harness is fixed: the manifest now comes from the Makefile run targets and the runtime data tree, the hardware rerun classifies 478 of 535 programs as pass or completion, and the emulation rerun of those 478 is partial (shards 0 to 3). Step 3 (HIP, SYCL, OpenMP) not started. Triage uses `concurrency-checking.md` to separate races from emulator defects.
+Status: in progress. Step 1 and T42 are done. The bounded workload now meets the 300 s headroom budget (183.6 s total in the default-concurrency run). Step 2's harness is fixed: the manifest now comes from the Makefile run targets and the runtime data tree, the hardware rerun classifies 478 of 535 programs as pass or completion, and the emulation rerun of those 478 is partial (shards 0 to 3). Step 3 (HIP, SYCL, OpenMP) not started. Triage uses `concurrency-checking.md` to separate races from emulator defects.
 
 ## Goal
 
@@ -83,8 +83,9 @@ New or confirmed emulator defects in the 38 rerun cases, compared with hardware:
 
 Argument changes and measured times:
 
-- `bitpacking`: 1000 to 8 compress iterations, 441.7 s in the bounded workload.
-- `laplace`: `NUM 1024` to 256, 3185 iterations, 538.0 s in the bounded workload.
+- `bitpacking`: 1000 to 3 compress iterations, 179.5 s in the default-concurrency bounded run and 199.2 s with two jobs.
+- `laplace`: `NUM 1024` to 256 and tolerance 1e-6 to 1e-4, 733 iterations, 183.6 s in the default-concurrency bounded run and 206.2 s with two jobs.
+- `minimod`: no arguments, overriding the Makefile run target, 4.4 s completion.
 - `softmax`: `repeat` 100 to 32, keeping the shipped slice count and size, 439.9 s. The shipped arguments exceed 600 s under emulation and pass on hardware.
 - `mdh`: not bounded; see above.
 - The time limits in the 38 rerun cases keep their shipped arguments in this pass. Shrinking them needs a per-program measured search; the current set is dominated by the large neural, BLAS, and stencil kernels.
@@ -126,9 +127,11 @@ Step 1 at the same commit:
 
 Ticket T42 (bounded arguments):
 
+- Rule: every `hecbench-bounded` case must finish within half the 600 s case limit (300 s) in the measured bounded run, so a loaded machine and CI retain headroom. The default 16-job run on 2026-11-17 took 183.6 s in total; the 2-job run took 225.1 s.
 - Default test arguments from `benchmarks.yaml` now override the per-benchmark Makefile `run:` target (144 programs have yaml arguments). The artifact generates `data/hecbench/hecbench-arguments.json` and `data/hecbench/hecbench-directories.json` after the build, and installs the source-shaped data tree the run targets need. The conformance driver merges workload `program_arguments` over the generated arguments and runs each program in its data directory.
-- `bitpacking`: `main()` takes no command-line arguments. Shipped `kernels.cu` runs 1000 compress iterations and exceeds 600 s under emulation. The staging patch runs 8 iterations, measured at 479.8 s alone and 441.7 s in the bounded workload on `cuda-sass/sm_89`, passing all six sizes. Eight is the largest count that stays under 600 s at both measured per-iteration rates (60 s and 72 s); nine would exceed it at the slower rate.
-- `laplace`: `main(void)` takes no command-line arguments. Shipped `NUM 1024` needs 27,250 GPU iterations and its serial CPU reference exceeds 15 minutes. The staging patch uses `NUM 256` (3185 iterations), measured at 299.9 s alone and 538.0 s alongside `bitpacking` in the bounded workload on `cuda-sass/sm_89`, passing with the same norms as hardware. The next step, 512, multiplies both the grid and the iteration count.
+- `bitpacking`: `main()` takes no command-line arguments. Shipped `kernels.cu` runs 1000 compress iterations. The staging patch runs 3 iterations, measured at 179.5 s in the default-concurrency bounded run and 199.2 s with two jobs, passing all six sizes.
+- `laplace`: `main(void)` takes no command-line arguments. Shipped `NUM 1024` needs 27,250 GPU iterations and its serial CPU reference exceeds 15 minutes. The staging patch uses `NUM 256` and lowers the convergence tolerance from 1e-6 to 1e-4, giving 733 iterations and 183.6 s in the default-concurrency bounded run (206.2 s with two jobs), passing with the same GPU and CPU norms. `NUM 128` is not valid: `BLOCK_SIZE` is 128, so the grid dimension becomes zero and the benchmark prints PASS after one empty iteration.
+- `minimod`: the Makefile run target (`--grid 256 --nsteps 1000`) exceeds 300 s under emulation. The bounded workload overrides it with no arguments and the program's default case, which completes in 4.4 s; the case has no pass or fail marker.
 - `mdh`: `-itmax 1` is the smallest argument and brings the GPU work within reach, but the process still runs the serial CPU reference and three kernels, so it exceeds 600 s once each kernel is allowed to complete. At the default 1e11 instruction budget the first kernel is cut off after 61 s and the later launches fail, and the case prints FAIL in 64 s. Its inputs are hardcoded (`size[iatom]` is `natom` 5877 and `xkappa` is 0.0736), so `-xkappa * (dist - size[iatom])` is about +432 for every pair; `expf` overflows to `+inf` on both sides and the comparator's NaN test prints PASS without checking a value. No command-line input changes that, and the benchmark source is not patched to hide it. `mdh` is therefore not in the bounded workload and is not counted as a verified pass.
 
 ## Risks to confirm
