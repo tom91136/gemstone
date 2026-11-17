@@ -4,8 +4,10 @@ import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.vm.RegisterUse
 import scala.collection.mutable
 
 /** AMDGPU opcodes with their per-ISA encodings, operand metadata and instruction word layouts. */
@@ -246,6 +248,21 @@ object AMDGPUModel extends Model {
     code <- CodeObject.decode(image).left.map(_.message.raw)
     flow <- flowOf(code, name)
   } yield flow
+
+  /** The kernel `function` of `image` as control flow, per-instruction register use and assembly. */
+  def staticCode(
+      image: Vec[Byte],
+      function: String
+  ): Either[String, (ControlFlowGraph, Vec[RegisterUse], Vec[String])] =
+    for {
+      name  <- function.refine[NonEmpty[String]].left.map(_ => s"no AMDGPU kernel '$function'")
+      code  <- CodeObject.decode(image).left.map(_.message.raw)
+      found <- {
+        val program = LoadedProgram.load(code)
+        try program.staticCode(name).left.map(_.message.raw)
+        finally program.close()
+      }
+    } yield found
 
   private def flowOf(code: CodeObject, name: NonEmpty[String]): Either[String, ControlFlow] = {
     val program = LoadedProgram.load(code)

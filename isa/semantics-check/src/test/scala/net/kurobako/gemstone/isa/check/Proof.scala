@@ -210,7 +210,7 @@ object Proof {
 
   private def touchesMemory(definitions: Definition*): Boolean = definitions.exists(definition =>
     (definition.body.map(_.term) ++ definition.requirements).exists(term =>
-      terms(term).exists {
+      Rejection.terms(term).exists {
         case _: Term.Context => true
         case _               => false
       }

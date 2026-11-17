@@ -24,6 +24,7 @@ Find cheaper equivalent instruction sequences for short windows of compiled SASS
 
 ### 1. Superoptimiser
 
+- Windows: `Liveness` and `Windows` in `core/.../flow` give static live-in and live-out sets and the windows of up to eight instructions, and `AMDGPUWindows` applies the equivalence checker's rejection rule (`Rejection`) to a decoded kernel. AMDGPU is done on gfx906 fixtures. SASS has no static per-instruction register use yet, so its windows and its loop-kernel test wait for that source.
 - Stochastic search over windows of up to about eight instructions, in the style of STOKE: MCMC over moves, with a cost of correctness distance plus model cycles.
 - Run it on the benchmark cases and conformance kernels. Report each proven rewrite with its model gain and the weakest source behind that gain.
 

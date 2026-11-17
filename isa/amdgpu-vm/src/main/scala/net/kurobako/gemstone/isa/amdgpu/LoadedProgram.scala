@@ -292,6 +292,16 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
   def controlFlow(name: NonEmpty[String]): Either[Fault, (ControlFlowGraph, Vec[Int])] =
     compile(name).map { case (_, _, kernel) => (AMDGPUControlFlowGraph.of(kernel), kernel.instructionOffsets) }
 
+  /** The kernel's control flow, the registers each instruction reads and writes and its assembly. */
+  def staticCode(name: NonEmpty[String]): Either[Fault, (ControlFlowGraph, Vec[RegisterUse], Vec[String])] =
+    compile(name).map { case (_, _, kernel) =>
+      (
+        AMDGPUControlFlowGraph.of(kernel),
+        kernel.registerUses,
+        Vec.tabulate(kernel.instructions.size)(kernel.assembly(_))
+      )
+    }
+
   override def close(): Unit = leased.getAndSet(None).foreach(_.release())
 
   override def build(name: NonEmpty[String]): Either[Fault, Unit] = compile(name).map(_ => ())

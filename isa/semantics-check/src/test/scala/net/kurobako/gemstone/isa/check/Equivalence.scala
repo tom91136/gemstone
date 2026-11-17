@@ -159,9 +159,9 @@ object Equivalence {
   private[check] def typings(step: Step): Either[String, Vec[(String, Type)]] = {
     val kase       = step.kase
     val definition = kase.definition
-    if (definition.body.isEmpty && definition.results.isEmpty) Left(s"${kase.instance} has no definition")
-    else unsupported(kase) match {
-      case Some(reason) => Left(s"${kase.instance} is refused: $reason")
+    if (Rejection.undefined(kase)) Left(s"${kase.instance} has no definition")
+    else Rejection.unsupported(kase) match {
+      case Some(reason)                                                                    => Left(reason)
       case None if !bound(definition.parameters.map(_.name).toSet, step.parameters.keySet) =>
         Left(s"${kase.instance} does not bind its ${definition.parameters.size} operands")
       case None if !bound(definition.results.map(_.name).toSet, step.results.keySet) =>
@@ -190,26 +190,6 @@ object Equivalence {
         }
       )
     )
-
-  private def unsupported(kase: Case): Option[String] = {
-    val definition = kase.definition
-    val roots      = definition.body.iterator.map(_.term) ++ definition.requirements.iterator ++
-      definition.results.iterator.map(_.value)
-    roots.flatMap(terms(_)).flatMap(refusal(_)).nextOption()
-  }
-
-  private[check] def terms(term: Term): Iterator[Term] = Iterator(term) ++ term.children.iterator.flatMap(terms(_))
-
-  private def refusal(term: Term): Option[String] = term match {
-    case Term.Context(contextType = contextType, method = method, result = result, effect = effect) =>
-      val owner   = contextType.substring(contextType.lastIndexOf('.') + 1)
-      val machine = contextType == RenderMachine.Machine.contextType
-      if (!machine || !Set("load", "store", "storeBytes").contains(method))
-        Some(s"$owner.$method is not a plain memory access")
-      else if (effect && result.nonEmpty) Some(s"atomic update through $owner.$method")
-      else None
-    case _ => None
-  }
 
   private def run[H](
       steps: Vec[Step],
