@@ -472,7 +472,8 @@ TEST_CASE("hecbench workloads include the corpus and the bounded selection", "[d
   }
   CHECK(bounded.includePrograms ^ exists([](const auto &pattern) { return pattern == "hecbench_laplace"; }));
   CHECK(bounded.includePrograms ^ none_match([](const auto &pattern) { return pattern == "hecbench_mdh"; }));
-  CHECK(bounded.programArguments.empty());
+  CHECK(bounded.programArguments.size() == 1);
+  CHECK(bounded.programArguments.at("hecbench_minimod").empty());
   CHECK(full.excludePrograms.empty());
   CHECK(bounded.excludePrograms.empty());
 }

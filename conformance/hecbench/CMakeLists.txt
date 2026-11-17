@@ -8,15 +8,20 @@ set(source "${hecbench_SOURCE_DIR}")
 set(staging "${CMAKE_CURRENT_BINARY_DIR}/source")
 stage_source("${source}" "${staging}")
 
-# Bounded workload: eight of the 1000 compress iterations (479.8 s on cuda-sass/sm_89 vs >600 s at 1000).
+# Bounded workload: three of the 1000 compress iterations (179.5 s in the bounded run, within the 300 s budget that
+# leaves half the 600 s case limit).
 patch_exact("${staging}/src/bitpacking-cuda/kernels.cu"
   "for (int n = 0; n < 1000; n++)"
-  "for (int n = 0; n < 8; n++)")
+  "for (int n = 0; n < 3; n++)")
 
-# Bounded workload: NUM 256 (3185 iterations, 299.9 s on cuda-sass/sm_89; default NUM 1024 needs 27250 iterations and its serial CPU reference exceeds 15 minutes).
+# Bounded workload: NUM 256 at tolerance 1e-4 (733 iterations, 183.6 s in the bounded run; the default NUM 1024 needs
+# 27,250 iterations and its serial CPU reference exceeds 15 minutes).
 patch_exact("${staging}/src/laplace-cuda/kernels.h"
   "#define NUM 1024"
   "#define NUM 256")
+patch_exact("${staging}/src/laplace-cuda/main.cu"
+  "Real tol = 1.e-6;"
+  "Real tol = 1.e-4;")
 
 hecbench_dvc_entries("${source}" dvc_entries)
 hecbench_licence_classification("${source}" licence_rows)
