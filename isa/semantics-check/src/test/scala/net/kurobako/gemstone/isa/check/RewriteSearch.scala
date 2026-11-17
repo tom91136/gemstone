@@ -22,7 +22,6 @@ import scala.reflect.ClassTag
 import scala.util.Random
 import scala.util.Try
 
-/** Cycles are one wave's issue and latency floor: the model has no occupancy and no memory traffic. */
 object RewriteSearch {
 
   case class Config(seed: Long, budget: Int, temperature: Double, states: Int, limit: Int)
@@ -40,7 +39,8 @@ object RewriteSearch {
       before: Measure,
       after: Measure,
       source: Architecture.Source,
-      evidence: Proof.Report
+      evidence: Proof.Report,
+      reason: String
   )
 
   case class Report(
@@ -346,76 +346,79 @@ object RewriteSearch {
     )
 
     def run(): Either[String, Report] = steps(original).flatMap { originalSteps =>
-      val out = liveOut(originalSteps)
-      if (out.locations.isEmpty)
-        Left("the window leaves none of its writes live out, so every candidate is trivially equivalent")
-      else {
-        val before = measure(original, originalUses)
-        val random = Random(config.seed)
-        val seen   = mutable.LinkedHashMap.empty[String, (Vec[Instruction], Long, Measure)]
+      val out     = liveOut(originalSteps)
+      val reason  = if (out.locations.isEmpty) "no write is live out" else "live-out writes proved equal"
+      val before  = measure(original, originalUses)
+      val random  = Random(config.seed)
+      val seen    = mutable.LinkedHashMap.empty[String, (Vec[Instruction], Long, Measure)]
+      val deleted = AMDGPUMoves.Candidate(AMDGPUMoves.Kind.Delete, Vec.empty, Vec.empty)
 
-        def visit(walk: Walk, candidate: AMDGPUMoves.Candidate): Walk = {
-          val bits = steps(candidate.instructions).flatMap(right =>
-            distance(originalSteps, right, out) match {
-              case Distance.Bits(bits)   => Right(bits)
-              case Distance.Refused(wby) => Left(wby)
-            }
-          ).toOption
-          bits.fold(walk.copy(evaluated = walk.evaluated + 1)) { bits =>
-            val after = measure(candidate.instructions, candidate.uses)
-            seen.getOrElseUpdate(text(candidate.instructions).mkString("; "), (candidate.instructions, bits, after))
-            val value    = bits.toDouble + after.cycles
-            val current  = walk.distance.toDouble + walk.cycles
-            val accepted = value <= current || random.nextDouble() < math.exp((current - value) / config.temperature)
-            if (accepted)
-              Walk(
-                candidate.instructions,
-                walk.moves.from(candidate.instructions).getOrElse(walk.moves),
-                after.cycles,
-                bits,
-                walk.evaluated + 1
-              )
-            else walk.copy(evaluated = walk.evaluated + 1)
+      def visit(walk: Walk, candidate: AMDGPUMoves.Candidate): Walk = {
+        val bits = steps(candidate.instructions).flatMap(right =>
+          distance(originalSteps, right, out) match {
+            case Distance.Bits(bits)   => Right(bits)
+            case Distance.Refused(wby) => Left(wby)
           }
+        ).toOption
+        bits.fold(walk.copy(evaluated = walk.evaluated + 1)) { bits =>
+          // the simulator has no period for an empty stream, and an empty block costs nothing
+          val after =
+            if (blockInstructions.size == length && candidate.instructions.isEmpty) Measure(0.0, before.source)
+            else measure(candidate.instructions, candidate.uses)
+          val key = text(candidate.instructions).mkString("; ")
+          if (!seen.contains(key)) seen.update(key, (candidate.instructions, bits, after))
+          val value    = bits.toDouble + after.cycles
+          val current  = walk.distance.toDouble + walk.cycles
+          val accepted = value <= current || random.nextDouble() < math.exp((current - value) / config.temperature)
+          if (accepted)
+            Walk(
+              candidate.instructions,
+              walk.moves.from(candidate.instructions).getOrElse(walk.moves),
+              after.cycles,
+              bits,
+              walk.evaluated + 1
+            )
+          else walk.copy(evaluated = walk.evaluated + 1)
         }
-
-        @tailrec
-        def walk(iteration: Int, current: Walk): Walk =
-          if (iteration == config.budget) current
-          else {
-            val pool       = current.moves.propose(random.nextLong(), config.limit)
-            val considered =
-              if (iteration == 0) pool
-              else if (pool.isEmpty) Vec.empty[AMDGPUMoves.Candidate]
-              else Vec(pool(random.nextInt(pool.size)))
-            walk(iteration + 1, considered.foldLeft(current)(visit))
-          }
-
-        val walked   = walk(0, Walk(original, moves, before.cycles, 0L, 0))
-        val cheaper  = seen.values.filter((_, bits, after) => bits == 0L && after.cycles < before.cycles).toVec
-        val lane     = originalSteps.map(_.kase)
-        val rewrites = cheaper.flatMap { (sequence, _, after) =>
-          steps(sequence).toOption.flatMap { right =>
-            Proof.prove(AMDGPUReference, executor, lane ++ right.map(_.kase), originalSteps, right, out) match {
-              case Proof.Result.Proved(evidence) =>
-                val source = Architecture.Source.weakest(before.source, after.source)
-                Some(Rewrite(window, text(original), text(sequence), before, after, source, evidence))
-              case _ => None
-            }
-          }
-        }
-        Right(
-          Report(
-            window,
-            config.seed,
-            config.budget,
-            walked.evaluated,
-            seen.size,
-            seen.values.count(_._2 > 0L),
-            rewrites
-          )
-        )
       }
+
+      @tailrec
+      def walk(iteration: Int, current: Walk): Walk =
+        if (iteration == config.budget) current
+        else {
+          val pool       = current.moves.propose(random.nextLong(), config.limit)
+          val considered =
+            if (iteration == 0) pool :+ deleted
+            else if (pool.isEmpty) Vec.empty[AMDGPUMoves.Candidate]
+            else Vec(pool(random.nextInt(pool.size)))
+          walk(iteration + 1, considered.foldLeft(current)(visit))
+        }
+
+      val start    = Walk(original, moves, before.cycles, 0L, 0)
+      val walked   = if (out.locations.isEmpty) visit(start, deleted) else walk(0, start)
+      val cheaper  = seen.values.filter((_, bits, after) => bits == 0L && after.cycles < before.cycles).toVec
+      val lane     = originalSteps.map(_.kase)
+      val rewrites = cheaper.flatMap { (sequence, _, after) =>
+        steps(sequence).toOption.flatMap { right =>
+          Proof.prove(AMDGPUReference, executor, lane ++ right.map(_.kase), originalSteps, right, out) match {
+            case Proof.Result.Proved(evidence) =>
+              val source = Architecture.Source.weakest(before.source, after.source)
+              Some(Rewrite(window, text(original), text(sequence), before, after, source, evidence, reason))
+            case _ => None
+          }
+        }
+      }
+      Right(
+        Report(
+          window,
+          config.seed,
+          config.budget,
+          walked.evaluated,
+          seen.size,
+          seen.values.count(_._2 > 0L),
+          rewrites
+        )
+      )
     }
   }
 

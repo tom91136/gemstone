@@ -51,6 +51,17 @@ class RewriteSearchSuite extends Suite {
     windows(overwritten, 1).find(window => window.first == 0 && window.liveOut.contains("v2"))
       .getOrElse(fail("no window at 0 with v2 live out"))
 
+  private val unobserved: Vec[Byte] = WindowFixtures.patched(
+    """v_add_u32 v2, v1, v1
+      |v_add_u32 v3, v1, v4
+      |s_endpgm
+      |""".stripMargin
+  )
+
+  private lazy val unobservedWindow: Window =
+    windows(unobserved, 2).find(window => window.first == 0 && window.last == 1)
+      .getOrElse(fail("no window 0..1"))
+
   test("a fixed seed and budget prove a rewrite of a dead result with fewer model cycles") {
     installed()
     val text   = assembly(dead)
@@ -62,6 +73,15 @@ class RewriteSearchSuite extends Suite {
     }
     val removed = Vec(text(0), text(2))
     assert(report.rewrites.exists(_.rewrite == removed), s"no rewrite deletes ${text(1)}: ${report.rewrites}")
+  }
+
+  test("a window that leaves no write live out is deleted as a proven rewrite") {
+    installed()
+    val report   = searchOf(unobserved, unobservedWindow)
+    val deletion = report.rewrites.find(_.rewrite.isEmpty).getOrElse(fail(s"no whole-window deletion: $report"))
+    assertEquals(deletion.reason, "no write is live out", deletion)
+    assert(deletion.after.cycles < deletion.before.cycles, deletion)
+    assert(deletion.evidence.instructions.nonEmpty, deletion)
   }
 
   test("a cheaper candidate that changes a live-out value is never reported") {
