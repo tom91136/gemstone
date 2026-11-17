@@ -618,8 +618,8 @@ jobs:
           path: target/ci
           merge-multiple: true
       - *unpack
-      # the server takes half the memory and the clients most of the rest, so sbt, which also compiles the emulator, gets
-      # a quarter
+      # the server heap is what the memory leaves after the concurrent cases and a reserve, so sbt, which also compiles
+      # the emulator, gets a quarter
       - name: Emulate
         run: |
           while sleep 60; do eval "$MEMORY_SAMPLE"; done &

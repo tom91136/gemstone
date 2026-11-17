@@ -45,6 +45,18 @@ object CLI {
   private val RetainedRecordings = 5
   private val UnsafeAccess       = "--sun-misc-unsafe-memory-access=allow"
 
+  // the largest process tree of one running case, a Julia package test, and what the build JVM, the server's own
+  // overhead, and the OS need beside the server heap
+  private[conformance] val CaseMegabytes        = 3584L
+  private[conformance] val ReservedMegabytes    = 3072L
+  private[conformance] val MinimumHeapMegabytes = 4096L
+
+  private[conformance] def serverHeapMegabytes(jobs: Int, memory: Long): Long = {
+    val sized     = math.max(8L, math.min(28L, 2L + jobs.toLong * 6L)) << 10
+    val available = (memory >> 20) - jobs.toLong * CaseMegabytes - ReservedMegabytes
+    math.max(MinimumHeapMegabytes, math.min(sized, available))
+  }
+
   private def path(name: String, help: String): Opts[Path] = Opts.option[String](name, help).map(Path.of(_))
 
   private val suite: Opts[Suite] = (
@@ -252,12 +264,12 @@ object CLI {
       environment.ExecutionThreadCount -> s"$workers",
       environment.NativeDir            -> s"${emulation.server.native.toAbsolutePath}"
     )
-    // the JVM reports the container's limit; the build JVM and the clients need the other half
+    // the JVM reports the container's limit
     val memory = ManagementFactory.getOperatingSystemMXBean match {
       case system: OperatingSystemMXBean => system.getTotalMemorySize
       case _                             => Long.MaxValue
     }
-    val heap = s"-Xmx${math.min(math.max(8L, math.min(28L, 2L + jobs.toLong * 6L)) << 10, memory / 2 >> 20)}m"
+    val heap = s"-Xmx${serverHeapMegabytes(jobs, memory)}m"
     // a Unix socket path is limited to 107 bytes, which a deep checkout would exceed
     val session   = Files.createTempDirectory("gemstone-conformance-")
     val recording = emulation.server.jfr.map { jfr =>

@@ -94,6 +94,11 @@ into one full package, merges the SYCL shards, caches that package alone, and ha
 package. A failed build shard leaves its backends out of the package, which is then not cached. A group with
 `CASES <n>` runs each of its run shards as n shards; the driver keeps every n-th case of the routes through
 `CONFORMANCE_CASE_SHARD=<index>/<count>`. OpenCL runs this way, as one route too long for a runner.
+The cuda, amd, Level Zero, and SYCL groups size their run shards from `artifacts/ShardCosts.cmake` instead: a route
+costs its backend's base cost plus its interpreter and bounded HeCBench programs, and the group takes as many shards,
+architecture slices first and then case slices, as keep each within the wall time budget. A program without a cost entry
+fails `Shards.cmake`. The emulation server's heap is the memory left after the concurrent cases and a reserve, so a
+16 GB runner gives it about 5.7 GB.
 
 CI records the emulated server with JFR and uploads each conformance run's recording as the `jfr-<shard>` artifact,
 beside the `report-<shard>` reports.
