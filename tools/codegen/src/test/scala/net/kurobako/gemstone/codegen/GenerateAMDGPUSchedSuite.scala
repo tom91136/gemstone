@@ -31,17 +31,20 @@ class GenerateAMDGPUSchedSuite extends Suite {
       size: Int,
       writes: Seq[String],
       predicates: Seq[String] = Nil,
-      pseudo: Int = 0
+      pseudo: Int = 0,
+      extra: Seq[String] = Nil
   ): String =
     definition(
       name,
       "Instruction",
-      s"""string AsmString = "$asm";""",
-      s"int Size = $size;",
-      s"bit isPseudo = $pseudo;",
-      "bit isCodeGenOnly = 0;",
-      s"list<Predicate> Predicates = ${list(predicates)};",
-      s"list<SchedReadWrite> SchedRW = ${list(writes)};"
+      Seq(
+        s"""string AsmString = "$asm";""",
+        s"int Size = $size;",
+        s"bit isPseudo = $pseudo;",
+        "bit isCodeGenOnly = 0;",
+        s"list<Predicate> Predicates = ${list(predicates)};",
+        s"list<SchedReadWrite> SchedRW = ${list(writes)};"
+      ) ++ extra*
     )
 
   private def writeRes(
@@ -149,9 +152,103 @@ class GenerateAMDGPUSchedSuite extends Suite {
   test("planned cycles divide wide writes and sum repeated resources") {
     withDump { dump =>
       val resource = ujson.read(render(dump).resource)
-      assertEquals(entries(resource, "gfx900")("v_mul_wide_f32"), ujson.Arr(4, 2, "WriteVALU"))
-      assertEquals(entries(resource, "gfx900")("flat_load_dword"), ujson.Arr(300, 4, "WriteVMEM"))
-      assertEquals(entries(resource, "gfx900")("s_two_writes"), ujson.Arr(2, 2, "WriteSALU+WriteSALU"))
+      assertEquals(entries(resource, "gfx900")("v_mul_wide_f32"), ujson.Arr(4, 2, "WriteVALU", ujson.Arr()))
+      assertEquals(entries(resource, "gfx900")("flat_load_dword"), ujson.Arr(300, 4, "WriteVMEM", ujson.Arr()))
+      assertEquals(entries(resource, "gfx900")("s_two_writes"), ujson.Arr(2, 2, "WriteSALU+WriteSALU", ujson.Arr()))
+    }
+  }
+
+  private def traitsOf(resource: ujson.Value, processor: String, mnemonic: String): Set[String] =
+    entries(resource, processor)(mnemonic)(3).arr.map(_.str).toSet
+
+  private def traitFixture: String = dumpOf(
+    instruction(
+      "V_FMAC_E32",
+      "v_fmac $vdst, $src0, $src1",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit VALU = 1;", "field bit TRANS = 0;", """string Constraints = "$vdst = $src2";""")
+    ),
+    instruction(
+      "V_FMAC_SDWA",
+      "v_fmac $vdst, $src0, $src1 sdwa",
+      8,
+      Seq("WriteSALU"),
+      extra = Seq("field bit VALU = 1;", "field bit SDWA = 1;", """string Constraints = "$vdst = $old";""")
+    ),
+    instruction(
+      "V_RCP_E32",
+      "v_rcp $vdst, $src0",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit VALU = 1;", "field bit TRANS = 1;")
+    ),
+    instruction(
+      "V_RCP_F64_E32",
+      "v_rcp64 $vdst, $src0",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit VALU = 1;", "field bit TRANS = 1;", "bit IsDPMACCInstruction = 1;")
+    ),
+    instruction("S_MOV_E32", "s_mov $sdst, $ssrc0", 4, Seq("WriteSALU"), extra = Seq("field bit SALU = 1;")),
+    instruction("S_LOAD_E32", "s_load $sdst, $sbase", 4, Seq("WriteSALU"), extra = Seq("field bit SMRD = 1;")),
+    instruction("DS_READ_E32", "ds_read $vdst, $addr", 4, Seq("WriteSALU"), extra = Seq("field bit DS = 1;")),
+    instruction(
+      "BUFFER_LOAD_E32",
+      "buffer_load $vdst, $addr",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit MUBUF = 1;")
+    ),
+    instruction(
+      "V_ATOMIC_RTN",
+      "v_atomic $vdst, $addr",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit MUBUF = 1;", """string Constraints = "$vdst = $vdata";""")
+    ),
+    instruction(
+      "BUFFER_STORE_E32",
+      "buffer_store $vdata, $addr",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit MUBUF = 1;", "bit mayStore = 1;")
+    ),
+    instruction("S_NOP_E32", "s_nopx", 4, Seq("WriteSALU")),
+    definition("WriteSALU", "SchedWrite"),
+    definition("SALU", "ProcResource", "int NumUnits = 1;"),
+    writeRes("WriteRes_SI_SALU", "SIModel", "WriteSALU", Seq("SALU"), Seq(1), 2),
+    processor("gfx900", "SIModel")
+  )
+
+  test("entries carry the delay type, wait classes and tied destination LLVM records") {
+    withText(traitFixture) { dump =>
+      val catalogue = Vector(
+        "v_fmac",
+        "v_rcp",
+        "v_rcp64",
+        "s_mov",
+        "s_load",
+        "ds_read",
+        "buffer_load",
+        "v_atomic",
+        "buffer_store",
+        "s_nopx"
+      )
+      val resource = ujson.read(
+        GenerateAMDGPUSched.render(dump, catalogue, Vector.empty, References.LlvmVersion, None).resource
+      )
+      def of(mnemonic: String) = traitsOf(resource, "gfx900", mnemonic)
+      assertEquals(of("v_fmac"), Set("valu", "tied"))
+      assertEquals(of("v_rcp"), Set("trans"))
+      assertEquals(of("v_rcp64"), Set("valu"))
+      assertEquals(of("s_mov"), Set("salu"))
+      assertEquals(of("s_load"), Set("smrd"))
+      assertEquals(of("ds_read"), Set("waits-valu"))
+      assertEquals(of("buffer_load"), Set("waits-valu", "vmem"))
+      assertEquals(of("buffer_store"), Set("waits-valu", "vmem", "store"))
+      assertEquals(of("v_atomic"), Set("waits-valu", "vmem", "tied"))
+      assertEquals(of("s_nopx"), Set.empty[String])
     }
   }
 
@@ -161,7 +258,7 @@ class GenerateAMDGPUSchedSuite extends Suite {
       assertEquals(resource("processors")("gfx1031"), resource("processors")("gfx1030"))
       assert(resource("processors")("gfx900").num != resource("processors")("gfx1030").num)
       assertEquals(entries(resource, "gfx1030").obj.keys.toSet, Set("s_add_u32", "v_mov_b32", "s_two_writes"))
-      assertEquals(entries(resource, "gfx900")("v_variant_op"), ujson.Arr(2, 1, "WriteSALU"))
+      assertEquals(entries(resource, "gfx900")("v_variant_op"), ujson.Arr(2, 1, "WriteSALU", ujson.Arr()))
       assertEquals(entries(resource, "generic"), ujson.Obj())
     }
   }
@@ -169,8 +266,8 @@ class GenerateAMDGPUSchedSuite extends Suite {
   test("lds forms are keyed apart from the plain form") {
     withDump { dump =>
       val resource = ujson.read(render(dump).resource)
-      assertEquals(entries(resource, "gfx900")("flat_load_dword"), ujson.Arr(300, 4, "WriteVMEM"))
-      assertEquals(ldsEntries(resource, "gfx900")("flat_load_dword"), ujson.Arr(2, 1, "WriteSALU"))
+      assertEquals(entries(resource, "gfx900")("flat_load_dword"), ujson.Arr(300, 4, "WriteVMEM", ujson.Arr()))
+      assertEquals(ldsEntries(resource, "gfx900")("flat_load_dword"), ujson.Arr(2, 1, "WriteSALU", ujson.Arr()))
       assertEquals(ldsEntries(resource, "gfx1030").obj.keys.toSet, Set("flat_load_dword"))
     }
   }
@@ -192,7 +289,10 @@ class GenerateAMDGPUSchedSuite extends Suite {
         None
       )
       val resource = ujson.read(rendered.resource)
-      assertEquals(entries(resource, "gfx900").obj.get("buffer_store_lds_dword"), Some(ujson.Arr(2, 1, "WriteSALU")))
+      assertEquals(
+        entries(resource, "gfx900").obj.get("buffer_store_lds_dword"),
+        Some(ujson.Arr(2, 1, "WriteSALU", ujson.Arr()))
+      )
       assertEquals(ldsEntries(resource, "gfx900").obj.keys.toSet, Set.empty[String])
     }
   }

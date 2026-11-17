@@ -1,0 +1,55 @@
+atom	gfx1100	-mllvm -amdgpu-enable-vopd=0
+atom	gfx1150	-mllvm -amdgpu-enable-vopd=0
+atom	gfx1200	-mllvm -amdgpu-enable-vopd=0
+atom	gfx906	
+bitops	gfx1100	-mllvm -amdgpu-enable-vopd=0
+bitops	gfx906	
+cmp	gfx1100	-mllvm -amdgpu-enable-vopd=0
+cmp	gfx1150	-mllvm -amdgpu-enable-vopd=0
+cmp	gfx1200	-mllvm -amdgpu-enable-vopd=0
+cmp	gfx906	
+conv2	gfx1100	-mllvm -amdgpu-enable-vopd=0
+conv2	gfx906	
+conv	gfx1100	-mllvm -amdgpu-enable-vopd=0
+conv	gfx1150	-mllvm -amdgpu-enable-vopd=0
+conv	gfx1200	-mllvm -amdgpu-enable-vopd=0
+conv	gfx906	
+dot	gfx1100	-mllvm -amdgpu-enable-vopd=0
+dot	gfx906	
+fminmax	gfx1100	-mllvm -amdgpu-enable-vopd=0
+fminmax	gfx906	
+i64	gfx1100	-mllvm -amdgpu-enable-vopd=0
+i64	gfx906	
+intmath	gfx1100	-mllvm -amdgpu-enable-vopd=0
+intmath	gfx1150	-mllvm -amdgpu-enable-vopd=0
+intmath	gfx1200	-mllvm -amdgpu-enable-vopd=0
+intmath	gfx906	
+ldspath	gfx1100	-mllvm -amdgpu-enable-vopd=0
+ldspath	gfx906	
+loads	gfx1100	-mllvm -amdgpu-enable-vopd=0
+loads	gfx1150	-mllvm -amdgpu-enable-vopd=0
+loads	gfx1200	-mllvm -amdgpu-enable-vopd=0
+loads	gfx906	
+many	gfx1100	-mllvm -amdgpu-enable-vopd=0
+many	gfx906	
+mixed	gfx1100	-mllvm -amdgpu-enable-vopd=0
+mixed	gfx906	
+mixf	gfx1100	-mllvm -amdgpu-enable-vopd=0
+mixf	gfx1150	-mllvm -amdgpu-enable-vopd=0
+mixf	gfx1200	-mllvm -amdgpu-enable-vopd=0
+mixf	gfx906	
+salu	gfx1100	-mllvm -amdgpu-enable-vopd=0
+salu	gfx1150	-mllvm -amdgpu-enable-vopd=0
+salu	gfx1200	-mllvm -amdgpu-enable-vopd=0
+salu	gfx906	
+scalar	gfx1100	-mllvm -amdgpu-enable-vopd=0
+setreg	gfx906	
+stores	gfx1100	-mllvm -amdgpu-enable-vopd=0
+stores	gfx1150	-mllvm -amdgpu-enable-vopd=0
+stores	gfx1200	-mllvm -amdgpu-enable-vopd=0
+stores	gfx906	
+trans2	gfx1100	-mllvm -amdgpu-enable-vopd=0
+trans2	gfx1150	-mllvm -amdgpu-enable-vopd=0
+trans2	gfx1200	-mllvm -amdgpu-enable-vopd=0
+trans2	gfx906	
+trans	gfx1100	-mllvm -amdgpu-enable-vopd=0

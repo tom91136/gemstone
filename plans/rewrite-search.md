@@ -33,6 +33,7 @@ Find cheaper equivalent instruction sequences for short windows of compiled SASS
 ### 2. Control-word regeneration
 
 - AMDGPU first, where LLVM's model gives the delays: recompute `s_delay_alu` and `s_nop` for a rewritten block, and test against LLVM's output on the same sequence.
+- AMDGPU done for straight-line blocks: `ControlWords` regenerates `s_delay_alu` as `AMDGPUInsertDelayAlu` does, from delay types, wait classes and tied operands that codegen takes from LLVM's instruction records into `scheduling.json`, and `s_nop` for three `GCNHazardRecognizer` rules (`s_setreg`/`s_getreg` repeats, a VMEM read of a VALU-written SGPR, a VALU overwriting a wide store's data); `ControlWordsSuite` matches LLVM on all 55 compiled blocks (gfx906, gfx1100, gfx1150, gfx1200, VOPD off). Not covered: VOPD pairs, DPP and SDWA forms, and every other hazard rule (VALU trans use, `v_div_fmas`, readlane, LDS, MFMA).
 - SASS next. Derive stall counts and barriers from the latency table that `static-pipeline.md` step 3 builds, and check against ptxas on regenerated code. Until this passes for a target, rewrites on that target are reported, not emitted.
 
 ### 3. Hardware validation

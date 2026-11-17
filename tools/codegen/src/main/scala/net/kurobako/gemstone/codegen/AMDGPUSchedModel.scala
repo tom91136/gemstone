@@ -13,7 +13,7 @@ object AMDGPUSchedModel {
   private val Head      = """[^\s$]*""".r
   private val LdsForm   = """\blds\b""".r
 
-  case class Entry(latency: Int, cycles: Int, writes: String)
+  case class Entry(latency: Int, cycles: Int, writes: String, traits: Vector[String] = Vector.empty)
 
   case class Processor(
       name: String,
@@ -68,6 +68,25 @@ object AMDGPUSchedModel {
     }
     Head.findPrefixOf(flatten(asm)).getOrElse("")
   }
+
+  private val Tie = """\$\w+\s*=\s*\$\w+""".r
+
+  private def flag(value: ujson.Obj, field: String): Boolean = value.obj.get(field).exists(truthy)
+
+  private def waitsForValu(value: ujson.Obj): Boolean =
+    Vector("DS", "EXP", "FLAT", "MIMG", "MUBUF", "MTBUF").exists(flag(value, _))
+
+  private def vmem(value: ujson.Obj): Boolean =
+    Vector("MUBUF", "MTBUF", "MIMG", "VIMAGE", "VSAMPLE", "FLAT").exists(flag(value, _))
+
+  private def delayType(value: ujson.Obj): Option[String] =
+    if (flag(value, "TRANS") && !flag(value, "IsDPMACCInstruction")) Some("trans")
+    else if (flag(value, "VALU")) Some("valu")
+    else if (flag(value, "SALU")) Some("salu")
+    else None
+
+  private def tied(value: ujson.Obj): Boolean =
+    value.obj.get("Constraints").exists(_.strOpt.exists(Tie.findFirstIn(_).isDefined))
 
   private def withoutParentheses(text: String): String =
     text.foldLeft((0, mutable.StringBuilder())) { case ((depth, out), char) =>
@@ -236,6 +255,25 @@ class AMDGPUSchedModel(dump: AMDGPUSchedRecords.Dump, catalogue: Vector[String])
     dump.classMembers("Processor").map(name => processor(name)).groupBy(_.name).view.mapValues(_.last).toVector
       .sortBy(_._1).map(_._2)
 
+  /** The delay type, wait classes and tied destination LLVM's `SIInstrFlags` and constraints give the records of one
+    * mnemonic. DPP and SDWA records are left out when a plain record exists, as their tied old-value operand is not the
+    * accumulator of the plain form.
+    */
+  private def traits(candidates: Vector[String], mnemonic: String): Vector[String] = {
+    val all   = candidates.map(record)
+    val plain =
+      Some(all.filterNot(value => flag(value, "DPP") || flag(value, "SDWA"))).filter(_.nonEmpty).getOrElse(all)
+    val delays = plain.map(delayType).distinct
+    if (delays.size > 1)
+      throw IllegalStateException(s"AMDGPU delay types disagree for $mnemonic: ${delays.flatten.mkString(", ")}")
+    (delays.flatten ++
+      Option.when(plain.exists(waitsForValu))("waits-valu") ++
+      Option.when(plain.exists(flag(_, "SMRD")))("smrd") ++
+      Option.when(plain.exists(vmem))("vmem") ++
+      Option.when(plain.exists(flag(_, "mayStore")))("store") ++
+      Option.when(plain.exists(tied))("tied")).toVector.sorted
+  }
+
   private def outcome(scheduled: Scheduled): Either[String, Entry] =
     if (scheduled.status == "ok") Right(entry(scheduled.infos)) else Left(scheduled.status)
 
@@ -249,7 +287,7 @@ class AMDGPUSchedModel(dump: AMDGPUSchedRecords.Dump, catalogue: Vector[String])
   ): Either[String, Entry] = {
     val outcomes = candidates.map(candidate => candidate -> outcome(schedule(model, candidate, table)))
     outcomes.map(_._2).distinct match {
-      case Vector(single) => single
+      case Vector(single) => single.map(_.copy(traits = traits(candidates, mnemonic)))
       case _              =>
         val form    = if (lds) s"$mnemonic lds" else mnemonic
         val records = outcomes.map((candidate, value) => s"$candidate $value").mkString("; ")

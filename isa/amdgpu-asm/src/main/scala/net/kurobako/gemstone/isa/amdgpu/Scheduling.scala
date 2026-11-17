@@ -3,16 +3,18 @@ package net.kurobako.gemstone.isa.amdgpu
 import net.kurobako.gemstone.*
 import upickle.default.*
 
-/** LLVM scheduling-model timing per mnemonic, keyed by the processor target. */
+/** LLVM scheduling-model timing per mnemonic, keyed by the processor target. The traits are the `SIInstrFlags` classes
+  * and tied destination of the instruction's LLVM records, as the generator documents in `scheduling.json`.
+  */
 object Scheduling {
-  case class Timing(latency: Int, cycles: Int, writes: String) {
+  case class Timing(latency: Int, cycles: Int, writes: String, traits: Set[String]) {
     def trans32: Boolean = writes.split('+').contains("WriteTrans32")
   }
 
   private case class Table(
       model: String,
-      entries: Map[String, (Int, Int, String)],
-      lds: Map[String, (Int, Int, String)]
+      entries: Map[String, (Int, Int, String, Set[String])],
+      lds: Map[String, (Int, Int, String, Set[String])]
   ) derives ReadWriter
 
   private case class Catalogue(processors: Map[String, Int], tables: Vector[Table]) derives ReadWriter
@@ -20,8 +22,10 @@ object Scheduling {
   private lazy val timings: Map[String, Map[(String, Boolean), Timing]] = {
     val catalogue = resources.json[Catalogue](getClass, "scheduling.json")
     val tables    = catalogue.tables.map { table =>
-      def keyed(rows: Map[String, (Int, Int, String)], lds: Boolean) =
-        rows.map { case (mnemonic, (latency, cycles, writes)) => (mnemonic, lds) -> Timing(latency, cycles, writes) }
+      def keyed(rows: Map[String, (Int, Int, String, Set[String])], lds: Boolean) =
+        rows.map { case (mnemonic, (latency, cycles, writes, traits)) =>
+          (mnemonic, lds) -> Timing(latency, cycles, writes, traits)
+        }
       keyed(table.entries, lds = false) ++ keyed(table.lds, lds = true)
     }
     catalogue.processors.map((name, index) => name -> tables(index))

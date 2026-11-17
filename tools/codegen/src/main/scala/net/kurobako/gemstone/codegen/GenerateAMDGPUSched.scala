@@ -15,7 +15,9 @@ object GenerateAMDGPUSched {
       "Records of one mnemonic and form must resolve alike, or codegen fails. " +
       "A mnemonic with plain and LDS records is keyed in each table. " +
       "An LDS-only mnemonic is keyed in the plain table only. " +
-      "Latency is the LLVM WriteRes latency and is not used by the profile."
+      "Latency is the LLVM WriteRes latency and is not used by the profile. " +
+      "Traits come from the instruction records' SIInstrFlags and constraints: the s_delay_alu type (valu, trans, salu), " +
+      "waits-valu (DS, EXP, FLAT, MIMG, buffer), smrd, vmem, store (mayStore), and tied (a destination tied to a source, read by the instruction)."
 
   private val ReportName       = "scheduling-report.md"
   private val ReportColumns    = Vector("processor", "model", "in scope", "scheduled")
@@ -152,7 +154,8 @@ object GenerateAMDGPUSched {
     else
       entries
         .map { case (mnemonic, entry) =>
-          s"        ${ujson.write(mnemonic)}: [${entry.latency}, ${entry.cycles}, ${ujson.write(entry.writes)}]"
+          s"        ${ujson.write(mnemonic)}: [${entry.latency}, ${entry.cycles}, ${ujson.write(entry.writes)}, " +
+            s"${ujson.write(ujson.Arr.from(entry.traits.map(ujson.Str(_))))}]"
         }
         .mkString("{\n", ",\n", "\n      }")
 

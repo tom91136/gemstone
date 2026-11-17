@@ -7,12 +7,15 @@ class SchedulingSuite extends Suite {
 
   private def target(name: String): Target = Target.all.find(_.raw == name).get
 
-  private def vmem(latency: Int): Option[Timing] = Some(Timing(latency = latency, cycles = 1, writes = "WriteVMEM"))
+  private def vmem(latency: Int): Option[(Int, Int, String)] = Some((latency, 1, "WriteVMEM"))
+
+  private def row(timing: Option[Timing]): Option[(Int, Int, String)] =
+    timing.map(value => (value.latency, value.cycles, value.writes))
 
   test("timings come from the LLVM model of each processor") {
-    assertEquals(Scheduling.timing(target("gfx906"), "global_load_dword", lds = false), vmem(80))
-    assertEquals(Scheduling.timing(target("gfx1030"), "global_load_dword", lds = false), vmem(320))
-    assertEquals(Scheduling.timing(target("gfx1100"), "global_load_b32", lds = false), vmem(320))
+    assertEquals(row(Scheduling.timing(target("gfx906"), "global_load_dword", lds = false)), vmem(80))
+    assertEquals(row(Scheduling.timing(target("gfx1030"), "global_load_dword", lds = false)), vmem(320))
+    assertEquals(row(Scheduling.timing(target("gfx1100"), "global_load_b32", lds = false)), vmem(320))
     assertEquals(Scheduling.timing(target("gfx1100"), "global_load_dword", lds = false), None)
     assertEquals(Scheduling.timing(target("gfx906"), "v_add_nc_u32", lds = false), None)
   }
@@ -32,14 +35,26 @@ class SchedulingSuite extends Suite {
     assertEquals(Scheduling.timing(target("gfx940"), "v_add_f32", lds = false), None)
   }
 
+  test("timings carry the delay type and wait classes of LLVM's instruction flags") {
+    def traits(processor: String, mnemonic: String) =
+      Scheduling.timing(target(processor), mnemonic, lds = false).map(_.traits)
+    assertEquals(traits("gfx1100", "v_fmac_f32"), Some(Set("valu", "tied")))
+    assertEquals(traits("gfx1100", "v_sqrt_f32"), Some(Set("trans")))
+    assertEquals(traits("gfx1100", "v_rcp_f64"), Some(Set("valu")))
+    assertEquals(traits("gfx1100", "s_mov_b32"), Some(Set("salu")))
+    assertEquals(traits("gfx1100", "s_load_b128"), Some(Set("smrd")))
+    assertEquals(traits("gfx1100", "ds_load_b32"), Some(Set("waits-valu")))
+    assertEquals(traits("gfx1100", "global_load_b32"), Some(Set("waits-valu", "vmem")))
+  }
+
   test("lds loads are timed apart from plain loads") {
     assertEquals(Scheduling.timing(target("gfx1030"), "global_load_ubyte", lds = true).map(_.cycles), Some(2))
     assertEquals(Scheduling.timing(target("gfx1030"), "global_load_ubyte", lds = false).map(_.cycles), Some(1))
   }
 
   test("lds-only mnemonics are timed in both forms") {
-    assertEquals(Scheduling.timing(target("gfx906"), "buffer_store_lds_dword", lds = false), vmem(80))
-    assertEquals(Scheduling.timing(target("gfx906"), "buffer_store_lds_dword", lds = true), vmem(80))
+    assertEquals(row(Scheduling.timing(target("gfx906"), "buffer_store_lds_dword", lds = false)), vmem(80))
+    assertEquals(row(Scheduling.timing(target("gfx906"), "buffer_store_lds_dword", lds = true)), vmem(80))
     assertEquals(Scheduling.timing(target("gfx1030"), "buffer_store_lds_dword", lds = false), None)
   }
 
