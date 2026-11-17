@@ -65,7 +65,13 @@ private object VMCompiler {
       })
     }
 
-  case class Compiled(kernel: VMIR.Kernel, offsets: Vec[Long], controlFlow: Option[() => ControlFlowGraph])
+  case class Compiled(
+      kernel: VMIR.Kernel,
+      offsets: Vec[Long],
+      controlFlow: Option[() => ControlFlowGraph],
+      function: DecodedFunction,
+      layout: VMRegisters.Layout
+  )
 
   def compile(
       module: Cubin.Module,
@@ -119,7 +125,9 @@ private object VMCompiler {
       Compiled(
         ir,
         function.instructions.map(_.address.raw.toLong),
-        Option.when(functions.size == 1)(() => SASSControlFlowGraph.of(module.sm, function))
+        Option.when(functions.size == 1)(() => SASSControlFlowGraph.of(module.sm, function)),
+        function,
+        layout
       )
     }
 

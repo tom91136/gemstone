@@ -13,9 +13,10 @@ object SASSGenerator {
   private val counters = Vec("SR_CLOCK", "SR_GLOBALTIMER")
 
   /** Each definition `target` describes once, but those that access memory, with the first instance that lowers to it.
+    * Only the entries `included` holds are described.
     */
-  def describe(target: String): Vec[Case] =
-    SASSModel.entries(Some(target)).flatMap(entry =>
+  def describe(target: String, included: String => Boolean = _ => true): Vec[Case] =
+    SASSModel.entries(Some(target)).filter(entry => included(entry.mnemonic)).flatMap(entry =>
       entry.forms.flatMap(form =>
         SASSModel.instances(Some(target), entry.mnemonic, form.name).toOption.toVec.flatten.flatMap(found =>
           // counters are never staged into a checked definition

@@ -4,10 +4,12 @@ import java.util.concurrent.ConcurrentHashMap
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.ControlFlowGraph
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
 import scala.collection.mutable
 
@@ -599,6 +601,25 @@ object SASSModel extends Model {
     SASSControlFlowGraph.of(module.sm, decoded),
     index => decoded.instructions(index).address.raw.toLong
   )
+
+  /** The kernel `function` of `image` as control flow, per-instruction register use, and decoded instructions. */
+  def staticCode(
+      image: Vec[Byte],
+      function: String
+  ): Either[String, (ControlFlowGraph, Vec[RegisterUse], Vec[DecodedInstruction])] = for {
+    module <- Cubin.decode(image).left.map(_.raw)
+    name   <- function.refine[NonEmpty[String]].left.map(_ => s"no SASS kernel '$function'")
+    found  <- {
+      val program = LoadedProgram(
+        module,
+        Map.empty,
+        Workgroups.Sequential,
+        instruction => Printer.print(instruction).toOption
+      )
+      try program.staticCode(name).left.map(_.message.raw)
+      finally program.close()
+    }
+  } yield found
 
   val assemblyExample: String = "IADD3 R7, R7, 0x1, RZ;\nEXIT;\n"
   val binaryExample: String   = "/* 0x000000000000794d */ /* 0x000fea0003800000 */\n"

@@ -7,6 +7,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.ControlFlowGraph
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.sass.Instruction as SASSInstruction
@@ -219,6 +220,20 @@ class LoadedProgram(
   override def close(): Unit = release()
 
   override def build(name: NonEmpty[String]): Either[Fault, Unit] = compile(name).map(_ => ())
+
+  /** The kernel's control flow, the registers each of its instructions reads and writes, and its instructions. */
+  def staticCode(name: NonEmpty[String]): Either[Fault, (ControlFlowGraph, Vec[RegisterUse], Vec[DecodedInstruction])] =
+    compile(name).flatMap { lowered =>
+      lowered.controlFlow
+        .toRight(Fault.InvalidRequest(s"${name.raw} has no single function to attribute its instructions to"))
+        .map(graph =>
+          (
+            graph(),
+            StaticRegisterUse.of(lowered.kernel.entry.routine.program, lowered.offsets, lowered.layout),
+            lowered.function.instructions
+          )
+        )
+    }
 
   override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
     compile(task.kernelName).flatMap { lowered =>
