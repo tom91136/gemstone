@@ -50,8 +50,8 @@ pinned_dependency(babelstream SOURCE_ONLY
   URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/5cb9445483786f3502b12b8faab8414f8c5873b1
   URL_HASH SHA256=3f6d3e600feed6933254f28bd135cef9b068e0186d0942f3089d42f24d0a39d9)
 pinned_dependency(babelstream_julia SOURCE_ONLY
-  URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/f9e95b09fe0ef5d4a307a9e1111caaf56b9fece3
-  URL_HASH SHA256=7f36c5fcf960da6331be974924fca65c5dc9dc4faf12570b14df7757cbfb4ddf)
+  URL https://codeload.github.com/UoB-HPC/BabelStream/tar.gz/a992a272c31505a3f5c190bc96a668afa54102b7
+  URL_HASH SHA256=465eebed0068914919b61f6d5c2e3f7ea7783ce44aaceae0e430659498ebeb8d)
 pinned_dependency(minibude SOURCE_ONLY
   URL https://codeload.github.com/UoB-HPC/miniBUDE/tar.gz/2b23c27e80792f48fdf12a3ed232620160979e4c
   URL_HASH SHA256=5a24663d101873a376fdae03126e7778f361cddd5b65b4bc124414a8839d8543)
