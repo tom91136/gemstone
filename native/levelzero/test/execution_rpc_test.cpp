@@ -697,11 +697,11 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((zeMemFree(context, unrelatedMemory) == ZE_RESULT_SUCCESS));
   unrelatedMemory = nullptr;
-  REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
-  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
   const uint32_t changedAfterRecording = 0xabcdef01;
   REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(changedAfterRecording), &changedAfterRecording) == ZE_RESULT_SUCCESS));
   REQUIRE((zeKernelSetGroupSize(kernel, 8, 1, 1) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
   ze_command_list_handle_t copyList = nullptr;
   REQUIRE(zeCommandListCreateImmediate(context, device, &queueDesc, &copyList) == ZE_RESULT_SUCCESS);
@@ -756,7 +756,7 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
     REQUIRE((zeFenceDestroy(fence) == ZE_RESULT_SUCCESS));
   }
 
-  REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE));
   REQUIRE((zeModuleDestroy(module) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE));
   REQUIRE((zeCommandListDestroy(list) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS));
@@ -1027,6 +1027,65 @@ struct DeviceLost {
 };
 
 } // namespace
+
+TEST_CASE("Level Zero kernel destroyed after a recorded launch still runs", "[level-zero][rpc]") {
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
+
+  ze_driver_handle_t driver = nullptr;
+  auto *const device = gemstoneDevice(&driver);
+  REQUIRE((device));
+  ze_context_desc_t contextDesc{};
+  contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
+  ze_context_handle_t context = nullptr;
+  REQUIRE((zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS));
+
+  ze_module_desc_t moduleDesc{};
+  moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  ze_module_handle_t module = nullptr;
+  REQUIRE((zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS));
+  ze_kernel_desc_t kernelDesc{};
+  kernelDesc.stype = ZE_STRUCTURE_TYPE_KERNEL_DESC;
+  kernelDesc.pKernelName = "groups";
+  ze_kernel_handle_t kernel = nullptr;
+  REQUIRE((zeKernelCreate(module, &kernelDesc, &kernel) == ZE_RESULT_SUCCESS));
+
+  std::array<uint32_t, 16> memory{};
+  auto *base = memory.data();
+  const uint32_t seed = 41;
+  REQUIRE((zeKernelSetArgumentValue(kernel, 0, sizeof(base), &base) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeKernelSetArgumentValue(kernel, 1, sizeof(seed), &seed) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeKernelSetGroupSize(kernel, 4, 1, 1) == ZE_RESULT_SUCCESS));
+
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.mode = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE((zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS));
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
+  const ze_group_count_t groups{.groupCountX = 1, .groupCountY = 1, .groupCountZ = 1};
+  REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandListClose(list) == ZE_RESULT_SUCCESS));
+  server.expect({.local = 4, .groups = 1, .global = 4, .offset = 0, .seed = seed});
+  REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS));
+  for (uint32_t index = 0; index < 4; ++index)
+    REQUIRE((memory[index] == seed + index));
+
+  REQUIRE((zeCommandListDestroy(list) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
+  REQUIRE((server.launches.load() == 1U));
+  server.check();
+}
 
 TEST_CASE("Level Zero device lost is sticky", "[level-zero][rpc]") {
   const char *const children[]{

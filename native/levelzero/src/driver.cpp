@@ -895,11 +895,15 @@ ze_result_t ZE_APICALL contextCreateEx(ze_driver_handle_t driver, const ze_conte
     context->devices.push_back(cast<Device>(devices[index]));
   return ZE_RESULT_SUCCESS;
 }
+bool deferredFreeInUse(const Context *context);
+void reapDeferredFrees(const Context *context = nullptr);
 ze_result_t ZE_APICALL contextDestroy(ze_context_handle_t handle) {
   auto *context = cast<Context>(handle);
   if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   // Objects created in the context keep it alive until they are destroyed.
   HandleUse<Context> const lifetime(context);
+  if (deferredFreeInUse(context)) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
+  reapDeferredFrees(context);
   context->destroyRequested.store(true, std::memory_order_release);
   return ZE_RESULT_SUCCESS;
 }
@@ -1779,12 +1783,18 @@ ze_result_t releaseAllocation(const AllocationRef &allocation) {
   return released ? ZE_RESULT_SUCCESS : ZE_RESULT_ERROR_DEVICE_LOST;
 }
 
-void reapDeferredFrees() {
+bool deferredFreeInUse(const Context *context) {
+  std::scoped_lock const lock(allocationsMutex);
+  return deferredFrees
+         ^ exists([context](const auto &entry) { return entry.second->context.get() == context && entry.second.use_count() != 1; });
+}
+
+void reapDeferredFrees(const Context *context) {
   std::vector<AllocationRef> unused;
   {
     std::scoped_lock const lock(allocationsMutex);
     for (auto entry = deferredFrees.begin(); entry != deferredFrees.end();) {
-      if (entry->second.use_count() != 1) {
+      if (entry->second.use_count() != 1 || (context && entry->second->context.get() != context)) {
         ++entry;
         continue;
       }
@@ -3389,7 +3399,14 @@ ze_result_t ZE_APICALL kernelCreate(ze_module_handle_t moduleHandle, const ze_ke
   *result = reinterpret_cast<ze_kernel_handle_t>(kernel);
   return ZE_RESULT_SUCCESS;
 }
-ze_result_t ZE_APICALL kernelDestroy(ze_kernel_handle_t handle) { return destroyHandle(cast<Kernel>(handle)); }
+ze_result_t ZE_APICALL kernelDestroy(ze_kernel_handle_t handle) {
+  auto *kernel = cast<Kernel>(handle);
+  if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  // Recorded and queued launches keep the kernel's state until they no longer need it.
+  HandleUse<Kernel> const lifetime(kernel);
+  kernel->destroyRequested.store(true, std::memory_order_release);
+  return ZE_RESULT_SUCCESS;
+}
 ze_result_t ZE_APICALL kernelGroup(ze_kernel_handle_t handle, uint32_t x, uint32_t y, uint32_t z) {
   auto *kernel = cast<Kernel>(handle);
   if (!kernel) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;

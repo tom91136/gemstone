@@ -623,6 +623,48 @@ TEST_CASE("Level Zero free defers memory that a queued prefetch still references
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 
+TEST_CASE("Level Zero context destroy waits for deferred frees that queued work holds", "[level-zero]") {
+  auto [driver, device, context] = createContext();
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS);
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+  poolDesc.count = 1;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  ze_event_desc_t eventDesc{};
+  eventDesc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+  eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+  eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+  ze_event_handle_t gate = nullptr;
+  REQUIRE(zeEventCreate(pool, &eventDesc, &gate) == ZE_RESULT_SUCCESS);
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocHost(context, &hostDesc, 64, 1, &memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendWaitOnEvents(list, 1, &gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendMemoryPrefetch(list, memory, 64) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(context, memory) == ZE_RESULT_SUCCESS);
+  CHECK(zeContextDestroy(context) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
+  REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueSynchronize(queue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventDestroy(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
 TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
 
