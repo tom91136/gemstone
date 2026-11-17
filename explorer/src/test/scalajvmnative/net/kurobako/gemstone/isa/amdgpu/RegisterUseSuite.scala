@@ -5,6 +5,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.RegisterUse
 import scala.concurrent.duration.*
 
 /** The registers [[RegisterUses]] reports for every instance the explorer writes, against those the rendered semantics
@@ -28,13 +29,29 @@ class RegisterUseSuite extends Suite {
     }.toSet
   }
 
+  // MODE is read by every floating-point instruction and written only by instructions with no definition, which no
+  // window contains, so it is constant in every window
+  private val tracked: Set[String] = ImplicitState.names.filterNot(_ == "mode").toSet
+
+  private def states(names: Iterable[String]): Set[String] =
+    names.map(name => name.stripSuffix("_lo").stripSuffix("_hi")).filter(tracked.contains).toSet
+
   private case class Difference(target: Target, text: String, side: String, missing: Set[String], extra: Set[String])
 
-  private def decoded(target: Target, text: String): Either[String, VMIR.Instruction] = for {
+  private def decoded(target: Target, text: String): Either[String, (VMIR.Instruction, RegisterUse)] = for {
     program     <- asm.Parser.parse(text).left.map(_.diagnostic.raw)
     code        <- asm.Assembler.encode(program, TargetMode(target)).left.map(_.toString)
     instruction <- VMCompiler.decodeInstruction(code, target).left.map(_.raw)
-  } yield instruction
+  } yield (
+    instruction,
+    RegisterUses.state(
+      instruction,
+      CodeStream(Vec.toArray(code), TargetMode(target)),
+      0,
+      TargetDefaults.waveSize(target),
+      target.isa
+    )
+  )
 
   private def representatives: Vec[Target] =
     Target.all.groupBy(_.isa).toVec.sortBy(_._1.toString).map(_._2.head)
@@ -45,8 +62,8 @@ class RegisterUseSuite extends Suite {
       entry.forms.foreach { form =>
         AMDGPUModel.instances(Some(target.raw), entry.mnemonic, form).foreach { (instanceTarget, text, _) =>
           for {
-            definition  <- InstructionSemantics.describe(instanceTarget, text, Map.empty).toOption
-            instruction <- decoded(instanceTarget, text).toOption
+            definition           <- InstructionSemantics.describe(instanceTarget, text, Map.empty).toOption
+            (instruction, state) <- decoded(instanceTarget, text).toOption
           } {
             val use = RegisterUses.of(instruction, TargetDefaults.waveSize(instanceTarget))
             def compare(side: String, reported: Vec[String], rendered: Vec[String]): Unit = {
@@ -55,6 +72,12 @@ class RegisterUseSuite extends Suite {
             }
             compare("reads", use.reads, definition.parameters.map(_.name))
             compare("writes", use.writes, definition.results.map(_.name))
+            def implicitly(side: String, reported: Vec[String], rendered: Vec[String]): Unit = {
+              val (left, right) = (states(reported), rendered.filter(tracked.contains).toSet)
+              if (!right.subsetOf(left)) found += Difference(instanceTarget, text, side, right -- left, Set.empty)
+            }
+            implicitly("implicit reads", state.reads, definition.parameters.map(_.name))
+            implicitly("implicit writes", state.writes, definition.results.map(_.name))
           }
         }
       }

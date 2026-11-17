@@ -4,7 +4,6 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.*
-import net.kurobako.gemstone.string.*
 import scala.collection.mutable
 
 /** Assembly instances of an AMDGPU catalogue encoding on one target. Operands take distinct aligned registers of the
@@ -68,8 +67,7 @@ private object AMDGPUInstances {
   def operandName(info: OperandInfo): String = info.field.fold(info.kind.toString)(_.toString)
 
   /** The implicit state an operand of `kind` stands for, by the state its kind ends with. */
-  def state(kind: OperandKind): Option[String] =
-    ImplicitState.names.find(kind.toString.toLowerCaseRoot.endsWith(_))
+  def state(kind: OperandKind): Option[String] = ImplicitState.of(kind)
 
   private def literal(info: OperandInfo): Boolean =
     info.field.exists(field => field == EncodingField.LITERAL || field == EncodingField.LITERAL64)

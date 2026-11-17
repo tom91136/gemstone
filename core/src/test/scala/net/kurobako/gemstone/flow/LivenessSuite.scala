@@ -68,4 +68,17 @@ class LivenessSuite extends Suite {
     assertEquals(live.liveOut(1), Set("v0", "v2"))
     assertEquals(live.liveOut(0), Set("v0", "v2"))
   }
+
+  test("a unit that writes only preserve stays live across them") {
+    val flow = ControlFlowGraph(Vec(Some(Vec(1)), Some(Vec(2)), Some(Vec.empty[Int])), 0)
+    val code = Vec(
+      use(Vec.empty, Vec("v0", "s0")),
+      use(Vec.empty, Vec("v0", "s0")),
+      use(Vec("v0", "s0"), Vec.empty)
+    )
+    val live = Liveness.of(flow, code, _.startsWith("v"))
+    assertEquals(live.liveOut(0), Set("v0"))
+    assertEquals(live.liveOut(1), Set("v0", "s0"))
+    assertEquals(live.liveIn(0), Set("v0"))
+  }
 }

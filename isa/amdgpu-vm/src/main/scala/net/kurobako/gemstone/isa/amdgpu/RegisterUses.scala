@@ -30,25 +30,56 @@ private object RegisterUses {
 
   private def words(bytes: Int): Int = (bytes + 3) / 4
 
-  def of(instruction: Instruction, waveSize: Int in (32, 64)): RegisterUse = {
-    val found = Derivation(waveSize / 32).of(instruction)
+  def of(instruction: Instruction, waveSize: Int in (32, 64)): RegisterUse =
+    summary(Derivation(waveSize / 32, -1, -1, state = false).of(instruction))
+
+  /** The state the instruction at `offset` of `stream` reads and writes beside its registers: the special registers it
+    * names, the implicit state its catalogue encoding lists, and EXEC where it runs per lane. A lane mask or M0 is
+    * named by its 32-bit halves, and the condition code and the mode register by their names.
+    */
+  def state(instruction: Instruction, stream: CodeStream, offset: Int, waveSize: Int in (32, 64), isa: ISA)
+      : RegisterUse = {
+    val named = Derivation(waveSize / 32, m0Register(isa).raw, nullRegister(isa).fold(-1)(_.raw), state = true)
+    summary(named.of(instruction)).merge(ImplicitUses.of(stream, offset, waveSize))
+  }
+
+  private def summary(found: Use): RegisterUse =
     RegisterUse(
       found.reads.map(_.name).distinct,
       found.writes.map(_.name).distinct,
       (found.reads ++ found.writes).collect { case Span(name, units) if units > 1 => name -> units }.toMap
     )
-  }
 
-  private class Derivation(maskWords: Int) {
-    private def scalar(first: ScalarRegisterIndex, count: Int = 1): Vec[Span] =
-      if (first.raw >= Fixed.VccLo) Unused else Vec(Span(name("s", first.raw, count), count))
+  private class Derivation(maskWords: Int, m0: Int, discarded: Int, state: Boolean) {
+    private def named(spans: Vec[Span]): Vec[Span] = if (state) spans else Unused
+
+    private def special(code: Int): Vec[Span] = code match {
+      case Fixed.VccLo  => Vec(Span("vcc_lo", 1))
+      case Fixed.VccHi  => Vec(Span("vcc_hi", 1))
+      case Fixed.ExecLo => Vec(Span("exec_lo", 1))
+      case Fixed.ExecHi => Vec(Span("exec_hi", 1))
+      case `m0`         => Vec(Span("m0", 1))
+      case `discarded`  => Unused
+      case ttmp         => Vec(Span(s"ttmp${ttmp - Fixed.VccHi - 1}", 1))
+    }
+
+    private val m0Read: Vec[Span] = named(Vec(Span("m0", 1)))
+
+    private def execMask: Vec[Span] = named(Vec.from((Fixed.ExecLo until Fixed.ExecLo + maskWords).flatMap(special(_))))
+
+    private def scalar(first: ScalarRegisterIndex, count: Int = 1): Vec[Span] = {
+      val ordinary = math.min(count, math.max(0, Fixed.VccLo - first.raw))
+      val head     = if (ordinary > 0 && !state) Vec(Span(name("s", first.raw, ordinary), ordinary)) else Unused
+      head ++ named(Vec.from((first.raw + ordinary until first.raw + count).flatMap(special(_))))
+    }
 
     private def scalars(first: Option[ScalarRegisterIndex], count: Int = 1): Vec[Span] =
       first.fold(Unused)(scalar(_, count))
 
     private def vector(first: VectorRegisterIndex, count: Int = 1, bank: RegisterBank = RegisterBank.Vector)
         : Vec[Span] =
-      Vec(Span(name(if (bank == RegisterBank.Vector) "v" else "a", first.raw, count), count))
+      if (state) Unused
+      else Vec(Span(name(if (bank == RegisterBank.Vector) "v" else "a", first.raw, count), count))
 
     private def vectors(first: Option[VectorRegisterIndex], count: Int = 1): Vec[Span] =
       first.fold(Unused)(vector(_, count))
@@ -392,7 +423,11 @@ private object RegisterUses {
         use(sources(i.srcA, i.srcB) ++ source(i.srcC, 2), vector(i.dest, 2) ++ maskDestination(i.carryDest))
       case i: Instruction.VMadI64I32 =>
         use(sources(i.srcA, i.srcB) ++ source(i.srcC, 2), vector(i.dest, 2) ++ maskDestination(i.carryDest))
-      case i: Instruction.VCompare     => use(comparison(i.operation, i.srcA, i.srcB), maskDestination(i.dest))
+      case i: Instruction.VCompare =>
+        use(
+          comparison(i.operation, i.srcA, i.srcB),
+          maskDestination(i.dest) ++ (if (i.operation.updateExec) execMask else Unused)
+        )
       case i: Instruction.VDivScaleF32 =>
         use(sources(i.srcA, i.srcB, i.srcC), vector(i.dest) ++ maskDestination(i.conditionDest))
       case i: Instruction.VDivScaleF64 =>
@@ -451,8 +486,8 @@ private object RegisterUses {
         )
       case i: Instruction.FormatStore =>
         use(address(i.address) ++ vector(i.src, VMResourceDecoder.registers(i.components, i.packing), i.bank), Unused)
-      case i: Instruction.LoadLocal   => use(address(i.address), Unused)
-      case i: Instruction.StoreLocal  => use(address(i.address), Unused)
+      case i: Instruction.LoadLocal   => use(address(i.address) ++ m0Read, Unused)
+      case i: Instruction.StoreLocal  => use(address(i.address) ++ m0Read, Unused)
       case i: Instruction.SBufferLoad =>
         use(spans(scalar(i.resource, 4), scalars(i.scalarOffset)), scalar(i.dest, i.count))
       case i: Instruction.Image =>

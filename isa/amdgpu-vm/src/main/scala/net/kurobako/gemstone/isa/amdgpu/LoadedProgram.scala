@@ -292,12 +292,24 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
   def controlFlow(name: NonEmpty[String]): Either[Fault, (ControlFlowGraph, Vec[Int])] =
     compile(name).map { case (_, _, kernel) => (AMDGPUControlFlowGraph.of(kernel), kernel.instructionOffsets) }
 
-  /** The kernel's control flow, the registers each instruction reads and writes and its assembly. */
+  /** The kernel's control flow, the registers and state each instruction reads and writes, and its assembly. */
   def staticCode(name: NonEmpty[String]): Either[Fault, (ControlFlowGraph, Vec[RegisterUse], Vec[String])] =
     compile(name).map { case (_, _, kernel) =>
+      val mode   = kernel.source.mode
+      val stream = CodeStream(Vec.toArray(kernel.source.text), mode)
       (
         AMDGPUControlFlowGraph.of(kernel),
-        kernel.registerUses,
+        Vec.tabulate(kernel.instructions.size) { index =>
+          kernel.registerUses(index).merge(
+            RegisterUses.state(
+              kernel.instructions(index),
+              stream,
+              kernel.instructionOffsets(index),
+              mode.waveSize,
+              mode.target.isa
+            )
+          )
+        },
         Vec.tabulate(kernel.instructions.size)(kernel.assembly(_))
       )
     }

@@ -21,11 +21,12 @@ object Liveness {
     names.flatMap(name => units(name, use.unitsOf(name))).toSet
 
   /** Liveness of the units `uses` names, before and after each instruction, over `graph`. A write ends the live range
-    * of the units it spans, and a block with unresolved successors keeps every unit the code names live out of it.
+    * of the units it spans, except those `preserved` holds for, whose writes may leave some lanes or bits as they were.
+    * A block with unresolved successors keeps every unit the code names live out of it.
     */
-  def of(graph: ControlFlowGraph, uses: Vec[RegisterUse]): Liveness = {
+  def of(graph: ControlFlowGraph, uses: Vec[RegisterUse], preserved: String => Boolean = _ => false): Liveness = {
     val reads  = uses.map(use => unitsOf(use, use.reads))
-    val writes = uses.map(use => unitsOf(use, use.writes))
+    val writes = uses.map(use => unitsOf(use, use.writes).filterNot(preserved))
     val named  = (reads ++ writes).flatten.toSet
     val blocks = graph.blocks
 
