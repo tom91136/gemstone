@@ -875,8 +875,9 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   }
   environment[environment::TestName] = test.identity;
   environment[environment::ReportDir] = report.string();
-  const auto hecbenchDirectory = config.programDirectories ^ get_maybe(test.program);
-  const auto workingDirectory = hecbenchDirectory ? fs::path(*hecbenchDirectory) : (gtest ? fs::path(config.directory) : report);
+  const auto workingDirectory = config.programDirectories ^ get_maybe(test.program)
+                                ^ map([](const auto &directory) { return fs::path(directory); })
+                                ^ get_or_else(gtest ? fs::path(config.directory) : report);
   const auto outputPath = report / "output.log";
   std::ofstream output(outputPath, std::ios::binary);
   output.exceptions(std::ios::failbit | std::ios::badbit);
