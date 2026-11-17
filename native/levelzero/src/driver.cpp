@@ -1857,29 +1857,6 @@ ze_result_t ZE_APICALL memFree(ze_context_handle_t contextHandle, void *pointer)
     const auto found = allocations.find(pointer);
     if (found == allocations.end()) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     if (found->second->context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-    if (found->second.use_count() != 1) return ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE;
-    allocation = found->second;
-    allocations.erase(found);
-  }
-  return releaseAllocation(allocation);
-}
-ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t contextHandle, const ze_memory_free_ext_desc_t *desc, void *pointer) {
-  auto *context = cast<Context>(contextHandle);
-  if (!context) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  if (!desc || !pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
-  constexpr auto supportedPolicies = ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_BLOCKING_FREE | ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE;
-  if ((desc->freePolicy & ~supportedPolicies) != 0) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
-  if ((desc->freePolicy & ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE) == 0) return memFree(contextHandle, pointer);
-  {
-    std::scoped_lock const lock(virtualMemoryMutex);
-    if (virtualReservations.contains(reinterpret_cast<uintptr_t>(pointer))) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  }
-  reapDeferredFrees();
-  AllocationRef allocation;
-  {
-    std::scoped_lock const lock(allocationsMutex);
-    const auto found = allocations.find(pointer);
-    if (found == allocations.end() || found->second->context.get() != context) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
     allocation = std::move(found->second);
     allocations.erase(found);
     if (allocation.use_count() != 1) {
@@ -1888,6 +1865,13 @@ ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t contextHandle, const ze_me
     }
   }
   return releaseAllocation(allocation);
+}
+ze_result_t ZE_APICALL memFreeExt(ze_context_handle_t contextHandle, const ze_memory_free_ext_desc_t *desc, void *pointer) {
+  if (!cast<Context>(contextHandle)) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!desc || !pointer) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  constexpr auto supportedPolicies = ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_BLOCKING_FREE | ZE_DRIVER_MEMORY_FREE_POLICY_EXT_FLAG_DEFER_FREE;
+  if ((desc->freePolicy & ~supportedPolicies) != 0) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
+  return memFree(contextHandle, pointer);
 }
 
 struct ImageFormatRow {

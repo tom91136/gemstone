@@ -695,7 +695,6 @@ TEST_CASE("Level Zero execution RPC", "[level-zero][rpc]") {
   REQUIRE((zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS));
   const ze_group_count_t groups{.groupCountX = 2, .groupCountY = 1, .groupCountZ = 1};
   REQUIRE((zeCommandListAppendLaunchKernel(list, kernel, &groups, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
-  REQUIRE((zeMemFree(context, memory) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
   REQUIRE((zeMemFree(context, unrelatedMemory) == ZE_RESULT_SUCCESS));
   unrelatedMemory = nullptr;
   REQUIRE((zeKernelDestroy(kernel) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));

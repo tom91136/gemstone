@@ -470,20 +470,18 @@ TEST_CASE("Level Zero completed memory hints release allocations before their ev
       const auto appended = advice ? zeCommandListAppendMemAdvise(list, device, memory, 64, ZE_MEMORY_ADVICE_SET_READ_MOSTLY)
                                    : zeCommandListAppendMemoryPrefetch(list, memory, 64);
       REQUIRE(appended == ZE_RESULT_SUCCESS);
-      REQUIRE(zeMemFree(context, memory) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
+      const auto freeStatus = zeMemFree(context, memory);
       REQUIRE(zeCommandListAppendSignalEvent(list, ready) == ZE_RESULT_SUCCESS);
       REQUIRE(zeCommandListAppendWaitOnEvents(list, 1, &release) == ZE_RESULT_SUCCESS);
       REQUIRE(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
       REQUIRE(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
       const auto readyStatus = zeEventHostSynchronize(ready, 5'000'000'000ULL);
-      const auto freeStatus = readyStatus == ZE_RESULT_SUCCESS ? zeMemFree(context, memory) : ZE_RESULT_NOT_READY;
       // Unblock the worker before checking results, so a red test cannot leave it waiting.
       REQUIRE(zeEventHostSignal(release) == ZE_RESULT_SUCCESS);
       REQUIRE(zeCommandQueueSynchronize(queue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
       CHECK(readyStatus == ZE_RESULT_SUCCESS);
       CHECK(freeStatus == ZE_RESULT_SUCCESS);
       REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
-      if (freeStatus != ZE_RESULT_SUCCESS) REQUIRE(zeMemFree(context, memory) == ZE_RESULT_SUCCESS);
       REQUIRE(zeEventDestroy(ready) == ZE_RESULT_SUCCESS);
       REQUIRE(zeEventDestroy(release) == ZE_RESULT_SUCCESS);
       REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
@@ -551,7 +549,6 @@ TEST_CASE("Level Zero memory free policies defer the free past recorded work", "
   void *memory = nullptr;
   REQUIRE(zeMemAllocDevice(context, &allocationDesc, 64, 64, device, &memory) == ZE_RESULT_SUCCESS);
   REQUIRE(zeCommandListAppendMemoryPrefetch(list, memory, 64) == ZE_RESULT_SUCCESS);
-  REQUIRE(zeMemFree(context, memory) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE);
 
   ze_memory_free_ext_desc_t freeDesc{};
   freeDesc.stype = ZE_STRUCTURE_TYPE_MEMORY_FREE_EXT_DESC;
@@ -573,6 +570,56 @@ TEST_CASE("Level Zero memory free policies defer the free past recorded work", "
   REQUIRE(zeMemFree(context, trigger) == ZE_RESULT_SUCCESS);
   REQUIRE(zeMemGetAllocProperties(context, memory, &memoryProperties, nullptr) == ZE_RESULT_SUCCESS);
   CHECK(memoryProperties.type == ZE_MEMORY_TYPE_UNKNOWN);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero free defers memory that a queued prefetch still references", "[level-zero]") {
+  auto [driver, device, context] = createContext();
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS);
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE;
+  poolDesc.count = 1;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  ze_event_desc_t eventDesc{};
+  eventDesc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+  eventDesc.signal = ZE_EVENT_SCOPE_FLAG_HOST;
+  eventDesc.wait = ZE_EVENT_SCOPE_FLAG_HOST;
+  ze_event_handle_t gate = nullptr;
+  REQUIRE(zeEventCreate(pool, &eventDesc, &gate) == ZE_RESULT_SUCCESS);
+  ze_host_mem_alloc_desc_t hostDesc{};
+  hostDesc.stype = ZE_STRUCTURE_TYPE_HOST_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  REQUIRE(zeMemAllocHost(context, &hostDesc, 64, 1, &memory) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendWaitOnEvents(list, 1, &gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListAppendMemoryPrefetch(list, memory, 64) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListClose(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueExecuteCommandLists(queue, 1, &list, nullptr) == ZE_RESULT_SUCCESS);
+  const auto freeStatus = zeMemFree(context, memory);
+  REQUIRE(zeEventHostSignal(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueSynchronize(queue, 5'000'000'000ULL) == ZE_RESULT_SUCCESS);
+  REQUIRE(freeStatus == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+
+  void *trigger = nullptr;
+  REQUIRE(zeMemAllocHost(context, &hostDesc, 64, 1, &trigger) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeMemFree(context, trigger) == ZE_RESULT_SUCCESS);
+  ze_memory_allocation_properties_t memoryProperties{};
+  memoryProperties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
+  REQUIRE(zeMemGetAllocProperties(context, memory, &memoryProperties, nullptr) == ZE_RESULT_SUCCESS);
+  CHECK(memoryProperties.type == ZE_MEMORY_TYPE_UNKNOWN);
+  REQUIRE(zeEventDestroy(gate) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 
@@ -861,7 +908,8 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeCommandListAppendMemoryCopyRegion(list, source, &right, 8, 0, source, &left, 8, 0, nullptr, 0, nullptr) == ZE_RESULT_SUCCESS));
   REQUIRE((sourceBytes[4] == 0 && sourceBytes[5] == 1 && sourceBytes[12] == 8 && sourceBytes[13] == 9));
 
-  // Deferred copies retain allocation ownership and read data at execution, not recording time.
+  void *queuedSource = nullptr;
+  REQUIRE((zeMemAllocDevice(context, &allocationDesc, 64, 16, device, &queuedSource) == ZE_RESULT_SUCCESS));
   ze_command_list_desc_t deferredDesc{};
   deferredDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
   ze_command_list_handle_t deferred{};
@@ -870,14 +918,12 @@ TEST_CASE("Level Zero facade smoke test", "[level-zero]") {
   REQUIRE((zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS));
   sourceRegion = {.originX = 0, .originY = 0, .originZ = 0, .width = 4, .height = 2, .depth = 2};
   destinationRegion = {.originX = 0, .originY = 0, .originZ = 0, .width = 4, .height = 2, .depth = 2};
-  REQUIRE((zeCommandListAppendMemoryCopyRegion(deferred, destination, &destinationRegion, 8, 24, source, &sourceRegion, 8, 32, nullptr, 0,
-                                               nullptr)
+  REQUIRE((zeCommandListAppendMemoryCopyRegion(deferred, destination, &destinationRegion, 8, 24, queuedSource, &sourceRegion, 8, 32,
+                                               nullptr, 0, nullptr)
            == ZE_RESULT_SUCCESS));
   sourceRegion.width = destinationRegion.width = 0;
-  std::memset(source, 0x37, 64);
-  std::memset(destination, 0xa5, 64);
-  REQUIRE((zeMemFree(context, source) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
-  REQUIRE((zeMemFree(context, destination) == ZE_RESULT_ERROR_HANDLE_OBJECT_IN_USE));
+  std::memset(queuedSource, 0x37, 64);
+  REQUIRE((zeMemFree(context, queuedSource) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandListClose(deferred) == ZE_RESULT_SUCCESS));
   REQUIRE((zeCommandQueueExecuteCommandLists(queue, 1, &deferred, nullptr) == ZE_RESULT_SUCCESS));
   for (uint32_t i = 0; i < 64; ++i) {
