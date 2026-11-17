@@ -1,6 +1,6 @@
 # Workload corpus
 
-Status: in progress. Step 1 and T42 are done. The bounded workload now meets the 300 s headroom budget (183.6 s total in the default-concurrency run). Step 2's harness is fixed: the manifest now comes from the Makefile run targets and the runtime data tree, the hardware rerun classifies 478 of 535 programs as pass or completion, and the emulation rerun of those 478 is partial (shards 0 to 3). Step 3 (HIP, SYCL, OpenMP) not started. Triage uses `concurrency-checking.md` to separate races from emulator defects.
+Status: in progress. Step 1 and T42 are done. The bounded workload now meets the 300 s headroom budget (183.6 s total in the default-concurrency run). Step 2's harness is fixed: the manifest now comes from the Makefile run targets and the runtime data tree, the hardware rerun classifies 478 of 535 programs as pass or completion, and the emulation rerun of those 478 is partial (shards 0 to 3). Step 3 (HIP, SYCL, OpenMP) not started. Triage uses `concurrency-checking.md` to separate races from emulator defects. CI runs `hecbench-bounded` through `long` and `xlong`; `short` and the full `hecbench` workload run no more than before.
 
 ## Goal
 
@@ -122,7 +122,7 @@ Reconnaissance at HeCBench `4426c9fbdbb5e54b3776bf04a72774f8da4973b3`:
 Step 1 at the same commit:
 
 - Staging the three build-input DVC archives fixed sad, seam-carving, and testSNAP; they build. The remaining CUDA build failures are the 17 above.
-- The full `hecbench` workload discovers the 537 built programs on the same artifact. The first `hecbench-bounded` run through Gemstone on `cuda-sass/sm_89` selected assert, bitpacking, minimod, and overlap: 1 verified pass, 1 completion only, 2 failed, 0 skipped, and 0 time limit in 24.8 s. overlap passes, minimod completes without a pass or fail marker, assert fails because Gemstone does not implement device-side `assert`, and bitpacking prints FAIL for every size. The run exits non-zero because failures stay red.
+- The full `hecbench` workload discovers the 537 built programs on the same artifact. The first `hecbench-bounded` run through Gemstone on `cuda-sass/sm_89` selected assert, bitpacking, minimod, and overlap: 1 verified pass, 1 completion only, 2 failed, 0 skipped, and 0 time limit in 24.8 s. overlap passes, minimod completes without a pass or fail marker, assert fails on the RTX 4060 Ti too (its Release build defines `NDEBUG`, which compiles out the device asserts the program expects to trigger, so it prints `returned ERROR!`), and bitpacking prints FAIL for every size. The run exits non-zero because failures stay red.
 - A probe of larger defaults found page-rank passing in 266 s and overlap in 21 s; chemv, winograd, mdh, and laplace fail under emulation, with laplace failing its own verification after one iteration. Step 2 needs the yaml arguments, smaller inputs, or both before those can be bounded.
 
 Ticket T42 (bounded arguments):

@@ -2,8 +2,10 @@
 # (300 s) when measured on a loaded machine, so CI has headroom.
 # mdh is not here: its shipped inputs overflow expf, so its PASS checks nothing, and -itmax 1 exceeds the case limit
 # under emulation.
+# assert is not here: the Release build defines NDEBUG, so its device asserts are compiled out and it reports ERROR on
+# hardware as well.
 specs = ['*']
-include_programs = ['hecbench_assert', 'hecbench_bitpacking', 'hecbench_laplace', 'hecbench_minimod', 'hecbench_overlap']
+include_programs = ['hecbench_bitpacking', 'hecbench_laplace', 'hecbench_minimod', 'hecbench_overlap']
 
 # minimod: the Makefile run target (grid 256, 1000 steps) exceeds the 300 s budget; run its default case.
 [program_arguments]

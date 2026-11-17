@@ -425,20 +425,29 @@ TEST_CASE("iteration workloads retain every miniapp", "[driver][workload-budget]
   }
 }
 
-TEST_CASE("iteration workloads leave the HeCBench corpus to its own workloads", "[driver][workload-budget]") {
+TEST_CASE("long and xlong select exactly the bounded HeCBench programs", "[driver][workload-budget]") {
+  RunOptions options;
+  options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
+  options.workload = "hecbench-bounded";
+  const auto bounded = loadWorkload(options);
+  REQUIRE(!bounded.includePrograms.empty());
   for (const auto *name : {"short", "long", "xlong"}) {
     DYNAMIC_SECTION(name) {
-      RunOptions options;
-      options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
       options.workload = name;
       const auto workload = loadWorkload(options);
-      const auto matches = [](const std::string &program) {
-        return [&program](const auto &pattern) { return conformance::globMatches(pattern, program); };
-      };
-      for (const std::string program : {"hecbench_lud", "hecbench_bfs"}) {
+      const bool runsBounded = std::string_view(name) != "short";
+      const auto selected = [&](const std::string &program) { return conformance::driver::programSelected(workload, program); };
+      for (const std::string program : {"hecbench_lud", "hecbench_bfs", "hecbench_mdh"}) {
         CAPTURE(program);
-        CHECK((workload.excludePrograms ^ exists(matches(program))
-               || (!workload.includePrograms.empty() && workload.includePrograms ^ none_match(matches(program)))));
+        CHECK(!selected(program));
+      }
+      for (const auto &program : bounded.includePrograms) {
+        CAPTURE(program);
+        CHECK(selected(program) == runsBounded);
+      }
+      for (const auto &[program, arguments] : bounded.programArguments) {
+        CAPTURE(program);
+        CHECK((workload.programArguments.contains(program) && workload.programArguments.at(program) == arguments) == runsBounded);
       }
     }
   }
@@ -472,10 +481,46 @@ TEST_CASE("hecbench workloads include the corpus and the bounded selection", "[d
   }
   CHECK(bounded.includePrograms ^ exists([](const auto &pattern) { return pattern == "hecbench_laplace"; }));
   CHECK(bounded.includePrograms ^ none_match([](const auto &pattern) { return pattern == "hecbench_mdh"; }));
+  CHECK(bounded.includePrograms ^ none_match([](const auto &pattern) { return pattern == "hecbench_assert"; }));
+  CHECK(conformance::driver::programSelected(full, "hecbench_assert"));
   CHECK(bounded.programArguments.size() == 1);
   CHECK(bounded.programArguments.at("hecbench_minimod").empty());
   CHECK(full.excludePrograms.empty());
   CHECK(bounded.excludePrograms.empty());
+}
+
+TEST_CASE("imported workloads admit their programs past excludes and inherit through extends", "[driver][workload-budget]") {
+  const TemporaryDirectory directory;
+  std::ofstream(directory.path / "source.toml")
+      << "specs = ['*']\ninclude_programs = ['hecbench_a']\n[program_arguments]\nhecbench_a = ['1']\nhecbench_z = ['9']\n";
+  std::ofstream(directory.path / "bare.toml") << "specs = ['*']\n";
+  std::ofstream(directory.path / "parent.toml") << "specs = ['*']\nexclude_programs = ['hecbench_*']\nadd_workloads = ['source']\n";
+  std::ofstream(directory.path / "child.toml")
+      << "extends = 'parent'\nexclude_programs = ['hecbench_*', 'other']\n[program_arguments]\nhecbench_a = ['2']\n";
+  std::ofstream(directory.path / "narrow.toml") << "specs = ['*']\ninclude_programs = ['other']\nadd_workloads = ['source', 'bare']\n";
+  std::ofstream(directory.path / "loop.toml") << "specs = ['*']\nadd_workloads = ['loop']\n";
+  RunOptions options;
+  options.workloads = directory.path;
+  const auto load = [&](const char *name) {
+    options.workload = name;
+    return loadWorkload(options);
+  };
+  using conformance::driver::programSelected;
+  const auto parent = load("parent");
+  CHECK(programSelected(parent, "hecbench_a"));
+  CHECK(!programSelected(parent, "hecbench_b"));
+  CHECK(parent.programArguments.at("hecbench_a") == std::vector<std::string>{"1"});
+  const auto child = load("child");
+  CHECK(programSelected(child, "hecbench_a"));
+  CHECK(!programSelected(child, "hecbench_b"));
+  CHECK(!programSelected(child, "other"));
+  CHECK(child.programArguments.at("hecbench_a") == std::vector<std::string>{"2"});
+  CHECK(child.programArguments.at("hecbench_z") == std::vector<std::string>{"9"});
+  const auto narrow = load("narrow");
+  CHECK(programSelected(narrow, "other"));
+  CHECK(programSelected(narrow, "hecbench_a"));
+  CHECK(!programSelected(narrow, "unrelated"));
+  CHECK_THROWS_AS(load("loop"), std::invalid_argument);
 }
 
 TEST_CASE("workload program arguments override inherited ones", "[driver][workload-budget]") {

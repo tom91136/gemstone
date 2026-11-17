@@ -441,6 +441,12 @@ static std::vector<std::string> launched(const std::vector<std::string> &launche
   result.insert(result.end(), std::make_move_iterator(command.begin()), std::make_move_iterator(command.end()));
   return result;
 }
+bool programSelected(const Workload &workload, std::string_view program) {
+  const auto matches = [&](const std::string &pattern) { return globMatches(pattern, program); };
+  return workload.admitPrograms ^ exists(matches)
+         || (!(workload.excludePrograms ^ exists(matches))
+             && (workload.includePrograms.empty() || workload.includePrograms ^ exists(matches)));
+}
 Workload loadWorkload(const RunOptions &configuration) {
   std::set<std::string> active;
   const auto read = [&](auto &&self, const std::string &name) -> Workload {
@@ -458,6 +464,7 @@ Workload loadWorkload(const RunOptions &configuration) {
     };
     replace(workload.specs, fields.specs);
     replace(workload.includePrograms, fields.includePrograms);
+    replace(workload.admitPrograms, fields.admitPrograms);
     replace(workload.levelzeroCases, fields.levelzeroCases);
     replace(workload.vulkanCases, fields.vulkanCases);
     replace(workload.vulkanMustpass, fields.vulkanMustpass);
@@ -473,6 +480,13 @@ Workload loadWorkload(const RunOptions &configuration) {
     append(workload.excludePrograms, fields.addExcludePrograms);
     append(workload.excludeCases, fields.addExcludeCases);
     append(workload.includeCases, fields.addIncludeCases);
+    for (const auto &imported : fields.addWorkloads.value_or(std::vector<std::string>{})) {
+      const auto source = self(self, imported);
+      workload.admitPrograms.insert(workload.admitPrograms.end(), source.includePrograms.begin(), source.includePrograms.end());
+      workload.admitPrograms.insert(workload.admitPrograms.end(), source.admitPrograms.begin(), source.admitPrograms.end());
+      for (const auto &[prog, args] : source.programArguments)
+        workload.programArguments[prog] = args;
+    }
     if (fields.programArguments) {
       for (auto &[prog, args] : *fields.programArguments)
         workload.programArguments[prog] = std::move(args);
@@ -536,11 +550,7 @@ static std::vector<TestProgram> testPrograms(const fs::path &artifact, const Wor
                       .format = format});
   }
   if (result.empty()) throw std::runtime_error("artifact contains no test programs: " + artifact.string());
-  std::erase_if(result, [&](const TestProgram &program) {
-    return workload.excludePrograms ^ exists([&](const std::string &pattern) { return globMatches(pattern, program.name); })
-           || (!workload.includePrograms.empty()
-               && workload.includePrograms ^ none_match([&](const std::string &pattern) { return globMatches(pattern, program.name); }));
-  });
+  std::erase_if(result, [&](const TestProgram &program) { return !programSelected(workload, program.name); });
   return result;
 }
 void applyDeviceProbe(ExecutionConfig &configuration, const conformance::DeviceProbeResult &probe) {

@@ -48,6 +48,8 @@ struct Workload {
   std::vector<std::string> specs{"*"};
   // Discovery-time program-name globs. Empty selects all; exclusions win.
   std::vector<std::string> includePrograms;
+  // Program globs taken in from other workloads; selected even when excluded or outside includePrograms.
+  std::vector<std::string> admitPrograms;
   // Full Google Test names or globs for the Level Zero CTS. Empty selects all.
   std::vector<std::string> levelzeroCases;
   // Explicit dEQP selection; empty requires an explicit mustpass manifest.
@@ -88,6 +90,9 @@ struct WorkloadFields {
   std::optional<std::vector<std::string>> addIncludePrograms, addLevelzeroCases, addVulkanCases, addExcludePrograms, addExcludeCases,
       addIncludeCases;
   std::optional<std::vector<std::string>> includeCases;
+  std::optional<std::vector<std::string>> admitPrograms;
+  // Workloads whose include_programs and program_arguments this one takes in.
+  std::optional<std::vector<std::string>> addWorkloads;
   std::optional<std::string> vulkanMustpass;
   std::optional<std::map<std::string, std::vector<std::string>>> programArguments;
 };
@@ -167,6 +172,7 @@ std::vector<std::string> deqpMustpassCases(const std::filesystem::path &root, co
                                            const std::vector<std::string> &patterns);
 std::vector<std::string> deqpCaseNames(std::istream &input);
 Workload loadWorkload(const RunOptions &configuration);
+bool programSelected(const Workload &workload, std::string_view program);
 DeqpResult deqpResult(std::string_view qpa, std::string_view identity);
 std::vector<std::string> gtestCaseNames(std::string_view listing, std::string_view program);
 bool gtestSkipped(std::string_view report);

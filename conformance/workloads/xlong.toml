@@ -1,5 +1,5 @@
 # What CI runs: long plus the vendor suites, the rocThrust-semantic cases and the heavy Level Zero CTS families.
-# HeCBench runs through its own workloads.
+# HeCBench runs only the bounded programs it inherits; the full corpus runs through the hecbench workload.
 extends = "long"
 exclude_programs = ["opencl_cts_thread_dimensions", "sycl_cts_full_conformance_*", "hecbench_*"]
 exclude_cases = []
