@@ -18,6 +18,7 @@
 
 #include <gemstone/child_test.hpp>
 #include <gemstone/test_support.hpp>
+#include <gemstone_target_limits.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
@@ -360,7 +361,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   size_t sharedForTwo = 0;
   REQUIRE((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForOne, clustered, 1, 256) == CUDA_SUCCESS));
   REQUIRE((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForTwo, clustered, 2, 256) == CUDA_SUCCESS));
-  CHECK(sharedForOne == 2 * sharedForTwo);
+  CHECK(sharedForTwo < sharedForOne);
   CHECK((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForOne, clustered, 0, 256) == CUDA_ERROR_INVALID_VALUE));
   CHECK((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForOne, clustered, 2, 1024) == CUDA_ERROR_INVALID_VALUE));
   config.gridDimX = 3;
@@ -930,6 +931,28 @@ TEST_CASE("CUDA runtime cooperative launches go through the registered host stub
   char unregistered = 0;
   CHECK(cudaLaunchCooperativeKernel(&unregistered, dim3(1), dim3(1), arguments, 0, nullptr) == cudaErrorInvalidValue);
   __cudaUnregisterFatBinary(handle);
+}
+
+TEST_CASE("CUDA dynamic shared memory reported as available keeps that many blocks active on every target", "[cuda][code-mode]") {
+  FailureSession session;
+  session.loadKernel(Ptx);
+  for (int version = 0; version < 200; ++version) {
+    const auto target = "sm_" + std::to_string(version);
+    if (!gemstone::targetLimits(target)) continue;
+    const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, target.c_str());
+    for (const int blockSize : {1, 128, 1024}) {
+      for (const int blocks : {1, 2, 4, 8}) {
+        size_t available = 0;
+        const auto status = cuOccupancyAvailableDynamicSMemPerBlock(&available, session.function, blocks, blockSize);
+        CAPTURE(target, blockSize, blocks, available);
+        if (blocks == 1 && blockSize == 1) REQUIRE(status == CUDA_SUCCESS);
+        if (status != CUDA_SUCCESS) continue;
+        int active = 0;
+        REQUIRE(cuOccupancyMaxActiveBlocksPerMultiprocessor(&active, session.function, blockSize, available) == CUDA_SUCCESS);
+        CHECK(active >= blocks);
+      }
+    }
+  }
 }
 
 TEST_CASE("CUDA occupancy calculator suggests potential block sizes and queries stream priority", "[cuda][code-mode]") {

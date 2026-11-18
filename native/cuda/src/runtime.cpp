@@ -4480,8 +4480,9 @@ CUresult cuOccupancyAvailableDynamicSMemPerBlock(size_t *bytes, CUfunction funct
   int staticBytes = 0;
   if (const auto status = cuFuncGetAttribute(&staticBytes, CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES, function); status != CUDA_SUCCESS)
     return status;
-  const auto perBlock = limits.maxSharedMemoryPerMultiprocessor / blocks;
-  *bytes = static_cast<size_t>(std::max(0, perBlock - staticBytes));
+  const int granule = limits.sharedMemoryGranule;
+  const int perBlock = (limits.maxSharedMemoryPerMultiprocessor / blocks / granule * granule) - limits.reservedSharedMemoryPerBlock;
+  *bytes = static_cast<size_t>(std::max(0, std::min(perBlock, limits.maxSharedMemoryPerBlock) - staticBytes));
   return CUDA_SUCCESS;
 }
 
