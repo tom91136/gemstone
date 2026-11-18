@@ -103,8 +103,106 @@ class FormsSuite extends Suite {
     assertEquals(scalar.parameters, Map("s[4:5]" -> Operand.Joined(Vec("s4", "s5"))))
   }
 
-  test("a branch is refused: what it writes is not a register") {
-    assertEquals(at(0x80), Left("@!P0 BRA 0x4e0 writes guard, which is not a register"))
+  test("a guarded branch is refused as a branch") {
+    assertEquals(at(0x80), Left("@!P0 BRA 0x4e0 has no rendering: lowers to Branch, with no staged semantics"))
+  }
+
+  private def written(text: String): Either[String, Form] =
+    sass.asm.Parser.parseProgram(s"$text;").toOption.flatMap(_.statements.collectFirst {
+      case sass.asm.Program.Statement.Operation(operation, _, _) => operation
+    }).toRight(s"$text does not parse").flatMap(SASSForms.of("sm_89", _))
+
+  private def admitted(text: String): Form = written(text).fold(fail(_), identity)
+
+  test("a guarded instruction reads its guard and what it writes, which it leaves where the guard fails") {
+    val move = admitted("@P0 MOV R2, R3")
+    assertEquals(
+      move.parameters,
+      Map("P0" -> Operand.Location("P0"), "R3" -> Operand.Location("R3"), "R2" -> Operand.Location("R2"))
+    )
+    assertEquals(move.results, Map("R2" -> Vec("R2")))
+    move.kase.definition.results.map(_.value) match {
+      case Vec(Term.Select(_, _, Term.Variable(kept))) => assertEquals(kept, "R2")
+      case other                                       => fail(other.map(_.show).mkString)
+    }
+    val sum = admitted("@!P1 IADD3 R1, R2, R3, R4")
+    assertEquals(sum.parameters.keySet, Set("P1", "R1", "R2", "R3", "R4"))
+    assertEquals(sum.results, Map("R1" -> Vec("R1")))
+    val compared = admitted("@P0 ISETP.GE.AND P2, PT, R1, R2, PT")
+    assertEquals(compared.parameters.keySet, Set("P0", "P2", "R1", "R2"))
+    assertEquals(compared.results, Map("P2" -> Vec("P2")))
+    val own = admitted("@P0 ISETP.GE.AND P0, PT, R1, R2, PT")
+    assertEquals(own.parameters.keySet, Set("P0", "R1", "R2"))
+    assertEquals(own.results, Map("P0" -> Vec("P0")))
+  }
+
+  test("the cases behind a guarded form are the checked cases of its mnemonic under a guard of its sense") {
+    val held = admitted("@P0 MOV R2, R3").lane.cases.map(_.instance)
+    assert(held.nonEmpty && held.forall(_.matches(raw"@P\d MOV .*")), held)
+    val failed = admitted("@!P1 IADD3 R1, R2, R3, R4").lane.cases.map(_.instance)
+    assert(failed.nonEmpty && failed.forall(_.matches(raw"@!P\d IADD3 .*")), failed)
+    val plain = admitted("MOV R2, R3").lane.cases.map(_.instance)
+    assert(plain.nonEmpty && plain.forall(_.startsWith("MOV")), plain)
+    assertEquals(
+      written("@UP0 MOV R2, R3"),
+      Left("@UP0 MOV R2, R3 has no checked case of @UP MOV with operands R, R")
+    )
+  }
+
+  test("a guarded load or store makes its access only where the guard holds") {
+    val load = admitted("@P0 LDG.E R5, [R2.64]")
+    assertEquals(accesses(load), Vec(("load", 32)))
+    assertEquals(
+      load.parameters,
+      Map("P0" -> Operand.Location("P0"), "R2" -> Operand.Joined(Vec("R2", "R3")), "R5" -> Operand.Location("R5"))
+    )
+    assertEquals(load.results, Map("R5" -> Vec("R5")))
+    assertEquals(load.kase.definition.body, Vec.empty[Definition.Statement])
+    load.kase.definition.results.map(_.value) match {
+      case Vec(Term.Select(_, taken, Term.Variable(kept))) =>
+        assertEquals(kept, "R5")
+        assertEquals(Rejection.terms(taken).count { case _: Term.Context => true; case _ => false }, 1)
+      case other => fail(other.map(_.show).mkString)
+    }
+    assert(load.lane.cases.nonEmpty && load.lane.cases.forall(_.instance.matches(raw"@P\d LDG.*")), load.lane.cases)
+    val store = admitted("@!P0 STG.E [R2.64], R5")
+    assertEquals(accesses(store), Vec(("store", 32)))
+    assertEquals(store.results, Map.empty[String, Vec[String]])
+    store.kase.definition.body.map(_.term) match {
+      case Vec(Term.When(_, Vec(Term.Step(_, _: Term.Context)))) => ()
+      case other                                                 => fail(other.map(_.show).mkString)
+    }
+    assert(
+      store.lane.cases.nonEmpty && store.lane.cases.forall(_.instance.matches(raw"@!P\d STG.*")),
+      store.lane.cases
+    )
+  }
+
+  test("what is refused with no guard is refused under one for the same reason") {
+    Vec(
+      "BRA 0x20"                     -> "has no rendering: lowers to Branch, with no staged semantics",
+      "CALL.REL.NOINC 0x10"          -> "has no rendering: lowers to Branch, with no staged semantics",
+      "RET.REL.NODEC R20, 0x0"       -> "has no rendering: lowers to Branch, with no staged semantics",
+      "BSSY B0, 0x20"                -> "has no rendering: lowers to Convergence, with no staged semantics",
+      "BSYNC B0"                     -> "has no rendering: lowers to Convergence, with no staged semantics",
+      "EXIT"                         -> "has no rendering: lowers to Return, with no staged semantics",
+      "LDS R5, [R2]"                 -> "is refused: Memory.loadShared is not a plain memory access",
+      "UMOV UR4, 0x1"                -> "is refused: Warp.leader is not a plain memory access",
+      "LDG.E.64 R4, [R2.64]"         -> "is refused: Memory.loadGlobal is not a plain memory access",
+      "LDC R5, c[0x3][R2]"           -> "reads a constant bank at an offset a register holds",
+      "IADD3 R1, P1, P2, R2, R3, R4" -> "has no checked case of"
+    ).foreach { (text, reason) =>
+      assert(written(text).left.exists(_.contains(reason)), written(text))
+      assert(written(s"@P0 $text").left.exists(_.contains(reason)), written(s"@P0 $text"))
+      assert(written(s"@!P0 $text").left.exists(_.contains(reason)), written(s"@!P0 $text"))
+    }
+  }
+
+  test("a guarded barrier, which lowers to a branch over its body, is refused") {
+    assertEquals(
+      written("@P0 BAR.SYNC 0x0"),
+      Left("@P0 BAR.SYNC 0x0 has no rendering: lowers to Branch, with no staged semantics")
+    )
   }
 
   test("every instruction of the kernel is admitted or refused with a reason") {

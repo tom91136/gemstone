@@ -100,16 +100,23 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
     found <- lowered.getOrElseUpdate((selected.sm, instance), lower(selected.sm, instance, lookup.operands))
       .toRight(s"$instance does not lower on ${selected.name}")
     lowering = found.lowering
-    bank     = SASSConstantBank(
+    steps    = lowering.steps.map(_.instruction)
+    product  = NvidiaWarpgroups.product(steps).nonEmpty || NvidiaMatrices.product(steps).nonEmpty
+    _ <- Either.cond(
+      !product || lowering.steps.forall(_.predication.isEmpty),
+      (),
+      s"$instance is a product under a predicate, which the reference runs with none"
+    )
+    bank = SASSConstantBank(
       harness,
       found.bank,
       lookup.constants.flatMap((binding, offset) => offsets.get(binding).map(offset -> _))
     )
-    values <- NvidiaWarpgroups.product(lowering.steps).fold(
-      NvidiaMatrices.product(lowering.steps).fold(single(lowering, parameters, inputs, results, bank))(multiply =>
+    values <- NvidiaWarpgroups.product(steps).fold(
+      NvidiaMatrices.product(steps).fold(single(lowering, parameters, inputs, results, bank))(multiply =>
         NvidiaMatrices.run(
           lowering.prologue,
-          lowering.steps,
+          steps,
           lowering.registerCount,
           lowering.predicateCount,
           multiply,
@@ -123,7 +130,7 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
     )(warpgroup =>
       NvidiaWarpgroups.run(
         lowering.prologue,
-        lowering.steps,
+        steps,
         lowering.registerCount,
         lowering.predicateCount,
         warpgroup,

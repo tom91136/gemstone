@@ -36,12 +36,12 @@ object NvidiaReference {
 
   private def immediate(value: Long): VMIR.Value = VMIR.Value.Immediate(value)
 
-  /** `steps` after `prologue` on one lane, with `inputs` set before and the values of `outputs` after, or why they do
-    * not execute.
+  /** `steps`, each under its predicate, after `prologue` on one lane, with `inputs` set before and the values of
+    * `outputs` after, or why they do not execute.
     */
   def run(
       prologue: Vec[VMIR.Instruction],
-      steps: Vec[VMIR.Instruction],
+      steps: Vec[VMIR.PredicatedInstruction],
       registerCount: Int >= 0,
       predicateCount: Int >= 0,
       inputs: Vec[(Slot, Type, Long)],
@@ -117,8 +117,8 @@ object NvidiaReference {
         case other => (other, Vec.empty[VMIR.Instruction])
       }
     }
-    val instructions = (prologue ++ set ++ steps ++ read.flatMap(_._2) :+ VMIR.Instruction.Return)
-      .map(VMIR.PredicatedInstruction(_, None))
+    val instructions = (prologue ++ set).map(VMIR.PredicatedInstruction(_, None)) ++ steps ++
+      (read.flatMap(_._2) :+ VMIR.Instruction.Return).map(VMIR.PredicatedInstruction(_, None))
     NvidiaHarness.run(instructions, (registerCount.raw + scratch.size).unsafe[Int >= 0], predicateCount, 1, memory) {
       view =>
         read.zip(outputs).map { case ((slot, _), (_, tpe)) =>

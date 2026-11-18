@@ -134,7 +134,7 @@ object InstructionSemantics {
     lowering(instruction, registers).flatMap(lowered =>
       StepRenderer.definition(
         StepRenderer.Spec(mnemonic, registers.map(_.name), Vec.empty),
-        lowered.steps,
+        lowered.steps.map(VMIR.PredicatedInstruction(_, None)),
         lowered.names
       )
     )

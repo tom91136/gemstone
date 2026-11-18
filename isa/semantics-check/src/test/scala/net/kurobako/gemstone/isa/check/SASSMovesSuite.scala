@@ -31,6 +31,15 @@ class SASSMovesSuite extends Suite {
       |EXIT""".stripMargin
   )
 
+  private lazy val guardedMemoryKernel: Harness.Kernel = Harness.program(
+    89,
+    """ISETP.GT.U32.AND P0, PT, R0, 0x10, PT
+      |@P0 LDG.E R5, [R2.64]
+      |IADD3 R4, R5, 0x1, RZ
+      |@!P0 STG.E [R2.64], R4
+      |EXIT""".stripMargin
+  )
+
   private type Sample = (
       name: String,
       module: Cubin.Module,
@@ -97,6 +106,10 @@ class SASSMovesSuite extends Suite {
     samples.map(sample => sample -> sample.moves.propose(seed, limit))
 
   private lazy val first = proposed(1)
+
+  private lazy val guardedMemory: Vec[(Sample, Vec[SASSMoves.Candidate])] =
+    samplesOf("guarded memory", guardedMemoryKernel, Vec.empty, _ => true)
+      .map(sample => sample -> sample.moves.propose(1, limit))
 
   private def all: Vec[SASSMoves.Candidate] = first.flatMap(_._2)
 
@@ -216,6 +229,45 @@ class SASSMovesSuite extends Suite {
         }
       }
     }
+  }
+
+  private def source(sample: Sample): Vec[DecodedInstruction] =
+    analysed(sample.module, sample.decoded, sample.function)._3.slice(sample.window.first, sample.window.last + 1)
+
+  test("every move keeps the guard of the instruction it changes or copies, and none guards another") {
+    val guarded = (first ++ guardedMemory).map((sample, candidates) => (sample, candidates, source(sample)))
+      .filter((_, _, original) => original.exists(_.guard.nonEmpty))
+    assertEquals(guarded.map(_._1.name).distinct, Vec("predicated", "guarded memory"))
+    assertEquals(guarded.flatMap(_._2).map(_.kind).toSet, SASSMoves.Kind.values.toSet)
+    val changed = guarded.flatMap { (sample, candidates, original) =>
+      val held = original.flatMap(_.guard)
+      val own  = held.toSet
+      val text = original.map(instruction => render(instruction.operation)).toSet
+      candidates.flatMap { candidate =>
+        val kept = candidate.instructions.flatMap(_.guard)
+        candidate.kind match {
+          case SASSMoves.Kind.Delete =>
+            assert(kept.forall(own) && held.size - kept.size <= 1, clue(sample, candidate))
+          case SASSMoves.Kind.Insert =>
+            assert(kept.forall(own) && kept.size - held.size <= 1, clue(sample, candidate))
+          case _ => assertEquals(kept, held, clue(sample, candidate))
+        }
+        candidate.instructions.filter(_.guard.nonEmpty).map(instruction => render(instruction.operation))
+          .filterNot(text)
+      }
+    }
+    assert(changed.nonEmpty, "no move changed or copied a guarded instruction")
+  }
+
+  test("a guarded load or store stays as it is, guard and all") {
+    val held = guardedMemory.map((sample, candidates) => (sample, candidates, accesses(source(sample))))
+    assert(held.exists((_, candidates, kept) => kept.exists(_.guard.nonEmpty) && candidates.nonEmpty), held.map(_._3))
+    held.foreach((sample, candidates, kept) =>
+      candidates.foreach { candidate =>
+        assertEquals(accesses(candidate.instructions), kept, clue(sample, candidate))
+        assert(SASSWindows.admitted(targetName, candidate.instructions).forall(identity), clue(sample, candidate))
+      }
+    )
   }
 
   private val memory = Set("LDG", "STG", "LDGSTS")

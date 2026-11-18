@@ -3,6 +3,8 @@ package net.kurobako.gemstone.isa.check
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.flow.ControlFlowGraph
+import net.kurobako.gemstone.flow.Window
+import net.kurobako.gemstone.flow.Windows
 import net.kurobako.gemstone.isa.sass.DecodedInstruction
 import net.kurobako.gemstone.isa.sass.Harness
 import net.kurobako.gemstone.isa.sass.LoadedProgram
@@ -110,13 +112,42 @@ class SASSWindowsSuite extends Suite {
     assertEquals(
       windows.map(window => (window.first, window.last, window.liveIn, window.liveOut)),
       Vec(
-        (0, 1, Set("R0", "R1", "R3"), Set("R2", "R3", "P0")),
-        (3, 3, Set("R2"), Set.empty[String])
+        (0, 2, Set("R0", "R1", "R3"), Set("R2")),
+        (1, 3, Set("R0", "R2", "R3"), Set.empty[String])
       )
     )
-    assert(SASSForms.of("sm_89", instructions(2).operation).left.exists(_.contains("has no rendering")))
-    assert(windows.head.liveOut.contains("R2"), "the guarded write kept R2 live")
+    assert(SASSForms.of("sm_89", instructions(2).operation).isRight, "the guarded write is admitted")
+    assert(windows.last.liveIn.contains("R2"), "the guarded write kept R2 live")
     assertEquals(uses(2).reads.toSet, Set("P0", "R2", "R3"))
+  }
+
+  test("a compiled division's guarded corrections sit inside its windows") {
+    val kernel                      = Harness.load(89, Fixture.listing("divideSm89"), "divide_probe")
+    val (graph, uses, instructions) = coded(kernel, Vec(8, 4, 4))
+    val kept                        = SASSWindows.admitted("sm_89", instructions)
+    val guarded                     = Vec.from(instructions.indices).filter(instructions(_).guard.nonEmpty)
+    assertEquals(guarded.map(loop), Vec(0x120, 0x130, 0x180, 0x1b0, 0x1c0))
+    assert(
+      guarded.forall(kept),
+      guarded.filterNot(kept).map(index => SASSForms.of("sm_89", instructions(index).operation))
+    )
+    def covered(windows: Vec[Window]): Int = windows.flatMap(window => window.first to window.last).distinct.size
+    val without                            = Windows.of(
+      graph,
+      SASSWindows.liveness(graph, uses),
+      index => !kept(index) || instructions(index).guard.nonEmpty,
+      8
+    )
+    assertEquals((without.size, covered(without)), (11, 26))
+    val windows = SASSWindows.of(graph, uses, instructions, "sm_89", 8)
+    assertEquals((windows.size, covered(windows), instructions.size), (23, 31, 34))
+    assertEquals(
+      windows.map(window => (loop(window.first), loop(window.last))).filter((first, _) => first >= 0x100),
+      Vec.tabulate(10)(index => (0x100 + 16 * index, 0x170 + 16 * index))
+    )
+    val corrected = windows.find(window => loop(window.first) == 0x110).getOrElse(fail("no window at 0x110"))
+    assertEquals(corrected.liveIn, Set("R0", "R2", "R3", "R5", "R7"))
+    assert(corrected.liveOut.contains("R3") && corrected.liveOut.contains("P1"), corrected.liveOut)
   }
 
   test("the cubin path gives the same windows as its decoded instructions") {

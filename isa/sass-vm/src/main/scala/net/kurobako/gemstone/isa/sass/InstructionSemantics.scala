@@ -26,24 +26,29 @@ object InstructionSemantics {
   /** The bytes of the constant bank. */
   private[isa] val ConstantBytes: Int >= 0 = 0x10000
 
-  /** The steps an instruction lowers to after the kernel's `prologue`, and the register and predicate slots each name
-    * stands for: one slot, or the low then the high register of a pair. `rendered` is the steps with each such pair
-    * joined into one value, and `naming` names and types what they use.
+  /** The steps an instruction lowers to after the kernel's `prologue`, each under its predicate, and the register and
+    * predicate slots each name stands for: one slot, or the low then the high register of a pair. `rendered` is the
+    * steps with each such pair joined into one value, and `naming` names and types what they use.
     */
   // the semantics-check reference runs the lowering the rendered semantics describe
   @SuppressWarnings(Array("bonsai:test-only-member"))
   private[isa] case class SASSLowering(
       prologue: Vec[VMIR.Instruction],
-      steps: Vec[VMIR.Instruction],
+      steps: Vec[VMIR.PredicatedInstruction],
       registerCount: Int >= 0,
       predicateCount: Int >= 0,
       registers: Map[String, Vec[VMIR.Register]],
       predicates: Map[String, VMIR.Predicate],
-      rendered: Vec[VMIR.Instruction],
+      rendered: Vec[VMIR.PredicatedInstruction],
       naming: SlotNaming,
-      machine: Vec[VMIR.PredicatedInstruction],
       state: Set[String]
   )
+
+  /** Whether a step runs under the predicate its instruction's guard is copied to. Nothing reads that predicate after
+    * the instruction, so it has no name.
+    */
+  private def guarded(step: VMIR.PredicatedInstruction): Boolean =
+    step.predication.exists(held => held.predicate == VMRegisters.Predicate.Guard.slot && !held.negated)
 
   /** Names registers by their spelling, or the operand `operands` binds it to, and constant operands by the field
     * `constants` binds their offset to; `pairs` maps the slot each pair renders as to its name. Under `barriers`, the
@@ -71,7 +76,8 @@ object InstructionSemantics {
         ))
 
     def predicate(slot: VMIR.Predicate): Option[String] =
-      VMRegisters.spelling(slot).map(spelling => operands.getOrElse(spelling, spelling))
+      Option.unless(slot == VMRegisters.Predicate.Guard.slot)(VMRegisters.spelling(slot)).flatten
+        .map(spelling => operands.getOrElse(spelling, spelling))
 
     def resolve(slot: Slot): Vec[Naming.Name] = (slot match {
       case Slot.Gpr(register) =>
@@ -102,25 +108,23 @@ object InstructionSemantics {
   private def parameterBase(sm: Int >= 35): Int >= 0 =
     (if (sm < 70) 0x140 else if (sm < 90) 0x160 else if (sm < 100) 0x210 else 0x380).unsafe[Int >= 0]
 
-  /** The lowered instructions attributed to the SASS instruction at `at`, or `None` when any is predicated, and whether
-    * it branches.
+  /** The lowered instructions attributed to the SASS instruction at `at`, each with its predicate, and whether it
+    * branches.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def attributed(statements: Vec[VMAssembler.Statement], at: Long)
-      : (steps: Option[Vec[VMIR.Instruction]], branches: Boolean) = {
-    val found    = mutable.ArrayBuffer.empty[VMIR.Instruction]
+      : (steps: Vec[VMIR.PredicatedInstruction], branches: Boolean) = {
+    val found    = mutable.ArrayBuffer.empty[VMIR.PredicatedInstruction]
     var current  = Option.empty[Long]
-    var complete = true
     var branches = false
     statements.foreach {
-      case VMAssembler.Statement.Source(address, _, _)                              => current = Some(address)
-      case VMAssembler.Statement.Execute(instruction, None) if current.contains(at) =>
-        if (complete) found.append(instruction)
-      case VMAssembler.Statement.Execute(_, Some(_)) if current.contains(at) => complete = false
-      case VMAssembler.Statement.Branch(_, _) if current.contains(at)        => branches = true
-      case _                                                                 => ()
+      case VMAssembler.Statement.Source(address, _, _)                                     => current = Some(address)
+      case VMAssembler.Statement.Execute(instruction, predication) if current.contains(at) =>
+        found.append(VMIR.PredicatedInstruction(instruction, predication))
+      case VMAssembler.Statement.Branch(_, _) if current.contains(at) => branches = true
+      case _                                                          => ()
     }
-    (Option.when(complete)(found.toVec), branches)
+    (found.toVec, branches)
   }
 
   /** Whether steps that accompany branches only select the target or leave control-stack tokens: an indirect branch's
@@ -238,28 +242,32 @@ object InstructionSemantics {
   ): Either[Unrendered, SASSLowering] =
     for {
       at <- placed(sm, instruction)
-      found = attributed(at.statements, at.position * 16L)
-      steps <- found.steps match {
-        case steps if found.branches && steps.forall(transfers(_)) => Left(Unrendered.Unstaged(Vec("Branch")))
-        case Some(steps) if steps.nonEmpty                         => Right(steps)
-        case Some(_)                                               => Left(Unrendered.Unstaged(Vec("NoOp")))
-        case None => Left(Unrendered.Rejected(s"$instruction lowers to predicated steps"))
-      }
-    } yield lowering(at, steps, None, operands, constants)
+      found      = attributed(at.statements, at.position * 16L)
+      predicated = found.steps.filter(_.predication.nonEmpty)
+      steps <-
+        if (
+          found.branches &&
+          (predicated.nonEmpty || instruction.guard.nonEmpty || transfers(found.steps.map(_.instruction)))
+        ) Left(Unrendered.Unstaged(Vec("Branch")))
+        else if (!predicated.forall(guarded(_)))
+          Left(Unrendered.Rejected(s"$instruction lowers to predicated steps"))
+        else if (found.steps.isEmpty) Left(Unrendered.Unstaged(Vec("NoOp")))
+        else Right(found.steps)
+    } yield lowering(at, steps, false, operands, constants)
 
-  /** `steps` as lowered in `placed`, with the registers and predicates they name as `lowered` names them. The machine
-    * path also gives the program that renders machine semantics, and names the convergence barriers.
+  /** `predicated` as lowered in `placed`, with the registers and predicates they name as `lowered` names them. The
+    * machine path names the convergence barriers under `barriers`.
     */
   private def lowering(
       placed: Placed,
-      steps: Vec[VMIR.Instruction],
-      machine: Option[Vec[VMIR.PredicatedInstruction]],
+      predicated: Vec[VMIR.PredicatedInstruction],
+      barriers: Boolean,
       operands: Map[String, String],
       constants: Map[Long, (name: String, tpe: Type)]
   ): SASSLowering = {
-    val layout   = VMRegisters.Layout.of(placed.module.kernels.head, Vec(placed.function))
-    val barriers = machine.isDefined
-    val general  = (0 until layout.generalCount + layout.uniformCount).map(index =>
+    val layout  = VMRegisters.Layout.of(placed.module.kernels.head, Vec(placed.function))
+    val steps   = predicated.map(_.instruction)
+    val general = (0 until layout.generalCount + layout.uniformCount).map(index =>
       VMIR.Register(index.unsafe[Int >= 0])
     )
     val predicates      = (0 until VMRegisters.PredicateCount).map(index => VMIR.Predicate(index.unsafe[Int >= 0]))
@@ -274,15 +282,14 @@ object InstructionSemantics {
         case VMAssembler.Statement.Source(_, _, _) => false
         case _                                     => true
       }.collect { case VMAssembler.Statement.Execute(initial, None) => initial },
-      steps,
+      predicated,
       placed.registerCount,
       VMRegisters.PredicateCount,
       general.flatMap(slot => spelt.name(slot).map(_ -> Vec(slot))).toMap ++
         pairs.map((low, name) => name -> Vec(low, VMIR.Register((low.raw + 1).unsafe[Int >= 0]))),
       predicates.flatMap(slot => spelt.predicate(slot).map(_ -> slot)).toMap,
-      joins(steps, pairs.keySet),
+      predicated.map(step => step.copy(instruction = join(step.instruction, pairs.keySet))),
       naming,
-      machine.toVec.flatten.map(step => step.copy(instruction = join(step.instruction, pairs.keySet))),
       state
     )
   }
@@ -373,11 +380,10 @@ object InstructionSemantics {
       requirements: Vec[Term]
   ): Vec[Either[Unrendered, Definition]] =
     placed(sm, instruction).map { at =>
-      val steps   = program(at)
-      val lowered = lowering(at, steps.map(_.instruction), Some(steps), operands, constants)
+      val lowered = lowering(at, program(at), true, operands, constants)
       StepRenderer.machine(
         StepRenderer.Spec(mnemonic, order, requirements),
-        lowered.machine,
+        lowered.rendered,
         Names(lowered.naming),
         lowered.state
       )

@@ -56,6 +56,51 @@ class FormProofSuite extends Suite {
     }
   }
 
+  private def proved(result: Result): Proof.Report = result match {
+    case Result.Proved(report) => report
+    case other                 => fail(s"expected a proof, got $other")
+  }
+
+  private def rejected(result: Result): Unit = result match {
+    case Result.Rejected(_, _) => ()
+    case other                 => fail(s"expected a refutation, got $other")
+  }
+
+  private val guarded = "@P0 MOV R2, R3"
+
+  test("a guarded write equals its unguarded form where its guard holds, and nothing where it fails") {
+    installed()
+    val holds  = "ISETP.EQ.U32.AND P0, PT, R1, R1, PT"
+    val report = proved(prove(SASSReference, nvidia(holds, guarded), nvidia(holds, "MOV R2, R3"), "R2", "P0"))
+    assert(report.filtered > 0)
+    val cover = report.instructions.find(_.instance == guarded).getOrElse(fail(report.toString))
+    assert(cover.checked.nonEmpty && cover.checked.forall(_.matches(raw"@P\d MOV .*")), cover)
+    val _ = proved(prove(SASSReference, nvidia(holds, "@!P0 MOV R2, R3"), nvidia(holds), "R2", "P0"))
+    rejected(prove(SASSReference, nvidia(guarded), nvidia("MOV R2, R3"), "R2"))
+    rejected(prove(SASSReference, nvidia(holds, "@!P0 MOV R2, R3"), nvidia(holds, "MOV R2, R3"), "R2", "P0"))
+  }
+
+  test("deleting a guarded write is rejected when its destination is live out, and proved when it is not") {
+    installed()
+    val kept = "IADD3 R4, R5, R6, RZ"
+    rejected(prove(SASSReference, nvidia(guarded, kept), nvidia(kept), "R2", "R4"))
+    val _ = proved(prove(SASSReference, nvidia(guarded, kept), nvidia(kept), "R4"))
+  }
+
+  test("two writes under complementary guards of one predicate equal one select") {
+    installed()
+    val either = nvidia(guarded, "@!P0 MOV R2, R4")
+    val _      = proved(prove(SASSReference, either, nvidia("SEL R2, R3, R4, P0"), "R2"))
+    rejected(prove(SASSReference, either, nvidia("SEL R2, R4, R3, P0"), "R2"))
+  }
+
+  test("a guard is read before the instruction writes its predicate") {
+    installed()
+    val both = "ISETP.EQ.U32.AND P0, PT, R1, R2, P0"
+    val _    = proved(prove(SASSReference, nvidia("@P0 ISETP.EQ.U32.AND P0, PT, R1, R2, PT"), nvidia(both), "P0"))
+    rejected(prove(SASSReference, nvidia("@!P0 ISETP.EQ.U32.AND P0, PT, R1, R2, PT"), nvidia(both), "P0"))
+  }
+
   test("a sum with a constant is proved equal to the constant read and then added") {
     installed()
     val left  = nvidia("IADD3 R4, R5, c[0][0x160], RZ")

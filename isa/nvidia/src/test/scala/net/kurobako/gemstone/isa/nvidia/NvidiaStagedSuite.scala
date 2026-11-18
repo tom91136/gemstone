@@ -36,7 +36,7 @@ class NvidiaStagedSuite extends Suite {
   private def show(instruction: Instruction)(using munit.Location): String =
     StepRenderer.definition(
       StepRenderer.Spec("op", Vec("d", "p", "a", "b", "c", "e", "q", "r"), Vec.empty),
-      Vec(instruction),
+      Vec(PredicatedInstruction(instruction, None)),
       names
     )
       .fold(failure => fail(failure.message), ScalaBackend.show(_))
@@ -371,7 +371,7 @@ class NvidiaStagedSuite extends Suite {
           Vec.fill(c.registers)(rc),
           Matrix.accumulation(89, shape, operand, result, ConversionRounding.RN),
           saturate
-        ))),
+        ))).map(PredicatedInstruction(_, None)),
         names
       ).fold(failure => fail(failure.message), ScalaBackend.show(_))
     }

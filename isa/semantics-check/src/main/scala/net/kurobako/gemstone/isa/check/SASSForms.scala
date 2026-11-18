@@ -17,7 +17,11 @@ import scala.reflect.ClassTag
 
 /** A SASS instruction as the [[Form]] an equivalence check takes, or why it takes none. The definition is the one the
   * instruction's own operands lower to, each register and predicate under its spelling, a 64-bit pair binding both its
-  * registers. The cases behind it are those of its mnemonic whose instance has operands of the same kinds.
+  * registers. The cases behind it are those of its mnemonic whose instance has operands of the same kinds, under a
+  * guard of the same kind where it has one.
+  *
+  * A guarded instruction runs where its guard holds: elsewhere each register and predicate it writes keeps its value,
+  * so its definition reads them, and it makes no memory access.
   *
   * A constant-bank operand reads its own bank at its own offset. The lane checks such forms in
   * [[InstructionSemantics.ConstantBank]], the bank the rendering binds, so the instruction renders and executes with
@@ -95,24 +99,43 @@ object SASSForms {
     instruction.operands.map(kind(_))
   }
 
-  private def parsed(text: String): Option[Instruction] = Parser.parseProgram(s"$text;").toOption.flatMap(
+  /** The kind of an instruction's guard, its bank and sense as written, or nothing without one. */
+  def guard(instruction: Instruction): Option[String] = instruction.guard.map { case Instruction.Guard(predicate) =>
+    s"@${if (predicate.negated) "!" else ""}${if (predicate.uniform) "UP" else "P"}"
+  }
+
+  def parsed(text: String): Option[Instruction] = Parser.parseProgram(s"$text;").toOption.flatMap(
     _.statements.collectFirst { case Program.Statement.Operation(operation, _, _) => operation }
   )
 
-  private val lanes = ConcurrentHashMap[(String, String), Vec[(kinds: Vec[String], kase: Case)]]()
+  private val lanes =
+    ConcurrentHashMap[(String, String), Vec[(kinds: Vec[String], described: SASSGenerator.Described)]]()
 
-  /** The checked cases of `mnemonic` on `target`, each with the kinds of its instance's operands. */
-  private def lane(target: String, mnemonic: String): Vec[(kinds: Vec[String], kase: Case)] = lanes.computeIfAbsent(
+  /** The checked cases of `mnemonic` on `target` with no guard, each with the kinds of its instance's operands. */
+  private def lane(target: String, mnemonic: String)
+      : Vec[(kinds: Vec[String], described: SASSGenerator.Described)] = lanes.computeIfAbsent(
     (target, mnemonic),
     _ =>
-      SASSGenerator.describe(target, _ == mnemonic)
-        .flatMap(kase => parsed(kase.instance).filter(_.mnemonic.raw == mnemonic).map(found => (kinds(found), kase)))
+      SASSGenerator.plain(target, _ == mnemonic).flatMap(described =>
+        parsed(described.kase.instance).filter(_.mnemonic.raw == mnemonic).map(found => (kinds(found), described))
+      )
   )
 
-  /** The checked cases of the form of `instruction` on `target`. */
+  private val guardedLanes = ConcurrentHashMap[(String, String, Vec[String], String), Option[Case]]()
+
+  /** The checked cases of the form of `instruction` on `target`: under a guard, the case the lane checks its form under
+    * a guard of that kind, where it checks one.
+    */
   def checked(target: String, instruction: Instruction): Vec[Case] = {
-    val own = kinds(instruction)
-    lane(target, instruction.mnemonic.raw).collect { case (kinds, kase) if kinds == own => kase }
+    val own      = kinds(instruction)
+    val mnemonic = instruction.mnemonic.raw
+    val form     = lane(target, mnemonic).collect { case (kinds, described) if kinds == own => described }
+    guard(instruction).fold(form.map(_.kase))(kind =>
+      Vec.from(guardedLanes.computeIfAbsent(
+        (target, mnemonic, own, kind),
+        _ => SASSGenerator.guards.find(_ == kind).flatMap(SASSGenerator.guarded(target, form, _))
+      ))
+    )
   }
 
   /** The units a register or predicate named `name` and of `tpe` is held in. */
@@ -161,7 +184,8 @@ object SASSForms {
     _ <- Either.cond(
       cases.nonEmpty,
       (),
-      s"$text has no checked case of ${instruction.mnemonic.raw} with operands ${kinds(instruction).mkString(", ")}"
+      s"$text has no checked case of ${guard(instruction).fold("")(kind => s"$kind ")}${instruction.mnemonic.raw} " +
+        s"with operands ${kinds(instruction).mkString(", ")}"
     )
   } yield Form(kase, parameters.toMap, results.toMap, Form.Lane(cases))
 }

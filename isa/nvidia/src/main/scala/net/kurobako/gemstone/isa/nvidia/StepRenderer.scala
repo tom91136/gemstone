@@ -25,13 +25,16 @@ private[isa] object StepRenderer {
   case class Spec(name: String, order: Vec[String], requirements: Vec[Term])
 
   /** The instructions' semantics as the definition `spec` names. Operands and state are declared with the types `names`
-    * gives them, those in `spec.order` first and in that order.
+    * gives them, those in `spec.order` first and in that order. An instruction under a predicate runs where it holds:
+    * elsewhere it writes nothing and makes no access.
     */
-  def definition(spec: Spec, instructions: Vec[Instruction], names: Names): Either[Unrendered, Definition] = {
+  def definition(spec: Spec, instructions: Vec[PredicatedInstruction], names: Names): Either[Unrendered, Definition] = {
     val sinks    = StepRenderer(names)
-    val rendered = instructions.map(instruction =>
-      NvidiaStaged.staged(Render, instruction)(sinks)(None).toRight(instruction.productPrefix)
-    )
+    val rendered = instructions.map { case PredicatedInstruction(instruction, predication) =>
+      NvidiaStaged.staged(Render, instruction)(sinks)(None).toRight(instruction.productPrefix).map(steps =>
+        predication.fold(steps)(held => under(guardTerm(names, held), steps))
+      )
+    }
     rendered.collect { case Left(unstaged) => unstaged }.distinct match {
       case Vec() =>
         Definition.from(
@@ -73,7 +76,7 @@ private[isa] object StepRenderer {
             case (Some(steps), None)                                   => lane += steps
             case (Some(steps), Some(condition)) if storesMemory(steps) =>
               guardedOut = true
-              lane += Term.Steps(Term.Step("machine", Term.When(condition, steps.all)))
+              lane += under(condition, steps)
             case _ => skipped ||= predication.nonEmpty
           }
       }
@@ -83,6 +86,10 @@ private[isa] object StepRenderer {
       Vec(Definition.from(steps, spec.name, names, spec.order, spec.requirements).left.map(Unrendered.Undefined(_)))
     else Vec.from(defined)
   }
+
+  /** `steps` run where `condition` holds. */
+  private def under(condition: Term, steps: Term.Steps): Term.Steps =
+    Term.Steps(Term.Step("machine", Term.When(condition, steps.all)))
 
   private def storesMemory(steps: Term.Steps): Boolean = steps.all.exists(_.name == Machine.memory)
 

@@ -174,6 +174,23 @@ class MemoryProofSuite extends Suite {
     proved(prove(SASSReference, nvidia(first, load), nvidia(load, first), "R7"), "LDG")
   }
 
+  test("a guarded SASS store is not its unguarded form, and stores under complementary guards are one store") {
+    installed()
+    rejected(prove(SASSReference, nvidia("@P0 STG.E [R2.64], R5"), nvidia(first)))
+    proved(prove(SASSReference, nvidia("@P0 STG.E [R2.64], R5", "@!P0 STG.E [R2.64], R5"), nvidia(first)), "@P")
+    rejected(prove(SASSReference, nvidia("@P0 STG.E [R2.64], R5", "@!P0 STG.E [R2.64], R6"), nvidia(first)))
+  }
+
+  test("a guarded SASS load reads nothing where its guard fails") {
+    installed()
+    val load = "LDG.E R7, [R2.64]"
+    rejected(prove(SASSReference, nvidia(s"@P0 $load"), nvidia(load), "R7"))
+    proved(prove(SASSReference, nvidia(s"@P0 $load", s"@!P0 $load"), nvidia(load), "R7"), "@!P")
+    val fails = "ISETP.NE.U32.AND P0, PT, R1, R1, PT"
+    proved(prove(SASSReference, nvidia(fails, s"@P0 $load"), nvidia(fails), "R7", "P0"), "@P")
+    rejected(prove(SASSReference, nvidia(fails, s"@!P0 $load"), nvidia(fails), "R7", "P0"))
+  }
+
   private def refusal(text: String): String = {
     val parsed = sass.asm.Parser.parseProgram(s"$text;").toOption.flatMap(_.statements.collectFirst {
       case sass.asm.Program.Statement.Operation(operation, _, _) => operation

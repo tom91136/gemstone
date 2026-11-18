@@ -94,7 +94,7 @@ object PTXReference extends Reference[NvidiaHarness, Lookup.Registers] {
       targets <- NvidiaReference.slots(results.map(_._1), locate)
       values  <- NvidiaReference.run(
         Vec.empty,
-        found.steps,
+        found.steps.map(VMIR.PredicatedInstruction(_, None)),
         found.routine.registerCount,
         found.routine.predicateCount,
         sources.zip(parameters).zip(inputs).map { case ((slot, (_, tpe)), value) => (slot, tpe, value) },
