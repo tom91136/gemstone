@@ -32,8 +32,9 @@ object AMDGPUWindows {
   def admitted(target: String, names: Set[String]): Map[String, Boolean] = {
     val unknown = names.filterNot(name => verdicts.containsKey((target, name)))
     if (unknown.nonEmpty) {
-      val cases = AMDGPUGenerator.cases(unknown.map(Variant.replaceFirstIn(_, "")))
-        .filter(_.target.contains(target)).groupBy(kase => encoded(kase.instance))
+      val checked = AMDGPUGenerator.checked(target)
+      val cases   = AMDGPUGenerator.cases(unknown.map(Variant.replaceFirstIn(_, "")))
+        .filter(kase => checked.exists(kase.target.contains)).groupBy(kase => encoded(kase.instance))
       unknown.foreach(name => verdicts.put((target, name), cases.get(name).exists(_.forall(Rejection.of(_).isEmpty))))
     }
     names.map(name => name -> verdicts.get((target, name))).toMap

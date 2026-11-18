@@ -48,6 +48,21 @@ object WindowFixtures {
   def withCode(code: Vec[Byte]): Vec[Byte] =
     CodeObject.decode(vectorCopy).flatMap(_.replaceKernel(kernel.unsafe[NonEmpty[String]], code)).toOption.get.image
 
+  val calibrated = "gfx1036"
+
+  /** `search/fixtures.c` as `search/compile.sh` builds it for gfx1036. */
+  lazy val compiled: Vec[Byte] = {
+    val stream = getClass.getResourceAsStream("search/fixtures.gfx1036.hsaco")
+    try Vec.from(stream.readAllBytes())
+    finally stream.close()
+  }
+
+  /** The compiled object with `source` as its `window` kernel. */
+  def assembled(source: String): Vec[Byte] = {
+    val code = AMDGPUModel.assemble(source, Some(calibrated)).flatMap(Hex.parse(_)).toOption.get
+    CodeObject.decode(compiled).flatMap(_.replaceKernel("window", code)).toOption.get.image
+  }
+
   lazy val loop: Vec[Byte]  = patched(loopSource)
   lazy val state: Vec[Byte] = patched(stateSource)
 }

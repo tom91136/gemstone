@@ -105,4 +105,18 @@ class AMDGPUMovesSuite extends Suite {
     val kinds = first.flatMap(_._2.map(_.kind)).toSet
     assertEquals(kinds, AMDGPUMoves.Kind.values.toSet)
   }
+
+  test("a gfx1036 window proposes moves that assemble for gfx1036") {
+    val calibrated = WindowFixtures.calibrated
+    val found      = for {
+      windows <- AMDGPUWindows.of(WindowFixtures.compiled, "ctl_f4_dead", calibrated)
+      moves   <- AMDGPUMoves.of(WindowFixtures.compiled, "ctl_f4_dead", calibrated, windows.last)
+    } yield moves.propose(1, limit)
+    val candidates = found.fold(fail(_), identity)
+    assert(candidates.exists(_.instructions.nonEmpty), candidates)
+    candidates.filter(_.instructions.nonEmpty).foreach { candidate =>
+      val source = text(candidate).mkString("", "\n", "\n")
+      assert(AMDGPUModel.assemble(source, Some(calibrated)).isRight, source)
+    }
+  }
 }

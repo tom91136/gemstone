@@ -2,7 +2,10 @@ package net.kurobako.gemstone.profile
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.*
+import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
+import net.kurobako.gemstone.vm.LaunchObserver.*
 
 /** The loop bodies of the hardware validation kernels as compiled for each card: SASS from nvcc 13.3 for sm_89 and
   * AMDGPU code from hipcc 7.2 (clang 22) for gfx1036. Pipe, schedule and text are what the VM profiles on the compiled
@@ -42,6 +45,63 @@ object HardwareLoops {
 
   private def row(address: Long, text: String, pipe: String, reads: String, writes: String, schedule: Schedule): Row =
     row(text, pipe, reads, writes, schedule).copy(address = Some(address))
+
+  private val iterations = 4
+
+  def loads(row: Row): Boolean = row.text.startsWith("LDG") || row.text.startsWith("global_load")
+
+  /** The stream of `warps` warps per workgroup running the loop `rows` four times between an entry and an exit
+    * instruction, `branchBytes` away from the loop when the rows carry addresses.
+    */
+  def stream(rows: Vec[Row], warps: Int, shared: Long, branchBytes: Long): Either[String, ProfileStream] = {
+    val last  = rows.size + 1
+    val graph = ControlFlowGraph(
+      Vec(Some(Vec(1))) ++
+        Vec.tabulate(rows.size)(i => if i == rows.size - 1 then Some(Vec(1, last)) else Some(Vec(i + 2))) :+
+        None,
+      0
+    )
+    val entry   = Row("entry", None, Vec.empty, Vec.empty, Schedule.Estimated(1.unsafe[Int >= 0]))
+    val exit    = Row("exit", None, Vec.empty, Vec.empty, Schedule.Estimated(1.unsafe[Int >= 0]))
+    val all     = entry +: rows :+ exit
+    val placed  = rows.flatMap(_.address)
+    val offsets =
+      if (placed.isEmpty) Right(Vec.tabulate(all.size)(i => 0x10L * (i + 1)))
+      else if (placed.size == rows.size) Right((placed.head - branchBytes) +: placed :+ (placed.last + branchBytes))
+      else Left(s"no address for ${rows.find(_.address.isEmpty).fold("")(_.text)}")
+    def static(offsets: Vec[Long]) = all.zipWithIndex.map { (row, index) =>
+      val accesses =
+        if (loads(row))
+          Vec.tabulate(32)(lane =>
+            StaticProfile.Access(
+              lane.unsafe,
+              Space.Global,
+              AccessKind.Read,
+              0x100000L + 0x1000L * index + 4L * lane,
+              4.unsafe
+            )
+          )
+        else Vec.empty[StaticProfile.Access]
+      StaticProfile.Row(
+        offsets(index),
+        row.text,
+        row.pipe,
+        Some(row.schedule),
+        RegisterUse(row.reads, row.writes),
+        accesses
+      )
+    }
+    val order = Vec(0) ++ Vec.fill(iterations)(Vec.tabulate(rows.size)(_ + 1)).flatten :+ last
+    offsets.flatMap(found =>
+      StaticProfile.stream(
+        "k",
+        graph,
+        static(found),
+        order,
+        KernelResources((32 * warps).unsafe, 32, None, shared.unsafe)
+      )
+    )
+  }
 
   val sm89: Map[String, Vec[Row]] = Map(
     "chain_ffma" -> Vec(

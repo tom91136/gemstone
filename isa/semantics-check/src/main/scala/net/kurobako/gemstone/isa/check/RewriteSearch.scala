@@ -10,9 +10,6 @@ import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.profile.Architecture
-import net.kurobako.gemstone.profile.Pipe
-import net.kurobako.gemstone.profile.PipelineSimulator
-import net.kurobako.gemstone.profile.ProfileReport
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.testing.Edges
 import net.kurobako.gemstone.vm.RegisterUse
@@ -40,8 +37,15 @@ object RewriteSearch {
       after: Measure,
       source: Architecture.Source,
       evidence: Proof.Report,
-      reason: String
-  )
+      reason: String,
+      shift: Int
+  ) {
+
+    /** `shift` is how many bytes the code after the window moves; the cycles do not include what that does to it. */
+    def line: String =
+      f"${after.cycles}%.2f from ${before.cycles}%.2f cycles (${source.kind}), shifts $shift bytes: " +
+        s"${rewrite.mkString("; ")} for ${original.mkString("; ")} ($reason)"
+  }
 
   case class Report(
       window: Window,
@@ -50,6 +54,7 @@ object RewriteSearch {
       evaluated: Int,
       candidates: Int,
       wrong: Int,
+      before: Measure,
       rewrites: Vec[Rewrite]
   )
 
@@ -65,9 +70,18 @@ object RewriteSearch {
   private val Register = raw"([sva])(\d+)".r
   private val Span     = raw"([sva])\[(\d+):(\d+)\]".r
 
-  def amdgpu(image: Vec[Byte], function: String, targetName: String, window: Window, config: Config = Config.default)
-      : Either[String, Report] =
-    search(image, function, targetName, window, config).flatMap(_.run())
+  def amdgpu(
+      image: Vec[Byte],
+      function: String,
+      targetName: String,
+      window: Window,
+      launch: AMDGPUBlockCost.Launch,
+      config: Config = Config.default
+  ): Either[String, Report] = for {
+    cost   <- AMDGPUBlockCost.of(image, function, targetName, launch)
+    ready  <- search(image, function, targetName, window, config)
+    report <- ready.run(cost)
+  } yield report
 
   def prove(image: Vec[Byte], function: String, targetName: String, window: Window, candidate: Vec[String])
       : Either[String, Proof.Result] =
@@ -81,10 +95,7 @@ object RewriteSearch {
         Vec(
           s"$head live-out=${window.liveOut.toVec.sorted.mkString(",")} candidates=${report.candidates} " +
             s"wrong=${report.wrong} rewrites=${report.rewrites.size}"
-        ) ++ report.rewrites.map(rewrite =>
-          f"[rewrite]   ${rewrite.after.cycles}%.2f from ${rewrite.before.cycles}%.2f " +
-            s"(${rewrite.source.kind}) ${rewrite.rewrite.mkString("; ")}"
-        )
+        ) ++ report.rewrites.map(rewrite => s"[rewrite]   ${rewrite.line}")
     }
   }
 
@@ -95,13 +106,12 @@ object RewriteSearch {
       window: Window,
       config: Config
   ): Either[String, Search] = for {
-    target       <- targetName.refine[Target].left.map(_.raw)
-    architecture <- Architecture.named(targetName).toRight(s"no pipeline model for $targetName")
-    found        <- AMDGPUModel.staticCode(image, function)
-    moves        <- AMDGPUMoves.of(image, function, targetName, window)
-    parsed       <- each(found._3.zip(found._2))((text, use) => instruction(text).map(_ -> use))
+    target <- targetName.refine[Target].left.map(_.raw)
+    found  <- AMDGPUModel.staticCode(image, function)
+    moves  <- AMDGPUMoves.of(image, function, targetName, window)
+    parsed <- each(found._3.zip(found._2))((text, use) => instruction(text).map(_ -> use))
     block = found._1.blocks(window.block)
-    ready <- Search.of(target, architecture, window, block, parsed, moves, config)
+    ready <- Search.of(target, window, block, parsed, moves, config)
   } yield ready
 
   private def instruction(text: String): Either[String, Instruction] =
@@ -114,14 +124,6 @@ object RewriteSearch {
     values.foldLeft[Either[String, Vec[B]]](Right(Vec.empty[B]))((found, value) =>
       found.flatMap(done => f(value).map(done :+ _))
     )
-
-  private def pipe(writes: String): Option[Pipe] =
-    if (writes.contains("WriteDouble")) Some(Pipe.Fp64)
-    else if (writes.contains("WriteQuarterRate32")) Some(Pipe.Mufu)
-    else if (writes.contains("Write32Bit") || writes.contains("WriteTrans32") || writes.contains("WriteFloatFMA"))
-      Some(Pipe.Fma)
-    else if (writes.contains("WriteIntMul")) Some(Pipe.Alu)
-    else None
 
   private def location(name: String): Boolean = name match {
     case Register(_, _) | Span(_, _, _) => true
@@ -145,7 +147,6 @@ object RewriteSearch {
 
   private final class Search(
       target: Target,
-      architecture: Architecture,
       window: Window,
       block: Block,
       parsed: Vec[(Instruction, RegisterUse)],
@@ -161,7 +162,6 @@ object RewriteSearch {
     private val blockUses         = parsed.slice(block.first, block.last + 1).map(_._2)
     private val original          = blockInstructions.slice(at, at + length)
     private val originalUses      = blockUses.slice(at, at + length)
-    private val backEdge          = block.successors.contains(window.block)
 
     private val definitions = mutable.Map.empty[String, Either[String, Equivalence.Step]]
 
@@ -302,41 +302,6 @@ object RewriteSearch {
           runs.fold(Distance.Refused(_), Distance.Bits(_))
       }
 
-    private def op(instruction: Instruction, use: RegisterUse, backEdge: Boolean): PipelineSimulator.Op = {
-      val mnemonic = instruction.opcode.raw
-      val lds      = instruction.mods.exists(_.name == "lds")
-      val counting = Option.when(mnemonic == "s_nop")(instruction.operands.headOption.collect {
-        case Operand.IntegerLiteral(value, _) => value.toInt
-      }.getOrElse(0))
-      val timing = Scheduling.timing(target, mnemonic, lds)
-      val source =
-        if (timing.isDefined) Architecture.Source.Estimate(ProfileReport.modelledPlanning._2)
-        else Architecture.Source.Estimate("no LLVM scheduling-model record; one issue slot")
-      PipelineSimulator.Op(
-        pipe = timing.flatMap(value => pipe(value.writes)),
-        lanes = waveSize,
-        reads = units(use, use.reads),
-        writes = units(use, use.writes),
-        latency = Architecture.Sourced(counting.fold(timing.fold(1)(_.latency))(_ => 0), source),
-        issue = counting.fold(timing.fold(1)(_.cycles))(_ + 1),
-        stall = None,
-        traffic = PipelineSimulator.Traffic.none,
-        backEdge = backEdge,
-        rate = None,
-        span = None
-      )
-    }
-
-    private def measure(sequence: Vec[Instruction], used: Vec[RegisterUse]): Measure = {
-      val instructions = blockInstructions.patch(at, sequence, length)
-      val uses         = blockUses.patch(at, used, length)
-      val ops          = instructions.zip(uses).zipWithIndex.map { case ((instruction, use), index) =>
-        op(instruction, use, backEdge && index == instructions.size - 1)
-      }
-      val block = PipelineSimulator.simulate(architecture, None, PipelineSimulator.Stream.repeat(ops))
-      Measure(block.cyclesPerIteration, block.source)
-    }
-
     private def text(sequence: Vec[Instruction]): Vec[String] = sequence.map(Printer.render(_))
 
     private[check] def evidence(candidate: Vec[String]): Either[String, Proof.Result] = for {
@@ -360,27 +325,30 @@ object RewriteSearch {
         evaluated: Int
     )
 
-    def run(): Either[String, Report] = steps(original).flatMap { originalSteps =>
+    def run(cost: AMDGPUBlockCost): Either[String, Report] = for {
+      originalSteps <- steps(original)
+      whole         <- cost.cost(window, text(original))
+    } yield {
       val out     = liveOut(originalSteps)
       val reason  = if (out.locations.isEmpty) "no write is live out" else "live-out writes proved equal"
-      val before  = measure(original, originalUses)
+      val before  = Measure(whole.cycles, whole.source)
       val random  = Random(config.seed)
-      val seen    = mutable.LinkedHashMap.empty[String, (Vec[Instruction], Long, Measure)]
+      val costs   = mutable.Map.empty[String, Option[AMDGPUBlockCost.Cost]]
+      val seen    = mutable.LinkedHashMap.empty[String, (Vec[Instruction], Long, AMDGPUBlockCost.Cost)]
       val deleted = AMDGPUMoves.Candidate(AMDGPUMoves.Kind.Delete, Vec.empty, Vec.empty)
 
       def visit(walk: Walk, candidate: AMDGPUMoves.Candidate): Walk = {
-        val bits = steps(candidate.instructions).flatMap(right =>
-          distance(originalSteps, right, out) match {
-            case Distance.Bits(bits)   => Right(bits)
-            case Distance.Refused(wby) => Left(wby)
-          }
-        ).toOption
-        bits.fold(walk.copy(evaluated = walk.evaluated + 1)) { bits =>
-          // the simulator has no period for an empty stream, and an empty block costs nothing
-          val after =
-            if (blockInstructions.size == length && candidate.instructions.isEmpty) Measure(0.0, before.source)
-            else measure(candidate.instructions, candidate.uses)
-          val key = text(candidate.instructions).mkString("; ")
+        val key   = text(candidate.instructions).mkString("; ")
+        val found = for {
+          bits <- steps(candidate.instructions).flatMap(right =>
+            distance(originalSteps, right, out) match {
+              case Distance.Bits(bits)   => Right(bits)
+              case Distance.Refused(why) => Left(why)
+            }
+          ).toOption
+          after <- costs.getOrElseUpdate(key, cost.cost(window, text(candidate.instructions)).toOption)
+        } yield (bits, after)
+        found.fold(walk.copy(evaluated = walk.evaluated + 1)) { (bits, after) =>
           if (!seen.contains(key)) seen.update(key, (candidate.instructions, bits, after))
           val value    = bits.toDouble + after.cycles
           val current  = walk.distance.toDouble + walk.cycles
@@ -418,21 +386,32 @@ object RewriteSearch {
           Proof.prove(AMDGPUReference, executor, lane ++ right.map(_.kase), originalSteps, right, out) match {
             case Proof.Result.Proved(evidence) =>
               val source = Architecture.Source.weakest(before.source, after.source)
-              Some(Rewrite(window, text(original), text(sequence), before, after, source, evidence, reason))
+              Some(
+                Rewrite(
+                  window,
+                  text(original),
+                  text(sequence),
+                  before,
+                  Measure(after.cycles, after.source),
+                  source,
+                  evidence,
+                  reason,
+                  after.shift
+                )
+              )
             case _ => None
           }
         }
       }
-      Right(
-        Report(
-          window,
-          config.seed,
-          config.budget,
-          walked.evaluated,
-          seen.size,
-          seen.values.count(_._2 > 0L),
-          rewrites
-        )
+      Report(
+        window,
+        config.seed,
+        config.budget,
+        walked.evaluated,
+        seen.size,
+        seen.values.count(_._2 > 0L),
+        before,
+        rewrites
       )
     }
   }
@@ -440,7 +419,6 @@ object RewriteSearch {
   private object Search {
     def of(
         target: Target,
-        architecture: Architecture,
         window: Window,
         block: Block,
         parsed: Vec[(Instruction, RegisterUse)],
@@ -448,7 +426,7 @@ object RewriteSearch {
         config: Config
     ): Either[String, Search] = Either.cond(
       block.first <= window.first && window.last <= block.last,
-      new Search(target, architecture, window, block, parsed, moves, config),
+      new Search(target, window, block, parsed, moves, config),
       s"the window ${window.first}..${window.last} is not inside the block ${block.first}..${block.last}"
     )
   }

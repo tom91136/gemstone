@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.profile.PipelineSimulator
 import net.kurobako.gemstone.semantics.render.Bitwuzla
 import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
@@ -11,10 +12,10 @@ import scala.concurrent.duration.*
 class RewriteSearchRunnerSuite extends Suite {
   override def baseTimeout: FiniteDuration = 120.seconds
 
-  private val target = "gfx906"
-  private val kernel = WindowFixtures.kernel
+  private val target = WindowFixtures.calibrated
   private val size   = 8
   private val config = RewriteSearch.Config.default
+  private val launch = AMDGPUBlockCost.Launch(32, 65536L, Some(PipelineSimulator.Placement(Vec(1, 0, 0, 0))))
 
   private def installed(): Unit =
     assume(Bitwuzla.executable.isDefined, "no bitwuzla binary on GEMSTONE_BITWUZLA_EXE or PATH")
@@ -25,8 +26,10 @@ class RewriteSearchRunnerSuite extends Suite {
     buffer.toString.linesIterator.toVec
   }
 
-  private def fixture(name: String, image: Vec[Byte]): Unit =
-    test(s"the runner prints the $name fixture as the search suite does") {
+  private def fixture(kernel: String): Unit =
+    test(s"the runner prints the $kernel kernel as the search does under the launch its flags state") {
+      val name  = "fixtures"
+      val image = WindowFixtures.compiled
       installed()
       val directory = Files.createTempDirectory("rewrite-search-runner")
       val file      = directory.resolve(s"$name.co")
@@ -44,11 +47,17 @@ class RewriteSearchRunnerSuite extends Suite {
             "--temperature",
             config.temperature.toString,
             "--window",
-            size.toString
+            size.toString,
+            "--lanes",
+            "32",
+            "--shared",
+            "65536",
+            "--placement",
+            "1,0,0,0"
           )
         )
         val expected = AMDGPUWindows.of(image, kernel, target, size).toOption.get.flatMap(window =>
-          RewriteSearch.lines(name, window, RewriteSearch.amdgpu(image, kernel, target, window, config))
+          RewriteSearch.lines(name, window, RewriteSearch.amdgpu(image, kernel, target, window, launch, config))
         )
         assertEquals(output, expected)
       } finally {
@@ -57,7 +66,6 @@ class RewriteSearchRunnerSuite extends Suite {
       }
     }
 
-  fixture("loop", WindowFixtures.loop)
-  fixture("state", WindowFixtures.state)
-  fixture("copy", WindowFixtures.vectorCopy)
+  fixture("ctl_f4_tail")
+  fixture("ctl_f4_dead")
 }

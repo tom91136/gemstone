@@ -15,6 +15,7 @@ import net.kurobako.gemstone.constraint.auto.*
 import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.isa.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.profile.Pipe
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 
@@ -313,6 +314,32 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
         Vec.tabulate(kernel.instructions.size)(kernel.assembly(_))
       )
     }
+
+  /** The byte offset, pipe and planned issue cycles of each instruction, as a launch of the kernel profiles them. */
+  def staticTiming(
+      name: NonEmpty[String]
+  ): Either[Fault, Vec[(offset: Int, pipe: Option[Pipe], schedule: Option[Schedule])]] =
+    compile(name).map { case (_, _, kernel) =>
+      Vec.tabulate(kernel.instructions.size)(index =>
+        (
+          kernel.instructionOffsets(index),
+          Pipes.of(kernel.instructions(index), kernel.transIssue(index)),
+          kernel.schedule(index)
+        )
+      )
+    }
+
+  /** What a launch of the kernel with `workgroupLanes` lanes and `dynamicShared` further shared bytes reports. */
+  def staticResources(
+      name: NonEmpty[String],
+      workgroupLanes: Int > 0,
+      dynamicShared: Long >= 0
+  ): Either[Fault, KernelResources] =
+    compile(name).map { case (_, _, kernel) => VMInterpreter.resources(kernel.source, workgroupLanes, dynamicShared) }
+
+  /** The lane registers one unit of the kernel descriptor's VGPR field stands for. */
+  def registerGranule(name: NonEmpty[String]): Either[Fault, Int] =
+    compile(name).map { case (_, _, kernel) => VMInterpreter.registerGranule(kernel.source) }
 
   override def close(): Unit = leased.getAndSet(None).foreach(_.release())
 

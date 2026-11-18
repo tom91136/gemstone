@@ -23,6 +23,11 @@ object AMDGPUGenerator {
   val targets: Vec[String] =
     Vec("gfx906", "gfx1030", "gfx90a", "gfx1100", "gfx803", "gfx1151", "gfx950", "gfx1201", "gfx601", "gfx700")
 
+  /** The target whose checked cases stand for `target`: itself, or the one of `targets` with the same ISA. */
+  def checked(target: String): Option[String] = targets.find(_ == target).orElse(
+    target.refine[Target].toOption.flatMap(named => targets.find(_.refine[Target].exists(_.isa == named.isa)))
+  )
+
   /** Targets whose matrix instructions alone are checked. */
   val matrixTargets: Vec[String] = Vec("gfx908", "gfx942")
 

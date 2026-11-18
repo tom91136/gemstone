@@ -85,4 +85,13 @@ class AMDGPUWindowsSuite extends Suite {
       )
     )
   }
+
+  test("a gfx1036 kernel takes its windows from the checked cases of its ISA") {
+    val kept  = Set("s5", "s6", "s17", "v3", "v4", "v5", "v6", "exec_lo")
+    val found = AMDGPUWindows.of(WindowFixtures.compiled, "ctl_f4_dead", WindowFixtures.calibrated, 8)
+    assertEquals(
+      found.map(_.map(w => (w.first, w.last, w.liveIn, w.liveOut))),
+      Right(Vec((0, 0, kept - "s17", kept), (15, 21, kept, kept + "scc")))
+    )
+  }
 }

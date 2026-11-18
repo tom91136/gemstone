@@ -6,8 +6,12 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.isa.amdgpu.*
+import net.kurobako.gemstone.profile.Pipe
 import net.kurobako.gemstone.semantics.render.*
+import net.kurobako.gemstone.vm.Fault
+import net.kurobako.gemstone.vm.KernelResources
 import net.kurobako.gemstone.vm.RegisterUse
+import net.kurobako.gemstone.vm.Schedule
 import scala.collection.mutable
 
 /** AMDGPU opcodes with their per-ISA encodings, operand metadata and instruction word layouts. */
@@ -254,15 +258,37 @@ object AMDGPUModel extends Model {
       image: Vec[Byte],
       function: String
   ): Either[String, (ControlFlowGraph, Vec[RegisterUse], Vec[String])] =
+    loaded(image, function)(_.staticCode(_))
+
+  private def loaded[A](image: Vec[Byte], function: String)(
+      read: (LoadedProgram, NonEmpty[String]) => Either[Fault, A]
+  ): Either[String, A] =
     for {
       name  <- function.refine[NonEmpty[String]].left.map(_ => s"no AMDGPU kernel '$function'")
       code  <- CodeObject.decode(image).left.map(_.message.raw)
       found <- {
         val program = LoadedProgram.load(code)
-        try program.staticCode(name).left.map(_.message.raw)
+        try read(program, name).left.map(_.message.raw)
         finally program.close()
       }
     } yield found
+
+  def staticTiming(
+      image: Vec[Byte],
+      function: String
+  ): Either[String, Vec[(offset: Int, pipe: Option[Pipe], schedule: Option[Schedule])]] =
+    loaded(image, function)(_.staticTiming(_))
+
+  def registerGranule(image: Vec[Byte], function: String): Either[String, Int] =
+    loaded(image, function)(_.registerGranule(_))
+
+  def staticResources(
+      image: Vec[Byte],
+      function: String,
+      workgroupLanes: Int > 0,
+      dynamicShared: Long >= 0
+  ): Either[String, KernelResources] =
+    loaded(image, function)(_.staticResources(_, workgroupLanes, dynamicShared))
 
   private def flowOf(code: CodeObject, name: NonEmpty[String]): Either[String, ControlFlow] = {
     val program = LoadedProgram.load(code)

@@ -233,22 +233,25 @@ private object VMInterpreter {
       )
   }
 
-  /** The descriptor's VGPR field holds the allocation granule count minus one. */
-  private def resources(kernel: CodeObjectKernel, dispatch: KernelTask): KernelResources = {
-    val granule = kernel.target.isa match {
-      case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 => 4
-      case ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4                     => 8
-      case ISA.CDNA5                                             => 16
-      case _ if kernel.waveSize == 32                            => 8
-      case _                                                     => 4
-    }
-    KernelResources(
-      workgroupLanes = dispatch.geometry.groupVolume,
-      subgroupSize = kernel.waveSize.widen[Int > 0],
-      registersPerLane = Some((((kernel.computePgmRsrc1 & 0x3f) + 1) * granule).unsafe[Int >= 0]),
-      sharedBytes = kernel.groupSegmentSize.widen[Long >= 0] + dispatch.groupSegmentBytes.widen[Long >= 0]
-    )
+  def registerGranule(kernel: CodeObjectKernel): Int = kernel.target.isa match {
+    case ISA.GFX6 | ISA.GFX7 | ISA.GFX8 | ISA.GFX9 | ISA.CDNA1 => 4
+    case ISA.CDNA2 | ISA.CDNA3 | ISA.CDNA4                     => 8
+    case ISA.CDNA5                                             => 16
+    case _ if kernel.waveSize == 32                            => 8
+    case _                                                     => 4
   }
+
+  /** The descriptor's VGPR field holds the allocation granule count minus one. */
+  def resources(kernel: CodeObjectKernel, workgroupLanes: Int > 0, dynamicShared: Long >= 0): KernelResources =
+    KernelResources(
+      workgroupLanes = workgroupLanes,
+      subgroupSize = kernel.waveSize.widen[Int > 0],
+      registersPerLane = Some((((kernel.computePgmRsrc1 & 0x3f) + 1) * registerGranule(kernel)).unsafe[Int >= 0]),
+      sharedBytes = kernel.groupSegmentSize.widen[Long >= 0] + dynamicShared
+    )
+
+  private def resources(kernel: CodeObjectKernel, dispatch: KernelTask): KernelResources =
+    resources(kernel, dispatch.geometry.groupVolume, dispatch.groupSegmentBytes.widen[Long >= 0])
 
   /** Every workgroup of a cooperative dispatch is resident at once: one thread interleaves them, a sweep advancing each
     * wave until it reaches a barrier, waits, sleeps, spins or ends. A sweep in which no wave advances is a deadlock. A

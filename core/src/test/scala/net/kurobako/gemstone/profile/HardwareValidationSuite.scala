@@ -1,14 +1,9 @@
 package net.kurobako.gemstone.profile
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.profile.HardwareLoops.Row
-import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
-import net.kurobako.gemstone.vm.LaunchGeometry.*
-import net.kurobako.gemstone.vm.LaunchObserver.*
 
 /** Cycles per iteration of loop kernels timed with `clock64` against the simulator. Each measured value is the median
   * over launches of the slowest resident warp's loop cycles, divided by iterations and resident warps, so it is the
@@ -249,63 +244,7 @@ class HardwareValidationSuite extends Suite {
     Measured("layout_m8_tail_a40", 1, 62.00, None, Some(oneSimd))
   )
 
-  private class State(
-      val issued: Long,
-      val text: String,
-      override val schedule: Option[Schedule],
-      override val pipe: Option[Pipe]
-  ) extends ArchitecturalState {
-    def begins: Boolean   = true
-    def unit: MachineUnit =
-      MachineUnit(Coordinates(1, 2, 3), issued.toInt.unsafe[Int >= 0], 32.unsafe[Int >= 0], MachineUnit.State.Running)
-    def subgroupSize: Int > 0                    = 32
-    def eachLane(each: (Int >= 0) => Unit): Unit = (0 until 32).foreach(lane => each(lane.unsafe))
-  }
-
-  private val iterations = 4
-
-  private def at(address: Long): Fault.Location =
-    Fault.Location("k", Some("f"), Some(address.unsafe), Some(Coordinates(1, 2, 3)), Some(0.unsafe))
-
   private def branchBytes(architecture: Architecture): Long = if architecture == Architecture.sm89 then 16L else 4L
-
-  private def loads(row: Row): Boolean = row.text.startsWith("LDG") || row.text.startsWith("global_load")
-
-  private def record(rows: Vec[Row], warps: Int, shared: Long, branchBytes: Long): ProfileStream = {
-    val recorder = ProfileRecorder()
-    val last     = rows.size + 1
-    val graph    = ControlFlowGraph(
-      Vec(Some(Vec(1))) ++
-        Vec.tabulate(rows.size)(i => if i == rows.size - 1 then Some(Vec(1, last)) else Some(Vec(i + 2))) :+
-        None,
-      0
-    )
-    val entry   = Row("entry", None, Vec.empty, Vec.empty, Schedule.Estimated(1.unsafe[Int >= 0]))
-    val exit    = Row("exit", None, Vec.empty, Vec.empty, Schedule.Estimated(1.unsafe[Int >= 0]))
-    val all     = entry +: rows :+ exit
-    val offsets = rows.head.address match {
-      case Some(top) =>
-        val body = rows.map(row => row.address.getOrElse(fail(s"no address for ${row.text}")))
-        (top - branchBytes) +: body :+ (body.last + branchBytes)
-      case None => Vec.tabulate(all.size)(i => 0x10L * (i + 1))
-    }
-    recorder.launched(KernelResources((32 * warps).unsafe, 32, None, shared.unsafe))
-    recorder.controlFlow("k", graph, offsets)
-    val order = Vec(0) ++ Vec.fill(iterations)(Vec.tabulate(rows.size)(_ + 1)).flatten :+ last
-    order.zipWithIndex.foreach { (index, issued) =>
-      val row = all(index)
-      assertEquals(
-        recorder.instruction(at(offsets(index)), State(issued.toLong, row.text, Some(row.schedule), row.pipe)),
-        Right(())
-      )
-      if (loads(row))
-        (0 until 32).foreach(lane =>
-          recorder.access(lane.unsafe, Space.Global, AccessKind.Read, 0x100000L + 0x1000L * index + 4L * lane, 4.unsafe)
-        )
-      recorder.registers(issued.toLong, RegisterUse(row.reads, row.writes))
-    }
-    recorder.stream
-  }
 
   private def analysed(
       architecture: Architecture,
@@ -314,7 +253,12 @@ class HardwareValidationSuite extends Suite {
       shared: Long,
       placement: Option[PipelineSimulator.Placement]
   ): PipelineSimulator.Block =
-    BlockAnalysis.of(record(rows, warps, shared, branchBytes(architecture)), architecture, placement).fold(
+    HardwareLoops.stream(
+      rows,
+      warps,
+      shared,
+      branchBytes(architecture)
+    ).flatMap(BlockAnalysis.of(_, architecture, placement)).fold(
       fail(_),
       _.regions.find(_.kind == BlockAnalysis.Kind.Loop).map(_.status) match {
         case Some(BlockAnalysis.Status.Executed(timing)) => timing.block
@@ -362,7 +306,8 @@ class HardwareValidationSuite extends Suite {
   }
 
   private def traffic(architecture: Architecture, row: Row): PipelineSimulator.Traffic =
-    if (loads(row)) PipelineSimulator.Traffic(sectors = 128.0 / architecture.global.sectorBytes.value, loads = 1.0)
+    if (HardwareLoops.loads(row))
+      PipelineSimulator.Traffic(sectors = 128.0 / architecture.global.sectorBytes.value, loads = 1.0)
     else PipelineSimulator.Traffic.none
 
   private def simulated(
