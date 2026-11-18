@@ -28,7 +28,10 @@ object KernelMetadata {
       value.workGroupSizeHint,
       value.bindingIndices,
       value.entryPointId,
-      value.registerCount
+      value.registerCount,
+      value.sharedSizeBytes,
+      value.constSizeBytes,
+      value.localSizeBytes
     )
   )
 
@@ -40,7 +43,10 @@ object KernelMetadata {
       workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
       bindingIndices: Vec[Int >= 0] = Vec.empty,
       entryPointId: Option[Int >= 0] = None,
-      registerCount: Option[Int >= 0] = None
+      registerCount: Option[Int >= 0] = None,
+      sharedSizeBytes: Option[Int >= 0] = None,
+      constSizeBytes: Option[Int >= 0] = None,
+      localSizeBytes: Option[Int >= 0] = None
   ): Either[NonEmpty[String], KernelMetadata] =
     for {
       _ <- Either.cond[NonEmpty[String], Unit](
@@ -70,7 +76,10 @@ object KernelMetadata {
       workGroupSizeHint,
       bindingIndices,
       entryPointId,
-      registerCount
+      registerCount,
+      sharedSizeBytes,
+      constSizeBytes,
+      localSizeBytes
     )
 }
 
@@ -83,5 +92,8 @@ case class KernelMetadata private (
     workGroupSizeHint: Option[LaunchGeometry.Dimensions],
     bindingIndices: Vec[Int >= 0],
     entryPointId: Option[Int >= 0],
-    registerCount: Option[Int >= 0]
+    registerCount: Option[Int >= 0],
+    sharedSizeBytes: Option[Int >= 0],
+    constSizeBytes: Option[Int >= 0],
+    localSizeBytes: Option[Int >= 0]
 )

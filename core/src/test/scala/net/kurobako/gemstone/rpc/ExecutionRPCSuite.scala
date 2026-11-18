@@ -214,6 +214,22 @@ class ExecutionRPCSuite extends Suite {
     )
   }
 
+  test("static shared, const and local sizes survive metadata transport") {
+    val metadata = KernelMetadata.validated(
+      0,
+      0,
+      Vec.empty,
+      sharedSizeBytes = Some(400),
+      constSizeBytes = Some(80),
+      localSizeBytes = Some(1024)
+    ).toOption.get
+    assertEquals(
+      Wire.Codec[KernelMetadata].encode(metadata, ExecutionRPC.Limits)
+        .flatMap(Wire.Codec[KernelMetadata].decode(_, ExecutionRPC.Limits)),
+      Right(metadata)
+    )
+  }
+
   test("operations use their exact names as tags") {
     val tags = operations.map(operation =>
       Wire.Protocol[Operation].encodePayload(operation, ExecutionRPC.Limits).toOption.get._1
@@ -349,7 +365,10 @@ class ExecutionRPCSuite extends Suite {
       workGroupSizeHint: Option[LaunchGeometry.Dimensions] = None,
       bindingIndices: Vec[Int >= 0] = Vec.empty,
       entryPointId: Option[Int >= 0] = None,
-      registerCount: Option[Int >= 0] = None
+      registerCount: Option[Int >= 0] = None,
+      sharedSizeBytes: Option[Int >= 0] = None,
+      constSizeBytes: Option[Int >= 0] = None,
+      localSizeBytes: Option[Int >= 0] = None
   ) derives Codec
 
   private case class UncheckedGlobalSymbol(

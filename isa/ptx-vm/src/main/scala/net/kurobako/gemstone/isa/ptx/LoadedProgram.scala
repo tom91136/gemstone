@@ -191,15 +191,27 @@ class LoadedProgram private (prepared: LoadedProgram.Prepared, workgroups: Workg
         )
         val blockSize = layout.lastOption.fold(0L)(parameter => parameter.offset.toLong + parameter.widthBytes)
         for {
-          size <- Either.cond(
-            blockSize <= Int.MaxValue.toLong,
-            blockSize.toInt.unsafe[Int >= 0],
-            Fault.InvalidRequest(s"PTX argument block size exceeds the supported range: $blockSize")
+          size   <- boundedSize(blockSize, "argument block size")
+          shared <- module.sharedLayouts.get(name).traverse(kernelShared =>
+            boundedSize(kernelShared.extent, "shared size")
           )
-          metadata <-
-            KernelMetadata.validated(size, parameters.nonNegativeSize, parameters).leftMap(Fault.InvalidRequest(_))
+          constant <- boundedSize(module.constExtent, "const size")
+          metadata <- KernelMetadata.validated(
+            size,
+            parameters.nonNegativeSize,
+            parameters,
+            sharedSizeBytes = shared,
+            constSizeBytes = Some(constant)
+          ).leftMap(Fault.InvalidRequest(_))
         } yield metadata
       }
+
+  private def boundedSize(bytes: Long, what: String): Either[Fault, Int >= 0] =
+    Either.cond(
+      bytes <= Int.MaxValue.toLong,
+      bytes.toInt.unsafe[Int >= 0],
+      Fault.InvalidRequest(s"PTX $what exceeds the supported range: $bytes")
+    )
 
   override def global(
       name: NonEmpty[String]

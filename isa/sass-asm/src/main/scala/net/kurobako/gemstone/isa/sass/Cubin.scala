@@ -35,7 +35,9 @@ object Cubin {
       parameters: Vec[Parameter],
       requiredCluster: LaunchGeometry.Dimensions = LaunchGeometry.Dimensions.One,
       explicitCluster: Boolean = false,
-      registerCount: Int >= 0 = 0
+      registerCount: Int >= 0 = 0,
+      sharedSizeBytes: Int >= 0 = 0,
+      localSizeBytes: Int >= 0 = 0
   )
   case class Global(
       name: NonEmpty[String],
@@ -412,6 +414,10 @@ object Cubin {
   def constantSections(module: Module): Vec[Section] =
     module.sections.filter(section => isConstantSection(section.name))
 
+  /** The driver reports the module-wide user constant bank as every kernel's constant size. */
+  def constSizeBytes(module: Module): Int >= 0 =
+    module.sections.find(_.name == ".nv.constant3").fold(0: Int >= 0)(_.size)
+
   /** The program-global name under which a constant bank section is bound. */
   def constantSymbol(section: Int >= 0): NonEmpty[String] = s"__sass_const$section"
 
@@ -624,12 +630,20 @@ object Cubin {
           } yield (section.link.raw -> symbol) -> registers
       }.sequence)
     }.map(_.toMap)
+    localSizes <- sections.filter(_.name == ".nv.info").flatTraverse { section =>
+      attributes(section.bytes).map(_.flatMap {
+        case (0x12, value) if value.size == 8 =>
+          LittleEndian.decodeInt32(value, 4).refine[Int >= 0].toOption
+            .map(bytes => (section.link.raw -> LittleEndian.decodeInt32(value, 0)) -> bytes)
+        case _ => None
+      })
+    }.map(_.toMap)
     callees = deviceFunctions(parsed, sections)
     names   = sections.map(_.name).toSet
     kernels <- sections.filter(section =>
       section.name.startsWith(".text.") && !callees(section.name.stripPrefix(".text.")) &&
         names(s".nv.info.${section.name.stripPrefix(".text.")}")
-    ).traverse(section => kernel(section, sections, registerCounts))
+    ).traverse(section => kernel(section, sections, registerCounts, localSizes))
     globals <- sections.filter(_.kind == SectionType.SymbolTable)
       .flatMap(table => parsed.symbolTables.getOrElse(table.index, Vec.empty[elf.Symbol]))
       .traverse(global(_, sections))
@@ -694,7 +708,8 @@ object Cubin {
   private def kernel(
       section: Section,
       sections: Vec[Section],
-      registerCounts: Map[(Int, Int), Int >= 0]
+      registerCounts: Map[(Int, Int), Int >= 0],
+      localSizes: Map[(Int, Int), Int >= 0]
   ): Either[NonEmpty[String], Kernel] = {
     val name                                                          = section.name.stripPrefix(".text.")
     def record(value: Vec[Byte], size: Int, detail: NonEmpty[String]) = check(value.size == size, detail)
@@ -729,6 +744,8 @@ object Cubin {
       }.getOrElse(Right(LaunchGeometry.Dimensions.One))
       registers <- registerCounts.get(section.link.raw -> (section.info & 0x00ffffff))
         .fold((section.info >>> 24).refine[Int >= 0])(Right(_))
+      localSize  = localSizes.getOrElse(section.link.raw -> (section.info & 0x00ffffff), 0: Int >= 0)
+      sharedSize = sections.find(_.name == s".nv.shared.$name").fold(0: Int >= 0)(_.size)
       kernelName <- name.refine[NonEmpty[String]]
     } yield Kernel(
       kernelName,
@@ -738,7 +755,9 @@ object Cubin {
       parameters,
       requiredCluster,
       attrs.exists(_._1 == 0x3e),
-      registers
+      registerCount = registers,
+      sharedSizeBytes = sharedSize,
+      localSizeBytes = localSize
     )
   }
 }

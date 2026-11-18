@@ -45,6 +45,8 @@ object Fixture {
 
   def copyAddCubin: Vec[Byte] = Vec.unsafeWrapArray(bytes.hex(CompilerKernelFixtures.copyAddCubin))
 
+  def functionAttributesCubin: Vec[Byte] = Vec.unsafeWrapArray(bytes.hex(FunctionAttributeFixtures.cubin))
+
   /** SAXPY machine code; sm_89 comes from the `-hex` listing of the unoptimised build. */
   def saxpy(sm: Int): Vec[Byte] =
     if (sm != 89) code(s"saxpySm$sm")

@@ -202,9 +202,29 @@ class LoadedProgramSuite extends Suite {
             KernelMetadata.ParameterKind.Scalar,
             containsPointers = false
           )
-        )
+        ),
+        sharedSizeBytes = Some(0),
+        constSizeBytes = Some(0)
       ).value
     assertEquals(actual, expected)
+  }
+
+  test("exposes static PTX shared size per kernel and module-wide const size") {
+    val source =
+      ".version 8.4\n.target sm_89\n.address_size 64\n.const .align 8 .b8 c[80];\n" +
+        ".visible .entry used(.param .u64 p)\n{\n  .reg .b32 %r<3>;\n  .reg .b64 %rd<2>;\n" +
+        "  .shared .align 4 .b32 s[100];\n  ld.param.u64 %rd1, [p];\n  mov.u32 %r1, 7;\n" +
+        "  st.shared.u32 [s+4], %r1;\n  ld.shared.u32 %r2, [s+4];\n  st.global.u32 [%rd1], %r2;\n  ret;\n}\n" +
+        ".visible .entry idle(.param .u64 p) { ret; }\n"
+    val program = Parser.parse(source).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
+
+    val used = loaded.kernel("used").value
+    val idle = loaded.kernel("idle").value
+    assertEquals(used.sharedSizeBytes, Some(400: Int >= 0))
+    assertEquals(idle.sharedSizeBytes, Some(0: Int >= 0))
+    assertEquals(used.constSizeBytes, Some(80: Int >= 0))
+    assertEquals(idle.constSizeBytes, Some(80: Int >= 0))
   }
 
   test("exposes PTX pointer parameters as allocations") {

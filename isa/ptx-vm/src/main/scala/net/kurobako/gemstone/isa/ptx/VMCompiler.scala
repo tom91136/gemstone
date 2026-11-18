@@ -52,6 +52,7 @@ private object VMCompiler {
       functions: Map[NonEmpty[String], Statement.Function],
       functionTable: FunctionTable,
       sharedLayouts: Map[NonEmpty[String], KernelShared],
+      constExtent: Long,
       initialisedFunctions: Vec[NonEmpty[String]],
       architecture: Int,
       text: Instruction => Option[String]
@@ -86,7 +87,7 @@ private object VMCompiler {
     entries.keys.toVec.traverse(entry =>
       SharedLayout(entry, initialised.toSet, module, routines).map(entry -> _)
     ).map(layouts =>
-      Module(entries, functions, table, layouts.toMap, initialised, architecture(program), text)
+      Module(entries, functions, table, layouts.toMap, constExtent(program), initialised, architecture(program), text)
     )
   }
 
@@ -149,9 +150,24 @@ private object VMCompiler {
     declaration.qualifiers.collectFirst { case DeclarationQualifier.Alignment(bytes) => bytes.toLong }
       .getOrElse(declaration.elementType.widthBits.toLong / 8L)
 
-  private def extentBytes(declaration: Statement.Data): Long = declaration.extent match {
-    case Extent.Sized(elements) => elements.toLong * declaration.elementType.byteCount
-    case _                      => declaration.elementType.byteCount.toLong
+  private def elementCount(declaration: Statement.Data): Long = declaration.extent match {
+    case Extent.Scalar          => 1L
+    case Extent.Sized(elements) => elements.toLong
+    case Extent.Unsized         => declaration.initialiser.size.max(1).toLong
+  }
+
+  private def extentBytes(declaration: Statement.Data): Long =
+    elementCount(declaration) * declaration.elementType.byteCount
+
+  private def constExtent(program: Program): Long = {
+    val declarations = program.statements.collect {
+      case value: Statement.Data if value.addressSpace == DataAddressSpace.Const => value
+    }
+    val winners = declarations.groupMapReduce(_.name)(identity)(Linker.preferDefinition(_, _))
+    declarations.map(_.name).distinct.foldLeft(0L) { (end, name) =>
+      val declaration = winners(name)
+      end.alignUp(alignment(declaration)) + extentBytes(declaration)
+    }
   }
 
   private object SharedLayout {

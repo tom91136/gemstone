@@ -89,6 +89,24 @@ import net.kurobako.gemstone.constraint.*
     } finally program.close()
   }
 
+  test("cubin states per-kernel shared and local sizes and a module-wide constant size") {
+    val image  = Fixture.functionAttributesCubin.toArray
+    val module = Cubin.decode(Vec.unsafeWrapArray(image)).value
+    val all    = module.kernels.find(_.name == "k_all").get
+    val plain  = module.kernels.find(_.name == "k_plain").get
+    assertEquals((all.sharedSizeBytes.raw, all.localSizeBytes.raw, all.registerCount.raw), (400, 1024, 12))
+    assertEquals((plain.sharedSizeBytes.raw, plain.localSizeBytes.raw, plain.registerCount.raw), (0, 0, 8))
+    assertEquals(Cubin.constSizeBytes(module).raw, 80)
+    val program = CubinBackend(text = Harness.text).load(Vec.from(image)).value
+    try {
+      val metadata = program.kernel("k_all").value
+      assertEquals(metadata.sharedSizeBytes.map(_.raw), Some(400))
+      assertEquals(metadata.localSizeBytes.map(_.raw), Some(1024))
+      assertEquals(metadata.constSizeBytes.map(_.raw), Some(80))
+      assertEquals(program.kernel("k_plain").value.constSizeBytes.map(_.raw), Some(80))
+    } finally program.close()
+  }
+
   test("kernel register counts use NVIDIA metadata when section-header counts are absent") {
     val image    = copyAdd
     val sections = elf.Image.parse(Vec.unsafeWrapArray(image)).value.sections

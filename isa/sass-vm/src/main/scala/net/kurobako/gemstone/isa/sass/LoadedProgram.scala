@@ -126,7 +126,10 @@ class LoadedProgram(
               containsPointers = true
             )
           ),
-          registerCount = Some(kernel.registerCount)
+          registerCount = Some(kernel.registerCount),
+          sharedSizeBytes = Some(kernel.sharedSizeBytes),
+          constSizeBytes = Some(Cubin.constSizeBytes(module)),
+          localSizeBytes = Some(kernel.localSizeBytes)
         ).left.map(Fault.InvalidRequest(_))
     }
 

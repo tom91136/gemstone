@@ -18,7 +18,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <functional>
+#include <ios>
 #include <limits>
 #include <map>
 #include <memory>
@@ -1337,6 +1339,9 @@ struct Function {
   // PTX has virtual registers; use one synthetic allocation unit when no
   // physical register count is present. Cubins report their compiler metadata.
   int registerCount = 1;
+  int sharedSizeBytes = 0;
+  int constSizeBytes = 0;
+  int localSizeBytes = 0;
   std::array<int, 3> clusterDimensions{};
   Module *module{};
   std::string name;
@@ -1698,13 +1703,13 @@ std::optional<CUresult> registeredKernel(const void *hostFunction, CUfunction *k
   return status;
 }
 
-CUresult functionRegisterCount(const void *function, int *value) {
+CUresult functionField(const void *function, int Function::*field, int *value) {
   CUfunction kernel = nullptr;
   const auto status = registeredKernel(function, &kernel);
   if (status && *status != CUDA_SUCCESS) return *status;
   auto *const entry = findFunction(status ? kernel : function);
   if (!entry) return CUDA_ERROR_INVALID_HANDLE;
-  *value = entry->registerCount;
+  *value = entry->*field;
   return CUDA_SUCCESS;
 }
 
@@ -4111,6 +4116,9 @@ CUresult cuModuleGetFunction(CUfunction *function, CUmodule module, const char *
     entry->name = name;
     const auto &kernel = described.value();
     if (kernel.registerCount) entry->registerCount = kernel.registerCount->value;
+    if (kernel.sharedSizeBytes) entry->sharedSizeBytes = kernel.sharedSizeBytes->value;
+    if (kernel.constSizeBytes) entry->constSizeBytes = kernel.constSizeBytes->value;
+    if (kernel.localSizeBytes) entry->localSizeBytes = kernel.localSizeBytes->value;
     entry->parameters = kernel.parameters;
     auto *const handle = reinterpret_cast<CUfunction>(entry.get());
     {
@@ -4327,6 +4335,20 @@ CUresult cuLinkAddData_v2(CUlinkState state, CUjitInputType type, void *data, si
   return linkAppend(link, static_cast<const char *>(data), size) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
 }
 
+CUresult cuLinkAddFile_v2(CUlinkState state, CUjitInputType type, const char *path, unsigned, CUjit_option *, void **) {
+  if (!state || !path) return CUDA_ERROR_INVALID_VALUE;
+  std::ifstream file(path, std::ios::binary | std::ios::ate);
+  if (!file) return CUDA_ERROR_FILE_NOT_FOUND;
+  const std::streamoff length = file.tellg();
+  if (length < 0) return CUDA_ERROR_INVALID_VALUE;
+  const auto size = static_cast<size_t>(length);
+  if (size > MaximumImageSize) return CUDA_ERROR_INVALID_VALUE;
+  std::vector<char> contents(size);
+  file.seekg(0);
+  if (!file.read(contents.data(), static_cast<std::streamsize>(contents.size()))) return CUDA_ERROR_UNKNOWN;
+  return cuLinkAddData_v2(state, type, contents.data(), contents.size(), nullptr, 0, nullptr, nullptr);
+}
+
 CUresult cuLinkComplete(CUlinkState state, void **image, size_t *size) {
   if (!state || !image || !size) return CUDA_ERROR_INVALID_VALUE;
   auto *link = reinterpret_cast<LinkState *>(state);
@@ -4361,7 +4383,7 @@ CUresult cuFuncGetParamInfo(CUfunction function, size_t index, size_t *offset, s
 CUresult cuFuncGetAttribute(int *value, CUfunction_attribute attribute, CUfunction function) {
   if (!value || !function) return CUDA_ERROR_INVALID_VALUE;
   switch (attribute) {
-    case CU_FUNC_ATTRIBUTE_NUM_REGS: return functionRegisterCount(function, value);
+    case CU_FUNC_ATTRIBUTE_NUM_REGS: return functionField(function, &Function::registerCount, value);
     case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: *value = device_limits::MaxThreadsPerBlock; return CUDA_SUCCESS;
     case CU_FUNC_ATTRIBUTE_PTX_VERSION:
     case CU_FUNC_ATTRIBUTE_BINARY_VERSION: {
@@ -4371,9 +4393,9 @@ CUresult cuFuncGetAttribute(int *value, CUfunction_attribute attribute, CUfuncti
       return CUDA_SUCCESS;
     }
     case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: *value = device_limits::MaxSharedMemoryPerBlock; return CUDA_SUCCESS;
-    case CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
-    case CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
-    case CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
+    case CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES: return functionField(function, &Function::sharedSizeBytes, value);
+    case CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES: return functionField(function, &Function::constSizeBytes, value);
+    case CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES: return functionField(function, &Function::localSizeBytes, value);
     case CU_FUNC_ATTRIBUTE_CACHE_MODE_CA:
     case CU_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
     case CU_FUNC_ATTRIBUTE_CLUSTER_SIZE_MUST_BE_SET:
@@ -5568,7 +5590,8 @@ cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attributes, const void *fu
   if (!attributes || !function) return cudaErrorInvalidValue;
   std::memset(attributes, 0, offsetof(cudaFuncAttributes, preferredShmemCarveout) + sizeof(attributes->preferredShmemCarveout));
   attributes->maxThreadsPerBlock = device_limits::MaxThreadsPerBlock;
-  if (const auto status = functionRegisterCount(function, &attributes->numRegs); status != CUDA_SUCCESS) return runtimeStatus(status);
+  if (const auto status = functionField(function, &Function::registerCount, &attributes->numRegs); status != CUDA_SUCCESS)
+    return runtimeStatus(status);
   const auto version = registeredPtxVersion(function);
   if (!version) return cudaErrorSymbolNotFound;
   attributes->ptxVersion = *version;
@@ -6113,6 +6136,7 @@ GEMSTONE_CUDA_ALIAS(cuMemcpy2DUnaligned_v2, cuMemcpy2D_v2)
 GEMSTONE_CUDA_ALIAS(cuMemcpy2DUnaligned, cuMemcpy2D)
 GEMSTONE_CUDA_ALIAS(cuLinkCreate, cuLinkCreate_v2)
 GEMSTONE_CUDA_ALIAS(cuLinkAddData, cuLinkAddData_v2)
+GEMSTONE_CUDA_ALIAS(cuLinkAddFile, cuLinkAddFile_v2)
 GEMSTONE_CUDA_ALIAS(cuLaunchKernel_ptsz, cuLaunchKernel)
 GEMSTONE_CUDA_ALIAS(cuStreamDestroy, cuStreamDestroy_v2)
 GEMSTONE_CUDA_ALIAS(cuEventElapsedTime, cuEventElapsedTime_v2)

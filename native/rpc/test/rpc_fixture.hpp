@@ -98,6 +98,12 @@ public:
     uint32_t kind;
     uint32_t containsPointers;
   };
+  struct KernelResources {
+    std::optional<uint32_t> registerCount;
+    std::optional<uint32_t> sharedSizeBytes;
+    std::optional<uint32_t> constSizeBytes;
+    std::optional<uint32_t> localSizeBytes;
+  };
   struct ProgramKernel {
     std::string name;
     std::string linkageName;
@@ -230,6 +236,10 @@ public:
     kernelArgumentBlockSize = argumentBlockSize;
     kernelExplicitParameterCount = explicitParameterCount;
     kernelParameters = std::move(parameters);
+  }
+  void kernelResources(KernelResources resources) {
+    std::scoped_lock const lock(stateMutex);
+    kernelResourceCounts = resources;
   }
   void programCatalogue(std::vector<ProgramKernel> kernels, std::vector<ProgramGlobal> globals) {
     std::scoped_lock const lock(stateMutex);
@@ -469,6 +479,14 @@ private:
       metadata.requiredWorkGroupSize = Dimensions{.x = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[0])},
                                                   .y = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[1])},
                                                   .z = IntPositive{static_cast<int32_t>((*requiredWorkGroupSize)[2])}};
+    const auto resource = [](const std::optional<uint32_t> &value) -> std::optional<IntPositive0> {
+      if (!value) return std::nullopt;
+      return IntPositive0{static_cast<int32_t>(*value)};
+    };
+    metadata.registerCount = resource(kernelResourceCounts.registerCount);
+    metadata.sharedSizeBytes = resource(kernelResourceCounts.sharedSizeBytes);
+    metadata.constSizeBytes = resource(kernelResourceCounts.constSizeBytes);
+    metadata.localSizeBytes = resource(kernelResourceCounts.localSizeBytes);
     encodePayload(result, metadata);
   }
   bool receive(int socket, void *output, size_t size) {
@@ -1071,6 +1089,7 @@ private:
   uint32_t kernelExplicitParameterCount = 2;
   std::vector<KernelParameter> kernelParameters{{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0},
                                                 {.width = 4, .offset = 8, .kind = 1, .containsPointers = 0}};
+  KernelResources kernelResourceCounts{};
   std::optional<std::array<uint32_t, 3>> requiredWorkGroupSize;
   std::optional<std::vector<ShaderDescriptor>> preparedDescriptors;
   std::vector<ProgramKernel> programKernels{{.name = "add", .linkageName = "add.kd"}};
