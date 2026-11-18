@@ -8,6 +8,7 @@ import net.kurobako.gemstone.profile.BlockAnalysis
 import net.kurobako.gemstone.profile.HardwareLoops
 import net.kurobako.gemstone.profile.PipelineSimulator
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.LaunchGeometry
 
 class AMDGPUBlockCostSuite extends Suite {
   private val target   = WindowFixtures.calibrated
@@ -45,6 +46,21 @@ class AMDGPUBlockCostSuite extends Suite {
     assertEquals(grown.shift, 24)
     assertEquals(grown.cycles, expected)
     assert(grown.cycles - costOf(oneWave, text).cycles > 3.0, grown)
+  }
+
+  test("a launch of the loop is analysed at the cycles its static view gives") {
+    val image    = ProgramListing.Image(Language.AMDGPU, WindowFixtures.compiled, None)
+    val wave     = LaunchGeometry.Dimensions(32, 1, 1)
+    val recorded = for {
+      loaded   <- ProgramRun.load(image)
+      run      <- ProgramRun.run(loaded, "ctl_f4_tail", wave, LaunchGeometry.Dimensions.One)
+      analysis <- BlockAnalysis.of(run.stream, Architecture.gfx1036, oneWave.placement)
+    } yield analysis.regions.filter(_.kind == BlockAnalysis.Kind.Loop).map(_.status)
+    val static = costOf(AMDGPUBlockCost.Launch(32, 0L, oneWave.placement), text).cycles
+    recorded match {
+      case Right(Vec(BlockAnalysis.Status.Executed(timing))) => assertEquals(timing.block.cyclesPerIteration, static)
+      case other                                             => fail(s"no executed loop: $other")
+    }
   }
 
   test("a rewrite that needs more registers is costed at the residency they leave") {

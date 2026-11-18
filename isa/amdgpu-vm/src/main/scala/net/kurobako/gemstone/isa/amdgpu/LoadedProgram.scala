@@ -296,23 +296,7 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
   /** The kernel's control flow, the registers and state each instruction reads and writes, and its assembly. */
   def staticCode(name: NonEmpty[String]): Either[Fault, (ControlFlowGraph, Vec[RegisterUse], Vec[String])] =
     compile(name).map { case (_, _, kernel) =>
-      val mode   = kernel.source.mode
-      val stream = CodeStream(Vec.toArray(kernel.source.text), mode)
-      (
-        AMDGPUControlFlowGraph.of(kernel),
-        Vec.tabulate(kernel.instructions.size) { index =>
-          kernel.registerUses(index).merge(
-            RegisterUses.state(
-              kernel.instructions(index),
-              stream,
-              kernel.instructionOffsets(index),
-              mode.waveSize,
-              mode.target.isa
-            )
-          )
-        },
-        Vec.tabulate(kernel.instructions.size)(kernel.assembly(_))
-      )
+      (AMDGPUControlFlowGraph.of(kernel), kernel.uses, Vec.tabulate(kernel.instructions.size)(kernel.assembly(_)))
     }
 
   /** The byte offset, pipe and planned issue cycles of each instruction, as a launch of the kernel profiles them. */

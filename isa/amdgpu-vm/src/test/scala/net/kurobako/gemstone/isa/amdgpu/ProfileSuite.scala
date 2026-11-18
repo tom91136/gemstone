@@ -141,22 +141,40 @@ class ProfileSuite extends Suite {
         |global_load_dwordx2 v[4:5], v1, s[2:3]
         |global_store_dwordx2 v1, v[4:5], s[2:3]""".stripMargin
     )
-    assertEquals(uses(result, "v_lshlrev_b32"), Vector(RegisterUse(Vec("v0"), Vec("v1"))))
-    assertEquals(uses(result, "v_add_u32"), Vector(RegisterUse(Vec("v1", "v3"), Vec("v2"))))
+    assertEquals(uses(result, "v_lshlrev_b32"), Vector(RegisterUse(Vec("exec_hi", "exec_lo", "v0"), Vec("v1"))))
+    assertEquals(uses(result, "v_add_u32"), Vector(RegisterUse(Vec("exec_hi", "exec_lo", "v1", "v3"), Vec("v2"))))
     assertEquals(
       uses(result, "global_load_dwordx2"),
-      Vector(RegisterUse(Vec("s[2:3]", "v1"), Vec("v[4:5]"), Map("s[2:3]" -> 2, "v[4:5]" -> 2)))
+      Vector(
+        RegisterUse(Vec("exec_hi", "exec_lo", "m0", "s[2:3]", "v1"), Vec("v[4:5]"), Map("s[2:3]" -> 2, "v[4:5]" -> 2))
+      )
     )
     assertEquals(
       uses(result, "global_store_dwordx2"),
-      Vector(RegisterUse(Vec("s[2:3]", "v1", "v[4:5]"), Vec.empty, Map("s[2:3]" -> 2, "v[4:5]" -> 2)))
+      Vector(
+        RegisterUse(
+          Vec("exec_hi", "exec_lo", "m0", "s[2:3]", "v1", "v[4:5]"),
+          Vec.empty,
+          Map("s[2:3]" -> 2, "v[4:5]" -> 2)
+        )
+      )
     )
+  }
+
+  test("a launch records the state an instruction reads and writes beside its registers") {
+    val result = run("s_mov_b32 s4, 1\ns_cmp_lg_u32 s4, 0\ns_cbranch_scc0 0\nv_mov_b32 v1, v0")
+    assertEquals(uses(result, "s_cmp_lg_u32"), Vector(RegisterUse(Vec("s4"), Vec("scc"))))
+    assertEquals(uses(result, "s_cbranch_scc0"), Vector(RegisterUse(Vec("scc"), Vec.empty)))
+    assertEquals(uses(result, "v_mov_b32"), Vector(RegisterUse(Vec("exec_hi", "exec_lo", "v0"), Vec("v1"))))
   }
 
   test("an accumulating instruction reads its destination") {
     val result = run("v_fmac_f32 v5, v1, v2\nv_mac_f32 v6, v1, v2")
-    assertEquals(uses(result, "v_fmac_f32"), Vector(RegisterUse(Vec("v1", "v2", "v5"), Vec("v5"))))
-    assertEquals(uses(result, "v_mac_f32"), Vector(RegisterUse(Vec("v1", "v2", "v6"), Vec("v6"))))
+    assertEquals(
+      uses(result, "v_fmac_f32"),
+      Vector(RegisterUse(Vec("exec_hi", "exec_lo", "v1", "v2", "v5"), Vec("v5")))
+    )
+    assertEquals(uses(result, "v_mac_f32"), Vector(RegisterUse(Vec("exec_hi", "exec_lo", "v1", "v2", "v6"), Vec("v6"))))
   }
 
   test("a legacy flat address without a scalar base is a register pair") {
@@ -168,13 +186,16 @@ class ProfileSuite extends Suite {
     )
     assertEquals(
       uses(result, "flat_load_dword"),
-      Vector(RegisterUse(Vec("v[3:4]"), Vec("v6"), Map("v[3:4]" -> 2)))
+      Vector(RegisterUse(Vec("exec_hi", "exec_lo", "m0", "v[3:4]"), Vec("v6"), Map("v[3:4]" -> 2)))
     )
   }
 
   test("a scratch access with a scalar base reads no vector address") {
     val result = run("s_mov_b32 s4, 24\nv_mov_b32 v2, 7\nscratch_store_dword off, v2, s4")
-    assertEquals(uses(result, "scratch_store_dword"), Vector(RegisterUse(Vec("s4", "v2"), Vec.empty)))
+    assertEquals(
+      uses(result, "scratch_store_dword"),
+      Vector(RegisterUse(Vec("exec_hi", "exec_lo", "m0", "s4", "v2"), Vec.empty))
+    )
   }
 
   test("a global address with a scalar base is one register") {
@@ -185,7 +206,7 @@ class ProfileSuite extends Suite {
     )
     assertEquals(
       uses(result, "global_load_dword"),
-      Vector(RegisterUse(Vec("s[2:3]", "v1"), Vec("v2"), Map("s[2:3]" -> 2)))
+      Vector(RegisterUse(Vec("exec_lo", "m0", "s[2:3]", "v1"), Vec("v2"), Map("s[2:3]" -> 2)))
     )
   }
 

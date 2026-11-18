@@ -1656,6 +1656,16 @@ private object VMIR {
         text
       }
     }
+
+    /** The registers and state each instruction reads and writes, as a launch records them. */
+    lazy val uses: Vec[RegisterUse] = {
+      val stream = CodeStream(textBytes, source.mode)
+      Vec.tabulate(instructions.size)(index =>
+        registerUses(index).merge(
+          RegisterUses.state(instructions(index), stream, instructionOffsets(index), source.mode.waveSize, isa)
+        )
+      )
+    }
     // one shared step result per branch target, so taken and fall-through branches allocate nothing
     lazy val jumpTable: Array[Either[Fault, Int]] = Array.tabulate(instructions.size + 1)(Right(_))
 
