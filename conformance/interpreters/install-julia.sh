@@ -32,6 +32,9 @@ export JULIA_PKG_PRECOMPILE_AUTO=1
 for name in babelstream tests; do
   mkdir -p "$target/environment/$name"
   cp "$project/$name/Project.toml" "$project/$name/Manifest.toml" "$target/environment/$name/"
+  if [ -f "$project/LocalPreferences.toml" ]; then
+    cp "$project/LocalPreferences.toml" "$target/environment/$name/"
+  fi
   "$julia" --startup-file=no --project="$target/environment/$name" -e 'using Pkg; Pkg.instantiate(); Pkg.precompile()'
 done
 "$julia" --startup-file=no --project="$target/environment/babelstream" "$warmup"
