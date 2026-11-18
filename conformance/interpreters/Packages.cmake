@@ -23,6 +23,8 @@ set(conformance_interpreter_package_julia-oneapi_backends sycl levelzero)
 set(conformance_interpreter_package_julia-oneapi_environment julia/oneapi)
 set(conformance_interpreter_package_julia-oneapi_programs julia_babelstream_oneapi julia_tests_oneapi)
 
+set(conformance_julia_tests_timeout 450)
+
 set(conformance_interpreter_program_python_numba_script python/numba_cases.py)
 set(conformance_interpreter_program_python_numba_timeout 900)
 
@@ -33,7 +35,7 @@ set(conformance_interpreter_program_julia_babelstream_cuda_timeout 900)
 set(conformance_interpreter_program_julia_tests_cuda_script julia/package_tests.jl)
 set(conformance_interpreter_program_julia_tests_cuda_project tests)
 set(conformance_interpreter_program_julia_tests_cuda_arguments CUDA)
-set(conformance_interpreter_program_julia_tests_cuda_timeout 1800)
+set(conformance_interpreter_program_julia_tests_cuda_timeout ${conformance_julia_tests_timeout})
 
 set(conformance_interpreter_program_julia_babelstream_amdgpu_script julia/babelstream.jl)
 set(conformance_interpreter_program_julia_babelstream_amdgpu_project babelstream)
@@ -42,7 +44,7 @@ set(conformance_interpreter_program_julia_babelstream_amdgpu_timeout 900)
 set(conformance_interpreter_program_julia_tests_amdgpu_script julia/package_tests.jl)
 set(conformance_interpreter_program_julia_tests_amdgpu_project tests)
 set(conformance_interpreter_program_julia_tests_amdgpu_arguments AMDGPU)
-set(conformance_interpreter_program_julia_tests_amdgpu_timeout 1800)
+set(conformance_interpreter_program_julia_tests_amdgpu_timeout ${conformance_julia_tests_timeout})
 
 set(conformance_interpreter_program_julia_babelstream_oneapi_script julia/babelstream.jl)
 set(conformance_interpreter_program_julia_babelstream_oneapi_project babelstream)
@@ -51,7 +53,7 @@ set(conformance_interpreter_program_julia_babelstream_oneapi_timeout 900)
 set(conformance_interpreter_program_julia_tests_oneapi_script julia/package_tests.jl)
 set(conformance_interpreter_program_julia_tests_oneapi_project tests)
 set(conformance_interpreter_program_julia_tests_oneapi_arguments oneAPI)
-set(conformance_interpreter_program_julia_tests_oneapi_timeout 1800)
+set(conformance_interpreter_program_julia_tests_oneapi_timeout ${conformance_julia_tests_timeout})
 
 # Programs are listed in the order their cases run: an inventory first, then the benchmark, then package suites.
 set(conformance_interpreter_programs
