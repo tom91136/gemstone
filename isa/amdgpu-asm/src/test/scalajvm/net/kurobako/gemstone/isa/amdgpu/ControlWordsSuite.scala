@@ -79,11 +79,15 @@ class ControlWordsSuite extends Suite {
     assertEquals(failures, Vector.empty[String], s"${all.size - failures.size} of ${all.size} blocks match")
   }
 
-  test("every target's blocks contain the control word it regenerates") {
-    all.groupBy(_.processor).foreach { (processor, blocks) =>
-      val word = if (blocks.head.target.isa.isGFX11OrLater) "s_delay_alu" else "s_nop"
-      assert(blocks.exists(block => count(block.statements, word) > 0), s"$processor has no $word")
-    }
+  test("every hazard rule fires on some compiled block") {
+    val fired = all.flatMap(block =>
+      ControlWords.hazards(block.statements, block.target).fold(error => fail(error), identity)
+    ).toSet
+    assertEquals(
+      ControlWords.Hazard.values.toVector.filterNot(fired.contains),
+      Vector.empty[ControlWords.Hazard],
+      "hazard rules that fire on no compiled block"
+    )
   }
 
   test("no s_delay_alu is regenerated on a target without the delay instruction") {
@@ -101,5 +105,50 @@ class ControlWordsSuite extends Suite {
     ).fold(error => fail(error.toString), identity)
     val target = Target.all.find(_.raw == "gfx1100").getOrElse(fail("no gfx1100"))
     assert(ControlWords.regenerate(Vec(Program.Statement.InstructionPair(add, add)), target).isLeft)
+  }
+
+  test("a target with the no-data-dependency hazard model regenerates no hazard s_nop") {
+    def vector(index: Int)                            = Operand.Register(RegisterFile.VectorRegister, index, index)
+    def pair(first: Int)                              = Operand.Register(RegisterFile.VectorRegister, first, first + 1)
+    def scalar(first: Int, last: Int)                 = Operand.Register(RegisterFile.Scalar, first, last)
+    def statement(opcode: String, operands: Operand*) = Program.Statement.Instruction(
+      Instruction.decode(opcode, Vec.from(operands)).fold(error => fail(error.toString), identity)
+    )
+    def compare(target: Target) = statement(
+      "v_cmpx_eq_u32",
+      (Option.when(target.isa.isGFX9OrEarlier)(Operand.SpecialRegister("vcc")).toVector ++
+        Vector(vector(0), vector(1)))*
+    )
+    val sequences = Vector[(String, Target => Vector[Program.Statement])](
+      "vmem reads an sgpr a valu wrote" ->
+        (_ =>
+          Vector(
+            statement("v_readfirstlane_b32", scalar(4, 4), vector(0)),
+            statement("global_load_dword", vector(1), vector(0), scalar(4, 5))
+          )
+        ),
+      "valu overwrites a wide store" ->
+        (_ =>
+          Vector(
+            statement("global_store_dwordx2", vector(0), pair(2), scalar(0, 1)),
+            statement("v_mov_b32", vector(3), vector(2))
+          )
+        ),
+      "vmem reads exec a valu wrote" ->
+        (target =>
+          Vector(
+            compare(target),
+            statement("global_load_dword", vector(2), vector(3), scalar(4, 5))
+          )
+        )
+    )
+    val gfx906  = Target.all.find(_.raw == "gfx906").getOrElse(fail("no gfx906"))
+    val gfx1036 = Target.all.find(_.raw == "gfx1036").getOrElse(fail("no gfx1036"))
+    sequences.foreach { (name, block) =>
+      def nops(target: Target): Int =
+        count(ControlWords.regenerate(Vec.from(block(target)), target).fold(error => fail(error), identity), "s_nop")
+      assertEquals(nops(gfx1036), 0, name)
+      assert(nops(gfx906) > 0, name)
+    }
   }
 }

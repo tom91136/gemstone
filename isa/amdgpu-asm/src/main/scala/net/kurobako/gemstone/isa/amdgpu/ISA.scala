@@ -40,7 +40,8 @@ enum ISA derives CanEqual {
     case RDNA3 | RDNA3_5 | RDNA4 | GFX11_7 => true
     case _                                 => false
   }
-  def isGFX11OrLater: Boolean = isGFX11OrLaterGraphics || this == CDNA5
+  def isGFX11OrLater: Boolean     = isGFX11OrLaterGraphics || this == CDNA5
+  def hasNoDataDepHazard: Boolean = !isGFX9OrEarlier
 
   /** Width of the `s_nop` count field, as in LLVM `GCNSubtarget::getSNopBits`. */
   def snopBits: Int = this match {

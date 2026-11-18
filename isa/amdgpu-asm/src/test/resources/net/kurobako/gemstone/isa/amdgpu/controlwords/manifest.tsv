@@ -53,3 +53,24 @@ trans2	gfx1150	-mllvm -amdgpu-enable-vopd=0
 trans2	gfx1200	-mllvm -amdgpu-enable-vopd=0
 trans2	gfx906	
 trans	gfx1100	-mllvm -amdgpu-enable-vopd=0
+atom	gfx1036	
+bitops	gfx1036	
+cmp	gfx1036	
+conv	gfx1036	
+conv2	gfx1036	
+dot	gfx1036	
+fminmax	gfx1036	
+i64	gfx1036	
+intmath	gfx1036	
+ldspath	gfx1036	
+loads	gfx1036	
+many	gfx1036	
+mixed	gfx1036	
+mixf	gfx1036	
+salu	gfx1036	
+scalar	gfx1036	
+setreg	gfx1036	
+stores	gfx1036	
+trans	gfx1036	
+trans2	gfx1036	
+vmemsgpr	gfx906	

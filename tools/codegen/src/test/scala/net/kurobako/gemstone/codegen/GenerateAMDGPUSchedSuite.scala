@@ -297,6 +297,46 @@ class GenerateAMDGPUSchedSuite extends Suite {
     }
   }
 
+  test("a suffixed record joins its base mnemonic where the bare record is unavailable") {
+    val text = dumpOf(
+      instruction("V_CMPX_EQ_U32_sdst", "v_cmpx_eq_u32$sdst, $src0, $src1", 8, Seq("WriteVALU"), Seq("HasWave64")),
+      instruction("V_CMPX_EQ_U32_e32", "v_cmpx_eq_u32_e32 $src0, $src1", 4, Seq("WriteVALU"), Seq("HasGfx10")),
+      definition("WriteVALU", "SchedWrite"),
+      definition("VALU", "ProcResource", "int NumUnits = 2;"),
+      writeRes("WriteRes_SI_VALU", "SIModel", "WriteVALU", Seq("VALU"), Seq(3), 4),
+      writeRes("WriteRes_GFX10_VALU", "GFX10Model", "WriteVALU", Seq("VALU"), Seq(2), 3),
+      definition(
+        "HasWave64",
+        "Predicate",
+        "bit AssemblerMatcherPredicate = 1;",
+        "dag AssemblerCondDag = (all_of FeatureWave64);"
+      ),
+      definition(
+        "HasGfx10",
+        "Predicate",
+        "bit AssemblerMatcherPredicate = 1;",
+        "dag AssemblerCondDag = (all_of FeatureGfx10);"
+      ),
+      definition("FeatureWave64", "SubtargetFeature", "list<SubtargetFeature> Implies = [];"),
+      definition("FeatureGfx9", "SubtargetFeature", "list<SubtargetFeature> Implies = [FeatureWave64];"),
+      definition("FeatureGfx10", "SubtargetFeature", "list<SubtargetFeature> Implies = [];"),
+      processor("gfx900", "SIModel", "FeatureGfx9"),
+      processor("gfx1030", "GFX10Model", "FeatureGfx10")
+    )
+    withText(text) { dump =>
+      val rendered = GenerateAMDGPUSched.render(
+        dump,
+        Vector("v_cmpx_eq_u32"),
+        Vector.empty,
+        References.LlvmVersion,
+        None
+      )
+      val resource = ujson.read(rendered.resource)
+      assertEquals(entries(resource, "gfx900")("v_cmpx_eq_u32"), ujson.Arr(4, 2, "WriteVALU", ujson.Arr()))
+      assertEquals(entries(resource, "gfx1030")("v_cmpx_eq_u32"), ujson.Arr(3, 1, "WriteVALU", ujson.Arr()))
+    }
+  }
+
   test("candidates of one form that disagree fail naming the processor, mnemonic, and records") {
     withText(fixture(Seq("WriteVALU"))) { dump =>
       val message = intercept[IllegalStateException](render(dump)).getMessage

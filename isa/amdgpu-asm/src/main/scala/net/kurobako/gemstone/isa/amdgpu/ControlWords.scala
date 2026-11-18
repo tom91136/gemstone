@@ -16,18 +16,22 @@ import scala.annotation.tailrec
   * its writer still needs and how many instructions of each class have issued since. Hazard `s_nop` covers the rules of
   * `GCNHazardRecognizer` that a straight-line block reaches on its target: the `s_setreg`/`s_getreg` wait states, from
   * GFX8 the wait states of a VMEM instruction reading an SGPR a VALU wrote, and a VALU overwriting the data registers
-  * of a wide store.
+  * of a wide store. These rules apply to GFX9 and earlier and to CDNA1 to CDNA4 only: LLVM skips them on targets with
+  * the no-data-dependency hazard model (GFX10 and later, CDNA5).
   *
   * Write latencies, the delay type (VALU, TRANS, SALU), the wait classes and the tied destination of each instruction
   * come from the generated scheduling model, which records them from LLVM's instruction records. An instruction the
   * model has no record for, and a dual-issue pair (whose components the model records only as the single-issue forms),
   * stop the regeneration rather than borrow a latency.
   *
-  * Not covered: DPP and SDWA forms, whose tied old-value operand differs from the plain form, and the hazards of
-  * `GCNHazardRecognizer` outside the rules above.
+  * Not covered: FPAtomicToDenormMode, which no compiled fixture reaches; the DPP, SDWA and VOPD forms, whose operands
+  * differ from the plain form; and the other `GCNHazardRecognizer` checks, such as DivFMas, RWLane, MAI, inline
+  * assembly, RFE, the M0 read of movrel and interpolation, the gfx101x bugs, and the `fixHazards` pass.
   */
 object ControlWords {
   private enum Kind derives CanEqual { case Other, Valu, Trans, Salu }
+
+  private[amdgpu] enum Hazard derives CanEqual { case Setreg, VmemSgpr, WideStore }
 
   private case class Def(unit: String, index: Int)
 
@@ -38,7 +42,7 @@ object ControlWords {
       reads: Vector[String],
       allReads: Vector[String],
       defs: Vector[Def],
-      wideStore: Option[Vector[String]],
+      wideStore: Option[Set[String]],
       latency: Int,
       cycles: Int,
       waitsForValu: Boolean,
@@ -91,10 +95,11 @@ object ControlWords {
       hazard: Vector[Step],
       delays: Map[String, Delay],
       lastDelayAlu: Option[Int],
-      lastSgprFromValu: Option[String]
+      lastSgprFromValu: Option[String],
+      fired: Set[Hazard]
   )
 
-  private val Empty = State(Vector.empty, Vector.empty, Map.empty, None, None)
+  private val Empty = State(Vector.empty, Vector.empty, Map.empty, None, None, Set.empty)
 
   private val Nop      = "s_nop"
   private val DelayAlu = "s_delay_alu"
@@ -103,12 +108,18 @@ object ControlWords {
 
   /** `block` with its `s_delay_alu` and hazard `s_nop` instructions removed, regenerated for `target`. */
   def regenerate(block: Vec[Program.Statement], target: Target): Either[String, Vec[Program.Statement]] =
+    simulate(block, target).map(state => Vec.from(state.out))
+
+  private[amdgpu] def hazards(block: Vec[Program.Statement], target: Target): Either[String, Set[Hazard]] =
+    simulate(block, target).map(_.fired)
+
+  private def simulate(block: Vec[Program.Statement], target: Target): Either[String, State] =
     for {
       steps <- block.toVector.filterNot(controlWord).traverse(describe(_, target))
       state <- steps.foldLeft[Either[String, State]](Right(Empty)) { case (accumulated, step) =>
         accumulated.flatMap(advance(_, step, target))
       }
-    } yield Vec.from(state.out)
+    } yield state
 
   private def controlWord(statement: Program.Statement): Boolean = statement match {
     case Program.Statement.Instruction(value) => value.opcode.raw == Nop || value.opcode.raw == DelayAlu
@@ -159,6 +170,9 @@ object ControlWords {
 
   private def scalar(unit: String): Boolean =
     unit.length > 1 && unit.startsWith("s") && unit.drop(1).forall(_.isDigit)
+
+  private def vectorRegister(unit: String): Boolean =
+    unit.length > 1 && (unit.startsWith("v") || unit.startsWith("a")) && unit.drop(1).forall(_.isDigit)
 
   private def hwreg(instruction: Instruction): Option[Int] =
     if (instruction.opcode.raw.startsWith("s_setreg") || instruction.opcode.raw.startsWith("s_getreg"))
@@ -211,9 +225,11 @@ object ControlWords {
         val reads = operandReads.collect {
           case (info, values) if info.kind != OperandKind.VCC && info.kind != OperandKind.EXEC => values
         }.flatten
+        // the catalogue omits the EXEC read that LLVM declares on every VMEM form
+        val vmemExec   = if (traits("vmem")) special(OperandKind.EXEC) else Vector.empty
         val stateReads = operandReads.collect {
           case (info, values) if info.kind == OperandKind.VCC || info.kind == OperandKind.EXEC => values
-        }.flatten ++ unspelled.filterNot(_.output).flatMap(info => special(info.kind))
+        }.flatten ++ unspelled.filterNot(_.output).flatMap(info => special(info.kind)) ++ vmemExec
         val explicitDefs = schema.zip(instruction.operands).zipWithIndex.collect {
           case ((info, operand), index) if info.output => (index, units(operand))
         }.toVector
@@ -255,7 +271,7 @@ object ControlWords {
       schema: Seq[OperandInfo],
       formats: Seq[EncodingFormat],
       traits: Set[String]
-  ): Option[Vector[String]] =
+  ): Option[Set[String]] =
     if (!traits("store") || !traits("vmem")) None
     else {
       val operands = schema.zip(instruction.operands)
@@ -270,7 +286,7 @@ object ControlWords {
         case Operand.Register(RegisterFile.Scalar | RegisterFile.TrapTemporary, _, _) => true
         case _                                                                        => false
       }
-      data.filter(values => values.nonEmpty && (flat || (buffer && offset)))
+      data.map(_.toSet).filter(values => values.nonEmpty && (flat || (buffer && offset)))
     }
 
   /** Whether a decoded operand can fill a schema slot of `kind`: a vector slot takes a vector register, a scalar slot a
@@ -334,30 +350,32 @@ object ControlWords {
         if (next >= limit) Int.MaxValue else waitStatesSince(emitted.dropRight(1), isHazard, limit, next)
     }
 
-  private def nopsBefore(state: State, step: Step, target: Target): Int = {
-    val setreg = if (target.isa.isPreGFX9) 1 else 2
-    val byReg  = step.hwreg match {
-      case Some(hwreg) if step.mnemonic.startsWith("s_setreg") =>
-        val same = (previous: Step) => previous.mnemonic.startsWith("s_setreg") && previous.hwreg.contains(hwreg)
-        math.max(0, setreg - waitStatesSince(state.hazard, same, setreg))
-      case Some(hwreg) if step.mnemonic.startsWith("s_getreg") =>
-        val same = (previous: Step) => previous.mnemonic.startsWith("s_getreg") && previous.hwreg.contains(hwreg)
-        math.max(0, setreg - waitStatesSince(state.hazard, same, setreg))
-      case _ => 0
+  private def nopsBefore(state: State, step: Step, target: Target): Map[Hazard, Int] =
+    if (target.isa.hasNoDataDepHazard) Map.empty
+    else {
+      val setreg = if (target.isa.isPreGFX9) 1 else 2
+      val byReg  = step.hwreg match {
+        case Some(hwreg) if step.mnemonic.startsWith("s_setreg") =>
+          val same = (previous: Step) => previous.mnemonic.startsWith("s_setreg") && previous.hwreg.contains(hwreg)
+          math.max(0, setreg - waitStatesSince(state.hazard, same, setreg))
+        case Some(hwreg) if step.mnemonic.startsWith("s_getreg") =>
+          val same = (previous: Step) => previous.mnemonic.startsWith("s_getreg") && previous.hwreg.contains(hwreg)
+          math.max(0, setreg - waitStatesSince(state.hazard, same, setreg))
+        case _ => 0
+      }
+      val byStore = if (step.isValu) {
+        state.hazard.lastOption.flatMap(_.wideStore).filter(values =>
+          step.defs.exists(def_ => values.contains(def_.unit))
+        ).fold(0)(_ => 1)
+      } else 0
+      val byVmem = if (target.isa != ISA.GFX6 && target.isa != ISA.GFX7 && step.isVmem) {
+        step.allReads.filterNot(vectorRegister).map { unit =>
+          val isValu = (previous: Step) => previous.kind == Kind.Valu && previous.defs.exists(_.unit == unit)
+          5 - waitStatesSince(state.hazard, isValu, 5)
+        }.maxOption.getOrElse(0)
+      } else 0
+      Map(Hazard.Setreg -> byReg, Hazard.VmemSgpr -> byVmem, Hazard.WideStore -> byStore)
     }
-    val byStore = if (step.isValu) {
-      state.hazard.lastOption.flatMap(_.wideStore).filter(values =>
-        step.defs.exists(def_ => values.contains(def_.unit))
-      ).fold(0)(_ => 1)
-    } else 0
-    val byVmem = if (target.isa != ISA.GFX6 && target.isa != ISA.GFX7 && step.isVmem) {
-      step.allReads.filter(scalar).map { unit =>
-        val isValu = (previous: Step) => previous.kind == Kind.Valu && previous.defs.exists(_.unit == unit)
-        5 - waitStatesSince(state.hazard, isValu, 5)
-      }.maxOption.getOrElse(0)
-    } else 0
-    math.max(0, math.max(byReg, math.max(byVmem, byStore)))
-  }
 
   private def advanceState(state: State, step: Step, cycles: Int): Map[String, Delay] =
     state.delays.flatMap((unit, delay) => delay.advanced(step.kind, cycles).map(unit -> _))
@@ -380,7 +398,8 @@ object ControlWords {
   /** Emits `s_nop` wait states before `step`, as the hazard recognizer does, and lets each one advance the delay state.
     */
   private def nops(state: State, step: Step, target: Target): Either[String, State] = {
-    val needed  = nopsBefore(state, step, target)
+    val rules   = nopsBefore(state, step, target)
+    val needed  = rules.values.foldLeft(0)(math.max)
     val maximum = 1 << target.isa.snopBits
     val counts  = Iterator.unfold(needed)(remaining =>
       Option.when(remaining > 0) {
@@ -388,18 +407,20 @@ object ControlWords {
         (count, remaining - count)
       }
     ).toVector
-    counts.foldLeft[Either[String, State]](Right(state)) { case (accumulated, count) =>
-      accumulated.flatMap { current =>
-        for {
-          instruction <- nopInstruction(count - 1)
-          nop         <- describe(Program.Statement.Instruction(instruction), target)
-          emitted = nop.copy(cycles = count)
-        } yield current.copy(
-          out = current.out :+ emitted.statement,
-          hazard = current.hazard :+ emitted,
-          delays = advanceState(current, emitted, count)
-        )
-      }
+    val firing = rules.collect { case (hazard, count) if count > 0 => hazard }
+    counts.foldLeft[Either[String, State]](Right(state.copy(fired = state.fired ++ firing))) {
+      case (accumulated, count) =>
+        accumulated.flatMap { current =>
+          for {
+            instruction <- nopInstruction(count - 1)
+            nop         <- describe(Program.Statement.Instruction(instruction), target)
+            emitted = nop.copy(cycles = count)
+          } yield current.copy(
+            out = current.out :+ emitted.statement,
+            hazard = current.hazard :+ emitted,
+            delays = advanceState(current, emitted, count)
+          )
+        }
     }
   }
 

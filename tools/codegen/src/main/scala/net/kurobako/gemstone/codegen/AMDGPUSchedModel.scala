@@ -12,6 +12,7 @@ object AMDGPUSchedModel {
   private val Variant   = """(?<![$\\])\{([^{}]*)\}""".r
   private val Head      = """[^\s$]*""".r
   private val LdsForm   = """\blds\b""".r
+  private val Encoding  = """_e(?:32|64)$""".r
 
   case class Entry(latency: Int, cycles: Int, writes: String, traits: Vector[String] = Vector.empty)
 
@@ -68,6 +69,8 @@ object AMDGPUSchedModel {
     }
     Head.findPrefixOf(flatten(asm)).getOrElse("")
   }
+
+  private def stem(mnemonic: String): String = Encoding.replaceFirstIn(mnemonic, "")
 
   private val Tie = """\$\w+\s*=\s*\$\w+""".r
 
@@ -133,7 +136,7 @@ class AMDGPUSchedModel(dump: AMDGPUSchedRecords.Dump, catalogue: Vector[String])
 
   private val mnemonics: Map[String, String] = real.map(name => name -> mnemonic(record(name)("AsmString").str)).toMap
 
-  private val known: Set[String] = mnemonics.values.toSet
+  private val known: Set[String] = mnemonics.values.map(stem).toSet
 
   private val ldsRecords: Set[String] =
     real.filter(name => LdsForm.findFirstIn(record(name)("AsmString").str).isDefined).toSet
@@ -304,12 +307,13 @@ class AMDGPUSchedModel(dump: AMDGPUSchedRecords.Dump, catalogue: Vector[String])
     val (lds, plain) = real.filter(available(_, enabled, cache)).partition(ldsRecords)
     val byName       = plain.groupBy(mnemonics)
     val byForm       = lds.groupBy(mnemonics)
+    val byStem       = plain.groupBy(candidate => stem(mnemonics(candidate)))
+    val byStemForm   = lds.groupBy(candidate => stem(mnemonics(candidate)))
     val outcomes     = catalogue.flatMap { opcode =>
       if (!known(opcode)) Some(opcode -> Left("absent"))
       else
-        byName.get(opcode).orElse(byForm.get(opcode)).map(candidates =>
-          opcode -> resolve(name, model, opcode, lds = false, candidates, matched)
-        )
+        byName.get(opcode).orElse(byForm.get(opcode)).orElse(byStem.get(opcode)).orElse(byStemForm.get(opcode))
+          .map(candidates => opcode -> resolve(name, model, opcode, lds = false, candidates, matched))
     }.toMap
     val ldsOutcomes = catalogue.filter(byName.contains).flatMap(opcode =>
       byForm.get(opcode).map(candidates => opcode -> resolve(name, model, opcode, lds = true, candidates, matched))
