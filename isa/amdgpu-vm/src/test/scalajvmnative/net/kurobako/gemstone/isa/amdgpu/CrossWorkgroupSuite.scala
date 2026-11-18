@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import CodeKernels.*
 import fixtures.*
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch

@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import CodeKernels.*
 import VMIR.*
 import VMIR.InstructionSource.*
 import fixtures.*

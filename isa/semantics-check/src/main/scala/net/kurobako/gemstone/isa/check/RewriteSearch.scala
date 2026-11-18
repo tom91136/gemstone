@@ -73,6 +73,21 @@ object RewriteSearch {
       : Either[String, Proof.Result] =
     search(image, function, targetName, window, Config.default).flatMap(_.evidence(candidate))
 
+  def lines(label: String, window: Window, result: Either[String, Report]): Vec[String] = {
+    val head = s"[rewrite] $label ${window.first}..${window.last}"
+    result match {
+      case Left(reason)  => Vec(s"$head skipped: $reason")
+      case Right(report) =>
+        Vec(
+          s"$head live-out=${window.liveOut.toVec.sorted.mkString(",")} candidates=${report.candidates} " +
+            s"wrong=${report.wrong} rewrites=${report.rewrites.size}"
+        ) ++ report.rewrites.map(rewrite =>
+          f"[rewrite]   ${rewrite.after.cycles}%.2f from ${rewrite.before.cycles}%.2f " +
+            s"(${rewrite.source.kind}) ${rewrite.rewrite.mkString("; ")}"
+        )
+    }
+  }
+
   private def search(
       image: Vec[Byte],
       function: String,

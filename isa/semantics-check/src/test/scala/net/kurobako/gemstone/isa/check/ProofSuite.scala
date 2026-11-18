@@ -70,7 +70,7 @@ abstract class ProofSuite[H, L <: Lookup](reference: Reference[H, L], generate: 
       liveOut: LiveOut,
       solver: Proof.Solver = Proof.bitwuzla,
       cases: Vec[Case] = lane,
-      runs: Int = DifferentialSuite.Runs
+      runs: Int = Equivalence.Runs
   ): Result = Proof.prove(reference, executor, cases, left, right, liveOut, solver, runs)
 
   protected val unreachable: Proof.Solver = (_, _, _) => fail("the solver was called")
@@ -103,7 +103,7 @@ abstract class ProofSuite[H, L <: Lookup](reference: Reference[H, L], generate: 
         assertEquals(
           report.instructions,
           Vec(add.kase, three.kase).distinctBy(_.instance).map(kase =>
-            Cover(kase.instance, kase.target, DifferentialSuite.Runs)
+            Cover(kase.instance, kase.target, Equivalence.Runs)
           )
         )
       case other => fail(s"expected a proof, got $other")
@@ -211,7 +211,7 @@ class SASSProofSuite
       case Result.Proved(report) =>
         assertEquals(
           report.instructions.map(cover => (cover.instance, cover.runs)),
-          Vec((fsum("d", a, b).kase.instance, DifferentialSuite.Runs))
+          Vec((fsum("d", a, b).kase.instance, Equivalence.Runs))
         )
       case other => fail(s"expected a proof, got $other")
     }

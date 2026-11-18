@@ -1,7 +1,6 @@
 package net.kurobako.gemstone.isa.check
 
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.semantics.render.Bitwuzla
@@ -116,26 +115,12 @@ class RewriteSearchSuite extends Suite {
     test(s"the $name fixture reports only proved rewrites with fewer model cycles") {
       installed()
       windows(image, size).foreach { window =>
-        RewriteSearch.amdgpu(image, kernel, target, window, RewriteSearch.Config.default) match {
-          case Right(report) =>
-            report.rewrites.foreach { rewrite =>
-              assert(rewrite.after.cycles < rewrite.before.cycles, rewrite)
-              assert(rewrite.evidence.instructions.nonEmpty, rewrite)
-            }
-            println(
-              s"[rewrite] $name ${window.first}..${window.last} " +
-                s"live-out=${window.liveOut.toVec.sorted.mkString(",")} candidates=${report.candidates} " +
-                s"wrong=${report.wrong} rewrites=${report.rewrites.size}"
-            )
-            report.rewrites.foreach { rewrite =>
-              println(
-                f"[rewrite]   ${rewrite.after.cycles}%.2f from ${rewrite.before.cycles}%.2f " +
-                  s"(${rewrite.source.kind}) ${rewrite.rewrite.mkString("; ")}"
-              )
-            }
-          case Left(reason) =>
-            println(s"[rewrite] $name ${window.first}..${window.last} skipped: $reason")
-        }
+        val result = RewriteSearch.amdgpu(image, kernel, target, window, RewriteSearch.Config.default)
+        result.foreach(_.rewrites.foreach { rewrite =>
+          assert(rewrite.after.cycles < rewrite.before.cycles, rewrite)
+          assert(rewrite.evidence.instructions.nonEmpty, rewrite)
+        })
+        RewriteSearch.lines(name, window, result).foreach(println)
       }
     }
 

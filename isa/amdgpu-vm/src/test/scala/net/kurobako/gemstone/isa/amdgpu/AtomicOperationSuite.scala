@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import CodeKernels.*
 import fixtures.*
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*

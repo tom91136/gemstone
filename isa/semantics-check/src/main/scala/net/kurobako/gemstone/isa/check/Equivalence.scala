@@ -10,6 +10,9 @@ import scala.util.Random
 
 object Equivalence {
 
+  /** The inputs each definition runs on, which a proof reports as the differential coverage of its instructions. */
+  val Runs: Int = 64
+
   enum Operand {
     case Location(name: String)
     case Immediate(value: Long)
@@ -61,7 +64,7 @@ object Equivalence {
       left: Vec[Step],
       right: Vec[Step],
       liveOut: LiveOut,
-      runs: Int = DifferentialSuite.Runs
+      runs: Int = Runs
   ): Verdict = typed(reference, left, right, liveOut) match {
     case Left(reason) => Verdict.Refused(reason)
     case Right(types) =>

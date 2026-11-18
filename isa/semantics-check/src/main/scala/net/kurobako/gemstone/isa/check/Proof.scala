@@ -53,7 +53,7 @@ object Proof {
       right: Vec[Step],
       liveOut: LiveOut,
       solver: Solver = bitwuzla,
-      runs: Int = DifferentialSuite.Runs
+      runs: Int = Equivalence.Runs
   ): Result = Equivalence.check(reference, executor, left, right, liveOut, runs) match {
     case Verdict.Rejected(counterexample) => Result.Rejected(counterexample, Source.Filter)
     case Verdict.Refused(reason)          => Result.Refused(reason)
@@ -203,7 +203,7 @@ object Proof {
 
   private def report(steps: Vec[Step], filtered: Int): Report = Report(
     steps.map(_.kase).distinctBy(kase => (kase.instance, kase.target)).map(kase =>
-      Cover(kase.instance, kase.target, DifferentialSuite.Runs)
+      Cover(kase.instance, kase.target, Equivalence.Runs)
     ),
     filtered
   )
