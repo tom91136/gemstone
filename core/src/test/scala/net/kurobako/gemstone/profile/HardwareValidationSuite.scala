@@ -147,6 +147,8 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_mufu_1", 1, 28.01, Some(Binding.Path)),
     Measured("stream_mufu_4", 1, 36.01, Some(Binding.Arithmetic(Pipe.Mufu))),
     Measured("stream_mufu_16", 1, 137.01, Some(Binding.Arithmetic(Pipe.Mufu))),
+    Measured("stream_mufu_24", 1, 201.07, Some(Binding.Arithmetic(Pipe.Mufu))),
+    Measured("stream_mufu_32", 1, 265.08, Some(Binding.Arithmetic(Pipe.Mufu))),
     Measured("stream_mufu_16_wide", 2, 128.43, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same2)),
     Measured("stream_mufu_16_wide", 4, 128.04, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same4)),
     Measured("stream_mufu_16_wide", 8, 128.01, Some(Binding.Arithmetic(Pipe.Mufu)), Some(same8)),
