@@ -18,6 +18,7 @@ dot	gfx1100	-mllvm -amdgpu-enable-vopd=0
 dot	gfx906	
 fminmax	gfx1100	-mllvm -amdgpu-enable-vopd=0
 fminmax	gfx906	
+fp_atomic_window	gfx1100	
 i64	gfx1100	-mllvm -amdgpu-enable-vopd=0
 i64	gfx906	
 intmath	gfx1100	-mllvm -amdgpu-enable-vopd=0
@@ -60,6 +61,10 @@ conv	gfx1036
 conv2	gfx1036	
 dot	gfx1036	
 fminmax	gfx1036	
+fp_atomic_salu1	gfx1036	
+fp_atomic_salu2	gfx1036	
+fp_atomic_valu	gfx1036	
+fp_atomic_window	gfx1036	
 i64	gfx1036	
 intmath	gfx1036	
 ldspath	gfx1036	

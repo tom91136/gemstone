@@ -15,23 +15,24 @@ import scala.annotation.tailrec
   * On GFX11 and later the delay state follows `AMDGPUInsertDelayAlu`: one entry per register unit, holding the cycles
   * its writer still needs and how many instructions of each class have issued since. Hazard `s_nop` covers the rules of
   * `GCNHazardRecognizer` that a straight-line block reaches on its target: the `s_setreg`/`s_getreg` wait states, from
-  * GFX8 the wait states of a VMEM instruction reading an SGPR a VALU wrote, and a VALU overwriting the data registers
-  * of a wide store. These rules apply to GFX9 and earlier and to CDNA1 to CDNA4 only: LLVM skips them on targets with
-  * the no-data-dependency hazard model (GFX10 and later, CDNA5).
+  * GFX8 the wait states of a VMEM instruction reading an SGPR a VALU wrote, a VALU overwriting the data registers of a
+  * wide store, and on GFX10 the wait states an FP atomic owes before `s_denorm_mode`. The first three apply to GFX9 and
+  * earlier and to CDNA1 to CDNA4 only: LLVM skips them on targets with the no-data-dependency hazard model (GFX10 and
+  * later, CDNA5).
   *
   * Write latencies, the delay type (VALU, TRANS, SALU), the wait classes and the tied destination of each instruction
   * come from the generated scheduling model, which records them from LLVM's instruction records. An instruction the
   * model has no record for, and a dual-issue pair (whose components the model records only as the single-issue forms),
   * stop the regeneration rather than borrow a latency.
   *
-  * Not covered: FPAtomicToDenormMode, which no compiled fixture reaches; the DPP, SDWA and VOPD forms, whose operands
-  * differ from the plain form; and the other `GCNHazardRecognizer` checks, such as DivFMas, RWLane, MAI, inline
-  * assembly, RFE, the M0 read of movrel and interpolation, the gfx101x bugs, and the `fixHazards` pass.
+  * Not covered: the DPP, SDWA and VOPD forms, whose operands differ from the plain form; and the other
+  * `GCNHazardRecognizer` checks, such as DivFMas, RWLane, MAI, inline assembly, RFE, the M0 read of movrel and
+  * interpolation, the gfx101x bugs, and the `fixHazards` pass.
   */
 object ControlWords {
   private enum Kind derives CanEqual { case Other, Valu, Trans, Salu }
 
-  private[amdgpu] enum Hazard derives CanEqual { case Setreg, VmemSgpr, WideStore }
+  private[amdgpu] enum Hazard derives CanEqual { case Setreg, VmemSgpr, WideStore, FPAtomicToDenormMode }
 
   private case class Def(unit: String, index: Int)
 
@@ -49,6 +50,7 @@ object ControlWords {
       waitsForSgprWrite: Boolean,
       isValu: Boolean,
       isVmem: Boolean,
+      fpAtomic: Boolean,
       hwreg: Option[Int]
   )
 
@@ -105,6 +107,25 @@ object ControlWords {
   private val DelayAlu = "s_delay_alu"
   private val Hwreg    = raw"(?:hwreg\()?(\d+)\D".r
   private val DepCtr   = raw"depctr_va_vdst\((\d+)\)".r
+
+  private val Waitcnts = Set(
+    "s_waitcnt",
+    "s_waitcnt_vscnt",
+    "s_waitcnt_vmcnt",
+    "s_waitcnt_expcnt",
+    "s_waitcnt_lgkmcnt",
+    "s_wait_loadcnt",
+    "s_wait_loadcnt_dscnt",
+    "s_wait_storecnt",
+    "s_wait_storecnt_dscnt",
+    "s_wait_samplecnt",
+    "s_wait_bvhcnt",
+    "s_wait_expcnt",
+    "s_wait_dscnt",
+    "s_wait_kmcnt",
+    "s_wait_xcnt",
+    "s_wait_idle"
+  )
 
   /** `block` with its `s_delay_alu` and hazard `s_nop` instructions removed, regenerated for `target`. */
   def regenerate(block: Vec[Program.Statement], target: Target): Either[String, Vec[Program.Statement]] =
@@ -202,11 +223,16 @@ object ControlWords {
     case Program.Statement.InstructionPair(_, _) =>
       Left("a dual-issue pair has no scheduling record in the generated model")
     case Program.Statement.Instruction(instruction) =>
-      val shapes = instruction.definition.encodings(target).map { encoding =>
+      val printed   = instruction.operands.size
+      val encodings = instruction.definition.encodings(target).map { encoding =>
         val spelled   = encoding.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC)
         val unspelled = encoding.operands.filter(info => info.implicitOperand || info.kind == OperandKind.EXEC)
         (encoding, spelled, unspelled)
-      }.filter(_._2.size == instruction.operands.size)
+      }
+      val shapes = encodings.filter(_._2.size == printed) ++ encodings.collect {
+        case (encoding, schema, unspelled) if schema.size != printed && schema.count(!_.output) == printed =>
+          (encoding, schema.filterNot(_.output), unspelled)
+      }
       val fitted = shapes.filter((_, schema, _) =>
         schema.zip(instruction.operands).forall((info, operand) => fits(info.kind, operand))
       )
@@ -257,6 +283,7 @@ object ControlWords {
               (operandReads.exists(_._2.nonEmpty) || stateReads.nonEmpty || implicitDefs.nonEmpty)),
           isValu = kind == Kind.Valu || kind == Kind.Trans,
           isVmem = traits("vmem"),
+          fpAtomic = traits("fp-atomic"),
           hwreg = hwreg(instruction)
         )
       }
@@ -341,17 +368,32 @@ object ControlWords {
   }
 
   @tailrec
-  private def waitStatesSince(emitted: Seq[Step], isHazard: Step => Boolean, limit: Int, waiting: Int = 0): Int =
+  private def waitStatesSince(
+      emitted: Seq[Step],
+      isHazard: Step => Boolean,
+      limit: Int,
+      expired: Step => Boolean = _ => false,
+      waiting: Int = 0
+  ): Int =
     emitted.lastOption match {
       case None                                 => Int.MaxValue
       case Some(previous) if isHazard(previous) => waiting
       case Some(previous)                       =>
         val next = waiting + previous.cycles
-        if (next >= limit) Int.MaxValue else waitStatesSince(emitted.dropRight(1), isHazard, limit, next)
+        if (next >= limit || expired(previous)) Int.MaxValue
+        else waitStatesSince(emitted.dropRight(1), isHazard, limit, expired, next)
     }
 
-  private def nopsBefore(state: State, step: Step, target: Target): Map[Hazard, Int] =
-    if (target.isa.hasNoDataDepHazard) Map.empty
+  private def clearsFpAtomic(step: Step): Boolean = step.isValu || Waitcnts(step.mnemonic)
+
+  private def nopsBefore(state: State, step: Step, target: Target): Map[Hazard, Int] = {
+    val byDenormMode =
+      if (target.isa.isGFX10 && step.mnemonic == "s_denorm_mode") {
+        val owed   = 3
+        val atomic = (previous: Step) => previous.isVmem && previous.fpAtomic
+        math.max(0, owed - waitStatesSince(state.hazard, atomic, owed, clearsFpAtomic))
+      } else 0
+    if (target.isa.hasNoDataDepHazard) Map(Hazard.FPAtomicToDenormMode -> byDenormMode)
     else {
       val setreg = if (target.isa.isPreGFX9) 1 else 2
       val byReg  = step.hwreg match {
@@ -374,8 +416,14 @@ object ControlWords {
           5 - waitStatesSince(state.hazard, isValu, 5)
         }.maxOption.getOrElse(0)
       } else 0
-      Map(Hazard.Setreg -> byReg, Hazard.VmemSgpr -> byVmem, Hazard.WideStore -> byStore)
+      Map(
+        Hazard.Setreg               -> byReg,
+        Hazard.VmemSgpr             -> byVmem,
+        Hazard.WideStore            -> byStore,
+        Hazard.FPAtomicToDenormMode -> byDenormMode
+      )
     }
+  }
 
   private def advanceState(state: State, step: Step, cycles: Int): Map[String, Delay] =
     state.delays.flatMap((unit, delay) => delay.advanced(step.kind, cycles).map(unit -> _))

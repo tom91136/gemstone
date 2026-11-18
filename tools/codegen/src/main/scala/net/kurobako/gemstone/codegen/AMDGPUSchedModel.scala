@@ -258,6 +258,11 @@ class AMDGPUSchedModel(dump: AMDGPUSchedRecords.Dump, catalogue: Vector[String])
     dump.classMembers("Processor").map(name => processor(name)).groupBy(_.name).view.mapValues(_.last).toVector
       .sortBy(_._1).map(_._2)
 
+  private def fpAtomic(value: ujson.Obj): Boolean = {
+    val pseudo = value.obj.get("PseudoInstr").flatMap(_.strOpt).flatMap(records.get)
+    flag(value, "FPAtomic") || pseudo.exists(flag(_, "FPAtomic"))
+  }
+
   /** The delay type, wait classes and tied destination LLVM's `SIInstrFlags` and constraints give the records of one
     * mnemonic. DPP and SDWA records are left out when a plain record exists, as their tied old-value operand is not the
     * accumulator of the plain form.
@@ -273,6 +278,7 @@ class AMDGPUSchedModel(dump: AMDGPUSchedRecords.Dump, catalogue: Vector[String])
       Option.when(plain.exists(waitsForValu))("waits-valu") ++
       Option.when(plain.exists(flag(_, "SMRD")))("smrd") ++
       Option.when(plain.exists(vmem))("vmem") ++
+      Option.when(plain.exists(fpAtomic))("fp-atomic") ++
       Option.when(plain.exists(flag(_, "mayStore")))("store") ++
       Option.when(plain.exists(tied))("tied")).toVector.sorted
   }

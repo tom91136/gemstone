@@ -214,6 +214,28 @@ class GenerateAMDGPUSchedSuite extends Suite {
       Seq("WriteSALU"),
       extra = Seq("field bit MUBUF = 1;", "bit mayStore = 1;")
     ),
+    instruction(
+      "GLOBAL_ATOMIC_FMIN",
+      "global_atomic_fmin $vdst, $addr",
+      4,
+      Seq("WriteSALU"),
+      pseudo = 1,
+      extra = Seq("field bit FLAT = 1;", "field bit FPAtomic = 1;")
+    ),
+    instruction(
+      "GLOBAL_ATOMIC_FMIN_gfx9",
+      "global_atomic_fmin $vdst, $addr",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit FLAT = 1;", "field bit FPAtomic = 0;", """string PseudoInstr = "GLOBAL_ATOMIC_FMIN";""")
+    ),
+    instruction(
+      "GLOBAL_ATOMIC_ADD",
+      "global_atomic_add $vdst, $addr",
+      4,
+      Seq("WriteSALU"),
+      extra = Seq("field bit FLAT = 1;")
+    ),
     instruction("S_NOP_E32", "s_nopx", 4, Seq("WriteSALU")),
     definition("WriteSALU", "SchedWrite"),
     definition("SALU", "ProcResource", "int NumUnits = 1;"),
@@ -249,6 +271,17 @@ class GenerateAMDGPUSchedSuite extends Suite {
       assertEquals(of("buffer_store"), Set("waits-valu", "vmem", "store"))
       assertEquals(of("v_atomic"), Set("waits-valu", "vmem", "tied"))
       assertEquals(of("s_nopx"), Set.empty[String])
+    }
+  }
+
+  test("floating-point global atomics carry the fp-atomic trait") {
+    withText(traitFixture) { dump =>
+      val catalogue = Vector("global_atomic_fmin", "global_atomic_add")
+      val resource  = ujson.read(
+        GenerateAMDGPUSched.render(dump, catalogue, Vector.empty, References.LlvmVersion, None).resource
+      )
+      assertEquals(traitsOf(resource, "gfx900", "global_atomic_fmin"), Set("waits-valu", "vmem", "fp-atomic"))
+      assertEquals(traitsOf(resource, "gfx900", "global_atomic_add"), Set("waits-valu", "vmem"))
     }
   }
 

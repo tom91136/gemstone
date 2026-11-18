@@ -6,6 +6,7 @@ import net.kurobako.gemstone.isa.amdgpu.asm.Binary
 import net.kurobako.gemstone.isa.amdgpu.asm.Disassembler
 import net.kurobako.gemstone.isa.amdgpu.asm.Instruction
 import net.kurobako.gemstone.isa.amdgpu.asm.Operand
+import net.kurobako.gemstone.isa.amdgpu.asm.Parser
 import net.kurobako.gemstone.isa.amdgpu.asm.Printer
 import net.kurobako.gemstone.isa.amdgpu.asm.Program
 import net.kurobako.gemstone.isa.amdgpu.asm.RegisterFile
@@ -59,6 +60,16 @@ class ControlWordsSuite extends Suite {
       case _                                    => false
     }
 
+  private def program(source: String): Vec[Program.Statement] =
+    Parser.parse(source).fold(error => fail(error.toString), _.statements)
+
+  private def nopImmediates(target: Target, statements: Vec[Program.Statement]): Vector[BigInt] =
+    ControlWords.regenerate(statements, target).fold(error => fail(error), identity).toVector.flatMap {
+      case Program.Statement.Instruction(value) if value.opcode.raw == "s_nop" =>
+        value.operands.toVector.collect { case Operand.IntegerLiteral(immediate, _) => immediate }
+      case _ => Vector.empty
+    }
+
   private def mismatch(block: Compiled): Option[String] = {
     val outcome = for {
       regenerated <- ControlWords.regenerate(block.statements, block.target)
@@ -107,7 +118,7 @@ class ControlWordsSuite extends Suite {
     assert(ControlWords.regenerate(Vec(Program.Statement.InstructionPair(add, add)), target).isLeft)
   }
 
-  test("a target with the no-data-dependency hazard model regenerates no hazard s_nop") {
+  test("the older hazard rules add no s_nop on a target with the no-data-dependency model") {
     def vector(index: Int)                            = Operand.Register(RegisterFile.VectorRegister, index, index)
     def pair(first: Int)                              = Operand.Register(RegisterFile.VectorRegister, first, first + 1)
     def scalar(first: Int, last: Int)                 = Operand.Register(RegisterFile.Scalar, first, last)
@@ -150,5 +161,35 @@ class ControlWordsSuite extends Suite {
       assertEquals(nops(gfx1036), 0, name)
       assert(nops(gfx906) > 0, name)
     }
+  }
+
+  test("an FP atomic before s_denorm_mode owes three wait states on GFX10") {
+    val gfx1036 = Target("gfx1036")
+    val atomic  = "global_atomic_fmin v[0:1], v2, off"
+    Vector(
+      ""                                 -> Vector(BigInt(2)),
+      "s_mov_b32 s0, 0"                  -> Vector(BigInt(1)),
+      "s_mov_b32 s0, 0\ns_mov_b32 s1, 0" -> Vector(BigInt(0))
+    ).foreach { (fillers, expected) =>
+      val source = Vector(atomic, fillers, "s_denorm_mode 0").filter(_.nonEmpty).mkString("\n")
+      assertEquals(nopImmediates(gfx1036, program(source)), expected, fillers)
+    }
+  }
+
+  test("three SALU, a VALU or a waitcnt between an FP atomic and s_denorm_mode ends the hazard") {
+    val gfx1036 = Target("gfx1036")
+    val atomic  = "global_atomic_fmin v[0:1], v2, off"
+    Vector(
+      "s_mov_b32 s0, 0\ns_mov_b32 s1, 0\ns_mov_b32 s2, 0",
+      "v_mov_b32 v3, 0",
+      "s_waitcnt 0"
+    ).foreach { filler =>
+      assertEquals(nopImmediates(gfx1036, program(s"$atomic\n$filler\ns_denorm_mode 0")), Vector.empty[BigInt], filler)
+    }
+  }
+
+  test("the FP atomic hazard is absent before GFX10") {
+    val block = compiled("fp_atomic_window", "gfx1100")
+    assertEquals(nopImmediates(block.target, block.statements), Vector.empty[BigInt], block.name)
   }
 }
