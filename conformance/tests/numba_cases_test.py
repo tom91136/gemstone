@@ -1,3 +1,4 @@
+import json
 import os
 import subprocess
 import sys
@@ -6,12 +7,16 @@ import textwrap
 import unittest
 
 SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "interpreters", "python", "numba_cases.py")
+CONFIG = os.path.abspath(os.path.join(os.path.dirname(SCRIPT), "pytest.ini"))
 SKIP_STATUS = 4
 
 FAKE_PYTEST = """
+import json
 import os
 import sys
 
+with open(os.environ["FAKE_PYTEST_ARGV"], "w") as handle:
+    json.dump(sys.argv[1:], handle)
 sys.stdout.write(os.environ["FAKE_PYTEST_OUTPUT"] + "\\n")
 sys.exit(int(os.environ["FAKE_PYTEST_STATUS"]))
 """
@@ -66,7 +71,13 @@ class NumbaCases(unittest.TestCase):
         self.write("cuda/__init__.py", "")
         self.write("cuda/bindings/__init__.py", "")
         self.write("cuda/bindings/driver.py", FAKE_DRIVER)
-        self.environment = dict(os.environ, PYTHONPATH=root, PYTHONNOUSERSITE="1", PYTHONDONTWRITEBYTECODE="1")
+        self.environment = dict(
+            os.environ,
+            PYTHONPATH=root,
+            PYTHONNOUSERSITE="1",
+            PYTHONDONTWRITEBYTECODE="1",
+            FAKE_PYTEST_ARGV=os.path.join(root, "argv.json"),
+        )
 
     def write(self, relative, content):
         path = os.path.join(self.directory.name, relative)
@@ -74,18 +85,33 @@ class NumbaCases(unittest.TestCase):
         with open(path, "w") as handle:
             handle.write(textwrap.dedent(content))
 
-    def run_case(self, case, pytest_output="", pytest_status=0, absent=""):
+    def run_script(self, arguments, pytest_output="", pytest_status=0, absent=""):
         environment = dict(
             self.environment, FAKE_PYTEST_OUTPUT=pytest_output, FAKE_PYTEST_STATUS=str(pytest_status), FAKE_DRIVER_ABSENT=absent
         )
         completed = subprocess.run(
-            [sys.executable, SCRIPT, "--case", case],
+            [sys.executable, SCRIPT, *arguments],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             env=environment,
         )
         return completed.returncode, completed.stdout
+
+    def run_case(self, case, pytest_output="", pytest_status=0, absent=""):
+        return self.run_script(["--case", case], pytest_output, pytest_status, absent)
+
+    def pytest_arguments(self):
+        with open(os.path.join(self.directory.name, "argv.json")) as handle:
+            return json.load(handle)
+
+    def assertUsesShippedConfiguration(self, arguments):
+        self.assertIn("-c", arguments)
+        self.assertEqual(arguments[arguments.index("-c") + 1], CONFIG)
+        self.assertIn("--rootdir", arguments)
+        self.assertEqual(arguments[arguments.index("--rootdir") + 1], os.path.join(self.directory.name, "numba", "cuda", "tests"))
+        self.assertIn("numba_cases_pytest", arguments)
+        self.assertEqual(arguments[arguments.index("numba_cases_pytest") - 1], "-p")
 
     def classification(self, output):
         markers = [line for line in output.splitlines() if line.startswith("conformance-classification: ")]
@@ -96,6 +122,21 @@ class NumbaCases(unittest.TestCase):
         status, output = self.run_case("cudapy/test_x.py::T::test", "1 passed in 0.01s")
         self.assertEqual(status, 0, output)
         self.assertIsNone(self.classification(output))
+
+    def test_cases_run_pytest_with_the_shipped_configuration(self):
+        status, output = self.run_case("cudapy/test_x.py::T::test", "1 passed in 0.01s")
+        self.assertEqual(status, 0, output)
+        arguments = self.pytest_arguments()
+        self.assertUsesShippedConfiguration(arguments)
+        self.assertEqual(arguments[-1], "cudapy/test_x.py::T::test")
+
+    def test_listing_collects_with_the_shipped_configuration(self):
+        status, output = self.run_script(["--list"], "cudapy/test_x.py::T::test")
+        self.assertEqual(status, 0, output)
+        self.assertIn("cudapy/test_x.py::T::test", output)
+        arguments = self.pytest_arguments()
+        self.assertIn("--collect-only", arguments)
+        self.assertUsesShippedConfiguration(arguments)
 
     def test_skipped_test_reports_the_skip_status(self):
         status, output = self.run_case("cudapy/test_x.py::T::test", "SKIPPED [1] x.py:3: needs a device\n1 skipped in 0.01s")

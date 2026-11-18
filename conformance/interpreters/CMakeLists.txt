@@ -41,7 +41,10 @@ list(REMOVE_DUPLICATES languages)
 install(FILES "${fragment}" DESTINATION . COMPONENT architecture)
 
 if("python" IN_LIST languages)
-  install(FILES "${CMAKE_CURRENT_LIST_DIR}/python/numba_cases.py"
+  install(FILES
+    "${CMAKE_CURRENT_LIST_DIR}/python/numba_cases.py"
+    "${CMAKE_CURRENT_LIST_DIR}/python/numba_cases_pytest.py"
+    "${CMAKE_CURRENT_LIST_DIR}/python/pytest.ini"
     DESTINATION data/interpreters/python COMPONENT architecture)
 endif()
 if("julia" IN_LIST languages)

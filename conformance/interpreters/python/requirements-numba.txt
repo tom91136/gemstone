@@ -1,15 +1,28 @@
-# Numba and numba-cuda with the driver bindings, the CUDA 13.3 NVVM the PTX route needs, and pytest.
+# Numba and numba-cuda with the driver bindings, the CUDA 13.3 NVVM the PTX route needs, and the numba-cuda test dependencies.
 # Installed with --require-hashes --only-binary=:all: into the environment cache.
+cffi==2.1.1 --hash=sha256:c1453022f490d2459a11819d83ad1d586e9ff65a12ac3e705ffebd46d3685dcf
 cuda-bindings==13.1.0 --hash=sha256:6f63214291d316e18152e277edc1f159083a931f9936e2e3d854da8155a5f0f7
 cuda-core==1.0.1 --hash=sha256:be7b65311bf78964b7905adbf3c0f8f717d432f2854dc45169277729bf60f1e2
 cuda-pathfinder==1.5.0 --hash=sha256:498f90a9e9de36044a7924742aecce11c50c49f735f1bc53e05aa46de9ea4110
+cuda-toolkit==13.3.1 --hash=sha256:2ceda460a540323d52469bcfde48b48c1861f6482e4b5ea3cb5bdac00a1b11bd
+filecheck==1.0.6 --hash=sha256:202b53d0b384016f6b150af8fa6f1b7f306d2213d31983d5a472135fce95baf9
 iniconfig==2.3.1 --hash=sha256:9121e2c1fdb355232495be3194c8dfe87ccc2d5dee45947b78e68f499790d7a7
-llvmlite==0.50.0 --hash=sha256:d501e5103076b9a14be885d2574dc2f6793171aa54a853d1244e011d476f1399
-numba==0.68.1 --hash=sha256:8b33fee239194b9b6cb9b176f3c2563b94e5882fd846748ad0cf960daeee5406
+llvmlite==0.49.0 --hash=sha256:6acba646d88abbc87d5c113a3d62c1fbf8b8fee11c6493f516803e30f21ae870
+ml-dtypes==0.7.0 --hash=sha256:3c4e47f553a04d33886160a9600e2313e5bee8c1c3da997baa23c8fecbfab189
+# numba-cuda 0.30.4 stamps cache indexes by mtime and size; numba 0.68 uses sha256, so numba stays at 0.67.0.
+numba==0.67.0 --hash=sha256:f63d43db06b4756424d6d2484737c902e0ae944a0eec3e8b0b4de2c695b15caa
 numba-cuda==0.30.4 --hash=sha256:4f229a9314c98a6084e43c3a29ae1568a182bdcab7e87d8fc628a651ea2336ca
-numpy==2.5.1 --hash=sha256:59fda5e192b570217ec2580c96f00e9a7e12ef6866a900eb089b62c1a32545ca
+# numpy 2.5 warns on the generic timedelta64 unit that numba-cuda 0.30.4 imports; filterwarnings=error fails collection.
+numpy==2.4.6 --hash=sha256:90f9849678c75fe7afa2d348ac842c168b0a4d3d61919687216dfc547976d853
+nvidia-cuda-cccl==13.3.3.4.1 --hash=sha256:cc0adc188d570b09f4d606c7dc05a42aa3d8aa082e0d60f7bbfc5b6435f627c6
+nvidia-cuda-nvrtc==13.3.33 --hash=sha256:82530788b8c6164a54d3fd9ae8bcca8893d397c4aeb998861982a03bbe41e204
+nvidia-cuda-runtime==13.3.29 --hash=sha256:e04420616e72f563167a7733272992d7e6df6dc5cb54b2f94f9f1520ea9e30c1
+nvidia-nvjitlink==13.3.33 --hash=sha256:26a6de7fb4c8fdaa7703d3dad720d6d427ddfea5c48a528fd97c11733ad830e5
 nvidia-nvvm==13.3.73 --hash=sha256:0e28e0858a3475e11ac67d35301cd5bf82666a1c0dc4ec4e80ceaf3a5fd1dea8
 packaging==26.3 --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
 pluggy==1.7.0 --hash=sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec
+py-cpuinfo2==10.1.1 --hash=sha256:adc53396bfb206e6498d078ec2ab407f85799ecd819584ac36a8f80a2d4d762d
+pycparser==3.12 --hash=sha256:a076f3f489b39b43ed13563a1dafe42447445bec2e294154ec5c57fcdda4c85e
 pygments==2.21.0 --hash=sha256:2363c69b61c4a97c838da3b130dcd6468f4848992b21a82f2a63ec34377137d9
 pytest==9.0.1 --hash=sha256:67be0030d194df2dfa7b556f2e56fb3c3315bd5c8822c6951162b92b32ce7dad
+pytest-benchmark==5.3.1 --hash=sha256:d7732a9952b1c4a4a32277adc693739126eab37afc3a711847f53805ccadc020

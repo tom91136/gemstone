@@ -287,6 +287,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/OffloadKeyTest.cmake")
     add_test(NAME conformance_interpreter_shim
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterShimTest.cmake")
+    add_test(NAME conformance_interpreter_python_shim
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterPythonShimTest.cmake")
     add_test(NAME conformance_interpreter_cache
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterCacheTest.cmake")
     add_test(NAME conformance_interpreter_prepare

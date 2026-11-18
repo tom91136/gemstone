@@ -30,16 +30,17 @@ if [ ! -f "$wheels/.complete" ]; then
 fi
 
 rm -rf "$target"
-mkdir -p "$target/site-packages"
-PIP_DISABLE_PIP_VERSION_CHECK=1 "$interpreter" -m pip install --no-index --find-links "$wheels" --no-deps \
-  --no-compile --target "$target/site-packages" -r "$requirements"
+"$interpreter" -m venv "$target"
+PIP_DISABLE_PIP_VERSION_CHECK=1 "$target/bin/python" -m pip install --no-index --find-links "$wheels" --no-deps \
+  --no-compile -r "$requirements"
 
-ln -s "../$python_directory/bin/python3" "$target/python"
+site_packages=$("$target/bin/python" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')
+site_packages=${site_packages#"$target"/}
 mkdir -p "$target/cuda/nvvm/lib64" "$target/cuda/nvvm/libdevice" "$target/cuda/lib64"
-ln -s ../../../site-packages/nvidia/cu13/lib/libnvvm.so.4 "$target/cuda/nvvm/lib64/libnvvm.so.4"
+ln -s "../../../$site_packages/nvidia/cu13/lib/libnvvm.so.4" "$target/cuda/nvvm/lib64/libnvvm.so.4"
 ln -s libnvvm.so.4 "$target/cuda/nvvm/lib64/libnvvm.so"
-ln -s ../../../site-packages/nvidia/cu13/nvvm/libdevice/libdevice.10.bc "$target/cuda/nvvm/libdevice/libdevice.10.bc"
-ln -s ../../site-packages/nvidia/cu13/lib/libnvvm.so.4 "$target/cuda/lib64/libnvvm.so.4"
+ln -s "../../../$site_packages/nvidia/cu13/nvvm/libdevice/libdevice.10.bc" "$target/cuda/nvvm/libdevice/libdevice.10.bc"
+ln -s "../../$site_packages/nvidia/cu13/lib/libnvvm.so.4" "$target/cuda/lib64/libnvvm.so.4"
 
 printf '%s\n' "$key" >"$target/.key"
 touch "$target/.complete"

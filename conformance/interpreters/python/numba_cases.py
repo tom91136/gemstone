@@ -14,6 +14,8 @@ import traceback
 
 
 SKIP_STATUS = 4
+HERE = os.path.dirname(os.path.abspath(__file__))
+PYTEST_CONFIG = os.path.join(HERE, "pytest.ini")
 
 PACKAGE_MISMATCHES = (
     re.compile(r"AssertionError: '(?:atom|red)(?:\.shared)?\.add\.f64' not found"),
@@ -43,13 +45,23 @@ def tests_root():
     return os.path.dirname(os.path.abspath(numba.cuda.tests.__file__))
 
 
+def pytest_command(root, *arguments):
+    plugins = ["-p", "numba_cases_pytest", "-p", "no:cacheprovider"]
+    return [sys.executable, "-m", "pytest", "-c", PYTEST_CONFIG, "--rootdir", root, *plugins, *arguments]
+
+
+def pytest_environment():
+    paths = filter(None, [HERE, os.environ.get("PYTHONPATH")])
+    return dict(os.environ, PYTHONPATH=os.pathsep.join(paths))
+
+
 def list_pytest_cases(root):
     completed = subprocess.run(
-        [sys.executable, "-m", "pytest", "--collect-only", "-q", "--no-header", "-p", "no:cacheprovider", "."],
+        pytest_command(root, "--collect-only", "-q", "--no-header", "."),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        env=os.environ,
+        env=pytest_environment(),
         cwd=root,
     )
     if completed.returncode != 0:
@@ -150,11 +162,11 @@ def pytest_outcomes(output):
 
 def run_pytest(root, identity):
     completed = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "--no-header", "-p", "no:cacheprovider", identity],
+        pytest_command(root, "-q", "--no-header", identity),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        env=os.environ,
+        env=pytest_environment(),
         cwd=root,
     )
     sys.stdout.write(completed.stdout)
