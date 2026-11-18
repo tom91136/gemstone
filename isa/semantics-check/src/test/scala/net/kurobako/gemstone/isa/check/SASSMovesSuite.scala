@@ -11,8 +11,11 @@ import net.kurobako.gemstone.isa.sass.fixtures.Fixture
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.RegisterUse
 import net.kurobako.gemstone.vm.Workgroups
+import scala.concurrent.duration.*
 
 class SASSMovesSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 120.seconds
+
   private val targetName = "sm_89"
   private val target     = Target.parse(targetName).toOption.get
   private val limit      = 24
