@@ -573,7 +573,7 @@ void pointerAttributes() {
   uint8_t ordinary[32]{};
   hipPointerAttribute_t info{};
   REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipSuccess));
-  CHECK((info.type == hipMemoryTypeHost && info.device == -2 && info.hostPointer == nullptr && info.devicePointer == nullptr));
+  CHECK((info.type == hipMemoryTypeUnregistered && info.device == -2 && info.hostPointer == nullptr && info.devicePointer == nullptr));
   REQUIRE((hipHostRegister(ordinary, sizeof(ordinary), 0) == hipSuccess));
   for (size_t const offset : {size_t{0}, size_t{7}, sizeof(ordinary) - 1}) {
     REQUIRE((hipPointerGetAttributes(&info, ordinary + offset) == hipSuccess));
@@ -581,7 +581,7 @@ void pointerAttributes() {
   }
   REQUIRE((hipHostUnregister(ordinary) == hipSuccess));
   REQUIRE((hipPointerGetAttributes(&info, ordinary) == hipSuccess));
-  CHECK((info.type == hipMemoryTypeHost && info.device == -2 && info.hostPointer == nullptr));
+  CHECK((info.type == hipMemoryTypeUnregistered && info.device == -2 && info.hostPointer == nullptr));
   for (const auto kind : {hipMemoryTypeHost, hipMemoryTypeDevice, hipMemoryTypeManaged}) {
     void *pointer = nullptr;
     if (kind == hipMemoryTypeHost) REQUIRE((hipHostMalloc(&pointer, 32, 0) == hipSuccess));
@@ -594,7 +594,7 @@ void pointerAttributes() {
     if (kind == hipMemoryTypeHost) REQUIRE((hipHostFree(pointer) == hipSuccess));
     else REQUIRE((hipFree(pointer) == hipSuccess));
     REQUIRE((hipPointerGetAttributes(&info, pointer) == hipSuccess));
-    CHECK((info.type == hipMemoryTypeHost && info.device == -2 && info.hostPointer == nullptr));
+    CHECK((info.type == hipMemoryTypeUnregistered && info.device == -2 && info.hostPointer == nullptr));
   }
   REQUIRE((fixture.launches.load() == 0));
 }
@@ -614,7 +614,7 @@ void deviceResetLifetime() {
   REQUIRE((hipDeviceReset() == hipSuccess));
   hipPointerAttribute_t attributes{};
   REQUIRE((hipPointerGetAttributes(&attributes, memory) == hipSuccess));
-  CHECK((attributes.type == hipMemoryTypeHost && attributes.device == hipInvalidDeviceId));
+  CHECK((attributes.type == hipMemoryTypeUnregistered && attributes.device == hipInvalidDeviceId));
   REQUIRE((hipFree(memory) == hipErrorInvalidDevicePointer));
   REQUIRE((hipStreamQuery(stream) == hipErrorInvalidResourceHandle));
   REQUIRE((hipEventQuery(event) == hipErrorInvalidResourceHandle));
@@ -991,7 +991,7 @@ TEST_CASE("HIP registered subranges retain ownership and permit address reuse", 
     REQUIRE((hipHostUnregister(host.data() + 9) == hipSuccess));
     host[1] = iteration;
     REQUIRE((hipPointerGetAttributes(&info, host.data() + 1) == hipSuccess));
-    CHECK((info.type == hipMemoryTypeHost && info.device == hipInvalidDeviceId));
+    CHECK((info.type == hipMemoryTypeUnregistered && info.device == hipInvalidDeviceId));
   }
 }
 
@@ -1438,6 +1438,41 @@ TEST_CASE("HIP memory pools account for stream-ordered allocations", "[hip]") {
   uint64_t reset = 1;
   CHECK((hipMemPoolSetAttribute(pool, hipMemPoolAttrUsedMemHigh, &reset) == hipErrorInvalidValue));
   CHECK((hipDeviceSetMemPool(0, reinterpret_cast<hipMemPool_t>(uintptr_t{0x77})) == hipErrorInvalidValue));
+}
+
+TEST_CASE("HIP memory pool destruction follows the runtime", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  hipMemPoolProps props{};
+  props.allocType = hipMemAllocationTypePinned;
+  props.location.type = hipMemLocationTypeDevice;
+  props.location.id = 0;
+  hipMemPool_t defaultPool = nullptr;
+  REQUIRE((hipDeviceGetDefaultMemPool(&defaultPool, 0) == hipSuccess));
+
+  hipMemPool_t pool = nullptr;
+  REQUIRE((hipMemPoolCreate(&pool, &props) == hipSuccess));
+  CHECK((hipMemPoolDestroy(pool) == hipSuccess));
+
+  REQUIRE((hipMemPoolCreate(&pool, &props) == hipSuccess));
+  REQUIRE((hipDeviceSetMemPool(0, pool) == hipSuccess));
+  REQUIRE((hipMemPoolDestroy(pool) == hipSuccess));
+  hipMemPool_t current = nullptr;
+  REQUIRE((hipDeviceGetMemPool(&current, 0) == hipSuccess));
+  CHECK((current == defaultPool));
+
+  REQUIRE((hipMemPoolCreate(&pool, &props) == hipSuccess));
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+  void *pointer = nullptr;
+  REQUIRE((hipMallocFromPoolAsync(&pointer, 1024, pool, stream) == hipSuccess));
+  REQUIRE((hipMemPoolDestroy(pool) == hipSuccess));
+  CHECK((hipFreeAsync(pointer, stream) == hipSuccess));
+  CHECK((hipStreamSynchronize(stream) == hipSuccess));
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+
+  CHECK((hipMemPoolDestroy(defaultPool) == hipErrorInvalidValue));
+  CHECK((hipMemPoolDestroy(nullptr) == hipErrorInvalidValue));
 }
 
 TEST_CASE("HIP typed asynchronous fills write their element widths", "[hip]") {

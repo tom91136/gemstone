@@ -1396,6 +1396,20 @@ extern "C" hipError_t hipMemPoolCreate(hipMemPool_t *pool, const hipMemPoolProps
   return remember(hipSuccess);
 }
 
+extern "C" hipError_t hipMemPoolDestroy(hipMemPool_t pool) {
+  if (!pool) return remember(hipErrorInvalidValue);
+  if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  auto &runtime = state();
+  std::scoped_lock const guard(runtime.lock);
+  const auto found = runtime.pools.find(pool);
+  if (found == runtime.pools.end()) return remember(hipErrorInvalidValue);
+  for (auto &current : runtime.currentPools)
+    if (current == pool) current = nullptr;
+  for (auto &[_, allocation] : runtime.deviceAllocations)
+    if (allocation.pool == pool) allocation.pool = nullptr;
+  runtime.pools.erase(found);
+  return remember(hipSuccess);
+}
 extern "C" hipError_t hipMemPoolGetAttribute(hipMemPool_t pool, hipMemPoolAttr attribute, void *value) {
   if (!pool || !value) return remember(hipErrorInvalidValue);
   auto &runtime = state();
@@ -1993,7 +2007,7 @@ extern "C" hipError_t hipPointerGetAttributes(hipPointerAttribute_t *attributes,
   if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));
   if (info.type == HSA_EXT_POINTER_TYPE_UNKNOWN) {
     std::memset(attributes, 0, sizeof(*attributes));
-    attributes->type = hipMemoryTypeHost;
+    attributes->type = hipMemoryTypeUnregistered;
     attributes->device = hipInvalidDeviceId;
     return remember(hipSuccess);
   }

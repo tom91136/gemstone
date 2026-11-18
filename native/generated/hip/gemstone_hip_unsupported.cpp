@@ -194,7 +194,6 @@ GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemGetHandleForAddressRange, gemstone_h
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemImportFromShareableHandle, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemMap, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemMapArrayAsync, gemstone_hip_unsupported)
-GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemPoolDestroy, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemPoolExportPointer, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemPoolExportToShareableHandle, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipMemPoolGetAccess, gemstone_hip_unsupported)
