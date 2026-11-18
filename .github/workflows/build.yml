@@ -28,12 +28,14 @@ env:
   GEMSTONE_CONTAINER_EXE: docker
   CONFORMANCE_BUILD_PROFILE: complete
   CONFORMANCE_WORKLOAD: ${{ inputs.tier || 'xlong' }}
+  COURSIER_CACHE: ${{ github.workspace }}/.cache/coursier
   # a runner that runs out of memory is shut down without a trace, so long steps sample it into the log as they run
   MEMORY_SAMPLE: >-
     echo "::group::memory $(date -u +%T)"; free -m; cat /proc/pressure/memory 2>/dev/null;
     ps -eo rss=,args= --sort=-rss | head -5 | cut -c1-200; echo "::endgroup::"
 jobs:
   build:
+    needs: resolve
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
@@ -58,6 +60,13 @@ jobs:
           cache: ${{ steps.offload-cache.outputs.cache-hit != 'true' && 'sbt' || '' }}
       - &sbt
         uses: sbt/setup-sbt@v1
+      - &coursier
+        name: Restore coursier cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/coursier
+          key: ${{ needs.resolve.outputs.coursier-key }}
+          fail-on-cache-miss: true
       - &tools-cache
         uses: actions/cache@v6
         with:
@@ -186,6 +195,30 @@ jobs:
           path: target/ci/build.tar.zst
           compression-level: 0
 
+  resolve:
+    runs-on: ubuntu-24.04
+    outputs:
+      coursier-key: ${{ steps.coursier.outputs.cache-primary-key }}
+    steps:
+      - *checkout
+      - *java
+      - *sbt
+      - name: Restore coursier cache
+        id: coursier
+        uses: actions/cache/restore@v6
+        with:
+          path: .cache/coursier
+          key: coursier-${{ hashFiles('build.sbt', '**/*.sbt', 'project/**') }}
+      - name: Resolve dependencies
+        if: ${{ steps.coursier.outputs.cache-hit != 'true' }}
+        run: sbt --server --batch update
+      - name: Save coursier cache
+        if: ${{ steps.coursier.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: .cache/coursier
+          key: ${{ steps.coursier.outputs.cache-primary-key }}
+
   # the build and run shards come from one policy in Shards.cmake
   shards:
     runs-on: ubuntu-24.04
@@ -230,7 +263,7 @@ jobs:
 
   # the artifact builds do not depend on the rest of build, so they run beside it
   llvm-offload:
-    needs: conformance-package-cache
+    needs: [resolve, conformance-package-cache]
     if: ${{ needs.conformance-package-cache.outputs.package-hit != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -249,6 +282,7 @@ jobs:
           lookup-only: true
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - name: Build llvm-offload
@@ -262,7 +296,7 @@ jobs:
           key: llvm-offload-${{ steps.offload.outputs.key }}
 
   conformance-build:
-    needs: [shards, conformance-package-cache, llvm-offload]
+    needs: [resolve, shards, conformance-package-cache, llvm-offload]
     if: ${{ needs.conformance-package-cache.outputs.package-hit != 'true' }}
     name: conformance-build (${{ matrix.shard }})
     runs-on: ubuntu-24.04
@@ -276,6 +310,7 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - *dependencies
@@ -386,7 +421,7 @@ jobs:
           compression-level: 0
 
   test:
-    needs: build
+    needs: [resolve, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -400,6 +435,7 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - *toolchain-image-key
@@ -434,7 +470,7 @@ jobs:
         run: sbt --server --batch 'gemstoneRun -- printenv GEMSTONE_RPC_ENDPOINT'
 
   ctest:
-    needs: build
+    needs: [resolve, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -445,6 +481,7 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - *toolchain-image-key
@@ -460,7 +497,7 @@ jobs:
           exit $status
 
   sanitize:
-    needs: build
+    needs: [resolve, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
@@ -471,6 +508,7 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - *toolchain-image-key
@@ -495,7 +533,7 @@ jobs:
       - run: native/test/almalinux8-smoke.sh target/native/build
 
   lint:
-    needs: build
+    needs: [resolve, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -503,6 +541,7 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - uses: actions/cache@v6
@@ -547,7 +586,7 @@ jobs:
   # one backend per runner: each route builds the single toolchain image it needs and lints alone, so the images stay
   # small and the routes do not compete for the memory clang-tidy needs
   conformance-lint:
-    needs: shards
+    needs: [resolve, shards]
     name: conformance-lint (${{ matrix.backend }})
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -560,6 +599,7 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - *dependencies
@@ -567,7 +607,7 @@ jobs:
           sbt --server --batch 'set conformance / conformanceLintTargets := Seq("lint-${{ matrix.backend }}")' conformance/lintBackends
 
   semantics:
-    needs: build
+    needs: [resolve, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
@@ -582,12 +622,13 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *download-build
       - *unpack
       - run: sbt --server --batch 'semanticsCheck${{ matrix.isa }}/testOnly *'
 
   conformance:
-    needs: [shards, build, conformance-package-cache, conformance-build, conformance-package]
+    needs: [resolve, shards, build, conformance-package-cache, conformance-build, conformance-package]
     if: ${{ !cancelled() }}
     name: conformance (${{ matrix.shard }})
     runs-on: ubuntu-24.04
@@ -604,6 +645,7 @@ jobs:
       - *checkout
       - *java
       - *sbt
+      - *coursier
       - *tools-cache
       - *tools
       - *toolchain-image-key
