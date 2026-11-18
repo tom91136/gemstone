@@ -18,6 +18,7 @@
 *.dylib
 *.exe
 *.o
+!**/src/test/resources/**/*.o
 *.obj
 *.pdb
 *.so
