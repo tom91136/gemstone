@@ -34,7 +34,7 @@ class ListingSuite extends Suite {
       "kernel:\n.Ltarget:\n    /*0000*/ { @!P0 MOV\tR1, c[0x0] [0x20] ; /* 0x0000000000000010 */\n /* 0x0000000000000001 */\n"
     val control = Scheduling(
       0.unsafe[Int in 0 ~ 15],
-      yieldHint = false,
+      yieldHint = true,
       Some(0.unsafe[Int in 0 ~ 5]),
       Some(0.unsafe[Int in 0 ~ 5]),
       0.unsafe[Int in 0 ~ 0x3f],

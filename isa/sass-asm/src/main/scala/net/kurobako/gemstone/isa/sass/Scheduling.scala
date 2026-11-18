@@ -19,7 +19,7 @@ object Scheduling {
     readBarrier  <- scoreboard((control >> 8) & 7)
   } yield Some(Scheduling(
     (control & 0xf).unsafe[Int in 0 ~ 15],
-    ((control >> 4) & 1) == 1,
+    ((control >> 4) & 1) == 0,
     writeBarrier,
     readBarrier,
     ((control >> 11) & 0x3f).unsafe[Int in 0 ~ 0x3f],
@@ -35,9 +35,11 @@ object Scheduling {
 
 /** Static issue schedule that the compiler encodes beside each instruction from Maxwell onwards.
   *
-  * `stall` is the number of cycles a warp waits before issuing its next instruction. `writeBarrier` is the scoreboard a
-  * variable-latency instruction sets, and `readBarrier` the scoreboard that releases its source operands. `waitMask`
-  * has one bit per scoreboard that this instruction waits on before issuing. `reuse` selects the operand reuse caches.
+  * `stall` is the number of cycles a warp waits before issuing its next instruction. `yieldHint` is the clear bit 4,
+  * which the encoding tables name `WAITn_END_GROUP` and ptxas sets on a wait for a register. `writeBarrier` is the
+  * scoreboard a variable-latency instruction sets, and `readBarrier` the scoreboard that releases its source operands.
+  * `waitMask` has one bit per scoreboard that this instruction waits on before issuing. `reuse` selects the operand
+  * reuse caches.
   */
 case class Scheduling(
     stall: Int in 0 ~ 15,

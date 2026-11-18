@@ -12,7 +12,7 @@ class SchedulingSuite extends Suite {
     val encoding = BigInt("1071fef17007c20c7090c", 16)
     val expected = Scheduling(
       15.unsafe[Int in 0 ~ 15],
-      yieldHint = true,
+      yieldHint = false,
       Some(0.unsafe[Int in 0 ~ 5]),
       None,
       0x20.unsafe[Int in 0 ~ 0x3f],
@@ -25,7 +25,7 @@ class SchedulingSuite extends Suite {
     val encoding = BigInt("0e0f64000000540c00000006040c7236", 16)
     val expected = Scheduling(
       2.unsafe[Int in 0 ~ 15],
-      yieldHint = true,
+      yieldHint = false,
       Some(5.unsafe[Int in 0 ~ 5]),
       None,
       0x20.unsafe[Int in 0 ~ 0x3f],
@@ -38,7 +38,7 @@ class SchedulingSuite extends Suite {
     val encoding = BigInt("106400000000040000000002027229", 16)
     val expected = Scheduling(
       2.unsafe[Int in 0 ~ 15],
-      yieldHint = true,
+      yieldHint = false,
       Some(1.unsafe[Int in 0 ~ 5]),
       Some(0.unsafe[Int in 0 ~ 5]),
       0x1.unsafe[Int in 0 ~ 0x3f],
@@ -57,7 +57,7 @@ class SchedulingSuite extends Suite {
   test("maxwell control of a fixed-latency producer") {
     val expected = Scheduling(
       6.unsafe[Int in 0 ~ 15],
-      yieldHint = true,
+      yieldHint = false,
       None,
       None,
       0x1.unsafe[Int in 0 ~ 0x3f],
@@ -69,7 +69,7 @@ class SchedulingSuite extends Suite {
   test("volta control of a fixed-latency producer") {
     val expected = Scheduling(
       8.unsafe[Int in 0 ~ 15],
-      yieldHint = false,
+      yieldHint = true,
       None,
       None,
       0x1.unsafe[Int in 0 ~ 0x3f],
