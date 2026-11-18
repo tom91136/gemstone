@@ -67,14 +67,40 @@ class FormsSuite extends Suite {
     )
   }
 
-  test("a form that reaches memory, launch state or a uniform register is refused by its own definition") {
-    assertEquals(at(0x50).left.map(_.contains("is refused: Memory.")), Left(true))
+  test("a form that reaches shared memory, launch state or a uniform register is refused by its own definition") {
     assertEquals(at(0x10).left.map(_.contains("is refused: Launch.")), Left(true))
     assertEquals(at(0x30).left.map(_.contains("is refused: Warp.")), Left(true))
     assertEquals(
-      AMDGPUForms.of(gfx906, "global_load_dword v2, v[2:3], off").left.map(_.contains("is refused: GlobalMemory.")),
+      AMDGPUForms.of(gfx906, "ds_read_b32 v1, v2").left.map(_.contains("is refused: LocalMemory.")),
       Left(true)
     )
+  }
+
+  /** The widths in bits of the machine's plain loads and stores of a form's definition, in order. */
+  private def accesses(form: Form): Vec[(String, Int)] = {
+    val definition = form.kase.definition
+    (definition.body.map(_.term) ++ definition.results.map(_.value)).flatMap(Rejection.terms(_)).collect {
+      case Term.Context(contextType = owner, method = method, typeArguments = Vec(tpe))
+          if owner == RenderMachine.Machine.contextType => (method, tpe.bits)
+    }
+  }
+
+  test("a load or store of global memory is the machine's plain access at the instruction's own address") {
+    val load = at(0x50).fold(fail(_), identity)
+    assertEquals(load.kase.instance, "LDG.E.CONSTANT R5, [R2.64]")
+    assertEquals(accesses(load), Vec(("load", 32)))
+    assertEquals(load.parameters, Map("R2" -> Operand.Joined(Vec("R2", "R3"))))
+    assertEquals(load.results, Map("R5" -> Vec("R5")))
+    assert(load.lane.cases.nonEmpty)
+    load.lane.cases.foreach(kase => assert(kase.instance.startsWith("LDG"), kase))
+    val store = at(0x530).fold(fail(_), identity)
+    assertEquals(accesses(store), Vec(("store", 32)))
+    assertEquals(store.results, Map.empty[String, Vec[String]])
+    val wide = AMDGPUForms.of(gfx906, "global_store_dwordx4 v0, v[1:4], s[16:17]").fold(fail(_), identity)
+    assertEquals(accesses(wide), Vec.fill(4)(("store", 32)))
+    val scalar = AMDGPUForms.of(gfx906, "s_load_dword s9, s[4:5], 4").fold(fail(_), identity)
+    assertEquals(accesses(scalar), Vec(("load", 32)))
+    assertEquals(scalar.parameters, Map("s[4:5]" -> Operand.Joined(Vec("s4", "s5"))))
   }
 
   test("a branch is refused: what it writes is not a register") {

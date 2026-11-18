@@ -301,7 +301,63 @@ class SmtBackendSuite extends Suite {
       storing(Term.Binary("+", Term.Variable("a"), Term.Literal(1L))),
       memory = true
     )
-    assert(query.exists(_.contains("(assert (distinct l_memory_Global_0 r_memory_Global_0))")), query.toString)
+    assert(query.exists(_.contains("(distinct l_memory_Global_0 r_memory_Global_0)")), query.toString)
+  }
+
+  private def loading(address: Term): Term = Term.Context(
+    RenderMachine.Machine.contextType,
+    RenderMachine.Machine.context,
+    "load",
+    Vec(u32),
+    Vec(Term.Constant("Space.Global"), address),
+    Vec(None, None),
+    Some(u32),
+    effect = false
+  )
+
+  private val bit = "(Array (_ BitVec 64) (_ BitVec 8))"
+
+  test("the stores each side makes are compared by address and width when memory is live-out") {
+    val text = SmtBackend.equivalence(storing(Term.Variable("a")), storing(Term.Variable("a")), memory = true)
+      .fold(identity, identity)
+    assertEquals(text.linesIterator.count(_ == s"(declare-const stored_Global $bit)"), 1, text)
+    assert(
+      text.contains(
+        s"(define-fun l_stored_Global_1 () $bit " +
+          "(store stored_Global (_ bv0 64) (bvor (select stored_Global (_ bv0 64)) (_ bv8 8))))"
+      ),
+      text
+    )
+    assert(text.contains("(distinct l_stored_Global_1 r_stored_Global_1)"), text)
+  }
+
+  test("a side that loads nothing is told apart from one that loads") {
+    val text = SmtBackend.equivalence(
+      definition(ab, Vec(("d", u32, loading(Term.Variable("a"))))),
+      definition(ab, Vec(("d", u32, Term.Variable("b")))),
+      memory = true
+    ).fold(identity, identity)
+    assert(text.contains(s"(declare-const loaded_Global $bit)"), text)
+    assert(text.contains("(distinct l_loaded_Global_0 loaded_Global)"), text)
+  }
+
+  test("a load in one arm of a selection is marked only where that arm is taken") {
+    val chosen = Term.Select(Term.Variable("b"), loading(Term.Variable("a")), Term.Variable("b"))
+    val text   = SmtBackend.equivalence(
+      definition(ab, Vec(("d", u32, chosen))),
+      definition(ab, Vec(("d", u32, chosen))),
+      memory = true
+    ).fold(identity, identity)
+    assert(text.contains(s"(define-fun l_loaded_Global_0 () $bit (ite (distinct b (_ bv0 32)) (store "), text)
+  }
+
+  test("the loads and stores made are ignored when memory is not live-out") {
+    val text = SmtBackend.equivalence(
+      definition(ab, Vec(("d", u32, loading(Term.Variable("a"))))),
+      definition(ab, Vec(("d", u32, Term.Variable("b")))),
+      memory = false
+    ).fold(identity, identity)
+    assert(text.contains("(assert (distinct l_d r_d))"), text)
   }
 
   test("final memory is ignored when it is not live-out") {

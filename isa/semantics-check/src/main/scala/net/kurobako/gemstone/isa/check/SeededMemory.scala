@@ -17,11 +17,15 @@ object SeededMemory {
   }
 }
 
-/** Bytes by address, within `mask`, below `limit`, `initial` until written, recording every write; those from `limit`
-  * read zero and drop writes.
+/** Bytes by address, within `mask`, below `limit`, `initial` until written, recording every load and write; those from
+  * `limit` read zero and drop writes.
   */
 class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, mask: Long = -1L) {
   private val written = mutable.LongMap.empty[Byte]
+  private val loaded  = mutable.Set.empty[Long]
+
+  /** Every address loaded from. */
+  def loads: Set[Long] = loaded.toSet
 
   /** Every byte written, by address. */
   def writes: Map[Long, Byte] = written.toMap
@@ -32,7 +36,11 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
 
   def load(address: Long, size: Int): Long = (0 until size).foldLeft(0L) { (value, index) =>
     val at = (address + index) & mask
-    if (at >= limit) value else value | ((written.getOrElse(at, initial(at)) & 0xffL) << (index * 8))
+    if (at >= limit) value
+    else {
+      loaded += at
+      value | ((written.getOrElse(at, initial(at)) & 0xffL) << (index * 8))
+    }
   }
 
   def store(address: Long, value: Long, size: Int): Unit = (0 until size).foreach { index =>

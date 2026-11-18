@@ -48,23 +48,22 @@ class SASSWindowsSuite extends Suite {
     assert(at(0x00) && at(0x40) && at(0x90) && at(0xa0) && at(0x520), "constant-bank reads are admitted")
     assert(!at(0x60) && !at(0x510), "no checked case writes a predicate beside a constant-bank read")
     assert(!at(0x30), "a uniform register is written through the warp")
-    assert(!at(0x50), "a load is not a plain memory access")
+    assert(at(0x50) && at(0xb0) && at(0x530), "loads and stores of global memory are admitted")
     assert(!at(0x70), "a convergence barrier has no rendering")
     assert(!at(0x2c0), "a branch writes no register")
     assert(at(0x200) && at(0x210) && at(0x220), "the loop's arithmetic is admitted")
     assert(at(0x260), "the comparison is admitted")
   }
 
-  test("the kernel gains the windows that hold its constant-bank reads and loses none") {
+  test("the kernel's windows run through its constant-bank reads and its global loads and stores") {
     val (graph, uses, instructions) = coded(loopKernel, Vec(24))
     val windows                     = SASSWindows.of(graph, uses, instructions, "sm_89", 8)
     val spans                       = windows.map(window => (loop(window.first), loop(window.last)))
-    val gained                      = Vec((0x00, 0x00), (0x40, 0x40), (0x90, 0xa0), (0x520, 0x520))
+    val gained                      = Vec((0x00, 0x00), (0x40, 0x50), (0x90, 0xc0), (0x520, 0x530))
     assertEquals(
       spans.filterNot(gained.contains),
       Vec(
         (0x20, 0x20),
-        (0xc0, 0xc0),
         (0xe0, 0x130),
         (0x150, 0x150),
         (0x170, 0x190),
@@ -86,8 +85,15 @@ class SASSWindowsSuite extends Suite {
       )
     )
     assertEquals(spans.filter(gained.contains), gained)
-    val pair = windows.find(window => loop(window.first) == 0x90).getOrElse(fail("no window at 0x90"))
-    assertEquals(pair.liveOut.intersect(Set("R2", "R3")), Set("R2", "R3"))
+    assertEquals(spans.size, 23)
+    assertEquals(
+      spans.groupMapReduce((first, last) => (last - first) / 16 + 1)(_ => 1)(_ + _),
+      Map(1 -> 7, 2 -> 7, 3 -> 3, 4 -> 2, 5 -> 2, 6 -> 1, 8 -> 1)
+    )
+    val loaded = windows.find(window => loop(window.first) == 0x40).getOrElse(fail("no window at 0x40"))
+    assert(loaded.liveOut.contains("R5"), "what the load reads is live to the store at the kernel's end")
+    val stored = windows.find(window => loop(window.last) == 0x530).getOrElse(fail("no window ends at 0x530"))
+    assert(stored.liveIn.contains("R5"), stored.liveIn)
   }
 
   test("a predicated write does not end the live range of what it may leave unchanged") {

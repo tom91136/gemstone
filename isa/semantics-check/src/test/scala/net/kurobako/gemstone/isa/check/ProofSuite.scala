@@ -198,11 +198,12 @@ class SASSProofSuite
     case other             => other
   }
 
-  test("memory is not compared where the ISA does not observe it") {
-    assertEquals(
-      prove(Vec(sum("d", a, b)), Vec(sum("d", b, a)), LiveOut(Vec("d"), memory = true)),
-      Result.Refused("memory is not observed on this ISA")
-    )
+  test("memory is compared where the ISA observes it") {
+    installed()
+    prove(Vec(sum("d", a, b)), Vec(sum("d", b, a)), LiveOut(Vec("d"), memory = true)) match {
+      case Result.Proved(report) => assert(report.filtered > 0)
+      case other                 => fail(s"expected a proof, got $other")
+    }
   }
 
   test("a floating-point sum is proved equal in every bit, NaNs included") {

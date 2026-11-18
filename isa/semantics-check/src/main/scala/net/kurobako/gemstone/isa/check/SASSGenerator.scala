@@ -12,8 +12,8 @@ object SASSGenerator {
 
   private val counters = Vec("SR_CLOCK", "SR_GLOBALTIMER")
 
-  /** Each definition `target` describes once, but those that access memory, with the first instance that lowers to it.
-    * Only the entries `included` holds are described.
+  /** Each definition `target` describes once, but those that access memory other than by plain loads and stores of
+    * global memory, with the first instance that lowers to it. Only the entries `included` holds are described.
     */
   def describe(target: String, included: String => Boolean = _ => true): Vec[Case] =
     SASSModel.entries(Some(target)).filter(entry => included(entry.mnemonic)).flatMap(entry =>
@@ -21,7 +21,7 @@ object SASSGenerator {
         SASSModel.instances(Some(target), entry.mnemonic, form.name).toOption.toVec.flatten.flatMap(found =>
           // counters are never staged into a checked definition
           SASSModel.definition(found, entry.mnemonic, form.name).toOption.filter(described =>
-            NvidiaCases.included(described) && !counters.exists(found.text.contains)
+            NvidiaCases.global(described) && !counters.exists(found.text.contains)
           )
             .map(described =>
               Case(found.text, Some(target), described, Lookup.Sass(found.operands, found.constants, found.written))

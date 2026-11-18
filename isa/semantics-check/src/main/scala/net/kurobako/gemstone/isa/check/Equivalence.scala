@@ -140,8 +140,9 @@ object Equivalence {
           case location if !Edges.same(types(location))(expected(location), obtained(location)) =>
             Difference.Value(location, expected(location), obtained(location))
         }
-        val (leftState, rightState) = (reference.state(leftHarness), reference.state(rightHarness))
-        val memory                  = Option.when(liveOut.memory && !leftState.equals(rightState))(
+        val leftState  = (reference.state(leftHarness), reference.loads(leftHarness))
+        val rightState = (reference.state(rightHarness), reference.loads(rightHarness))
+        val memory     = Option.when(liveOut.memory && !leftState.equals(rightState))(
           Difference.Memory(leftState, rightState)
         )
         value.orElse(memory) match {

@@ -214,4 +214,21 @@ class SASSMovesSuite extends Suite {
       }
     }
   }
+
+  private val memory = Set("LDG", "STG", "LDGSTS")
+
+  /** The loads and stores of `instructions` as decoded, wherever they sit. */
+  private def accesses(instructions: Vec[DecodedInstruction]): Vec[DecodedInstruction] =
+    instructions.filter(instruction => memory(instruction.mnemonic.raw)).map(_.copy(address = 0.unsafe[Int >= 0]))
+
+  test("a window's loads and stores are kept as decoded and in their order, and no move creates one") {
+    val sources = first.map { (sample, candidates) =>
+      val (_, _, instructions) = analysed(sample.module, sample.decoded, sample.function)
+      (sample, candidates, accesses(instructions.slice(sample.window.first, sample.window.last + 1)))
+    }
+    assert(sources.exists((_, candidates, kept) => kept.nonEmpty && candidates.nonEmpty), "no window holds a load")
+    sources.foreach((sample, candidates, kept) =>
+      candidates.foreach(candidate => assertEquals(accesses(candidate.instructions), kept, clue(sample, candidate)))
+    )
+  }
 }

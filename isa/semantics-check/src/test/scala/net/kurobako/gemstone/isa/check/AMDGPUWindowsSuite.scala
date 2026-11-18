@@ -34,26 +34,62 @@ class AMDGPUWindowsSuite extends Suite {
         (0, 1, vectors ++ flat, vectors ++ flat + "s0"),
         (2, 5, vectors ++ flat + "s0", vectors ++ flat + "s0" + "scc"),
         (7, 7, Set("v1", "v3", "v4", "v5", "v6", "v7") ++ flat, Set("v3", "v4", "v5", "v6", "v7") ++ flat),
-        (9, 9, Set("v3", "v4", "v5", "v6", "v7") ++ flat, Set("v5", "v6", "v7") ++ flat)
+        (9, 10, Set("v3", "v4", "v5", "v6", "v7") ++ flat, Set.empty[String])
       )
     )
   }
 
   test("a run longer than the size gives every window of that size") {
-    assertEquals(windows(image, 2).map(w => (w._1, w._2)), Vec((0, 1), (2, 3), (3, 4), (4, 5), (7, 7), (9, 9)))
+    assertEquals(windows(image, 2).map(w => (w._1, w._2)), Vec((0, 1), (2, 3), (3, 4), (4, 5), (7, 7), (9, 10)))
   }
 
-  test("the LLVM-compiled vector copy has windows between its loads and waits, through its carries") {
+  test("the LLVM-compiled vector copy has windows through its loads and its store, between its waits") {
     val address = Set("s2", "s3", "v0", "v1", "v2", "v3")
+    val found   = windows(WindowFixtures.vectorCopy, 8)
     assertEquals(
-      windows(WindowFixtures.vectorCopy, 8),
+      found.map(w => (w._1, w._2)),
+      Vec((0, 3), (5, 12), (6, 13), (7, 14), (8, 15), (9, 16), (10, 17), (19, 19))
+    )
+    assertEquals(found(1), (5, 12, copied ++ flat, address ++ flat ++ vcc))
+    assertEquals(found(2), (6, 13, copied - "s9" + "s4" ++ flat, address ++ flat))
+    val (_, _, assembly) = AMDGPUModel.staticCode(WindowFixtures.vectorCopy, kernel).toOption.get
+    assert(assembly(14).startsWith("global_load_dword"), assembly(14))
+    assert(assembly(18).startsWith("s_waitcnt"), assembly(18))
+    assert(assembly(19).startsWith("global_store_dword"), assembly(19))
+  }
+
+  test("a compiled gfx1036 kernel has windows through its scalar loads and through its stores") {
+    val found = AMDGPUWindows.of(WindowFixtures.compiled, "square_plus_one", WindowFixtures.calibrated, 8).toOption.get
+    val spans = found.map(w => (w.first, w.last))
+    assertEquals(
+      spans,
       Vec(
-        (3, 3, copied ++ flat, copied ++ flat),
-        (5, 12, copied ++ flat, address ++ flat ++ vcc),
-        (6, 13, copied - "s9" + "s4" ++ flat, address ++ flat),
-        (15, 17, address ++ flat, Set("v0", "v1", "v2") ++ flat)
+        (0, 1),
+        (3, 3),
+        (5, 8),
+        (10, 13),
+        (14, 14),
+        (16, 22),
+        (24, 31),
+        (25, 32),
+        (26, 33),
+        (35, 36),
+        (37, 37),
+        (39, 41),
+        (43, 46),
+        (47, 47),
+        (49, 56)
       )
     )
+    val (_, _, assembly) = AMDGPUModel.staticCode(WindowFixtures.compiled, "square_plus_one").toOption.get
+    def holds(span: (Int, Int)): Vec[String] =
+      assembly.slice(span._1, span._2 + 1).map(_.takeWhile(!_.isWhitespace)).filter(name =>
+        name.startsWith("global_") || name.startsWith("s_load")
+      )
+    assertEquals(holds((16, 22)), Vec("s_load_dwordx8"))
+    assertEquals(holds((26, 33)), Vec("global_store_dwordx4", "global_store_dwordx4"))
+    assertEquals(holds((49, 56)), Vec("global_store_dword"))
+    assert(spans.forall(span => !assembly.slice(span._1, span._2 + 1).exists(_.startsWith("s_waitcnt"))))
   }
 
   test("a window ends with the condition code its branch reads") {

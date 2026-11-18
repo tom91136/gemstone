@@ -46,10 +46,18 @@ object SmtBackend extends Backend {
       results: List[(name: String, compared: String, tpe: Type)],
       accessed: Set[String],
       stored: Map[String, String],
+      touched: Map[String, String],
       floating: Boolean
   )
 
   private val Memory = "(Array (_ BitVec 64) (_ BitVec 8))"
+
+  /** The accesses a definition makes of a space, loads and stores apart: at the address of each, a bit per width in
+    * bytes. An access may fault by its address, width and direction, so sequences that make the same ones fault alike.
+    */
+  private val Footprint = "(Array (_ BitVec 64) (_ BitVec 8))"
+  private val Loaded    = "loaded"
+  private val Stored    = "stored"
 
   /** The constant banks, which nothing stores to: one memory of every bank's bytes, a bank above its offsets. */
   private val Constants    = "Constants"
@@ -78,7 +86,7 @@ object SmtBackend extends Backend {
 
   def show(definition: Definition): String = (for {
     encoding <- encode(definition, "")
-    header   <- declarations(definition.parameters, encoding.accessed.toList)
+    header   <- declarations(definition.parameters, encoding.accessed.toList, encoding.touched.keys.toList)
   } yield (header ++ encoding.lines).mkString("\n")).fold(
     reason => throw IllegalArgumentException(reason),
     identity
@@ -86,19 +94,24 @@ object SmtBackend extends Backend {
 
   def source(definition: Definition): String = show(definition)
 
-  /** A query that is unsatisfiable exactly when `left` and `right` agree on every input where both encode, on their
-    * final memory as well when `memory` is live-out.
+  /** A query that is unsatisfiable exactly when `left` and `right` agree on every input where both encode, and when
+    * `memory` is live-out on their final memory and on the loads and stores they make as well, so neither makes an
+    * access the other does not.
     */
   def equivalence(left: Definition, right: Definition, memory: Boolean): Either[String, String] = for {
     l          <- encode(left, "l_")
     r          <- encode(right, "r_")
     parameters <- union(left.parameters, right.parameters)
     pairs      <- pairResults(l.results, r.results)
-    header     <- declarations(parameters, (l.accessed ++ r.accessed).toList)
+    footprints = (l.touched.keys ++ r.touched.keys).toList.distinct
+    header <- declarations(parameters, (l.accessed ++ r.accessed).toList, footprints)
   } yield {
     val differences = pairs.map((a, b) => s"(distinct $a $b)") ++
       (if (memory) (l.stored.keys ++ r.stored.keys).toList.distinct else Nil).map(space =>
         s"(distinct ${finalOf(l, space)} ${finalOf(r, space)})"
+      ) ++
+      (if (memory) footprints else Nil).map(footprint =>
+        s"(distinct ${l.touched.getOrElse(footprint, symbol(footprint))} ${r.touched.getOrElse(footprint, symbol(footprint))})"
       )
     val values = parameters.toList.map(parameter => symbol(parameter.name))
     val logic  = if (l.floating || r.floating) "(set-logic QF_AUFBVFP)" else "(set-logic QF_ABV)"
@@ -119,6 +132,8 @@ object SmtBackend extends Backend {
     private val lines    = mutable.ArrayBuffer.empty[String]
     private val accessed = mutable.LinkedHashSet.empty[String]
     private val stored   = mutable.LinkedHashMap.empty[String, String]
+    private val touched  = mutable.LinkedHashMap.empty[String, String]
+    private val guards   = mutable.ArrayDeque.empty[String]
     private val formats  = mutable.HashSet.empty[FpFormat]
     private val counter  = Iterator.from(0)
 
@@ -127,7 +142,7 @@ object SmtBackend extends Backend {
       _       <- collect(definition.body)(step => statement(step.target, step.term, None))
       _       <- collect(definition.requirements)(requirement(_))
       results <- collect(definition.results)(output(_))
-    } yield Encoding(lines.toList, results.toList, accessed.toSet, stored.toMap, formats.nonEmpty)
+    } yield Encoding(lines.toList, results.toList, accessed.toSet, stored.toMap, touched.toMap, formats.nonEmpty)
 
     private def emit(line: String): Unit = lines.append(line)
 
@@ -172,11 +187,30 @@ object SmtBackend extends Backend {
       if (prefix.isEmpty && inputs(name)) symbol(s"result_$name") else symbol(prefix + name)
 
     private def statement(target: Definition.Target, term: Term, guard: Option[String]): Either[String, Unit] =
-      target match {
+      under(guard)(target match {
         case Definition.Target.Binding(name) => binding(name, term)
         case Definition.Target.Method(name)  => binding(name, term)
         case Definition.Target.Effect        => effect(term, guard)
-      }
+      })
+
+    /** `body` encoded as running only where `guard` holds, which the loads in it are then marked under. */
+    private def under[A](guard: Option[String])(body: => A): A = guard.fold(body) { condition =>
+      guards.append(condition)
+      try body
+      finally { val _ = guards.removeLast() }
+    }
+
+    /** Marks a load or store of `width` bits at `address` of `space`, where `guard` holds. */
+    private def touch(direction: String, space: String, address: String, width: Int, guard: Option[String]): Unit = {
+      val footprint = s"${direction}_${spaceName(space)}"
+      val previous  = touched.getOrElse(footprint, symbol(footprint))
+      val marked = s"(store $previous $address (bvor (select $previous $address) ${literal(1L << (width / 8 - 1), 8)}))"
+      val target = symbol(s"$prefix${footprint}_${counter.next()}")
+      emit(
+        s"(define-fun $target () $Footprint ${guard.fold(marked)(condition => s"(ite $condition $marked $previous)")})"
+      )
+      touched(footprint) = target
+    }
 
     private def binding(name: String, term: Term): Either[String, Unit] =
       expression(term).map { value =>
@@ -199,9 +233,10 @@ object SmtBackend extends Backend {
 
     private def effect(term: Term, guard: Option[String]): Either[String, Unit] = term match {
       case Term.Select(condition, inner, Term.Constant("()")) =>
-        expression(condition).flatMap(value => conditionOf(condition, value)).flatMap(condition =>
-          effect(inner, Some(conjoin(guard, condition)))
-        )
+        expression(condition).flatMap(value => conditionOf(condition, value)).flatMap { condition =>
+          val selected = Some(conjoin(guard, condition))
+          under(selected)(effect(inner, selected))
+        }
       case Term.When(condition, body) =>
         expression(condition).flatMap(value => conditionOf(condition, value)).flatMap { condition =>
           val inner = Some(conjoin(guard, condition))
@@ -250,6 +285,7 @@ object SmtBackend extends Backend {
       val value  = guard.fold(updated)(condition => s"(ite $condition $updated $previous)")
       emit(s"(define-fun $target () $Memory $value)")
       stored(space) = target
+      touch(Stored, space, address, width, guard)
     }
 
     private def read(space: String, address: String, width: Int): String = {
@@ -278,8 +314,8 @@ object SmtBackend extends Backend {
       case Term.Select(condition, whenTrue, whenFalse) =>
         for {
           c <- expression(condition).flatMap(conditionOf(condition, _))
-          t <- expression(whenTrue)
-          f <- expression(whenFalse)
+          t <- under(Some(conjoin(guards.lastOption, c)))(expression(whenTrue))
+          f <- under(Some(conjoin(guards.lastOption, s"(not $c)")))(expression(whenFalse))
           v <- select(c, t, f)
         } yield v
       case Term.Context(
@@ -292,7 +328,10 @@ object SmtBackend extends Backend {
           key   <- spaceKey(space)
           a     <- expression(address)
           shape <- shapeOf(tpe)
-        } yield Bitvector(read(key, bits(a, 64), shape._1), shape._1, shape._2)
+        } yield {
+          touch(Loaded, key, bits(a, 64), shape._1, guards.lastOption)
+          Bitvector(read(key, bits(a, 64), shape._1), shape._1, shape._2)
+        }
       case Term.Context(
             contextType = contextType,
             method = "load",
@@ -679,11 +718,15 @@ object SmtBackend extends Backend {
 
   private def declarations(
       parameters: Vec[(name: String, tpe: Type)],
-      spaces: List[String]
+      spaces: List[String],
+      footprints: List[String]
   ): Either[String, List[String]] =
     collect(parameters)(parameter =>
       declarationSort(parameter.tpe).map(sort => s"(declare-const ${symbol(parameter.name)} $sort)")
-    ).map(_.toList ++ spaces.map(space => s"(declare-const ${initial(space)} $Memory)"))
+    ).map(
+      _.toList ++ spaces.map(space => s"(declare-const ${initial(space)} $Memory)") ++
+        footprints.map(footprint => s"(declare-const ${symbol(footprint)} $Footprint)")
+    )
 
   private def declarationSort(tpe: Type): Either[String, String] = tpe.unranged match {
     case Type.Integer(width, _) => Right(s"(_ BitVec $width)")

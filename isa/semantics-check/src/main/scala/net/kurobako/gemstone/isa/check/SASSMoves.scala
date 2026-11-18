@@ -13,7 +13,9 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.util.Random
 
-/** One-move candidates of a SASS window, each checked by the sass-asm round trip and the window admission. */
+/** One-move candidates of a SASS window, each checked by the sass-asm round trip and the window admission. The window's
+  * loads and stores stay as decoded and in their order ([[Moves.ordered]]), and the other moves work around them.
+  */
 final class SASSMoves private (
     module: Cubin.Module,
     function: NonEmpty[String],
@@ -35,6 +37,17 @@ final class SASSMoves private (
   private val defined: Vec[Set[String]] = Moves.defined(window, uses)
 
   private def sound(used: Vec[RegisterUse]): Boolean = Moves.sound(window, Set.empty, written, used)
+
+  // a load or store is itself only with the encoding word it was decoded with: its text does not show its descriptor
+  private def access(instruction: DecodedInstruction): Option[Moves.Access[DecodedInstruction]] =
+    SASSForms.of(targetName, instruction.operation).toOption.map(_.kase.definition).filter(GlobalAccess.accesses(_))
+      .map(definition => Moves.Access(instruction.copy(address = 0.unsafe[Int >= 0]), GlobalAccess.loads(definition)))
+
+  private lazy val pinned = Moves.accesses(base)(access)
+
+  // a reader waits on a load through its own control word, so a candidate may read what a load wrote
+  private def ordered(sequence: Vec[DecodedInstruction], used: Vec[RegisterUse]): Boolean =
+    Moves.ordered(pinned, sequence, used, waits = false)(access)
 
   private def placed(sequence: Vec[DecodedInstruction]): Vec[DecodedInstruction] =
     sequence.zipWithIndex.map { case (instruction, index) => instruction.copy(address = (16 * index).unsafe[Int >= 0]) }
@@ -105,7 +118,7 @@ final class SASSMoves private (
         go(
           chunks,
           kept ++ named.zip(effects(named)).collect {
-            case (sequence, Some(used)) if sound(used) => Candidate(kind, sequence, used)
+            case (sequence, Some(used)) if sound(used) && ordered(sequence, used) => Candidate(kind, sequence, used)
           }
         )
       }

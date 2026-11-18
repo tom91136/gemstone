@@ -77,18 +77,31 @@ object Proof {
                     case Solved.Unavailable            => Result.Unavailable(filtered)
                     case Solved.Undecided(reason)      => Result.Undecided(reason, filtered)
                     case Solved.Different(description) =>
-                      counterexample(
+                      def replayed(model: String) = counterexample(
                         reference,
                         executor,
                         left,
                         right,
                         liveOut,
                         types,
-                        description,
+                        model,
                         touchesMemory(l, r),
                         l.parameters.exists(_.name == LaneMasks.Lane) || r.parameters.exists(_.name == LaneMasks.Lane),
                         filtered
                       )
+                      replayed(description) match {
+                        // a model whose accesses fault on both sequences shows nothing; one that aligns them may run
+                        case undecided: Result.Undecided if touchesMemory(l, r) =>
+                          solver(aligned(l), aligned(r), liveOut.memory) match {
+                            case Solved.Different(other) =>
+                              replayed(other) match {
+                                case rejected: Result.Rejected => rejected
+                                case _                         => undecided
+                              }
+                            case _ => undecided
+                          }
+                        case result => result
+                      }
                   }
               }
           }
@@ -172,6 +185,22 @@ object Proof {
       body.result(),
       results
     )
+  }
+
+  /** `definition` over the inputs where each load and store of its statements is aligned to its width. */
+  private def aligned(definition: Definition): Definition = {
+    val machine  = RenderMachine.Machine.contextType
+    val accesses = definition.body.flatMap(statement => Rejection.terms(statement.term)).collect {
+      case Term.Context(
+            contextType = `machine`,
+            method = "load" | "store",
+            typeArguments = Vec(tpe),
+            arguments = arguments
+          )
+          if tpe.bits > 8 =>
+        Term.Binary("==", Term.Binary("&", arguments(1), Term.Literal(tpe.bits / 8 - 1L)), Term.Literal(0L))
+    }
+    definition.copy(requirements = definition.requirements ++ accesses)
   }
 
   /** `term`, the value a location of type `from` holds, as an operand of type `to`. */
@@ -281,7 +310,10 @@ object Proof {
         Equivalence.replay(reference, executor, left, right, liveOut, inputs) match {
           case Verdict.Rejected(found)          => Result.Rejected(found, Source.Solver)
           case Verdict.NotRejected(_) if memory =>
-            Result.Undecided("the solver's model does not cover the initial memory the sequences read", filtered)
+            Result.Undecided(
+              "the solver's model rests on the initial memory the sequences read or on the width of an access",
+              filtered
+            )
           case Verdict.NotRejected(_)    => Result.Disagreement(Vec.from(inputs.toSeq.sortBy(_._1)), filtered)
           case Verdict.Undecided(reason) => Result.Undecided(reason, filtered)
           case Verdict.Refused(reason)   => Result.Refused(reason)

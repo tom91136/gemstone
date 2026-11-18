@@ -31,6 +31,8 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
   @SuppressWarnings(Array("scalafix:PublicSignatures.any-type"))
   def state(harness: AMDGPUHarness): Any = harness.writes
 
+  override def loads(harness: AMDGPUHarness): Set[Long] = harness.loads
+
   private val Single = raw"([sva])(\d+)".r
   private val Range  = raw"([sva])\[(\d+):(\d+)\]".r
 

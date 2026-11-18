@@ -18,7 +18,8 @@ import scala.util.Random
   * domains and the encoder decide what is legal: a candidate encodes to bytes that decode to the same instructions,
   * holds only instructions the equivalence checker admits ([[AMDGPUForms.of]]), writes no EXEC, reads only what is live
   * into the window or written earlier in the candidate, and writes no register that is live out of the window unless
-  * the window writes it. The register use is the VM's, through the kernel the candidate would patch in.
+  * the window writes it. The register use is the VM's, through the kernel the candidate would patch in. The window's
+  * loads and stores stay as they are and in their order, and the other moves work around them.
   *
   * Opcodes replace each other when some encoding of each has the same explicit operand kinds, widths and directions. An
   * inserted instruction draws its sources from the window's live-in registers and the registers written before it, and
@@ -95,6 +96,16 @@ final class AMDGPUMoves private (
 
   private def sound(used: Vec[RegisterUse]): Boolean = Moves.sound(window, exec, written, used)
 
+  private def access(instruction: Instruction): Option[Moves.Access[String]] =
+    AMDGPUForms.of(target, instruction).toOption.map(_.kase.definition).filter(GlobalAccess.accesses(_))
+      .map(definition => Moves.Access(Printer.render(instruction), GlobalAccess.loads(definition)))
+
+  private lazy val pinned = Moves.accesses(base)(access)
+
+  // no s_waitcnt is inside a window, so what a load writes is not there to read before the window ends
+  private def ordered(sequence: Vec[Instruction], used: Vec[RegisterUse]): Boolean =
+    Moves.ordered(pinned, sequence, used, waits = true)(access)
+
   private def legal(kind: Kind, raws: Vec[Vec[Instruction]], limit: Int): Vec[Candidate] = {
     val seen = mutable.Set(original)
 
@@ -107,7 +118,8 @@ final class AMDGPUMoves private (
         val named = fresh.filter(_.forall(AMDGPUForms.covered(target, _)))
         // a form is rendered only for the candidates that are sound, and no more of them than are kept
         val legal = named.zip(effects(named)).iterator.collect {
-          case (sequence, Some(used)) if sound(used) && sequence.forall(AMDGPUForms.of(target, _).isRight) =>
+          case (sequence, Some(used))
+              if sound(used) && sequence.forall(AMDGPUForms.of(target, _).isRight) && ordered(sequence, used) =>
             Candidate(kind, sequence, used)
         }
         go(chunks, kept ++ legal.take(limit - kept.size))

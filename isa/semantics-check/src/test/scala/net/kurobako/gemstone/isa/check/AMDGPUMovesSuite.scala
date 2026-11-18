@@ -120,4 +120,26 @@ class AMDGPUMovesSuite extends Suite {
       assert(AMDGPUModel.assemble(source, Some(calibrated)).isRight, source)
     }
   }
+
+  private def access(text: String): Boolean = text.startsWith("global_") || text.startsWith("s_load")
+
+  test("a window's loads and stores stay as they are and in their order, and nothing reads what a load wrote") {
+    val holding = first.filter((sample, _) =>
+      AMDGPUModel.staticCode(sample.image, kernel).toOption.get._3
+        .slice(sample.window.first, sample.window.last + 1).exists(access)
+    )
+    assert(holding.exists(_._2.nonEmpty), "no window with a load or store proposes a move")
+    holding.foreach { (sample, candidates) =>
+      val kept = candidates.map(text(_).filter(access)).distinct
+      assert(kept.size <= 1, s"${sample.name} ${sample.window}: $kept")
+      kept.foreach(found => assert(found.nonEmpty, s"${sample.name} ${sample.window}"))
+      candidates.foreach { candidate =>
+        text(candidate).zip(candidate.uses).foldLeft(Set.empty[String]) { case (pending, (line, use)) =>
+          assert(units(use, use.reads).intersect(pending).isEmpty, s"${text(candidate)} reads $pending at $line")
+          if (line.startsWith("global_load") || line.startsWith("s_load")) pending ++ units(use, use.writes)
+          else pending -- units(use, use.writes)
+        }
+      }
+    }
+  }
 }

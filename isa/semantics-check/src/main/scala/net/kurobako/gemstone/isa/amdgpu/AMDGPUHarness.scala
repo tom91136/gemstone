@@ -200,4 +200,7 @@ private[isa] class AMDGPUHarness {
     */
   def writes: (global: Map[Long, Byte], shared: Map[Long, Byte], vectors: Map[Int, Long]) =
     (globalBytes.writes, sharedBytes.writes, vectorWrites.toMap)
+
+  /** The addresses of global memory loaded from. */
+  def loads: Set[Long] = globalBytes.loads
 }

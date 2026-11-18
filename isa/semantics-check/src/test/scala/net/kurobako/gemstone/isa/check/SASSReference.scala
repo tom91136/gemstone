@@ -165,7 +165,7 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
     } yield values
   }
 
-  def state(harness: NvidiaHarness): Long = harness.seed
+  def state(harness: NvidiaHarness): Map[Long, Byte] = harness.globalBytes.writes
 
-  override def observesMemory: Boolean = false
+  override def loads(harness: NvidiaHarness): Set[Long] = harness.globalBytes.loads
 }

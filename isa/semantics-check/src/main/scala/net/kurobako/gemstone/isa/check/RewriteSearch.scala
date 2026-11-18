@@ -267,7 +267,8 @@ object RewriteSearch {
       whole         <- cost.cost(window, text(original))
     } yield {
       val out     = liveOut(originalSteps)
-      val reason  = if (out.locations.isEmpty) "no write is live out" else "live-out writes proved equal"
+      val idle    = out.locations.isEmpty && !out.memory
+      val reason  = if (idle) "no write is live out" else "live-out writes proved equal"
       val before  = Measure(whole.cycles, whole.source)
       val random  = Random(config.seed)
       val costs   = mutable.Map.empty[String, Option[AMDGPUBlockCost.Cost]]
@@ -315,7 +316,7 @@ object RewriteSearch {
         }
 
       val start    = Walk(original, moves, before.cycles, 0L, 0)
-      val walked   = if (out.locations.isEmpty) visit(start, deleted) else walk(0, start)
+      val walked   = if (idle) visit(start, deleted) else walk(0, start)
       val cheaper  = seen.values.filter((_, bits, after) => bits == 0L && after.cycles < before.cycles).toVec
       val lane     = originalSteps.flatMap(_.lane.cases)
       val rewrites = cheaper.flatMap { (sequence, _, after) =>

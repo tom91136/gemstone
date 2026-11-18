@@ -135,10 +135,15 @@ object SASSForms {
     )
 
   private def form(target: String, text: String, instruction: Instruction): Either[String, Form] = for {
+    _ <- Either.cond(
+      !kinds(instruction).exists(_.contains("c[R]")),
+      (),
+      s"$text reads a constant bank at an offset a register holds"
+    )
     moved      <- banked(instruction).left.map(reason => s"$text $reason")
     definition <- SASSModel.definition(target, moved.instruction).left
       .map(reason => s"$text has no rendering: ${reason.message}")
-    own  = moved.bank.fold(definition)(reading(definition, _))
+    own  = GlobalAccess.plain(moved.bank.fold(definition)(reading(definition, _)))
     kase = Case(
       text,
       Some(target),

@@ -121,9 +121,10 @@ object AMDGPUForms {
     for {
       spelling <- spelled
       text = Printer.render(spelling)
-      definition <- InstructionSemantics.describe(target, text, Map.empty, Vec.empty).left
+      described <- InstructionSemantics.describe(target, text, Map.empty, Vec.empty).left
         .map(reason => s"$own has no rendering: ${reason.message}")
-      kase = Case(text, Some(target.raw), definition, Lookup.Spellings(Map.empty))
+      definition = GlobalAccess.plain(described)
+      kase       = Case(text, Some(target.raw), definition, Lookup.Spellings(Map.empty))
       _          <- Rejection.of(kase).toLeft(())
       parameters <- each(definition.parameters) { (name, tpe) =>
         units(name, tpe, waveSize).map(Form.read(_)).orElse(values.get(name).map(Form.Operand.Immediate(_)))

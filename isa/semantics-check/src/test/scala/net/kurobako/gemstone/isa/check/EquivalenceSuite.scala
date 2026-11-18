@@ -164,11 +164,8 @@ class SASSEquivalenceSuite
   protected def fsum(destination: String, left: Operand, right: Operand): Step =
     step(named("FADD", 2), Vec(left, right), Vec(destination))
 
-  test("memory live-out is refused where memory is not observed") {
-    assertEquals(
-      refused(Vec(sum("d", a, b)), Vec(sum("d", b, a)), LiveOut(Vec("d"), memory = true)),
-      "memory is not observed on this ISA"
-    )
+  test("memory live-out is compared where memory is observed") {
+    survives(Vec(sum("d", a, b)), Vec(sum("d", b, a)), LiveOut(Vec("d"), memory = true))
   }
 }
 

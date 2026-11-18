@@ -11,6 +11,11 @@ object NvidiaCases {
   def included(definition: Definition): Boolean =
     definition.contexts.forall(context => context.tpe.split('.').last != "Memory")
 
+  /** Whether `definition` accesses no memory but global memory by plain loads and stores, which fault on no input where
+    * every address is mapped.
+    */
+  def global(definition: Definition): Boolean = included(GlobalAccess.plain(definition))
+
   /** Whether `definition` is one element of a matrix product, from the rows and column it reads to `d`. */
   def product(definition: Definition): Boolean =
     definition.parameters.exists(_.name == "a0") && definition.results.map(_.name) == Vec("d")

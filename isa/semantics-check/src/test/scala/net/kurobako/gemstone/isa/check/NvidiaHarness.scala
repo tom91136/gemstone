@@ -22,6 +22,15 @@ object NvidiaHarness {
   def constant(seed: Long, bank: Long, offset: Long): Byte =
     constant(seed, ((bank - InstructionSemantics.ConstantBank) << 32) + offset)
 
+  /** Whether `size` bytes from `address` reach the constant bank where the lane binds it. */
+  def bound(address: Long, size: Int): Boolean = {
+    val offset = address - InstructionSemantics.ConstantBase
+    offset > -size && offset < InstructionSemantics.ConstantBytes
+  }
+
+  /** The byte global memory holds at `address` until it is written, so every address is mapped. */
+  def global(seed: Long, address: Long): Byte = SeededMemory.byte(~seed, address)
+
   /** `instructions` as the only routine of a kernel of one block of `lanes` threads, and what `read` takes of the
     * cohort at the end of the routine, the one instruction with a source, or why the run did not reach it.
     */
@@ -101,10 +110,13 @@ object NvidiaHarness {
   }.flatten
 }
 
-/** One lane alone in its warp, block and grid, as the reference launches it, and the constant bank it reads, whose
-  * bytes follow the seed. Warp collectives see only the lane itself.
+/** One lane alone in its warp, block and grid, as the reference launches it, the constant bank it reads, whose bytes
+  * follow the seed, and global memory holding [[NvidiaHarness.global]] until written, but where the constant bank is
+  * bound. Warp collectives see only the lane itself.
   */
 class NvidiaHarness(val seed: Long) {
+
+  val globalBytes: SeededMemory = SeededMemory(NvidiaHarness.global(seed, _))
 
   /** `raw` as the prelude type `T`. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.asInstanceOf"))
@@ -200,7 +212,77 @@ class NvidiaHarness(val seed: Long) {
     }
   }
 
+  /** Global memory by address; the other spaces are never staged into a checked definition. */
+  private class Global extends Memory {
+    private def unstaged(what: String): Nothing = throw UnsupportedOperationException(what)
+
+    private def bytes[T](using typing: Type.Reified[T]): Int = typing.tpe.bits / 8
+
+    // execution faults an access that is not aligned to its width
+    private def aligned[T](address: UInt[64])(using Type.Reified[T]): Long = {
+      if ((address.raw & (bytes[T] - 1)) != 0L) throw IllegalArgumentException("misaligned")
+      address.raw
+    }
+
+    // a load that reaches the bound constant bank reads its bytes, as execution does
+    def loadGlobal[T](address: UInt[64])(using Type.Reified[T]): T =
+      if (NvidiaHarness.bound(aligned(address), bytes[T])) {
+        val offset = address.raw - InstructionSemantics.ConstantBase
+        if (offset < 0L || offset + bytes[T] > InstructionSemantics.ConstantBytes)
+          throw IllegalArgumentException("past the bank")
+        value((0 until bytes[T]).foldLeft(0L)((raw, index) =>
+          raw | ((NvidiaHarness.constant(seed, offset + index) & 0xffL) << (8 * index))
+        ))
+      } else value(globalBytes.load(address.raw, bytes[T]))
+
+    def storeGlobal[T](address: UInt[64], stored: T)(using Type.Reified[T]): Unit = {
+      if (NvidiaHarness.bound(aligned(address), bytes[T]))
+        throw IllegalArgumentException("the constant bank is read-only")
+      globalBytes.store(
+        address.raw,
+        stored match {
+          case flag: Boolean => if (flag) 1L else 0L
+          case raw: Long     => raw
+        },
+        bytes[T]
+      )
+    }
+
+    def localBase(): UInt[64]                                                    = unstaged("localBase")
+    def sharedWindow(): UInt[64]                                                 = unstaged("sharedWindow")
+    def load[T](address: UInt[64])(using Type.Reified[T]): T                     = unstaged("load")
+    def loadShared[T](address: UInt[64])(using Type.Reified[T]): T               = unstaged("loadShared")
+    def loadLocal[T](address: UInt[64])(using Type.Reified[T]): T                = unstaged("loadLocal")
+    def store[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit       = unstaged("store")
+    def storeShared[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit = unstaged("storeShared")
+    def storeLocal[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit  = unstaged("storeLocal")
+
+    def reduceGlobal(
+        address: UInt[64],
+        data: Array[Byte],
+        operator: TensorMap.Reduction,
+        element: TensorMap.Element
+    ): Unit = unstaged("reduceGlobal")
+
+    def storeGlobalMasked(destination: UInt[64], source: UInt[64], bytes: UInt[64], mask: UInt[64]): Unit =
+      unstaged("storeGlobalMasked")
+
+    def textureRead(shape: String, handle: UInt[64], coordinates: UInt[64]*): Array[Byte] = unstaged("textureRead")
+    def textureWord(data: Array[Byte], index: UInt[64], bytes: UInt[64]): UInt[64]        = unstaged("textureWord")
+    def surfaceStore(shape: String, handle: UInt[64], arguments: UInt[64]*): Unit         = unstaged("surfaceStore")
+    def surfaceReduce(shape: String, handle: UInt[64], arguments: UInt[64]*): Unit        = unstaged("surfaceReduce")
+    def fence(): Unit                                                                     = unstaged("fence")
+
+    def replaceTensorMap(map: Array[Byte], field: TensorMap.Field, index: Int, value: UInt[64]): Array[Byte] =
+      unstaged("replaceTensorMap")
+
+    def loadParameter[T](parameter: Int, offset: UInt[64])(using Type.Reified[T]): T = unstaged("loadParameter")
+    def storeParameter[T](parameter: Int, offset: UInt[64], value: T)(using Type.Reified[T]): Unit =
+      unstaged("storeParameter")
+  }
+
   given Warp      = Lane()
   given Launch    = Single()
   given Constants = Bank()
+  given Memory    = Global()
 }
