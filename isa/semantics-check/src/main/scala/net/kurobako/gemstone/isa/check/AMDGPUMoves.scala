@@ -17,9 +17,9 @@ import scala.util.Random
 
 /** Candidate replacements of one AMDGPU window, each one move away from it. The generated catalogue, the operand
   * domains and the encoder decide what is legal: a candidate encodes to bytes that decode to the same instructions,
-  * holds only instructions the equivalence checker admits ([[AMDGPUWindows.admitted]]), writes no EXEC, reads only what
-  * is live into the window or written earlier in the candidate, and writes no register that is live out of the window
-  * unless the window writes it. The register use is the VM's, through the kernel the candidate would patch in.
+  * holds only instructions the equivalence checker admits ([[AMDGPUForms.of]]), writes no EXEC, reads only what is live
+  * into the window or written earlier in the candidate, and writes no register that is live out of the window unless
+  * the window writes it. The register use is the VM's, through the kernel the candidate would patch in.
   *
   * Opcodes replace each other when some encoding of each has the same explicit operand kinds, widths and directions. An
   * inserted instruction draws its sources from the window's live-in registers and the registers written before it, and
@@ -29,7 +29,6 @@ import scala.util.Random
 final class AMDGPUMoves private (
     image: Vec[Byte],
     function: String,
-    targetName: String,
     target: Target,
     window: Window,
     base: Vec[Instruction],
@@ -112,15 +111,13 @@ final class AMDGPUMoves private (
       else {
         val fresh =
           chunks.next().flatMap(each(_)(settled(_))).filter(sequence => seen.add(sequence.map(Printer.render(_))))
-        val known = AMDGPUWindows.admitted(targetName, fresh.flatMap(_.map(encoded(_))).toSet)
-        val named = fresh.filter(_.forall(instruction => known(encoded(instruction))))
-        go(
-          chunks,
-          kept ++ named.zip(effects(named)).collect {
-            case (sequence, Some(used)) if sound(used) =>
-              Candidate(kind, sequence, used)
-          }
-        )
+        val named = fresh.filter(_.forall(AMDGPUForms.covered(target, _)))
+        // a form is rendered only for the candidates that are sound, and no more of them than are kept
+        val legal = named.zip(effects(named)).iterator.collect {
+          case (sequence, Some(used)) if sound(used) && sequence.forall(AMDGPUForms.of(target, _).isRight) =>
+            Candidate(kind, sequence, used)
+        }
+        go(chunks, kept ++ legal.take(limit - kept.size))
       }
 
     go(raws.grouped(ChunkSize), Vec.empty)
@@ -238,7 +235,7 @@ final class AMDGPUMoves private (
 
   def from(sequence: Vec[Instruction]): Either[String, AMDGPUMoves] =
     effects(Vec(sequence)).headOption.flatten.toRight("the sequence does not compile in this kernel").map { used =>
-      AMDGPUMoves(image, function, targetName, target, window, sequence, used, scratch, tables)
+      AMDGPUMoves(image, function, target, window, sequence, used, scratch, tables)
     }
 }
 
@@ -259,14 +256,7 @@ object AMDGPUMoves {
   private val InsertAttempts = 48
   private val MaxConstants   = 24
   private val ScratchSize    = 4
-  private val Variants       = Set("sdwa", "dpp", "dpp8")
-
-  private val RegisterFiles = Vec(RegisterFile.Scalar -> "s", RegisterFile.VectorRegister -> "v")
-
-  /** The mnemonic and encoding class [[AMDGPUWindows.admitted]] knows `instruction` by. */
-  def encoded(instruction: Instruction): String =
-    AMDGPUWindows.encoded(instruction.opcode.raw) +
-      instruction.mods.collectFirst { case mod if Variants(mod.name.raw) => s"_${mod.name.raw}" }.getOrElse("")
+  private val RegisterFiles  = Vec(RegisterFile.Scalar -> "s", RegisterFile.VectorRegister -> "v")
 
   private def signature(encoding: Metadata.Encoding): String = signature(encoding.operands.filterNot(_.implicitOperand))
 
@@ -318,7 +308,7 @@ object AMDGPUMoves {
       val top = named0.iterator.flatMap(_.stripPrefix(prefix).toIntOption).maxOption.getOrElse(-1) + 1 + ScratchSize
       Vec.from(0 until top).map(index => s"$prefix$index").filterNot(busy).take(ScratchSize)
     }
-    AMDGPUMoves(image, function, target, named, window, base, windowUses, pool, catalogue(named))
+    AMDGPUMoves(image, function, named, window, base, windowUses, pool, catalogue(named))
   }
 
   private def catalogue(target: Target): Tables = {

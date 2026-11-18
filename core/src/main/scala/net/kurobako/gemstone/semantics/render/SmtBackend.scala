@@ -49,7 +49,10 @@ object SmtBackend extends Backend {
       floating: Boolean
   )
 
-  private val Memory       = "(Array (_ BitVec 64) (_ BitVec 8))"
+  private val Memory = "(Array (_ BitVec 64) (_ BitVec 8))"
+
+  /** The constant banks, which nothing stores to: one memory of every bank's bytes, a bank above its offsets. */
+  private val Constants    = "Constants"
   private val Converted    = raw"\.to\[(UInt|SInt)\[(\d+)\]\]".r
   private val Constructed  = raw"(UInt|SInt)\[(\d+)\]".r
   private val FromFloating = raw"(?:FloatingPoint|Float)\[(\d+)\]".r
@@ -290,6 +293,17 @@ object SmtBackend extends Backend {
           a     <- expression(address)
           shape <- shapeOf(tpe)
         } yield Bitvector(read(key, bits(a, 64), shape._1), shape._1, shape._2)
+      case Term.Context(
+            contextType = contextType,
+            method = "load",
+            typeArguments = Vec(tpe),
+            arguments = Vec(bank, at)
+          ) if Term.simple(contextType) == Constants =>
+        for {
+          b     <- expression(bank)
+          a     <- expression(at)
+          shape <- shapeOf(tpe)
+        } yield Bitvector(read(Constants, s"(concat ${bits(b, 32)} ${bits(a, 32)})", shape._1), shape._1, shape._2)
       case other => Left(s"${other.show} is not supported")
     }
 

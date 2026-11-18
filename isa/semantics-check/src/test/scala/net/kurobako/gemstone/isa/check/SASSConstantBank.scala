@@ -6,15 +6,15 @@ import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
-/** The constant bank SASS instances read, bound at its base, holding the bytes of a harness's run; it cannot be
-  * written. Instances lower with their constant operands at default offsets, and `moved` takes each one a run moves to
-  * the offset it reads.
+/** The constant bank SASS instances read, bound at its base, holding the bytes of `bank` in a harness's run; it cannot
+  * be written. Instances lower with their constant operands at default offsets, and `moved` takes each one a run moves
+  * to the offset it reads.
   */
-class SASSConstantBank(harness: NvidiaHarness, moved: Vec[(Long, Long)]) extends AddressSpace {
+class SASSConstantBank(harness: NvidiaHarness, bank: Long, moved: Vec[(Long, Long)]) extends AddressSpace {
   private val Region = AllocationId(1L.unsafe[Long > 0])
 
   def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-    Right(Vec.tabulate(size.raw)(index => NvidiaHarness.constant(harness.seed, offset.raw + index)))
+    Right(Vec.tabulate(size.raw)(index => NvidiaHarness.constant(harness.seed, bank, offset.raw + index)))
 
   def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =
     Left(Fault.Memory("the constant bank is read-only"))

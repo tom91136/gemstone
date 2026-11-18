@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.check
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.isa.amdgpu.LaneMasks
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.testing.Edges
 import scala.annotation.tailrec
@@ -13,12 +14,11 @@ object Equivalence {
   /** The inputs each definition runs on, which a proof reports as the differential coverage of its instructions. */
   val Runs: Int = 64
 
-  enum Operand {
-    case Location(name: String)
-    case Immediate(value: Long)
-  }
+  type Operand = Form.Operand
+  val Operand: Form.Operand.type = Form.Operand
 
-  case class Step(kase: Case, parameters: Map[String, Operand], results: Map[String, String])
+  type Step = Form
+  val Step: Form.type = Form
 
   case class LiveOut(locations: Vec[String], memory: Boolean)
 
@@ -112,7 +112,9 @@ object Equivalence {
       liveOut: LiveOut
   ): Either[String, Map[String, Type]] =
     if (liveOut.memory && !reference.observesMemory) Left("memory is not observed on this ISA")
-    else validate(left.iterator ++ right.iterator, liveOut)
+    else crossLane(left).orElse(crossLane(right)).toLeft(()).flatMap(_ =>
+      validate(left.iterator ++ right.iterator, liveOut)
+    )
 
   private def compare[H, L <: Lookup](
       reference: Reference[H, L],
@@ -127,7 +129,7 @@ object Equivalence {
     val initial      = sampled.toMap
     val leftHarness  = reference.harness(seed.toLong)
     val rightHarness = reference.harness(seed.toLong)
-    (run(left, leftHarness, initial, executor), run(right, rightHarness, initial, executor)) match {
+    (run(left, leftHarness, initial, types, executor), run(right, rightHarness, initial, types, executor)) match {
       case (Left(_), Left(_))       => Outcome.Skipped
       case (Left(reason), Right(_)) =>
         Outcome.Differed(Counterexample(Difference.Refusal(Some(reason), None), sampled))
@@ -159,6 +161,38 @@ object Equivalence {
       }
     )
 
+  /** Why `steps` cannot be proved one lane at a time: an instruction reads whole a mask that a lane wrote before it, so
+    * its result depends on the other lanes.
+    */
+  private[check] def crossLane(steps: Vec[Step]): Option[String] =
+    steps.foldLeft[Either[String, Set[String]]](Right(Set.empty)) { (found, step) =>
+      found.flatMap { ballots =>
+        val definition = step.kase.definition
+        val terms      = definition.requirements ++ definition.body.map(_.term) ++ definition.results.map(_.value)
+        val whole      = definition.parameters.map(_.name).find(name =>
+          (step.parameters(name) match {
+            case Operand.Location(location) => ballots(location)
+            case Operand.Joined(locations)  => locations.exists(ballots)
+            case Operand.Immediate(_)       => false
+          }) && terms.exists(LaneMasks.whole(_, name))
+        )
+        whole.toLeft {
+          val named = definition.parameters.map(_.name).toSet
+          val bound = definition.body.exists(statement => LaneMasks.ballots(statement.term))
+          // a ballot bound in the body reaches the results that name what the body binds
+          def mask(value: Term) = LaneMasks.ballots(value) ||
+            (bound && Rejection.terms(value).exists {
+              case Term.Variable(name) => !named(name)
+              case _                   => false
+            })
+          definition.results.foldLeft(ballots) { (masks, result) =>
+            val written = step.results(result.name)
+            if (mask(result.value)) masks ++ written else masks -- written
+          }
+        }.left.map(name => s"${step.kase.instance} reads $name whole after a lane wrote it")
+      }
+    }.left.toOption
+
   private[check] def typings(step: Step): Either[String, Vec[(String, Type)]] = {
     val kase       = step.kase
     val definition = kase.definition
@@ -170,13 +204,20 @@ object Equivalence {
       case None if !bound(definition.results.map(_.name).toSet, step.results.keySet) =>
         Left(s"${kase.instance} does not bind its ${definition.results.size} results")
       case None =>
+        val unit   = Form.Unit
         val inputs = definition.parameters.flatMap(parameter =>
           step.parameters(parameter.name) match {
-            case Operand.Location(name) => Some((name, parameter.tpe))
-            case Operand.Immediate(_)   => None
+            case Operand.Location(name)    => Vec((name, parameter.tpe))
+            case Operand.Joined(locations) => locations.map((_, unit))
+            case Operand.Immediate(_)      => Vec.empty[(String, Type)]
           }
         )
-        val written = definition.results.map(result => (step.results(result.name), result.tpe))
+        val written = definition.results.flatMap(result =>
+          step.results(result.name) match {
+            case Vec(single) => Vec((single, result.tpe))
+            case several     => several.map((_, unit))
+          }
+        )
         Right(inputs ++ written)
     }
   }
@@ -188,8 +229,10 @@ object Equivalence {
     bindings.foldLeft[Either[String, Map[String, Type]]](Right(known))((types, binding) =>
       types.flatMap(current =>
         current.get(binding._1) match {
-          case Some(other) if other != binding._2 => Left(s"${binding._1} is used as $other and ${binding._2}")
-          case _                                  => Right(current.updated(binding._1, binding._2))
+          case Some(other) if !Form.compatible(other, binding._2) =>
+            Left(s"${binding._1} is used as $other and ${binding._2}")
+          case Some(_) => Right(current)
+          case None    => Right(current.updated(binding._1, binding._2))
         }
       )
     )
@@ -198,19 +241,14 @@ object Equivalence {
       steps: Vec[Step],
       harness: H,
       initial: Map[String, Long],
+      types: Map[String, Type],
       executor: (Case, Vec[Long], H) => Either[String, Vec[Long]]
   ): Either[String, Map[String, Long]] =
     steps.foldLeft[Either[String, Map[String, Long]]](Right(initial))((state, step) =>
-      state.flatMap { env =>
-        val inputs = step.kase.definition.parameters.map(parameter =>
-          step.parameters(parameter.name) match {
-            case Operand.Location(name)   => env(name)
-            case Operand.Immediate(value) => value
-          }
+      state.flatMap(env =>
+        executor(step.kase, step.inputs(env), harness).map(outputs =>
+          env ++ step.outputs(outputs).map((location, value) => (location, types(location).represent(value)))
         )
-        executor(step.kase, inputs, harness).map(outputs =>
-          env ++ step.kase.definition.results.zip(outputs).map((result, value) => (step.results(result.name), value))
-        )
-      }
+      )
     )
 }

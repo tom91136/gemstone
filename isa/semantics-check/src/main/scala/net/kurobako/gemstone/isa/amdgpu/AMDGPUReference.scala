@@ -25,6 +25,8 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
 
   def harness(seed: Long): AMDGPUHarness = AMDGPUHarness()
 
+  override def lane: Option[Int] = Some(Lane)
+
   // the machine state is compared as a value of any shape
   @SuppressWarnings(Array("scalafix:PublicSignatures.any-type"))
   def state(harness: AMDGPUHarness): Any = harness.writes

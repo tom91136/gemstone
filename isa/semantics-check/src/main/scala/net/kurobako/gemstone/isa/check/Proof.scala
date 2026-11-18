@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.check
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.isa.amdgpu.LaneMasks
 import net.kurobako.gemstone.isa.check.Equivalence.*
 import net.kurobako.gemstone.isa.check.Equivalence.Verdict
 import net.kurobako.gemstone.semantics.render.*
@@ -14,8 +15,10 @@ import scala.concurrent.duration.*
   */
 object Proof {
 
-  /** An instruction a proof relies on, and the runs of the differential check that its definition passed. */
-  case class Cover(instance: String, target: Option[String], runs: Int)
+  /** An instruction a proof relies on, and the runs of the differential check behind its definition. `checked` names
+    * the lane cases whose runs those are, where the instruction is not itself one of them.
+    */
+  case class Cover(instance: String, target: Option[String], runs: Int, checked: Vec[String] = Vec.empty)
 
   /** `filtered` is the number of inputs the filter ran on both sequences. */
   case class Report(instructions: Vec[Cover], filtered: Int)
@@ -83,6 +86,7 @@ object Proof {
                         types,
                         description,
                         touchesMemory(l, r),
+                        l.parameters.exists(_.name == LaneMasks.Lane) || r.parameters.exists(_.name == LaneMasks.Lane),
                         filtered
                       )
                   }
@@ -97,7 +101,12 @@ object Proof {
 
   /** One definition of the whole sequence, over its live-in locations, producing the live-out ones. */
   def compose(steps: Vec[Step], liveOut: LiveOut, types: Map[String, Type]): Definition = {
-    val used     = mutable.HashSet.from(types.keys)
+    val lanes = steps.exists { step =>
+      val definition = step.kase.definition
+      (definition.requirements ++ definition.body.map(_.term) ++ definition.results.map(_.value))
+        .exists(LaneMasks.uses(_))
+    }
+    val used     = mutable.HashSet.from(types.keys) += LaneMasks.Lane
     val indices  = Iterator.from(0)
     val inputs   = mutable.LinkedHashSet.empty[String]
     val latest   = mutable.HashMap.empty[String, Term]
@@ -114,12 +123,13 @@ object Proof {
       val operands   = definition.parameters.map { parameter =>
         parameter.name ->
           (step.parameters(parameter.name) match {
-            case Operand.Location(location) => read(location)
+            case Operand.Location(location) => held(read(location), types(location), parameter.tpe)
             case Operand.Immediate(value)   => typed(Term.Literal(value), parameter.tpe)
+            case Operand.Joined(locations)  => typed(joined(locations.map(read(_))), parameter.tpe)
           })
       }.toMap
       val scope = definition.body.foldLeft(operands) { (scope, statement) =>
-        val term = rewrite(statement.term, scope, fresh(_))
+        val term = rewrite(LaneMasks.plain(statement.term), scope, fresh(_))
         statement.target match {
           case Definition.Target.Binding(name) =>
             val binding = fresh(name)
@@ -134,29 +144,50 @@ object Proof {
             scope
         }
       }
-      required ++= definition.requirements.map(rewrite(_, scope, fresh(_)))
-      contexts ++= definition.contexts.map(context => (context.name, context.tpe))
-      val written = definition.results.map { result =>
+      required ++= definition.requirements.map(term => rewrite(LaneMasks.plain(term), scope, fresh(_)))
+      contexts ++= definition.contexts.filterNot(_.tpe == LaneMasks.contextType)
+        .map(context => (context.name, context.tpe))
+      val written = definition.results.flatMap { result =>
         val binding = fresh(result.name)
         body += Definition.Statement(
           Definition.Target.Binding(binding),
-          typed(rewrite(result.value, scope, fresh(_)), result.tpe)
+          typed(rewrite(LaneMasks.plain(result.value), scope, fresh(_)), result.tpe)
         )
-        step.results(result.name) -> Term.Variable(binding)
+        step.results(result.name) match {
+          case Vec(single) => Vec(single -> held(Term.Variable(binding), result.tpe, types(single)))
+          case several => several.zipWithIndex.map((location, index) => location -> unit(Term.Variable(binding), index))
+        }
       }
       latest ++= written
     }
 
     val results = liveOut.locations.map(location => (location, types(location), read(location)))
+    val lane    = Term.Binary("<", Term.Variable(LaneMasks.Lane), Term.Literal(LaneMasks.Lanes.toLong))
     Definition(
       "sequence",
-      inputs.toVec.map(location => (location, types(location))),
+      inputs.toVec.map(location => (location, types(location))) ++
+        (if (lanes) Vec((LaneMasks.Lane, LaneMasks.LaneType)) else Vec.empty),
       contexts.toVec,
-      required.result(),
+      required.result() ++ (if (lanes) Vec(lane) else Vec.empty),
       body.result(),
       results
     )
   }
+
+  /** `term`, the value a location of type `from` holds, as an operand of type `to`. */
+  private def held(term: Term, from: Type, to: Type): Term = if (from == to) term else typed(term, to)
+
+  /** The value whose 32-bit units `units` are, low first. */
+  private def joined(units: Vec[Term]): Term = units.zipWithIndex.map { (unit, index) =>
+    val widened = typed(unit, Form.Pair)
+    if (index == 0) widened else Term.Binary("<<", widened, Term.Literal(index.toLong * Form.UnitBits))
+  }.reduceLeft(Term.Binary("|", _, _))
+
+  /** The 32-bit unit `index` of `value`. */
+  private def unit(value: Term, index: Int): Term = typed(
+    if (index == 0) value else Term.Binary(">>", typed(value, Form.Pair), Term.Literal(index.toLong * Form.UnitBits)),
+    Form.Unit
+  )
 
   private def typed(term: Term, tpe: Type): Term = tpe.unranged match {
     case Type.Integer(width, signed) => Term.Call(s"${if (signed) "SInt" else "UInt"}[$width]", Vec(term))
@@ -196,14 +227,15 @@ object Proof {
 
   private def uncovered(lane: Vec[Case], steps: Vec[Step]): Option[Case] = {
     val indexed = lane.groupBy(kase => (kase.instance, kase.target))
-    steps.map(_.kase).find(kase => !indexed.getOrElse((kase.instance, kase.target), Vec.empty[Case]).contains(kase))
+    steps.flatMap(step => if (step.lane.cases.isEmpty) Vec(step.kase) else step.lane.cases)
+      .find(kase => !indexed.getOrElse((kase.instance, kase.target), Vec.empty[Case]).contains(kase))
   }
 
   private def describe(kase: Case): String = s"${kase.instance}${kase.target.fold("")(target => s" on $target")}"
 
   private def report(steps: Vec[Step], filtered: Int): Report = Report(
-    steps.map(_.kase).distinctBy(kase => (kase.instance, kase.target)).map(kase =>
-      Cover(kase.instance, kase.target, Equivalence.Runs)
+    steps.distinctBy(step => (step.kase.instance, step.kase.target)).map(step =>
+      Cover(step.kase.instance, step.kase.target, Equivalence.Runs, step.lane.cases.map(_.instance))
     ),
     filtered
   )
@@ -226,6 +258,7 @@ object Proof {
       types: Map[String, Type],
       description: String,
       memory: Boolean,
+      lanes: Boolean,
       filtered: Int
   ): Result = {
     val model = Entry.findAllMatchIn(description).map { found =>
@@ -236,9 +269,15 @@ object Proof {
     val outside = inputs.collectFirst {
       case (name, value) if !inRange(types(name), value) => name
     }
+    val lane = model.get(LaneMasks.Lane).filter(_ => lanes)
     outside match {
       case Some(name) => Result.Undecided(s"the solver's value for $name is outside its range", filtered)
-      case None       =>
+      case None if lane.exists(found => !reference.lane.contains(found.toInt)) =>
+        Result.Undecided(
+          s"the solver's counterexample is in lane ${lane.get}, which the reference does not run",
+          filtered
+        )
+      case None =>
         Equivalence.replay(reference, executor, left, right, liveOut, inputs) match {
           case Verdict.Rejected(found)          => Result.Rejected(found, Source.Solver)
           case Verdict.NotRejected(_) if memory =>

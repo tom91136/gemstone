@@ -13,7 +13,8 @@ import net.kurobako.gemstone.vm.RegisterUse
 class AMDGPUMovesSuite extends Suite {
   private val kernel = WindowFixtures.kernel
   private val target = "gfx906"
-  private val mode   = TargetMode(target.refine[Target].toOption.get)
+  private val named  = target.refine[Target].toOption.get
+  private val mode   = TargetMode(named)
   private val limit  = 24
 
   private val fixtures =
@@ -89,9 +90,9 @@ class AMDGPUMovesSuite extends Suite {
   test("no candidate holds an instruction the equivalence checker rejects or one that writes EXEC") {
     val exec = Set("exec_lo", "exec_hi")
     first.flatMap(_._2).foreach { candidate =>
-      val names = candidate.instructions.map(AMDGPUMoves.encoded(_))
-      val kept  = AMDGPUWindows.admitted(target, names.toSet)
-      names.foreach(name => assert(kept(name), s"$name is rejected in ${text(candidate)}"))
+      candidate.instructions.foreach(instruction =>
+        assertEquals(AMDGPUForms.of(named, instruction).left.toOption, None, text(candidate))
+      )
       usesOf(candidate).foreach(use => assertEquals(units(use, use.writes).intersect(exec), Set.empty[String]))
     }
   }

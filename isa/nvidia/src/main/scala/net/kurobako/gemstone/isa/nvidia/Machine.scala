@@ -23,9 +23,9 @@ private[isa] object Machine {
 
   val memory: String = "memory"
 
-  private val warpContext     = ("net.kurobako.gemstone.isa.nvidia.Warp", "warp")
-  private val launchContext   = ("net.kurobako.gemstone.isa.nvidia.Launch", "launch")
-  private val constantContext = ("net.kurobako.gemstone.isa.nvidia.Constants", "constants")
+  private val warpContext               = ("net.kurobako.gemstone.isa.nvidia.Warp", "warp")
+  private val launchContext             = ("net.kurobako.gemstone.isa.nvidia.Launch", "launch")
+  val constantContext: (String, String) = ("net.kurobako.gemstone.isa.nvidia.Constants", "constants")
 
   val memoryContext: (String, String) = ("net.kurobako.gemstone.isa.nvidia.Memory", "memory")
 

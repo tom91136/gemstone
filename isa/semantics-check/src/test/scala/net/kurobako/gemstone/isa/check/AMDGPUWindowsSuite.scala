@@ -43,13 +43,15 @@ class AMDGPUWindowsSuite extends Suite {
     assertEquals(windows(image, 2).map(w => (w._1, w._2)), Vec((0, 1), (2, 3), (3, 4), (4, 5), (7, 7), (9, 9)))
   }
 
-  test("the LLVM-compiled vector copy has windows between its loads, carries and waits") {
+  test("the LLVM-compiled vector copy has windows between its loads and waits, through its carries") {
+    val address = Set("s2", "s3", "v0", "v1", "v2", "v3")
     assertEquals(
       windows(WindowFixtures.vectorCopy, 8),
       Vec(
         (3, 3, copied ++ flat, copied ++ flat),
-        (5, 11, copied ++ flat, Set("s0", "s2", "s3", "v0", "v1", "v2", "v3") ++ flat),
-        (15, 15, Set("s2", "s3", "v0", "v1", "v2", "v3") ++ flat, Set("s2", "v0", "v1", "v2", "v3") ++ flat)
+        (5, 12, copied ++ flat, address ++ flat ++ vcc),
+        (6, 13, copied - "s9" + "s4" ++ flat, address ++ flat),
+        (15, 17, address ++ flat, Set("v0", "v1", "v2") ++ flat)
       )
     )
   }
@@ -70,17 +72,16 @@ class AMDGPUWindowsSuite extends Suite {
     assertEquals(uses(9).reads.toSet, Set("scc"))
   }
 
-  test("windows carry VCC to the instruction that reads it and stop at a write of EXEC") {
+  test("windows run through the lanes that read and write VCC and stop at a write of EXEC") {
     assertEquals(
       windows(stateImage, 8),
       Vec(
         (
           0,
-          1,
+          5,
           Set("s0", "s2", "s3", "s4", "s5", "v1", "v2", "v3", "v4", "v5") ++ exec,
-          Set("s0", "s4", "s5", "v1", "v3", "v4", "v5") ++ exec ++ vcc
+          Set("s0", "s4", "s5", "v4", "v5")
         ),
-        (5, 5, Set("s0", "s4", "s5", "v3", "v4", "v5") ++ exec, Set("s0", "s4", "s5", "v4", "v5")),
         (7, 9, Set("s0", "v4", "v5") ++ exec, Set.empty[String])
       )
     )

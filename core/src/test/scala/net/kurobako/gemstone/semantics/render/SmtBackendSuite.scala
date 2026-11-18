@@ -313,4 +313,28 @@ class SmtBackendSuite extends Suite {
     assert(query.exists(_.contains("(assert false)")), query.toString)
     assert(query.exists(!_.contains("distinct")), query.toString)
   }
+
+  private def constant(bank: Long, offset: Long): Term = Term.Context(
+    "net.kurobako.gemstone.isa.nvidia.Constants",
+    "constants",
+    "load",
+    Vec(u32),
+    Vec(Term.Literal(bank), Term.Literal(offset)),
+    Vec(Some(u32), Some(u32)),
+    Some(u32),
+    effect = false
+  )
+
+  test("a constant-bank read selects its bank and offset from one memory both sides share") {
+    val query = SmtBackend.equivalence(
+      definition(Vec.empty, Vec(("d", u32, constant(0L, 0x160L)))),
+      definition(Vec.empty, Vec(("d", u32, constant(2L, 0x164L)))),
+      memory = true
+    )
+    val text = query.fold(identity, identity)
+    assertEquals(text.linesIterator.count(_.startsWith("(declare-const memory_Constants ")), 1, text)
+    assert(text.contains("(select memory_Constants (concat (_ bv0 32) (_ bv352 32)))"), text)
+    assert(text.contains("(select memory_Constants (concat (_ bv2 32) (_ bv356 32)))"), text)
+    assert(text.contains("(assert (distinct l_d r_d))"), text)
+  }
 }

@@ -158,18 +158,24 @@ object AMDGPUGenerator {
   private def spelt(target: String, found: Spelt): Case =
     Case(found.described.instance, Some(target), found.described.definition, Lookup.Spellings(found.operands))
 
-  private def described(included: String => Boolean) = (targets ++ matrixTargets ++ dualTargets).distinct.flatMap(
-    target =>
+  /** Whether the instances of `mnemonic` on `target` are among those checked. */
+  private def checks(target: String, mnemonic: String): Boolean =
+    TargetSet(target) || (MatrixTargetSet(target) && Matrix.matches(mnemonic)) ||
+      (DualTargetSet(target) && Dual.matches(mnemonic))
+
+  /** The mnemonics whose instances on `target` are checked: each has its first instance there as a case, or a case of
+    * the same definition, up to names and numbers, on a target before it.
+    */
+  def mnemonics(target: String): Set[String] =
+    AMDGPUModel.entries(Some(target)).view.map(_.mnemonic).filter(checks(target, _)).toSet
+
+  private def described(included: String => Boolean, selected: String => Boolean) =
+    (targets ++ matrixTargets ++ dualTargets).distinct.filter(selected).flatMap(target =>
       AMDGPUModel.entries(Some(target)).view
-        .filter(entry =>
-          included(entry.mnemonic) &&
-            (TargetSet(target) ||
-              (MatrixTargetSet(target) && Matrix.matches(entry.mnemonic)) ||
-              (DualTargetSet(target) && Dual.matches(entry.mnemonic)))
-        )
+        .filter(entry => included(entry.mnemonic) && checks(target, entry.mnemonic))
         .flatMap(entry => entry.forms.map(form => (target, entry.mnemonic, AMDGPUModel.spelt(entry, form))))
         .toVec
-  )
+    )
 
   private val Number = raw"\b[0-9]+\b".r
 
@@ -199,8 +205,9 @@ object AMDGPUGenerator {
     kept.result()
   }
 
-  def cases(included: String => Boolean): Vec[Case] = {
-    val found   = described(included)
+  /** The cases of the mnemonics `included` holds for, on the targets `selected` holds for. */
+  def cases(included: String => Boolean, selected: String => Boolean = _ => true): Vec[Case] = {
+    val found   = described(included, selected)
     val kept    = Vec.newBuilder[Case]
     val checked = mutable.Set.empty[String]
     val shown   = mutable.Set.empty[String]

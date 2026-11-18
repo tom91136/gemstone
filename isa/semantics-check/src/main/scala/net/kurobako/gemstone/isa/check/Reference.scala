@@ -31,6 +31,9 @@ trait Reference[H, L <: Lookup] {
   /** Whether `state` reflects memory writes, so a memory live-out is comparable. */
   def observesMemory: Boolean = true
 
+  /** The lane of a wave a run executes, where the ISA runs an instruction once per lane. */
+  def lane: Option[Int] = None
+
   /** The inputs of a run of `instance`: the edge-biased `sampled` ones, or others where the instance reads operands
     * that are seldom meaningful at random, such as resource descriptors.
     */

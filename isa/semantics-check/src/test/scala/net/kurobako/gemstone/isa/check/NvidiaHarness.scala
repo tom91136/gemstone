@@ -16,6 +16,12 @@ object NvidiaHarness {
   /** The byte at `offset` of the constant bank of the run `seed` selects. */
   def constant(seed: Long, offset: Long): Byte = SeededMemory.byte(seed, offset)
 
+  /** The byte at `offset` of constant bank `bank`: the bank the lane binds holds [[constant]]'s bytes, and every other
+    * bank bytes of its own.
+    */
+  def constant(seed: Long, bank: Long, offset: Long): Byte =
+    constant(seed, ((bank - InstructionSemantics.ConstantBank) << 32) + offset)
+
   /** `instructions` as the only routine of a kernel of one block of `lanes` threads, and what `read` takes of the
     * cohort at the end of the routine, the one instruction with a source, or why the run did not reach it.
     */

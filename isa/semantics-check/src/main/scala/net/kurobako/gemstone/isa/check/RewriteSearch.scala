@@ -17,7 +17,6 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.reflect.ClassTag
 import scala.util.Random
-import scala.util.Try
 
 object RewriteSearch {
 
@@ -64,11 +63,6 @@ object RewriteSearch {
   }
 
   private case class Written(values: Map[String, Long], written: Set[String])
-
-  private val Placeholder = 0x1234
-
-  private val Register = raw"([sva])(\d+)".r
-  private val Span     = raw"([sva])\[(\d+):(\d+)\]".r
 
   def amdgpu(
       image: Vec[Byte],
@@ -125,26 +119,6 @@ object RewriteSearch {
       found.flatMap(done => f(value).map(done :+ _))
     )
 
-  private def location(name: String): Boolean = name match {
-    case Register(_, _) | Span(_, _, _) => true
-    case state                          => ImplicitState.names.contains(state)
-  }
-
-  private def literals(instruction: Instruction): Map[String, Long] =
-    instruction.operands.flatMap {
-      case Operand.IntegerLiteral(value, _)                                          => named(value)
-      case Operand.Expression(text) if text.startsWith("lit(") && text.endsWith(")") =>
-        val inner = text.slice("lit(".length, text.length - 1)
-        numeric(inner).toVec.flatMap(named)
-      case _ => Vec.empty[(String, Long)]
-    }.toMap
-
-  private def numeric(text: String): Option[BigInt] =
-    Try(BigInt(text.stripPrefix("0x"), if (text.startsWith("0x")) 16 else 10)).toOption
-
-  private def named(value: BigInt): Vec[(String, Long)] =
-    Vec(s"0x${value.toString(16)}" -> value.toLong, value.toString -> value.toLong).distinct
-
   private final class Search(
       target: Target,
       window: Window,
@@ -163,8 +137,6 @@ object RewriteSearch {
     private val original          = blockInstructions.slice(at, at + length)
     private val originalUses      = blockUses.slice(at, at + length)
 
-    private val definitions = mutable.Map.empty[String, Either[String, Equivalence.Step]]
-
     private val masks: Set[String] = Set(ImplicitState.Exec) ++ ImplicitState.of(OperandKind.`VCC`)
 
     private def units(name: String, width: Int): Vec[String] =
@@ -173,54 +145,23 @@ object RewriteSearch {
     private def units(use: RegisterUse, names: Vec[String]): Vec[String] =
       names.flatMap(name => units(name, use.unitsOf(name)))
 
-    private def step(instruction: Instruction): Either[String, Equivalence.Step] = {
-      val inline = instruction.operands.zipWithIndex.collectFirst {
-        case (Operand.Expression(text), index) if text.startsWith("lit(") && text.endsWith(")") =>
-          numeric(text.slice("lit(".length, text.length - 1)).map(value => index -> value)
-      }.flatten
-      val spelled = inline.fold[Either[String, Instruction]](Right(instruction))((index, _) =>
-        Instruction.decode(
-          instruction.definition,
-          instruction.operands.updated(index, Operand.IntegerLiteral(BigInt(Placeholder), 16)),
-          instruction.mods
-        ).left.map(reason => s"${Printer.render(instruction)}: $reason")
-      )
-      val literals = RewriteSearch.literals(instruction) ++ inline.map((_, value) =>
-        s"0x${Placeholder.toHexString}" -> value.toLong
-      )
-      for {
-        spelling <- spelled
-        text = Printer.render(spelling)
-        definition <-
-          InstructionSemantics.describe(target, text, Map.empty, Vec.empty).left.map(reason => s"$text: $reason")
-        parameters <- each(definition.parameters.map { parameter =>
-          val name = parameter.name
-          if (location(name)) Right(name -> Equivalence.Operand.Location(name))
-          else literals.get(name).toRight(s"$text binds $name, neither a location nor a literal").map(value =>
-            name -> Equivalence.Operand.Immediate(value)
-          )
-        }.toVec)(identity)
-      } yield Equivalence.Step(
-        Case(text, Some(target.raw), definition, Lookup.Spellings(Map.empty)),
-        parameters.toMap,
-        definition.results.map((name, _, _) => name -> name).toMap
-      )
-    }
-
     private def steps(sequence: Vec[Instruction]): Either[String, Vec[Equivalence.Step]] =
-      each(sequence)(instruction => definitions.getOrElseUpdate(Printer.render(instruction), step(instruction)))
+      each(sequence)(AMDGPUForms.of(target, _))
 
     private def liveOut(steps: Vec[Equivalence.Step]): Equivalence.LiveOut = {
       val written = originalUses.flatMap(use => units(use, use.writes)).toSet
       val live    = window.liveOut.intersect(written)
-      val named   = steps.flatMap(_.kase.definition.results.collect {
-        case (name, tpe, _) if units(name, (tpe.bits + 31) / 32).exists(live.contains) => name
-      })
-      Equivalence.LiveOut(named.distinct, memory = steps.exists(_.kase.definition.contexts.nonEmpty))
+      val named   = steps.flatMap(step => step.kase.definition.results.flatMap(result => step.results(result.name)))
+      Equivalence.LiveOut(
+        named.distinct.filter(live.contains),
+        memory = steps.exists(_.kase.definition.contexts.exists(_.tpe != LaneMasks.contextType))
+      )
     }
 
+    private val active = ImplicitState.units(ImplicitState.Exec, waveSize).toSet
+
     private def sample(name: String, tpe: Type, run: Int): Long =
-      if (name == ImplicitState.Exec) -1L
+      if (active(name)) tpe.represent(-1L)
       else {
         val mixed = config.seed ^ (name.hashCode.toLong * 0x9e3779b97f4a7c15L) ^ run.toLong
         Edges.sample(tpe, Random(mixed))
@@ -229,22 +170,16 @@ object RewriteSearch {
     private def execute(
         sequence: Vec[Equivalence.Step],
         initial: Map[String, Long],
+        types: Map[String, Type],
         harness: AMDGPUHarness
     ): Either[String, Written] =
       sequence.foldLeft[Either[String, Written]](Right(Written(initial, Set.empty))) { (found, step) =>
-        found.flatMap { known =>
-          val values = step.kase.definition.parameters.map((name, _) =>
-            step.parameters(name) match {
-              case Equivalence.Operand.Location(location) => known.values(location)
-              case Equivalence.Operand.Immediate(value)   => value
-            }
-          )
-          executor(step.kase, values, harness).map { outputs =>
-            val named = step.kase.definition.results.map((name, _, _) => name).zip(outputs)
-              .map((name, value) => step.results(name) -> value)
+        found.flatMap(known =>
+          executor(step.kase, step.inputs(known.values), harness).map { outputs =>
+            val named = step.outputs(outputs).map((location, value) => location -> types(location).represent(value))
             Written(known.values ++ named, known.written ++ named.map(_._1))
           }
-        }
+        )
       }
 
     private def changed[K, V](left: Map[K, V], right: Map[K, V])(using CanEqual[V, V]): Long =
@@ -280,7 +215,9 @@ object RewriteSearch {
         right: Vec[Equivalence.Step],
         liveOut: Equivalence.LiveOut
     ): Distance =
-      Equivalence.validate(left.iterator ++ right.iterator, liveOut) match {
+      Equivalence.crossLane(left).orElse(Equivalence.crossLane(right)).toLeft(()).flatMap(_ =>
+        Equivalence.validate(left.iterator ++ right.iterator, liveOut)
+      ) match {
         case Left(reason) => Distance.Refused(reason)
         case Right(types) =>
           val names = types.keys.toVec.sorted
@@ -290,7 +227,7 @@ object RewriteSearch {
 
               val expectedHarness = AMDGPUReference.harness(run.toLong)
               val obtainedHarness = AMDGPUReference.harness(run.toLong)
-              (execute(left, sampled, expectedHarness), execute(right, sampled, obtainedHarness)) match {
+              (execute(left, sampled, types, expectedHarness), execute(right, sampled, types, obtainedHarness)) match {
                 case (Right(expected), Right(obtained)) =>
                   Right(sum + differing(types, liveOut, expected, obtained) +
                     memory(expectedHarness, obtainedHarness, liveOut))
@@ -311,7 +248,7 @@ object RewriteSearch {
     } yield Proof.prove(
       AMDGPUReference,
       executor,
-      originalSteps.map(_.kase) ++ right.map(_.kase),
+      (originalSteps ++ right).flatMap(_.lane.cases),
       originalSteps,
       right,
       liveOut(originalSteps)
@@ -380,10 +317,10 @@ object RewriteSearch {
       val start    = Walk(original, moves, before.cycles, 0L, 0)
       val walked   = if (out.locations.isEmpty) visit(start, deleted) else walk(0, start)
       val cheaper  = seen.values.filter((_, bits, after) => bits == 0L && after.cycles < before.cycles).toVec
-      val lane     = originalSteps.map(_.kase)
+      val lane     = originalSteps.flatMap(_.lane.cases)
       val rewrites = cheaper.flatMap { (sequence, _, after) =>
         steps(sequence).toOption.flatMap { right =>
-          Proof.prove(AMDGPUReference, executor, lane ++ right.map(_.kase), originalSteps, right, out) match {
+          Proof.prove(AMDGPUReference, executor, lane ++ right.flatMap(_.lane.cases), originalSteps, right, out) match {
             case Proof.Result.Proved(evidence) =>
               val source = Architecture.Source.weakest(before.source, after.source)
               Some(

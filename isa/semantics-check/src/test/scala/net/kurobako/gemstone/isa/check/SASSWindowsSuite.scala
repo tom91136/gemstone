@@ -40,18 +40,54 @@ class SASSWindowsSuite extends Suite {
     assert(windows.forall(window => window.first != 44 && window.last != 44), "no window holds the branch")
   }
 
-  test("a window ends at an instruction Rejection refuses, and admits the arithmetic around it") {
+  test("constant-bank reads are admitted, and what has no form of its own ends a window") {
     val (_, _, instructions)      = coded(loopKernel, Vec(24))
     val kept                      = SASSWindows.admitted("sm_89", instructions)
     def at(address: Int): Boolean = kept(address / 16)
     assertEquals(instructions(0x40 / 16).mnemonic.raw, "IMAD", "the wide product reads the constant bank")
-    assert(!at(0x00), "a constant-bank read is refused")
-    assert(!at(0x40), "a constant-bank product is refused")
-    assert(!at(0x50), "a load has no definition to prove")
-    assert(!at(0x70), "a convergence barrier has no definition to prove")
-    assert(!at(0x2c0), "a branch has no definition to prove")
+    assert(at(0x00) && at(0x40) && at(0x90) && at(0xa0) && at(0x520), "constant-bank reads are admitted")
+    assert(!at(0x60) && !at(0x510), "no checked case writes a predicate beside a constant-bank read")
+    assert(!at(0x30), "a uniform register is written through the warp")
+    assert(!at(0x50), "a load is not a plain memory access")
+    assert(!at(0x70), "a convergence barrier has no rendering")
+    assert(!at(0x2c0), "a branch writes no register")
     assert(at(0x200) && at(0x210) && at(0x220), "the loop's arithmetic is admitted")
     assert(at(0x260), "the comparison is admitted")
+  }
+
+  test("the kernel gains the windows that hold its constant-bank reads and loses none") {
+    val (graph, uses, instructions) = coded(loopKernel, Vec(24))
+    val windows                     = SASSWindows.of(graph, uses, instructions, "sm_89", 8)
+    val spans                       = windows.map(window => (loop(window.first), loop(window.last)))
+    val gained                      = Vec((0x00, 0x00), (0x40, 0x40), (0x90, 0xa0), (0x520, 0x520))
+    assertEquals(
+      spans.filterNot(gained.contains),
+      Vec(
+        (0x20, 0x20),
+        (0xc0, 0xc0),
+        (0xe0, 0x130),
+        (0x150, 0x150),
+        (0x170, 0x190),
+        (0x1b0, 0x1d0),
+        (0x1f0, 0x1f0),
+        (0x200, 0x220),
+        (0x240, 0x2b0),
+        (0x2d0, 0x2e0),
+        (0x300, 0x310),
+        (0x330, 0x370),
+        (0x380, 0x380),
+        (0x3a0, 0x3b0),
+        (0x3d0, 0x400),
+        (0x420, 0x420),
+        (0x430, 0x430),
+        (0x450, 0x490),
+        (0x4b0, 0x4c0),
+        (0x4e0, 0x4f0)
+      )
+    )
+    assertEquals(spans.filter(gained.contains), gained)
+    val pair = windows.find(window => loop(window.first) == 0x90).getOrElse(fail("no window at 0x90"))
+    assertEquals(pair.liveOut.intersect(Set("R2", "R3")), Set("R2", "R3"))
   }
 
   test("a predicated write does not end the live range of what it may leave unchanged") {
@@ -68,10 +104,11 @@ class SASSWindowsSuite extends Suite {
     assertEquals(
       windows.map(window => (window.first, window.last, window.liveIn, window.liveOut)),
       Vec(
-        (0, 2, Set("R0", "R1", "R3"), Set("R2")),
-        (1, 3, Set("R0", "R2", "R3"), Set.empty[String])
+        (0, 1, Set("R0", "R1", "R3"), Set("R2", "R3", "P0")),
+        (3, 3, Set("R2"), Set.empty[String])
       )
     )
+    assert(SASSForms.of("sm_89", instructions(2).operation).left.exists(_.contains("has no rendering")))
     assert(windows.head.liveOut.contains("R2"), "the guarded write kept R2 live")
     assertEquals(uses(2).reads.toSet, Set("P0", "R2", "R3"))
   }

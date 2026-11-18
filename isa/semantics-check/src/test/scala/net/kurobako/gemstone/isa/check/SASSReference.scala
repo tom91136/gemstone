@@ -15,14 +15,17 @@ import scala.util.Random
   * and a run moves them to the offsets its inputs give, which must encode.
   */
 object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
-  private val lowered = TrieMap.empty[(Int, String), Option[InstructionSemantics.SASSLowering]]
+  private type Lowered = (lowering: InstructionSemantics.SASSLowering, bank: Long)
 
-  private def lower(sm: Int >= 35, instance: String, operands: Map[String, String])
-      : Option[InstructionSemantics.SASSLowering] = for {
+  private val lowered = TrieMap.empty[(Int, String), Option[Lowered]]
+
+  /** The lowering of `instance` with its constant operands in the bank the lowering binds, and the bank they name. */
+  private def lower(sm: Int >= 35, instance: String, operands: Map[String, String]): Option[Lowered] = for {
     program  <- Parser.parseProgram(s"$instance;").toOption
     parsed   <- program.statements.collectFirst { case Program.Statement.Operation(operation, _, _) => operation }
-    lowering <- InstructionSemantics.lowered(sm, parsed, operands, Map.empty).toOption
-  } yield lowering
+    moved    <- SASSForms.banked(parsed).toOption
+    lowering <- InstructionSemantics.lowered(sm, moved.instruction, operands, Map.empty).toOption
+  } yield (lowering, moved.bank.fold(InstructionSemantics.ConstantBank.toLong)(_.toLong))
 
   extension (written: SASSModel.Written) {
 
@@ -93,11 +96,15 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
     selected <- target.toRight(s"$instance has no target").flatMap(Target.parse)
     fields  = lookup.constants.map(_.binding).toSet
     offsets = parameters.map(_._1).zip(inputs).filter((name, _) => fields.contains(name)).toMap
-    _        <- if (offsets.isEmpty) Right(()) else lookup.written.encodes(offsets)
-    lowering <- lowered.getOrElseUpdate((selected.sm, instance), lower(selected.sm, instance, lookup.operands))
+    _     <- if (offsets.isEmpty) Right(()) else lookup.written.encodes(offsets)
+    found <- lowered.getOrElseUpdate((selected.sm, instance), lower(selected.sm, instance, lookup.operands))
       .toRight(s"$instance does not lower on ${selected.name}")
-    bank =
-      SASSConstantBank(harness, lookup.constants.flatMap((binding, offset) => offsets.get(binding).map(offset -> _)))
+    lowering = found.lowering
+    bank     = SASSConstantBank(
+      harness,
+      found.bank,
+      lookup.constants.flatMap((binding, offset) => offsets.get(binding).map(offset -> _))
+    )
     values <- NvidiaWarpgroups.product(lowering.steps).fold(
       NvidiaMatrices.product(lowering.steps).fold(single(lowering, parameters, inputs, results, bank))(multiply =>
         NvidiaMatrices.run(

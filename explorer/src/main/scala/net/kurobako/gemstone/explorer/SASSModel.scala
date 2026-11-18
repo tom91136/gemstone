@@ -869,6 +869,22 @@ object SASSModel extends Model {
     )
   }
 
+  /** The definition `instruction` lowers to on the target `name`, each register and predicate under its own spelling
+    * and each constant operand at its own offset.
+    */
+  def definition(name: String, instruction: Instruction): Either[Unrendered, Definition] =
+    target(Some(name)).left.map(Unrendered.Rejected(_)).flatMap(selected =>
+      InstructionSemantics.describe(
+        instruction.mnemonic.raw,
+        selected.sm,
+        instruction,
+        Map.empty,
+        Map.empty,
+        Vec.empty,
+        Vec.empty
+      )
+    )
+
   /** The definition an instance lowers to, under the operand table's names in its operand order, with its constant
     * operands' offsets as parameters.
     */
