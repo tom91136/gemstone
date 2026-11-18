@@ -34,8 +34,13 @@ private object VMConstantBank {
 
   def stackOrigin(sm: Int): Long = 0x100000000L - localWindow(sm)
 
-  /** The cluster launch field of c0 at `offset`: the cluster shape, its float reciprocals for dividing block indices,
-    * the grid of clusters and the blocks per cluster, from 0x144 on sm_90 and in the table at 0x2a0 from sm_100.
+  /** ptxas reads `%dynamic_smem_size` from this driver field; from sm_100 the cluster table carries it. */
+  private def dynamicShared(sm: Int): Int =
+    if (sm < 50) 0x114 else if (sm < 70) 0xfc else if (sm >= 100) 0x2ac else 0x2c
+
+  /** The cluster launch field of c0 at `offset`: the cluster shape, the dynamic shared memory size that follows it, the
+    * shape's float reciprocals for dividing block indices, the grid of clusters and the blocks per cluster, from 0x144
+    * on sm_90 and in the table at 0x2a0 from sm_100.
     */
   private def clusterField(offset: Int)(using context: VMCompilationContext): Option[Value] = {
     import context.*
@@ -44,6 +49,7 @@ private object VMConstantBank {
     def axis(start: Int): Option[LaunchGeometry.Axis] =
       Option.when(offset >= start && offset < start + 12 && (offset - start) % 4 == 0)(Axes((offset - start) / 4))
     axis(table).map(Value.ClusterShape(_))
+      .orElse(Option.when(sm >= 100 && offset == dynamicShared(sm))(Value.DynamicSharedBytes))
       .orElse(axis(table + (if (sm >= 100) 0x10 else 0xc)).map { dimension =>
         val shape = convert(
           Value.ClusterShape(dimension),
@@ -204,6 +210,11 @@ private object VMConstantBank {
     // ptxas reads %nsmid from this driver field.
     else if (c0 && sm >= 70 && bits == 32 && offset == (if (sm >= 100) 0x2d0 else 0x10c))
       constant(EmulatedDevice.Multiprocessors.toLong)
+    // ptxas reads %dynamic_smem_size from this driver field.
+    else if (c0 && bits == 32 && offset == dynamicShared(sm)) {
+      emit(Move(result.slot, Value.DynamicSharedBytes, 32))
+      result
+    }
     // Stack origin.
     else if (c0 && offset == (if (sm < 50) 0x44 else if (sm < 70) 0x20 else if (sm >= 100) 0x37c else 0x28))
       constant(stackOrigin(sm), if (bits == 64) 64 else 32)

@@ -123,6 +123,8 @@ class Recipes extends NvidiaFixtureSuite {
   recipe("virtualIdSm50", cuda(virtualIdCuda), 50, hex = true)
   recipe("virtualIdSm60", cuda(virtualIdCuda), 60, hex = true)
   recipe("constantSm89", cuda(constantCuda), 89)
+  recipe("dynamicSharedSm89", cuda(dynamicSharedCuda), 89)
+  recipe("dynamicSharedSm100", cuda(dynamicSharedCuda), 100)
   recipe("copyAddSm89", ptx(copyAddPtx), 89, hex = true)
   recipe("divideSm89", cuda(divideCuda), 89)
   recipe("dmmaSm80", ptx(dmmaPtx), 80)

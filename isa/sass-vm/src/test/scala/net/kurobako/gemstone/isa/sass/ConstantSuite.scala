@@ -67,6 +67,36 @@ class ConstantSuite extends Suite {
     assertEquals(run.words(0), Vec(0L, 0x7000L))
   }
 
+  // ptxas reads %dynamic_smem_size from this driver field, from the cluster table on sm_100.
+  for {
+    (sm, listing) <- Vec(89 -> "dynamicSharedSm89", 100 -> "dynamicSharedSm100")
+    requested     <- Vec[Int >= 0](0, 8, 160)
+  }
+    test(s"sm_$sm %dynamic_smem_size reports the launch request $requested") {
+      val run = load(sm, Fixture.listing(listing), "dynamic_shared").launch(1, dynamicShared = requested)(Arg.zeros(4))
+      assertEquals(run.words(0), Vec(requested.toLong))
+    }
+
+  for (
+    (sm, offset) <- Vec(
+      35  -> 0x114,
+      50  -> 0xfc,
+      60  -> 0xfc,
+      70  -> 0x2c,
+      90  -> 0x2c,
+      120 -> 0x2ac
+    )
+  )
+    test(f"sm_$sm c[0x0][0x$offset%x] holds the dynamic shared memory size") {
+      val base = parameterBase(sm).unsafe[Int >= 0]
+      val run  = program(
+        sm,
+        f"LDC R4, c[0x0][0x$offset%x]; LDC.64 R2, c[0x0][0x$base%x]; STG.E [R2.64], R4; EXIT",
+        base = base
+      ).launch(1, dynamicShared = 160)(Arg.zeros(4))
+      assertEquals(run.words(0), Vec(160L))
+    }
+
   test("kernel-scoped constant banks are constant sections for both decoding and binding") {
     Vec(".nv.constant3", ".nv.constant3.scoped", ".nv.constant12._Z6scopedv")
       .foreach(name => assert(Cubin.isConstantSection(name), name))

@@ -10,6 +10,14 @@ object ConstantFixtures {
       |}
       |""".stripMargin
 
+  val dynamicSharedCuda: String =
+    """extern "C" __global__ void dynamic_shared(int *out) {
+      |  unsigned int size;
+      |  asm("mov.u32 %0, %%dynamic_smem_size;" : "=r"(size));
+      |  out[0] = static_cast<int>(size);
+      |}
+      |""".stripMargin
+
   val listings: Map[String, String] = Map(
     "constantSm35" ->
       """//--------------------- .text.constant_read       --------------------------
@@ -59,6 +67,52 @@ object ConstantFixtures {
         |        /*00a0*/                   STG.E [R2.64], R5 ;
         |        /*00b0*/                   EXIT ;
         |.L_x_1:
+        |""".stripMargin,
+    "dynamicSharedSm89" ->
+      """//--------------------- .text.dynamic_shared      --------------------------
+        |	.section	.text.dynamic_shared,"ax",@progbits
+        |	.sectioninfo	@"SHI_REGISTERS=8"
+        |	.align	128
+        |        .global         dynamic_shared
+        |        .type           dynamic_shared,@function
+        |        .size           dynamic_shared,(.L_x_1 - dynamic_shared)
+        |        .other          dynamic_shared,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |dynamic_shared:
+        |.text.dynamic_shared:
+        |        /*0000*/                   IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28] ;
+        |        /*0010*/                   IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x2c] ;
+        |        /*0020*/                   MOV R2, c[0x0][0x160] ;
+        |        /*0030*/                   ULDC.64 UR4, c[0x0][0x118] ;
+        |        /*0040*/                   MOV R3, c[0x0][0x164] ;
+        |        /*0050*/                   STG.E [R2.64], R5 ;
+        |        /*0060*/                   EXIT ;
+        |.L_x_1:
+        |""".stripMargin,
+    "dynamicSharedSm100" ->
+      """//--------------------- .text.dynamic_shared      --------------------------
+        |	.section	.text.dynamic_shared,"ax",@progbits
+        |	.align	128
+        |        .global         dynamic_shared
+        |        .type           dynamic_shared,@function
+        |        .size           dynamic_shared,(.L_x_1 - dynamic_shared)
+        |        .other          dynamic_shared,@"STO_CUDA_ENTRY STV_DEFAULT"
+        |dynamic_shared:
+        |.text.dynamic_shared:
+        |        /*0000*/                   LDC R1, c[0x0][0x37c] ;
+        |        /*0010*/                   CS2R.32 R5, SR_CgaSize ;
+        |        /*0020*/                   IMAD R5, R5, -0xa0, RZ ;
+        |        /*0030*/                   LDC R5, c[0x0][R5+0x2ac] ;
+        |        /*0040*/                   LDCU.64 UR4, c[0x0][0x358] ;
+        |        /*0050*/                   LDC.64 R2, c[0x0][0x380] ;
+        |        /*0060*/                   STG.E desc[UR4][R2.64], R5 ;
+        |        /*0070*/                   EXIT ;
+        |.L_x_1:
+        |
+        |
+        |//--------------------- SYMBOLS --------------------------
+        |
+        |	.type		.nv.reservedSmem.offset0,@object
+        |	.size		.nv.reservedSmem.offset0,0x4
         |""".stripMargin
   )
 }
