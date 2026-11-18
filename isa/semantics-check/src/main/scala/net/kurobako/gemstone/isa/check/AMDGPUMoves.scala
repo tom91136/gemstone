@@ -5,7 +5,6 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.explorer.*
-import net.kurobako.gemstone.flow.Liveness
 import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
@@ -37,6 +36,8 @@ final class AMDGPUMoves private (
     tables: AMDGPUMoves.Tables
 ) {
   import AMDGPUMoves.*
+  import Moves.each
+  import Moves.unitsOf
 
   private val mode     = TargetMode(target)
   private val code     = CodeObject.decode(image).toOption.get
@@ -45,8 +46,7 @@ final class AMDGPUMoves private (
   private val writable = written ++ scratch
   private val original = each(base)(settled(_)).getOrElse(base).map(Printer.render(_))
 
-  private val defined: Vec[Set[String]] =
-    uses.scanLeft(window.liveIn)((live, use) => live ++ unitsOf(use, use.writes))
+  private val defined: Vec[Set[String]] = Moves.defined(window, uses)
 
   private def canonical: mutable.Map[String, Option[Instruction]] = tables.canonical
 
@@ -93,14 +93,7 @@ final class AMDGPUMoves private (
       }
     }
 
-  private def sound(used: Vec[RegisterUse]): Boolean =
-    used.foldLeft(Option(window.liveIn)) { (live, use) =>
-      val writes = unitsOf(use, use.writes)
-      live.filter(live =>
-        unitsOf(use, use.reads).subsetOf(live) && writes.intersect(exec).isEmpty &&
-          writes.intersect(window.liveOut).subsetOf(written)
-      ).map(_ ++ writes)
-    }.nonEmpty
+  private def sound(used: Vec[RegisterUse]): Boolean = Moves.sound(window, exec, written, used)
 
   private def legal(kind: Kind, raws: Vec[Vec[Instruction]], limit: Int): Vec[Candidate] = {
     val seen = mutable.Set(original)
@@ -228,10 +221,7 @@ final class AMDGPUMoves private (
   )
 
   /** Up to `limit` legal candidates of each kind, the same for the same seed. */
-  def propose(seed: Long, limit: Int): Vec[Candidate] = {
-    val random = Random(seed)
-    Kind.values.toVec.flatMap(candidates(_, random, limit))
-  }
+  def propose(seed: Long, limit: Int): Vec[Candidate] = Moves.propose(seed, limit)(candidates(_, _, _))
 
   def from(sequence: Vec[Instruction]): Either[String, AMDGPUMoves] =
     effects(Vec(sequence)).headOption.flatten.toRight("the sequence does not compile in this kernel").map { used =>
@@ -240,11 +230,14 @@ final class AMDGPUMoves private (
 }
 
 object AMDGPUMoves {
-  enum Kind derives CanEqual {
-    case Opcode, Swap, Delete, Insert, Immediate
-  }
+  import Moves.unitsOf
 
-  case class Candidate(kind: Kind, instructions: Vec[Instruction], uses: Vec[RegisterUse])
+  type Kind = Moves.Kind
+  val Kind = Moves.Kind
+  type Candidate = Moves.Candidate[Instruction]
+
+  def Candidate(kind: Kind, instructions: Vec[Instruction], uses: Vec[RegisterUse]): Candidate =
+    Moves.Candidate(kind, instructions, uses)
 
   private final class Tables(
       val opcodes: Vec[Opcode],
@@ -262,14 +255,6 @@ object AMDGPUMoves {
 
   private def signature(infos: Vec[OperandInfo]): String =
     infos.map(info => s"${info.kind}:${info.bits}:${info.output}").mkString(",")
-
-  private def each[A, B](values: Vec[A])(f: A => Option[B]): Option[Vec[B]] = {
-    val mapped = values.map(f)
-    Option.when(mapped.forall(_.isDefined))(mapped.flatten)
-  }
-
-  private def unitsOf(use: RegisterUse, names: Vec[String]): Set[String] =
-    names.flatMap(name => Liveness.units(name, use.unitsOf(name))).toSet
 
   private def end(mode: TargetMode): Vec[Byte] =
     Binary.encode(Instruction.decode("s_endpgm", Vec.empty).toOption.get, mode).toOption.get
