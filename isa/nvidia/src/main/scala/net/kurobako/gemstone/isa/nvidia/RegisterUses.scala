@@ -102,8 +102,55 @@ object RegisterUses {
     ).distinct
 
     def instruction(instruction: Instruction): Unit = instruction match {
-      case Instruction.Tensor(operation)                            => matrix(operation)
-      case Instruction.Texture(operation)                           => texture(operation)
+      case Instruction.Tensor(operation)  => matrix(operation)
+      case Instruction.Texture(operation) => texture(operation)
+      case _: (Instruction.ConvertTF32 | Instruction.LoadParameter | Instruction.StoreParameter | Instruction.Move |
+            Instruction.MoveVector | Instruction.UniformMove | Instruction.MovePredicate | Instruction.MoveSplit |
+            Instruction.MoveCombine | Instruction.IntegerUnary | Instruction.BitFind | Instruction.DotProduct4 |
+            Instruction.DotProduct2 | Instruction.SumAbsoluteDifference | Instruction.FindNthSet |
+            Instruction.PackSaturated | Instruction.ConvertToFloat8 | Instruction.ConvertNarrow |
+            Instruction.ConvertWiden | Instruction.ConvertFromFloat8 | Instruction.SpaceTest |
+            Instruction.PackedSaturatingAdd | Instruction.VideoSimd | Instruction.VideoScalar |
+            Instruction.VideoMultiplyAdd | Instruction.ConvertStochastic |
+            Instruction.SelectSign) => valueOps(instruction)
+      case _: (Instruction.TestProperty | Instruction.CompareSetCombined | Instruction.SetPredicateCombined |
+            Instruction.StackAllocate | Instruction.StackSave | Instruction.StackRestore | Instruction.IntegerBinary |
+            Instruction.FunnelShift | Instruction.Logic3 | Instruction.IntegerSubtractAdd |
+            Instruction.IntegerAddWithCarry | Instruction.IntegerSubtractWithBorrow | Instruction.IntegerAddThree |
+            Instruction.WriteConditionFlag | Instruction.ReadConditionFlag | Instruction.ReadConditionPredicate |
+            Instruction.InvalidateConditionFlag | Instruction.MultiplyAdd | Instruction.FloatBinary |
+            Instruction.FloatBinaryPacked | Instruction.FloatUnary | Instruction.MufuUnary |
+            Instruction.FloatUnaryPacked | Instruction.FusedMultiplyAdd | Instruction.FusedMultiplyAddBf16 |
+            Instruction.FusedMultiplyAddPacked) | Instruction.InvalidateAddThreeCarry => arithmeticOps(instruction)
+      case _: (Instruction.Shuffle | Instruction.VoteBallot | Instruction.Elect | Instruction.WarpReduceFloat |
+            Instruction.WarpMatch | Instruction.VotePredicate | Instruction.BitFieldExtract |
+            Instruction.BitFieldInsert | Instruction.BitMask | Instruction.BytePermute | Instruction.Select |
+            Instruction.Convert | Instruction.ConvertPacked | Instruction.CompareSet | Instruction.Load |
+            Instruction.LoadVector | Instruction.Store | Instruction.StoreVector | Instruction.AsyncCopy |
+            Instruction.AsyncBulkStore | Instruction.AsyncBulkCopy | Instruction.AsyncBulkReduce |
+            Instruction.AsyncBulkFill | Instruction.AsyncTensor | Instruction.TensorMapReplace |
+            Instruction.TensorMapCopy | Instruction.AsyncSharedStore) => warpMemoryOps(instruction)
+      case _: (Instruction.AsyncSharedReduce | Instruction.ClusterMap | Instruction.ClusterRankOf |
+            Instruction.ClusterBarrier | Instruction.ClusterTryCancel | Instruction.ClusterCancelStatus |
+            Instruction.ClusterCancelCta | Instruction.TensorMemoryAllocate | Instruction.TensorMemoryDeallocate |
+            Instruction.TensorMemoryClaim | Instruction.TensorMemoryRelease | Instruction.TensorMemoryLoad |
+            Instruction.TensorMemoryStore | Instruction.TensorMemoryCopy | Instruction.TensorMemoryShift |
+            Instruction.TensorMemoryMultiply | Instruction.TensorMemoryCommit | Instruction.MBarrierLoad |
+            Instruction.MBarrierInit | Instruction.MBarrierArrive | Instruction.MBarrierPending |
+            Instruction.MBarrierTransaction | Instruction.MBarrierTest | Instruction.MBarrierInvalidate |
+            Instruction.AsyncCommit | Instruction.AsyncWait) |
+          Instruction.TensorMemoryRelinquish => clusterTensorOps(instruction)
+      case _: (Instruction.SharedLockLoad | Instruction.SharedStoreUnlock | Instruction.SetPredicate |
+            Instruction.PredicateCompare | Instruction.PredicateUnary | Instruction.PredicateBinary |
+            Instruction.Branch | Instruction.BranchTable | Instruction.BarrierSync | Instruction.BarrierArrive |
+            Instruction.BarrierReduce | Instruction.Atomic | Instruction.AtomicCompareExchange |
+            Instruction.WarpReduce | Instruction.Convergence | Instruction.ReturnStackPush |
+            Instruction.ReturnStackPop | Instruction.ReturnStackSave | Instruction.WarpBarrier | Instruction.Call |
+            Instruction.CallBuiltin) | Instruction.NoOp | Instruction.Yield | Instruction.Spin | Instruction.Fence |
+          Instruction.Trap | Instruction.Return | Instruction.Exit => controlOps(instruction)
+    }
+
+    private def valueOps(instruction: Instruction): Unit = (instruction: @unchecked) match {
       case Instruction.ConvertTF32(destination, source, _, _, _, _) =>
         writeRegister(destination); readValue(source)
       case Instruction.LoadParameter(destinations, _, _, _, _) =>
@@ -164,6 +211,9 @@ object RegisterUses {
         writeRegister(destination); readValues(Vec(high, low, bits, rest))
       case Instruction.SelectSign(destination, whenNonNegative, whenNegative, condition, _, _, _) =>
         writeRegister(destination); readValues(Vec(whenNonNegative, whenNegative, condition))
+    }
+
+    private def arithmeticOps(instruction: Instruction): Unit = (instruction: @unchecked) match {
       case Instruction.TestProperty(destination, source, _, _) =>
         writePredicate(destination); readValue(source)
       case Instruction.CompareSetCombined(destination, _, _, left, right, _, _, _, predicate, _) =>
@@ -227,6 +277,9 @@ object RegisterUses {
         writeRegister(destination); readValues(Vec(left, right, addend))
       case Instruction.FusedMultiplyAddPacked(destination, left, right, addend, _, _) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
+    }
+
+    private def warpMemoryOps(instruction: Instruction): Unit = (instruction: @unchecked) match {
       case Instruction.Shuffle(_, destination, validity, source, lane, clamp, memberMask, _) =>
         writeRegister(destination); readValues(Vec(source, lane, clamp, memberMask))
         validity.foreach(readPredicate)
@@ -287,6 +340,9 @@ object RegisterUses {
         readValues(Vec(destination, source))
       case Instruction.AsyncSharedStore(address, sources, _, barrier) =>
         readValues(Vec(address, barrier)); readValues(sources)
+    }
+
+    private def clusterTensorOps(instruction: Instruction): Unit = (instruction: @unchecked) match {
       case Instruction.AsyncSharedReduce(address, source, _, _, barrier) =>
         readValues(Vec(address, source, barrier))
       case Instruction.ClusterMap(destination, address, rank) =>
@@ -342,6 +398,9 @@ object RegisterUses {
         ()
       case Instruction.AsyncWait(_, _) =>
         ()
+    }
+
+    private def controlOps(instruction: Instruction): Unit = (instruction: @unchecked) match {
       case Instruction.SharedLockLoad(destination, result, address, _) =>
         writePredicate(destination); writeRegister(result); readValue(address)
       case Instruction.SharedStoreUnlock(destination, address, source, _) =>
