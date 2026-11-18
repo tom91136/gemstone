@@ -17,7 +17,6 @@
 #include <aspartame/view.hpp>
 
 #include "gemstone/environment.hpp"
-#include "gemstone/hsa/allocation.hpp"
 #include "gemstone_execution_rpc.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/trace.hpp>

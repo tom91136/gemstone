@@ -6,7 +6,7 @@ import javax.annotation.processing.Generated
 @Generated(Array("sbt codegen"))
 object TextureLayout {
   object Table {
-    inline val BaseAddress = 0x3f0000000000L
+    inline val BaseAddress = 0x3800000000000000L
     inline val EntryBytes = 0x80L
     inline val Entries = 0x10000L
   }

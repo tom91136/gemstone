@@ -22,7 +22,7 @@ object TextureDescriptorABI {
       "Table",
       "Long",
       Vector(
-        "BaseAddress" -> 0x3f0000000000L,
+        "BaseAddress" -> GenerateAddressLayout.TextureTableBase,
         "EntryBytes"  -> 128L,
         "Entries"     -> 65536L
       )

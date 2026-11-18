@@ -17,15 +17,43 @@ import scala.util.Using
 class ProgramGlobalBindingSuite extends Suite {
   private val Booleans = List(false, true)
 
-  // the first program of a session loads in window 1, so the linked global at 0x3000 sits at 0x1040003000
-  private val linkedGlobal = 0x1040003000L
+  // the first program of a session loads in window 1, so the linked global at 0x3000 sits 0x3000 into that window
+  private val linkedGlobal = AddressLayout.ProgramBase + AddressLayout.ProgramStride + 0x3000L
   // gfx900: load through the loaded global address, increment/store through kernarg pointer, reload the global,
   // write value and pointer-equality flag to output. Assembly recorded in the bring-up report.
   private val code = Vec[Long](
-    0xc00a0100L, 0x00000000L, 0xbf8cc07fL, 0xbe8800ffL, 0x40003000L, 0xbe890090L, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
-    0x800a810aL, 0x7e000280L, 0x7e02020aL, 0xdc708000L, 0x00040100L, 0xbf8c0f70L, 0xc0020284L, 0x00000000L, 0xbf8cc07fL,
-    0x7e02020aL, 0xdc708000L, 0x00060100L, 0x880a0804L, 0x880b0905L, 0x870a0b0aL, 0xbf06800aL, 0x850a8081L, 0x7e02020aL,
-    0x7e000284L, 0xdc708000L, 0x00060100L, 0xbf810000L
+    0xc00a0100L,
+    0x00000000L,
+    0xbf8cc07fL,
+    0xbe8800ffL,
+    linkedGlobal & 0xffffffffL,
+    0xbe8900ffL,
+    linkedGlobal >>> 32,
+    0xc0020284L,
+    0x00000000L,
+    0xbf8cc07fL,
+    0x800a810aL,
+    0x7e000280L,
+    0x7e02020aL,
+    0xdc708000L,
+    0x00040100L,
+    0xbf8c0f70L,
+    0xc0020284L,
+    0x00000000L,
+    0xbf8cc07fL,
+    0x7e02020aL,
+    0xdc708000L,
+    0x00060100L,
+    0x880a0804L,
+    0x880b0905L,
+    0x870a0b0aL,
+    0xbf06800aL,
+    0x850a8081L,
+    0x7e02020aL,
+    0x7e000284L,
+    0xdc708000L,
+    0x00060100L,
+    0xbf810000L
   ).flatMap(value => LittleEndian.toVec(value, 4))
   private val global                                      = AllocationId(1L)
   private val output                                      = AllocationId(2L)
@@ -78,7 +106,7 @@ class ProgramGlobalBindingSuite extends Suite {
         s.write(global, 8L, LittleEndian.toVec(70, 4)),
         Right(())
       )
-      val synthetic = 0x400000000000L + 8L
+      val synthetic = AddressLayout.AllocationBase + (global.raw - 1L) * AddressLayout.AllocationStride + 8L
       val second    =
         launch(s, program, KernelTask.Argument.Scalar(LittleEndian.toVec(synthetic, 8).unsafe))
       assertEquals(read(s, global, 8), 71L)

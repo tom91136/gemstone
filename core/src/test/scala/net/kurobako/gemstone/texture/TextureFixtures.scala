@@ -2,9 +2,10 @@ package net.kurobako.gemstone.texture
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import net.kurobako.gemstone.memory.AddressLayout
 
 object TextureFixtures {
-  val Base: Long = 0x400000000000L
+  val Base: Long = AddressLayout.AllocationBase
 
   def descriptor(
       format: TexelFormat,

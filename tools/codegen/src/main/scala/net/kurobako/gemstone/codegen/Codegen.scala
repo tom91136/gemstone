@@ -38,7 +38,9 @@ object Codegen {
         Console.out.println(prepare(root, bundle))
       }
     case Request(root, Action.Generate)         => generate(root)
-    case Request(root, Action.CheckEnvironment) => GenerateEnvironment.main(Array(s"$root", "--check"))
+    case Request(root, Action.CheckEnvironment) =>
+      GenerateEnvironment.main(Array(s"$root", "--check"))
+      GenerateAddressLayout.generate(root, check = true)
   }
 
   // Mirrors `BuildEnvironment.offline` in the sbt build.
@@ -58,6 +60,8 @@ object Codegen {
     val references = root.resolve("target/references")
     announce(GenerateEnvironment)
     GenerateEnvironment.main(Array(s"$root", "--write"))
+    announce(GenerateAddressLayout)
+    GenerateAddressLayout.generate(root, check = false)
     announce(ImageFormats)
     ImageFormats.main(Array(path("core/src/generated/main/scala")))
     announce(TextureDescriptorABI)

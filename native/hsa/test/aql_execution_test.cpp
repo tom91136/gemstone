@@ -13,7 +13,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#include "gemstone/hsa/allocation.hpp"
 #include "gemstone/hsa/aql.hpp"
 #include "gemstone/hsa/doorbell_monitor.hpp"
 #include "gemstone_execution_rpc.hpp"
@@ -22,6 +21,7 @@
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include "transfer.hpp"
+#include <address_layout.hpp>
 
 namespace {
 
@@ -454,7 +454,7 @@ TEST_CASE("AQL pointer kernargs pass device code addresses and unresolved pointe
   harness.install(77, "callback_kernel");
   std::array<uint8_t, 8> kernarg{};
   const auto kernargId = harness.allocate(kernarg.data(), kernarg.size());
-  const uint64_t function = gemstone::hsa::ProgramBase + (3 * gemstone::hsa::ProgramSpan) + 0x1240;
+  const uint64_t function = gemstone::address::ProgramBase + (3 * gemstone::address::ProgramStride) + 0x1240;
   const uint64_t unmapped = 0x1000;
   uint32_t hostWord = 0;
   const uint64_t host = reinterpret_cast<uint64_t>(&hostWord);

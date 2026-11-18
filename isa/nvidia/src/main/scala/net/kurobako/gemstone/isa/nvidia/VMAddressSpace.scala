@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.isa.nvidia
 
+import net.kurobako.gemstone.memory.*
+
 /** Virtual-address apertures shared by the NVIDIA execution backend. */
 private[isa] object VMAddressSpace {
   inline val LocalLimit = 0x100000000L
@@ -7,17 +9,18 @@ private[isa] object VMAddressSpace {
   inline val LocalFrameSize = 0x80000L
   inline val SharedBase     = 0x10000000L
   inline val SharedLimit    = 0x40000000L
-  inline val ParameterBase  = 0x700000000L
+  inline val ParameterBase  = AddressLayout.NvidiaParameterBase
   @SuppressWarnings(Array("scalafix:ExplicitResultTypes"))
-  inline val ParameterLimit = ParameterBase + 0x100000000L
+  inline val ParameterLimit = AddressLayout.NvidiaParameterLimit
 
   // Each cluster CTA's shared memory is a 16 MiB window. PTX shared::cluster addresses select it above
   // ClusterWindowBase; SASS selects it with bits 24..31 of the low word of an address whose high word is SR_SWINHI.
   inline val ClusterRankShift  = 24
   inline val ClusterWindowBase = 0x30000000L
-  inline val SharedWindowBase  = 0x4000000000000000L
-  inline val SharedWindowSize  = 0x100000000L
-  inline val SharedOffsetMask  = 0xffffffL
+  inline val SharedWindowBase  = AddressLayout.NvidiaSharedWindowBase
+  @SuppressWarnings(Array("scalafix:ExplicitResultTypes"))
+  inline val SharedWindowSize = AddressLayout.NvidiaSharedWindowLimit - AddressLayout.NvidiaSharedWindowBase
+  inline val SharedOffsetMask = 0xffffffL
 
   def isShared(address: Long, size: Int = 1): Boolean =
     size >= 0 &&

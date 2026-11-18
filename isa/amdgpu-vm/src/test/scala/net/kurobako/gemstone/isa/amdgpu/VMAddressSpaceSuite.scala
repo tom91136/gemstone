@@ -6,6 +6,7 @@ import fixtures.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.vm.*
 
@@ -91,6 +92,22 @@ class VMAddressSpaceSuite extends Suite {
       assertEquals(execute(operations, globals), Right(()))
       assertEquals(LittleEndian.decode(globals, 0, 8), if (equal) replacement else original)
       assertEquals(LittleEndian.decode(globals, 8, 8), original)
+    }
+  }
+
+  test("no host user-space address reaches dispatch, code or session memory") {
+    for (sample <- HostAddresses.Samples) {
+      val operations = Vec(
+        Instruction.VMove64(0, InstructionSource.Constant(sample)),
+        Instruction.Load(2, MemoryAddress.Flat(0, 0), 4, false, LoadPlacement.Full),
+        Instruction.End
+      )
+      val source = codeKernel(
+        target = Target("gfx1036"),
+        kernelCodeProperties = EncodingConstants.KernelCodeProperty.ENABLE_SGPR_QUEUE_PTR
+      )
+      val result = runIR(operations, RegionMemory(AllocationId(1L) -> 64), source)
+      assert(result.isLeft, s"host address 0x${sample.toHexString} resolved")
     }
   }
 

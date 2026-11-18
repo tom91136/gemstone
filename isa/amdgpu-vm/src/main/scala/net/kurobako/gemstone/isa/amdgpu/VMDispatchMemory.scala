@@ -19,9 +19,9 @@ private object VMDispatchMemory {
     def offsetOf(value: Long): Long >= 0             = binding.offset + (value - address.raw).unsafe[Long >= 0]
   }
 
-  val KernargAddress  = 0x100000000000L
-  val DispatchAddress = 0x200000000000L
-  val QueueAddress    = 0x300000000000L
+  val KernargAddress  = AddressLayout.AmdgpuKernarg
+  val DispatchAddress = AddressLayout.AmdgpuDispatch
+  val QueueAddress    = AddressLayout.AmdgpuQueue
   // ROCr amd_queue_t ABI: aperture upper words follow the public queue, capabilities and write index.
   private val QueueApertureAddress = QueueAddress + 64L
   private val QueueApertures       = LittleEndian.toArray(VMAddressSpace.LocalBase >>> 32, 4) ++

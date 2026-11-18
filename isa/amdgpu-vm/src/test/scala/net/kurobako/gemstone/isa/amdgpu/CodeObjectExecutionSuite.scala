@@ -239,6 +239,8 @@ class CodeObjectExecutionSuite extends Suite {
     )).isLeft)
   }
 
+  private val allocationHigh: Int = (AddressLayout.AllocationBase >>> 32).toInt
+
   test("gfx1030 buffer short stores keep their two-byte width") {
     val code = words(0xe0681000, 0x80010001)
     assertEquals(
@@ -248,8 +250,19 @@ class CodeObjectExecutionSuite extends Suite {
     // Point the buffer descriptor at allocation 1 and store v0's low half at byte offset 1. s_brev_b32 s7, 12 selects
     // raw bounds checking (OOB_SELECT 3), as runtime descriptors do; RDNA checks a zero stride and drops the store
     // under OOB_SELECT 0.
-    val dwords = Vec[Int](0xbe840380, 0xbe8503ff, 0x00004000, 0xbe860388, 0xbe870b8c,
-      0x7e0002ff, 0x12345678, 0x7e020281, 0xe0681000, 0x80010001, 0xbf810000)
+    val dwords = Vec[Int](
+      0xbe840380,
+      0xbe8503ff,
+      allocationHigh,
+      0xbe860388,
+      0xbe870b8c,
+      0x7e0002ff,
+      0x12345678,
+      0x7e020281,
+      0xe0681000,
+      0x80010001,
+      0xbf810000
+    )
     val kernel     = codeKernel(target = Target("gfx1030"), code = words(dwords*))
     val memory     = RegionMemory()
     val allocation = AllocationId(1L)
@@ -276,9 +289,31 @@ class CodeObjectExecutionSuite extends Suite {
       privateSegmentSize = 4752,
       kernelCodeProperties = 1 | EncodingConstants.KernelCodeProperty.ENABLE_WAVEFRONT_SIZE32,
       code = words(
-        0xbe8403ff, 0x00020080, 0x7e0002ff, 0x12345678, 0xe0700000, 0x04000000, 0x7e0002ff, 0x0fedcba9, 0xe0700004,
-        0x04000000, 0xe0300000, 0x04000100, 0xe0300004, 0x04000200, 0xbf8c3f70, 0xbe800380, 0xbe8103ff, 0x00004000,
-        0xbe820388, 0xbe830b8c, 0xe0700000, 0x80000100, 0xe0700004, 0x80000200, 0xbf810000
+        0xbe8403ff,
+        0x00020080,
+        0x7e0002ff,
+        0x12345678,
+        0xe0700000,
+        0x04000000,
+        0x7e0002ff,
+        0x0fedcba9,
+        0xe0700004,
+        0x04000000,
+        0xe0300000,
+        0x04000100,
+        0xe0300004,
+        0x04000200,
+        0xbf8c3f70,
+        0xbe800380,
+        0xbe8103ff,
+        allocationHigh,
+        0xbe820388,
+        0xbe830b8c,
+        0xe0700000,
+        0x80000100,
+        0xe0700004,
+        0x80000200,
+        0xbf810000
       )
     )
     val memory     = RegionMemory()
@@ -298,7 +333,7 @@ class CodeObjectExecutionSuite extends Suite {
       ("f32 to f64 conversion", 0xd5900102, Seq(0xe0740000, 0x80000200), Seq(0, 0x40180000))
     )
   ) test(s"gfx1030 VOP3 $name applies the absolute source modifier") {
-    val prefix = Seq(0x7e0002ff, 0xc0c00000, conversion, 0x00000100, 0xbe800380, 0xbe8103ff, 0x00004000, 0xbe820388)
+    val prefix = Seq(0x7e0002ff, 0xc0c00000, conversion, 0x00000100, 0xbe800380, 0xbe8103ff, allocationHigh, 0xbe820388)
     // s_brev_b32 s3, 12 selects raw bounds checking
     val code       = words((prefix ++ Seq(0xbe830b8c) ++ store :+ 0xbf810000)*)
     val memory     = RegionMemory()

@@ -32,7 +32,6 @@
 
 #include "gemstone/devices.hpp"
 #include "gemstone/environment.hpp"
-#include "gemstone/hsa/allocation.hpp"
 #include "gemstone/hsa/aql.hpp"
 #include "gemstone/hsa/aql_execution.hpp"
 #include "gemstone/hsa/device_heap.hpp"
@@ -52,6 +51,7 @@
 
 #include "connection.hpp"
 #include "transfer.hpp"
+#include <address_layout.hpp>
 #include <environment_keys.hpp>
 #include <sys/stat.h>
 
@@ -417,9 +417,9 @@ uint64_t nativeGlobalPointer(RuntimeState &runtime, const GlobalStorage &storage
                                && pointer - candidate->elfAddress <= candidate->size;
                       });
   if (target) return reinterpret_cast<uint64_t>(target->get().second->allocation->base) + pointer - target->get().second->elfAddress;
-  constexpr uint64_t base = gemstone::hsa::AllocationBase;
-  constexpr uint64_t span = gemstone::hsa::AllocationSpan;
-  if (pointer >= base) {
+  constexpr uint64_t base = gemstone::address::AllocationBase;
+  constexpr uint64_t span = gemstone::address::AllocationStride;
+  if (pointer >= base && pointer < gemstone::address::AllocationLimit) {
     const uint64_t id = ((pointer - base) / span) + 1;
     const uint64_t offset = (pointer - base) % span;
     const auto allocation = findAllocationById(runtime, id);

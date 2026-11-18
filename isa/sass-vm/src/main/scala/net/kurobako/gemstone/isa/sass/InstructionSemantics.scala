@@ -21,7 +21,7 @@ object InstructionSemantics {
     */
   val ConstantBank: Int = 3
 
-  private[isa] val ConstantBase: Long = 0x7c0000000000L
+  private[isa] val ConstantBase: Long = AddressLayout.SassConstantBase
 
   /** The bytes of the constant bank. */
   private[isa] val ConstantBytes: Int >= 0 = 0x10000

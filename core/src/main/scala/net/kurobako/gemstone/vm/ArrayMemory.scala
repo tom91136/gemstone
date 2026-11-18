@@ -13,9 +13,8 @@ object ArrayMemory {
   /** Every allocation's base address and contents at one moment. */
   case class Snapshot(regions: Vec[(AllocationId, GuestAddress, Vec[Byte])])
 
-  /** Windows sit above the NVIDIA local and shared apertures. */
-  val Base: Long   = 0x400000000000L
-  val Stride: Long = 0x100000000L
+  val Base: Long   = AddressLayout.AllocationBase
+  val Stride: Long = AddressLayout.AllocationStride
 }
 
 /** Reference address space with one byte array per allocation. Each allocation gets its own window in allocation order

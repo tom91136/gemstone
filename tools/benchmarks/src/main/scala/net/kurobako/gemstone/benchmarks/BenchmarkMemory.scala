@@ -9,8 +9,8 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 object BenchmarkMemory {
-  private val Base   = 0x400000000000L
-  private val Stride = 0x100000000L
+  private val Base   = AddressLayout.AllocationBase
+  private val Stride = AddressLayout.AllocationStride
 }
 
 /** Byte-array allocations numbered from 1, each in its own address window. Benchmark lanes touch disjoint bytes, so

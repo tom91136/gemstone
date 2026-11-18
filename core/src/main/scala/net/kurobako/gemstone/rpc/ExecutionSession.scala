@@ -34,8 +34,8 @@ object ExecutionSession {
       slicePitch: Int > 0
   ) derives CanEqual
 
-  private val SyntheticAddressBase   = 0x400000000000L
-  private val SyntheticAddressStride = 0x100000000L
+  private val SyntheticAllocationCapacity =
+    (AddressLayout.AllocationLimit - AddressLayout.AllocationBase) / AddressLayout.AllocationStride
 
   private val Closed = ExecutionFailure.Failed("execution session is closed")
 
@@ -45,7 +45,7 @@ object ExecutionSession {
   private def notLoaded(id: ProgramId): ExecutionFailure = ExecutionFailure.NotFound(s"program $id is not loaded")
 
   private def syntheticAddress(id: AllocationId): GuestAddress =
-    GuestAddress(SyntheticAddressBase + (id.raw - 1L) * SyntheticAddressStride)
+    GuestAddress(AddressLayout.AllocationBase + (id.raw - 1L) * AddressLayout.AllocationStride)
 
   private def failure(fault: Fault): ExecutionFailure = fault match {
     case Fault.InvalidRequest(_)                 => ExecutionFailure.InvalidRequest(fault.description)
@@ -175,11 +175,15 @@ class ExecutionSession(
   private def open: Either[ExecutionFailure, State] = if (closed) Left(Closed) else Right(state.get())
 
   def registerAllocation(size: Int > 0): Either[ExecutionFailure, AllocationId] = stateLock.withLock {
-    open.map { current =>
-      val id         = current.nextAllocation
-      val allocation = StoredAllocation(StoredAllocation.Storage(size), syntheticAddress(id))
-      state.set(current.withAllocation(id, allocation).copy(nextAllocation = id.next))
-      id
+    open.flatMap { current =>
+      val id = current.nextAllocation
+      if (id.raw > SyntheticAllocationCapacity)
+        Left(ExecutionFailure.OutOfResources(s"session exhausted its $SyntheticAllocationCapacity allocation windows"))
+      else {
+        val allocation = StoredAllocation(StoredAllocation.Storage(size), syntheticAddress(id))
+        state.set(current.withAllocation(id, allocation).copy(nextAllocation = id.next))
+        Right(id)
+      }
     }
   }
 

@@ -1,9 +1,11 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import net.kurobako.gemstone.memory.*
+
 /** Flat local/private apertures occupy non-canonical addresses, outside global memory. */
 private object VMAddressSpace {
-  val LocalBase           = 0xffff000000000000L
-  val PrivateBase         = 0xfffe000000000000L
+  val LocalBase           = AddressLayout.AmdgpuLocalBase
+  val PrivateBase         = AddressLayout.AmdgpuPrivateBase
   val SegmentMask         = 0xffffffffL
   val LocalLimit: Long    = LocalBase | SegmentMask
   val PrivateLimit: Long  = PrivateBase | SegmentMask

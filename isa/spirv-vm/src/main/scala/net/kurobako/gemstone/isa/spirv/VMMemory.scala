@@ -43,12 +43,12 @@ private object VMMemory {
       stride: Long
   )
 
-  private inline val ApertureShift = 56
+  private inline val ApertureShift = AddressLayout.SpirvApertureShift.toInt
   private inline val OffsetMask    = (1L << ApertureShift) - 1L
   private inline val Alignment     = 16
-  inline val GlobalAperture        = 0x81L
-  inline val WorkgroupAperture     = 0x82L
-  inline val PrivateAperture       = 0x83L
+  inline val GlobalAperture        = AddressLayout.SpirvGlobalAperture
+  inline val WorkgroupAperture     = AddressLayout.SpirvWorkgroupAperture
+  inline val PrivateAperture       = AddressLayout.SpirvPrivateAperture
 
   def apertureAddress(aperture: Long, offset: Int): Long = (aperture << ApertureShift) | offset.toLong
 

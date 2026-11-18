@@ -11,6 +11,11 @@ import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
 
 class ExecutionPointerSuite extends Suite {
+  test("no host user-space address lies in a workgroup or private aperture") {
+    for (sample <- HostAddresses.Samples)
+      assertEquals(VMMemory.storageClassOf(sample), StorageClass.CrossWorkgroup, clues(sample))
+  }
+
   // SPIR-V 3.3.1 OpSizeOf: the run-time size of the pointee, as OpenCL lays out three-component vectors and structures
   test("OpSizeOf gives the size of the pointee type") {
     val module = spv"""

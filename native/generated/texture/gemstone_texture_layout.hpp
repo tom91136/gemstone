@@ -5,7 +5,7 @@
 
 namespace gemstone::texture::Layout {
 namespace Table {
-inline constexpr uint64_t BaseAddress = 0x3f0000000000ull;
+inline constexpr uint64_t BaseAddress = 0x3800000000000000ull;
 inline constexpr uint64_t EntryBytes = 0x80ull;
 inline constexpr uint64_t Entries = 0x10000ull;
 } // namespace Table

@@ -37,11 +37,15 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
   private val local = mutable.ArrayBuffer.empty[Array[Byte]]
   // RPC allocation aliases are positive. Keep shader interface addresses in the
   // negative half, away from both native aliases and VM exception tokens at Long.MinValue.
-  private val ScratchBase                                    = Long.MinValue / 2
+  private val ScratchBase                                    = AddressLayout.GraphicsScratchBase
+  private val ScratchLimit                                   = AddressLayout.GraphicsScratchLimit
   private val ScratchStride                                  = 0x100000000L
   def allocate(bytes: Array[Byte]): (AllocationId, Long > 0) = {
     require(bytes.nonEmpty, "empty graphics scratch allocation")
-    require(local.size.toLong < -ScratchBase / ScratchStride, "graphics scratch address space exhausted")
+    require(
+      local.size.toLong < (ScratchLimit - ScratchBase) / ScratchStride,
+      "graphics scratch address space exhausted"
+    )
     val candidate = Long.MaxValue - local.size.toLong
     val region    = candidate.unsafe[AllocationId]
     require(backing.address(region, 0L).isLeft, "graphics scratch allocation collides with backing storage")
@@ -124,7 +128,7 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
     else localRange(region, offset, 0).map(_ =>
       GuestAddress(ScratchBase + index(region).toLong * ScratchStride + offset)
     )
-  private def isScratch(address: GuestAddress): Boolean = address.raw >= ScratchBase && address.raw < 0L
+  private def isScratch(address: GuestAddress): Boolean = address.raw >= ScratchBase && address.raw < ScratchLimit
   override def read(address: GuestAddress, size: Int >= 0): Either[Fault, Vec[Byte]] =
     if (isScratch(address)) super.read(address, size) else backing.read(address, size)
   override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =

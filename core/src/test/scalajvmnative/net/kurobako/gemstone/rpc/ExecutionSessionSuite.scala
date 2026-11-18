@@ -705,6 +705,31 @@ class ExecutionSessionSuite extends Suite {
     assertFaultsAt(launchWithUnresolvedPointer((address, memory) => memory.write(address, Vec[Byte](1))))
   }
 
+  test("no host user-space address resolves to session memory") {
+    val backend = TestBackend { (task, memory, _) =>
+      val start = task.arguments.headOption match {
+        case Some(KernelTask.Argument.Memory(region, _, _)) => memory.address(region, 0L)
+        case _                                              => Left(Fault.InvalidRequest("memory argument is required"))
+      }
+      start.flatMap { address =>
+        if (!HostAddresses.guestOnly(address.raw)) Left(Fault.Backend(s"allocation at ${address.show}"))
+        else
+          HostAddresses.Samples.collectFirst {
+            case sample
+                if memory.read(GuestAddress(sample), 1).isRight ||
+                  memory.write(GuestAddress(sample), Vec[Byte](1)).isRight =>
+              Fault.Backend(s"host address 0x${sample.toHexString} resolved")
+          }.toLeft(())
+      }
+    }
+    Using.resource(ExecutionSession(List(backend))) { service =>
+      val allocation = service.registerAllocation(64).toOption.get
+      val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+      val launched   = service.launch(program, task("write", KernelTask.Argument.Memory(allocation, 0L))).toOption.get
+      assertEquals(service.awaitCompletion(launched), Right(()))
+    }
+  }
+
   test("descriptor slots without a binding are rejected before dispatch") {
     val invoked = AtomicBoolean()
     val backend = TestBackend { (_, _, _) =>

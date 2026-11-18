@@ -2,6 +2,7 @@ package net.kurobako.gemstone.texture
 
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import net.kurobako.gemstone.memory.AddressLayout
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.texture.TextureFixtures.*
 
@@ -23,11 +24,13 @@ class TextureDescriptorSuite extends Suite {
   ).copy(resource = ResourceKind.Pitch2D)
 
   test("the table layout is fixed") {
-    assertEquals(TextureLayout.Table.BaseAddress, 0x3f0000000000L)
+    assertEquals(TextureLayout.Table.BaseAddress, AddressLayout.TextureTableBase)
     assertEquals(TextureLayout.Table.EntryBytes, 128L)
     assertEquals(TextureLayout.Table.Entries, 65536L)
-    assert(TextureLayout.Table.BaseAddress + TextureLayout.Table.Entries * TextureLayout.Table.EntryBytes <
-      0x400000000000L)
+    assertEquals(
+      TextureLayout.Table.BaseAddress + TextureLayout.Table.Entries * TextureLayout.Table.EntryBytes,
+      AddressLayout.TextureTableLimit
+    )
   }
 
   test("an entry has the declared size and field offsets") {

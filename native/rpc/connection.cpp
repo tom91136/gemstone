@@ -26,6 +26,7 @@
 #include "gemstone/trace.hpp"
 #include "gemstone_execution_rpc.hpp"
 
+#include "guest_window.hpp"
 #include <asm-generic/socket.h>
 #include <environment_keys.hpp>
 #include <netinet/tcp.h>
@@ -208,6 +209,10 @@ bool Connection::connect() {
   if (fd.get() >= 0 && sessionEndpoint == endpoint) return true;
   if (poisoned && sessionEndpoint == endpoint) {
     error = "execution session was lost; create a fresh client and rebuild its state";
+    return false;
+  }
+  if (const auto &window = guest_window::reserveLayout(); !window) {
+    error = window.error;
     return false;
   }
   timeoutMillis = socketTimeoutMillis();

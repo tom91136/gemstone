@@ -302,6 +302,25 @@ class VMMemoryAccessSuite extends Suite {
     assert(memory.systemReads.isEmpty)
   }
 
+  test("no host user-space address reaches parameter, constant, shared or global memory") {
+    for (
+      (accesses, samples) <- List(
+        List(MemoryAccess.Global(false))                              -> HostAddresses.Samples,
+        List(MemoryAccess.Generic(false), MemoryAccess.Generic(true)) -> HostAddresses.AboveLocalWindow
+      )
+    )
+      for {
+        access <- accesses
+        sample <- samples
+      } {
+        val program = Vec(Instruction.Load(r(0), Value.Immediate(sample), 32, false, access), Instruction.Return)
+        assert(
+          execute(program, ObservedMemory()).isLeft,
+          s"host address 0x${sample.toHexString} resolved through $access"
+        )
+      }
+  }
+
   test("vector memory faults still surface when the complete range is out of bounds") {
     val memory  = ObservedMemory()
     val outside = memory.base.raw + 64L

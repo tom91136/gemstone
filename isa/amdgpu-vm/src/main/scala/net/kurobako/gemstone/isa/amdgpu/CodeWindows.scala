@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.amdgpu
 
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.vm.*
 
 /** The programs of one session share the device address space: program `id` loads at `Base + id * Stride`, between the
@@ -8,10 +9,9 @@ import net.kurobako.gemstone.vm.*
   * program of the session can call.
   */
 private object CodeWindows {
-  val Base: Long   = 0x1000000000L
-  val Stride: Long = 0x40000000L
-  // the first dispatch constant, VMDispatchMemory.KernargAddress
-  val Limit: Long = 0x100000000000L
+  val Base: Long   = AddressLayout.ProgramBase
+  val Stride: Long = AddressLayout.ProgramStride
+  val Limit: Long  = AddressLayout.ProgramLimit
 
   private val Capacity = (Limit - Base) / Stride
 

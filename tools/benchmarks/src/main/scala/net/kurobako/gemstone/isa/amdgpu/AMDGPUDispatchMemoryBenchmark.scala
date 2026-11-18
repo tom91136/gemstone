@@ -46,7 +46,7 @@ object AMDGPUDispatchMemoryBenchmark {
       index % 8 match {
         case 0 => 0x1000L + (index % aliases.length) * 16L
         case 1 => sections(1 + index % (sections.length - 1))._1 + index
-        case _ => 0x400000000000L + index * 8L
+        case _ => AddressLayout.AllocationBase + index * 8L
       }
     }
     def measure(count: Int): Long = {
