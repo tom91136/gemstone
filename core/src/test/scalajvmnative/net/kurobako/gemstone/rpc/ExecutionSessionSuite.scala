@@ -660,6 +660,51 @@ class ExecutionSessionSuite extends Suite {
     }
   }
 
+  private val unresolvedPointer = 0x7f405e98b490L
+
+  private def launchWithUnresolvedPointer(execute: (GuestAddress, AddressSpace) => Either[Fault, Unit])
+      : Either[ExecutionFailure, Unit] = {
+    val backend = TestBackend { (task, memory, _) =>
+      val buffer = task.argumentBuffer.get
+      memory.read(buffer.region, buffer.offset, 8).flatMap { bytes =>
+        val bits = LittleEndian.decode(bytes, 0, 8)
+        if (bits != unresolvedPointer) Left(Fault.Backend(s"kernel saw pointer bits $bits"))
+        else execute(GuestAddress(bits), memory)
+      }
+    }
+    Using.resource(ExecutionSession(List(backend))) { service =>
+      val allocation = service.registerAllocation(16).toOption.get
+      assertEquals(service.write(allocation, 0L, LittleEndian.toVec(unresolvedPointer, 8)), Right(()))
+      val program = service.load(encoding, Vec[Byte](1)).toOption.get
+      val launch  = KernelTask.validated(
+        kernelName = "write",
+        groupSize = LaunchGeometry.Dimensions.One,
+        groupCount = LaunchGeometry.Dimensions.One,
+        arguments = Vec.empty,
+        argumentBuffer = Some(KernelTask.ArgumentBuffer(allocation, 0L))
+      ).toOption.get
+      service.launch(program, launch).flatMap(service.awaitCompletion)
+    }
+  }
+
+  test("an unresolved pointer argument that the kernel only compares launches with its bits intact") {
+    assertEquals(launchWithUnresolvedPointer((_, _) => Right(())), Right(()))
+  }
+
+  private def assertFaultsAt(result: Either[ExecutionFailure, Unit]): Unit = result match {
+    case Left(ExecutionFailure.IllegalAddress(message)) =>
+      assert(message.contains(GuestAddress(unresolvedPointer).show), message)
+    case other => fail(s"expected a memory fault, got $other")
+  }
+
+  test("a load through an unresolved pointer argument faults at the access and names the address") {
+    assertFaultsAt(launchWithUnresolvedPointer((address, memory) => memory.read(address, 4).map(_ => ())))
+  }
+
+  test("a store through an unresolved pointer argument faults at the access and names the address") {
+    assertFaultsAt(launchWithUnresolvedPointer((address, memory) => memory.write(address, Vec[Byte](1))))
+  }
+
   test("descriptor slots without a binding are rejected before dispatch") {
     val invoked = AtomicBoolean()
     val backend = TestBackend { (_, _, _) =>

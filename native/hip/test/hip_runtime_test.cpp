@@ -1315,7 +1315,8 @@ TEST_CASE("HIP rejects a target that conflicts with the selected device preset",
 }
 
 TEST_CASE("HIP first-call launch child", "[.]") {
-  gemstone_test::RpcFixture const fixture;
+  gemstone_test::RpcFixture fixture;
+  fixture.opaqueLaunches();
   const gemstone_test::RpcEnvironment environment(fixture);
   const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1150");
   const auto bundle = offloadBundle(gemstone::hsa::test::codeObjectFixture(1, true, true));
@@ -1329,15 +1330,16 @@ TEST_CASE("HIP first-call launch child", "[.]") {
   void *arguments[] = {&output, &seed};
   REQUIRE(
       (hipLaunchKernel(reinterpret_cast<const void *>(&occupancyStub), dim3{1, 1, 1}, dim3{1, 1, 1}, arguments, 0, nullptr) == hipSuccess));
-  (void)hipDeviceSynchronize();
+  CHECK((hipDeviceSynchronize() == hipSuccess));
+  CHECK((fixture.launches.load() == 1));
   __hipUnregisterFatBinary(token);
 }
 
 TEST_CASE("HIP registered kernel launch as the first call loads the module", "[hip]") {
-  // the host output pointer fails kernarg validation once the module is loaded and dispatched
   const auto outcome = gemstone_test::runChildTest("HIP first-call launch child");
-  CHECK((outcome.signal == SIGABRT));
-  CHECK(outcome.output.contains("kernarg buffer or allocation pointer is invalid"));
+  CHECK((outcome.signal == 0));
+  CHECK((outcome.exitCode == 0));
+  CHECK((!outcome.output.contains("inactivated")));
 }
 
 TEST_CASE("HIP context creation selects the device and tracks the current context", "[hip]") {

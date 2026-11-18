@@ -14,8 +14,5 @@ inline constexpr uint64_t AllocationSpan = uint64_t{0x100000000};
 // addresses that name no allocation.
 inline constexpr uint64_t ProgramBase = uint64_t{0x1000000000};
 inline constexpr uint64_t ProgramSpan = uint64_t{0x40000000};
-inline constexpr uint64_t ProgramLimit = uint64_t{0x100000000000};
-
-constexpr bool isProgramAddress(uint64_t pointer) { return pointer >= ProgramBase && pointer < ProgramLimit; }
 
 } // namespace gemstone::hsa

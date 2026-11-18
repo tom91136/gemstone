@@ -317,18 +317,7 @@ bool AqlRuntime::relocations(const Kernel &kernel, uint64_t kernarg, std::option
         cursor += sizeof(uint64_t);
       }
     } else if (field.kind == ParameterKind::Allocation) {
-      const auto pointer = readNative<uint64_t>(bytes, field.offset);
-      // LLVM's OpenMP AMDGPU plugin prepends a kernel-launch-environment
-      // pointer to every target kernel and uses ~0 as the sentinel when there
-      // is no environment object. Null buffer arguments are legal too.
-      if ((field.offset == 0 && pointer == UINT64_MAX) || pointer == 0) continue;
-      if (const auto target = resolve(pointer)) {
-        relocate(field.offset, *target);
-      } else if (!isProgramAddress(pointer) && !systemPaging.load(std::memory_order_relaxed)) {
-        if (trace)
-          std::fprintf(stderr, "Gemstone AQL kernarg pointer 0x%lx at offset %u names no allocation or program\n", pointer, field.offset);
-        return false;
-      }
+      if (const auto target = resolve(readNative<uint64_t>(bytes, field.offset))) relocate(field.offset, *target);
     }
   }
   return true;
