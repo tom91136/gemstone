@@ -29,6 +29,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -350,6 +351,90 @@ std::string emptyPtx() {
 bool ptxText(const void *image) {
   const auto first = *static_cast<const unsigned char *>(image);
   return first == '.' || first == '/' || first == ' ' || first == '\n' || first == '\t' || first == '\r';
+}
+
+std::string jitArchitecture() {
+  const auto target = gemstone::environment::targetArch().value_or("sm_75");
+  return target ^ starts_with("compute_") ? "sm_" + target.substr(sizeof("compute_") - 1) : target;
+}
+
+// nvJitLink's C interface, bound at run time from the library the environment names
+struct NvJitLink {
+  using Handle = void *;
+  int (*create)(Handle *, uint32_t, const char **) = nullptr;
+  int (*destroy)(Handle *) = nullptr;
+  int (*addData)(Handle, int, const void *, size_t, const char *) = nullptr;
+  int (*complete)(Handle) = nullptr;
+  int (*cubinSize)(Handle, size_t *) = nullptr;
+  int (*cubin)(Handle, void *) = nullptr;
+  int (*errorLogSize)(Handle, size_t *) = nullptr;
+  int (*errorLog)(Handle, char *) = nullptr;
+
+  static constexpr int InputPtx = 2;
+  static constexpr int UnrecognisedArch = 16;
+  static constexpr int UnsupportedArch = 17;
+
+  static std::optional<NvJitLink> open(const std::string &path) {
+    void *const library = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+    if (!library) return std::nullopt;
+    NvJitLink link;
+    const auto bind = [&](auto &function, const char *name) {
+      function = reinterpret_cast<std::remove_reference_t<decltype(function)>>(dlsym(library, name));
+      return function != nullptr;
+    };
+    const bool bound = bind(link.create, "nvJitLinkCreate") && bind(link.destroy, "nvJitLinkDestroy")
+                       && bind(link.addData, "nvJitLinkAddData") && bind(link.complete, "nvJitLinkComplete")
+                       && bind(link.cubinSize, "nvJitLinkGetLinkedCubinSize") && bind(link.cubin, "nvJitLinkGetLinkedCubin")
+                       && bind(link.errorLogSize, "nvJitLinkGetErrorLogSize") && bind(link.errorLog, "nvJitLinkGetErrorLog");
+    return bound ? std::optional{link} : std::nullopt;
+  }
+};
+
+CUresult jitFailureStatus(int result, std::string_view log) {
+  if (result == NvJitLink::UnrecognisedArch || result == NvJitLink::UnsupportedArch) return CUDA_ERROR_NO_BINARY_FOR_GPU;
+  if (log.contains("Unsupported .version")) return CUDA_ERROR_UNSUPPORTED_PTX_VERSION;
+  return CUDA_ERROR_INVALID_PTX;
+}
+
+CUresult compilePtx(const std::vector<std::string> &modules, std::vector<uint8_t> &cubin) {
+  const auto path = gemstone::environment::value(gemstone::environment::CudaNvjitlinkLibraryFile);
+  if (!path) {
+    std::fprintf(stderr, "Gemstone: compiling PTX in the sass code mode needs %s to name libnvJitLink\n",
+                 gemstone::environment::CudaNvjitlinkLibraryFile);
+    return CUDA_ERROR_JIT_COMPILER_NOT_FOUND;
+  }
+  const auto link = NvJitLink::open(*path);
+  if (!link) {
+    std::fprintf(stderr, "Gemstone: cannot load nvJitLink from %s\n", path->c_str());
+    return CUDA_ERROR_JIT_COMPILER_NOT_FOUND;
+  }
+  const auto architecture = "-arch=" + jitArchitecture();
+  const char *options[]{architecture.c_str()};
+  NvJitLink::Handle handle = nullptr;
+  int result = link->create(&handle, 1, options);
+  for (size_t index = 0; result == 0 && index < modules.size(); ++index)
+    result = link->addData(handle, NvJitLink::InputPtx, modules[index].c_str(), modules[index].size() + 1,
+                           ("module" + std::to_string(index)).c_str());
+  if (result == 0) result = link->complete(handle);
+  size_t size = 0;
+  if (result == 0) result = link->cubinSize(handle, &size);
+  if (result == 0) {
+    cubin.resize(size);
+    result = link->cubin(handle, cubin.data());
+  }
+  if (result == 0) {
+    (void)link->destroy(&handle);
+    return cubin.empty() ? CUDA_ERROR_UNKNOWN : CUDA_SUCCESS;
+  }
+  std::string log;
+  size_t logSize = 0;
+  if (handle && link->errorLogSize(handle, &logSize) == 0 && logSize != 0) {
+    log.resize(logSize);
+    if (link->errorLog(handle, log.data()) != 0) log.clear();
+  }
+  std::fprintf(stderr, "Gemstone: nvJitLink failed with result %d for %s: %s\n", result, architecture.c_str(), log.c_str());
+  if (handle) (void)link->destroy(&handle);
+  return jitFailureStatus(result, log);
 }
 
 std::optional<size_t> cubinImageSize(const void *image, size_t maximumSize = MaximumImageSize) {
@@ -1416,6 +1501,8 @@ CUresult initialiseModule(Module &entry, const void *image, bool allowMetadataOn
   auto encoding = ProgramEncoding::PTXText;
   std::optional<size_t> binarySize;
   std::optional<Fatbin> fatbin;
+  std::vector<uint8_t> compiled;
+  bool compileText = false;
   if (!ptxText(image)) {
     if (*static_cast<const unsigned char *>(image) == 0x7f) {
       binarySize = cubinImageSize(image);
@@ -1434,13 +1521,19 @@ CUresult initialiseModule(Module &entry, const void *image, bool allowMetadataOn
       if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA module has neither PTX nor a compatible cubin\n");
       return CUDA_ERROR_NOT_SUPPORTED;
     }
-  } else if (sassCodeRequired() && !allowMetadataOnly) {
-    return CUDA_ERROR_NOT_SUPPORTED;
+  } else {
+    compileText = sassCodeRequired() && !allowMetadataOnly;
   }
 
   const auto *imageText = static_cast<const char *>(image);
-  const auto size = binarySize ? *binarySize : static_cast<size_t>(std::find(imageText, imageText + MaximumPayload, '\0') - imageText);
+  auto size = binarySize ? *binarySize : static_cast<size_t>(std::find(imageText, imageText + MaximumPayload, '\0') - imageText);
   if (size == MaximumPayload || size > std::numeric_limits<uint32_t>::max()) return CUDA_ERROR_INVALID_VALUE;
+  if (compileText) {
+    if (const auto status = compilePtx({std::string(imageText, size)}, compiled); status != CUDA_SUCCESS) return status;
+    imageText = reinterpret_cast<const char *>(compiled.data());
+    size = compiled.size();
+    encoding = ProgramEncoding::CUDACubin;
+  }
 
   entry.encoding = encoding;
   const auto *imageBytes = reinterpret_cast<const uint8_t *>(imageText);
@@ -1578,6 +1671,8 @@ template <class Reference> CUresult moduleReference(Reference *reference, CUmodu
 struct LinkState {
   std::vector<char> image;
   size_t size = 0;
+  std::vector<std::string> modules;
+  std::vector<uint8_t> cubin;
 };
 
 bool linkAppend(LinkState *state, const char *source, size_t sourceSize) {
@@ -1802,6 +1897,14 @@ constexpr std::array ErrorTexts{
               .driverName = "CUDA_ERROR_INVALID_PTX",
               .runtimeName = "cudaErrorInvalidPtx",
               .message = "a PTX JIT compilation failed"},
+    ErrorText{.status = CUDA_ERROR_JIT_COMPILER_NOT_FOUND,
+              .driverName = "CUDA_ERROR_JIT_COMPILER_NOT_FOUND",
+              .runtimeName = "cudaErrorJitCompilerNotFound",
+              .message = "PTX JIT compiler library not found"},
+    ErrorText{.status = CUDA_ERROR_UNSUPPORTED_PTX_VERSION,
+              .driverName = "CUDA_ERROR_UNSUPPORTED_PTX_VERSION",
+              .runtimeName = "cudaErrorUnsupportedPtxVersion",
+              .message = "the provided PTX was compiled with an unsupported toolchain"},
     ErrorText{.status = CUDA_ERROR_ILLEGAL_ADDRESS,
               .driverName = "CUDA_ERROR_ILLEGAL_ADDRESS",
               .runtimeName = "cudaErrorIllegalAddress",
@@ -4319,18 +4422,17 @@ CUresult cuLinkAddData_v2(CUlinkState state, CUjitInputType type, void *data, si
   if (!state || !data) return CUDA_ERROR_INVALID_VALUE;
   auto *link = reinterpret_cast<LinkState *>(state);
   if (type == CU_JIT_INPUT_PTX) {
-    if (sassCodeRequired()) return CUDA_ERROR_NOT_SUPPORTED;
     if (size == 0 || size > MaximumImageSize) return CUDA_ERROR_INVALID_VALUE;
     const auto *source = static_cast<const char *>(data);
     const auto *end = static_cast<const char *>(std::memchr(source, '\0', size));
     const size_t sourceSize = end ? static_cast<size_t>(end - source) : size;
     if (sourceSize == 0) return CUDA_ERROR_INVALID_VALUE;
-    return linkAppend(link, source, sourceSize) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
+    if (!linkAppend(link, source, sourceSize)) return CUDA_ERROR_UNKNOWN;
+    if (sassCodeRequired()) link->modules.emplace_back(source, sourceSize);
+    return CUDA_SUCCESS;
   }
   const auto fatbin = parseFatbin(data);
   if (const char *ptx = executablePtx(fatbin)) return linkAppend(link, ptx, std::strlen(ptx)) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
-  const bool text = ptxText(data);
-  if (sassCodeRequired() && text) return CUDA_ERROR_NOT_SUPPORTED;
   if (size == 0 || size > MaximumImageSize) return CUDA_ERROR_NOT_SUPPORTED;
   return linkAppend(link, static_cast<const char *>(data), size) ? CUDA_SUCCESS : CUDA_ERROR_UNKNOWN;
 }
@@ -4353,6 +4455,13 @@ CUresult cuLinkComplete(CUlinkState state, void **image, size_t *size) {
   if (!state || !image || !size) return CUDA_ERROR_INVALID_VALUE;
   auto *link = reinterpret_cast<LinkState *>(state);
   if (link->size == 0) return CUDA_ERROR_INVALID_VALUE;
+  if (sassCodeRequired() && !link->modules.empty()) {
+    if (link->cubin.empty())
+      if (const auto status = compilePtx(link->modules, link->cubin); status != CUDA_SUCCESS) return status;
+    *image = link->cubin.data();
+    *size = link->cubin.size();
+    return CUDA_SUCCESS;
+  }
   *image = link->image.data();
   *size = link->size;
   return CUDA_SUCCESS;

@@ -7,6 +7,7 @@ namespace gemstone::environment {
 inline constexpr char BitwuzlaExe[] = "GEMSTONE_BITWUZLA_EXE";
 inline constexpr char ContainerExe[] = "GEMSTONE_CONTAINER_EXE";
 inline constexpr char CudaCodeMode[] = "GEMSTONE_CUDA_CODE_MODE";
+inline constexpr char CudaNvjitlinkLibraryFile[] = "GEMSTONE_CUDA_NVJITLINK_LIBRARY_FILE";
 inline constexpr char Device[] = "GEMSTONE_DEVICE";
 inline constexpr char DeviceCount[] = "GEMSTONE_DEVICE_COUNT";
 inline constexpr uint64_t DeviceCountDefault = 1;

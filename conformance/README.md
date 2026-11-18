@@ -150,7 +150,8 @@ is the fatbin with SASS and PTX for `cuda-sass`. Clang cannot emit a PTX-only im
 each translation unit through `cmake/clang-cuda-ptx.sh`, which emits PTX, wraps it with `fatbinary`, and embeds the
 fatbinary in the host object. The route sets only `CONFORMANCE_CUDA_CODE_MODE`, from which the
 artifact directory and the expected artifact `code` follow, and the `sbt` launcher derives `GEMSTONE_CUDA_CODE_MODE`.
-SASS mode sets `CUDA_DISABLE_PTX_JIT` and never falls back to PTX.
+SASS mode sets `CUDA_DISABLE_PTX_JIT` and never falls back to the PTX machine. PTX that a program supplies at run time is compiled for the
+route's architecture by the support closure's `libnvJitLink`; the launcher derives `GEMSTONE_CUDA_NVJITLINK_LIBRARY_FILE` from it.
 Clang PTX modules can take minutes each to JIT, so on a PTX-only artifact without an isolated launcher the driver first runs
 one unskipped case of every program with `CUDA_MODULE_LOADING=EAGER`. That loads, and so caches, all of the program's modules,
 and the cases then run with their normal timeouts. The warm-up has a two-hour bound (scaled by `CONFORMANCE_TIMEOUT_SCALE`),

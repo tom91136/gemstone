@@ -7,6 +7,7 @@ object environment {
   val BitwuzlaExe: String = "GEMSTONE_BITWUZLA_EXE"
   val ContainerExe: String = "GEMSTONE_CONTAINER_EXE"
   val CudaCodeMode: String = "GEMSTONE_CUDA_CODE_MODE"
+  val CudaNvjitlinkLibraryFile: String = "GEMSTONE_CUDA_NVJITLINK_LIBRARY_FILE"
   val Device: String = "GEMSTONE_DEVICE"
   val DeviceCount: String = "GEMSTONE_DEVICE_COUNT"
   val DeviceCountDefault: Long > 0 = 1L

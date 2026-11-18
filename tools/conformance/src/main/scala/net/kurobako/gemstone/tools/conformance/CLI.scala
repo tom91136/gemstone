@@ -185,6 +185,11 @@ object CLI {
          |if [ -z "$$${environment.OpenclLlvmLinkExe}" ] && [ -x "$$toolchain/bin/compiler/llvm-link" ]; then
          |  export ${environment.OpenclLlvmLinkExe}="$$toolchain/bin/compiler/llvm-link"
          |fi
+         |for nvjitlink in "$$${conformanceEnvironment.SupportDir}"/lib/libnvJitLink.so.[0-9]*; do
+         |  if [ -z "$$${environment.CudaNvjitlinkLibraryFile}" ] && [ -f "$$nvjitlink" ]; then
+         |    export ${environment.CudaNvjitlinkLibraryFile}="$$nvjitlink"
+         |  fi
+         |done
          |""".stripMargin
     (exports :+ routing :+ s"exec ${client.map(quoted(_)).mkString(" ")} \"$$@\"").mkString("\n") + "\n"
   }

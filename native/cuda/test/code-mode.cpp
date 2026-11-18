@@ -17,13 +17,13 @@
 #include <cuda_runtime_api.h>
 
 #include <gemstone/child_test.hpp>
+#include <gemstone/process.hpp>
 #include <gemstone/test_support.hpp>
 #include <gemstone_target_limits.hpp>
 
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
-
 extern "C" CUresult cuCtxCreate_v2(CUcontext *context, unsigned flags, CUdevice device);
 extern "C" cudaError_t __cudaLaunchKernel(cudaKernel_t kernel, dim3 grid, dim3 block, void **arguments, size_t sharedMemory,
                                           cudaStream_t stream);
@@ -39,6 +39,7 @@ extern "C" void __cudaRegisterVar(void **handle, const char *hostVariable, char 
 
 namespace {
 
+constexpr char FakeNvJitLinkLibrary[] = FAKE_NVJITLINK_LIBRARY;
 constexpr char Ptx[] = ".version 8.0\n.target sm_89\n.address_size 64\n.visible .entry probe() { ret; }\n";
 
 void store16(std::vector<uint8_t> &bytes, size_t offset, uint16_t value) { std::memcpy(bytes.data() + offset, &value, sizeof(value)); }
@@ -142,6 +143,26 @@ public:
   CUfunction function = nullptr;
 };
 
+// Points the runtime at a stand-in nvJitLink that links up to the given number of PTX inputs into the executable cubin.
+class FakeNvJitLink {
+public:
+  explicit FakeNvJitLink(const char *inputs)
+      : directory("gemstone-nvjitlink-XXXXXX"), inputCount("FAKE_NVJITLINK_INPUTS", inputs),
+        library(gemstone::environment::CudaNvjitlinkLibraryFile, FakeNvJitLinkLibrary) {
+    REQUIRE(directory);
+    const auto cubin = executableCubin();
+    const auto cubinPath = directory.file("probe.cubin");
+    REQUIRE(gemstone::writeFile(cubinPath, cubin.data(), cubin.size()));
+    cubinFile.emplace("FAKE_NVJITLINK_CUBIN", cubinPath.c_str());
+  }
+
+private:
+  gemstone::TemporaryDirectory directory;
+  gemstone_test::Environment inputCount;
+  gemstone_test::Environment library;
+  std::optional<gemstone_test::Environment> cubinFile;
+};
+
 // cuda.h spells these as C-style casts of integers
 void *const LaunchParamBufferPointer = reinterpret_cast<void *>(uintptr_t{0x1});
 void *const LaunchParamBufferSize = reinterpret_cast<void *>(uintptr_t{0x2});
@@ -176,6 +197,101 @@ TEST_CASE("CUDA legacy linker fatbin PTX inputs keep their text", "[cuda][code-m
   REQUIRE(cuLinkComplete(state, &image, &size) == CUDA_SUCCESS);
   CHECK(std::string(static_cast<const char *>(image)) == Ptx);
   CHECK(size == std::strlen(Ptx));
+  CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA SASS routes compile PTX modules with nvJitLink", "[cuda][code-mode]") {
+  const FakeNvJitLink jit("1");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  FailureSession session;
+  session.loadKernel(Ptx);
+  CHECK(session.fixture.lastProgramImage() == executableCubin());
+  CHECK(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(session.fixture.launches.load() == 1);
+}
+
+TEST_CASE("CUDA SASS routes link one PTX input into a cubin", "[cuda][code-mode]") {
+  const FakeNvJitLink jit("1");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  FailureSession session;
+  CUlinkState state = nullptr;
+  REQUIRE(cuLinkCreate(0, nullptr, nullptr, &state) == CUDA_SUCCESS);
+  std::string ptx(Ptx);
+  REQUIRE(cuLinkAddData(state, CU_JIT_INPUT_PTX, ptx.data(), ptx.size() + 1, nullptr, 0, nullptr, nullptr) == CUDA_SUCCESS);
+  void *image = nullptr;
+  size_t size = 0;
+  REQUIRE(cuLinkComplete(state, &image, &size) == CUDA_SUCCESS);
+  const auto cubin = executableCubin();
+  REQUIRE(size == cubin.size());
+  CHECK(std::equal(cubin.begin(), cubin.end(), static_cast<const uint8_t *>(image)));
+  session.loadKernel(image);
+  CHECK(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA SASS routes link several PTX inputs into a cubin", "[cuda][code-mode]") {
+  const FakeNvJitLink jit("2");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  FailureSession session;
+  CUlinkState state = nullptr;
+  REQUIRE(cuLinkCreate(0, nullptr, nullptr, &state) == CUDA_SUCCESS);
+  std::string ptx(Ptx);
+  REQUIRE(cuLinkAddData(state, CU_JIT_INPUT_PTX, ptx.data(), ptx.size() + 1, nullptr, 0, nullptr, nullptr) == CUDA_SUCCESS);
+  std::string second = ".version 8.0\n.target sm_89\n.address_size 64\n.visible .entry second() { ret; }\n";
+  REQUIRE(cuLinkAddData(state, CU_JIT_INPUT_PTX, second.data(), second.size() + 1, nullptr, 0, nullptr, nullptr) == CUDA_SUCCESS);
+  void *image = nullptr;
+  size_t size = 0;
+  REQUIRE(cuLinkComplete(state, &image, &size) == CUDA_SUCCESS);
+  const auto cubin = executableCubin();
+  REQUIRE(size == cubin.size());
+  CHECK(std::equal(cubin.begin(), cubin.end(), static_cast<const uint8_t *>(image)));
+  session.loadKernel(image);
+  CHECK(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA SASS routes report PTX that nvJitLink cannot compile for the device architecture", "[cuda][code-mode]") {
+  const FakeNvJitLink jit("1");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  FailureSession session;
+  const gemstone_test::Environment unsupported(gemstone::environment::TargetArch, "sm_70");
+  const auto loads = session.fixture.programLoads.load();
+  CHECK(session.load(Ptx) == CUDA_ERROR_NO_BINARY_FOR_GPU);
+  CUlinkState state = nullptr;
+  REQUIRE(cuLinkCreate(0, nullptr, nullptr, &state) == CUDA_SUCCESS);
+  std::string ptx(Ptx);
+  REQUIRE(cuLinkAddData(state, CU_JIT_INPUT_PTX, ptx.data(), ptx.size() + 1, nullptr, 0, nullptr, nullptr) == CUDA_SUCCESS);
+  void *image = nullptr;
+  size_t size = 0;
+  CHECK(cuLinkComplete(state, &image, &size) == CUDA_ERROR_NO_BINARY_FOR_GPU);
+  CHECK(session.fixture.programLoads.load() == loads);
+  CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA SASS routes map nvJitLink compile failures to driver errors", "[cuda][code-mode]") {
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  const FakeNvJitLink jit("1");
+  FailureSession session;
+  CHECK(session.load(".version 99.0\n.target sm_89\n.address_size 64\n.visible .entry probe() { ret; }\n")
+        == CUDA_ERROR_UNSUPPORTED_PTX_VERSION);
+  CHECK(session.load(".version 8.0\n.target sm_89\n.address_size 64\n.visible .func probe() { ret; }\n") == CUDA_ERROR_INVALID_PTX);
+}
+
+TEST_CASE("CUDA SASS routes without nvJitLink report a missing JIT compiler", "[cuda][code-mode]") {
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  const gemstone_test::Environment compiler(gemstone::environment::CudaNvjitlinkLibraryFile, nullptr);
+  FailureSession session;
+  CHECK(session.load(Ptx) == CUDA_ERROR_JIT_COMPILER_NOT_FOUND);
+  CUlinkState state = nullptr;
+  REQUIRE(cuLinkCreate(0, nullptr, nullptr, &state) == CUDA_SUCCESS);
+  std::string ptx(Ptx);
+  REQUIRE(cuLinkAddData(state, CU_JIT_INPUT_PTX, ptx.data(), ptx.size() + 1, nullptr, 0, nullptr, nullptr) == CUDA_SUCCESS);
+  void *image = nullptr;
+  size_t size = 0;
+  CHECK(cuLinkComplete(state, &image, &size) == CUDA_ERROR_JIT_COMPILER_NOT_FOUND);
   CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
 }
 
@@ -246,7 +362,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
 
   setCodeMode("sass");
   CUmodule module = nullptr;
-  CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_NOT_SUPPORTED));
+  CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_JIT_COMPILER_NOT_FOUND));
   CHECK((module == nullptr));
   CHECK(fixture.programLoads.load() == loadsBefore);
 
@@ -271,7 +387,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
 
   module = nullptr;
-  CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_NOT_SUPPORTED));
+  CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_JIT_COMPILER_NOT_FOUND));
   CHECK((module == nullptr));
 
   setCodeMode("ptx");
@@ -297,7 +413,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
 
   module = nullptr;
-  CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_NOT_SUPPORTED));
+  CHECK((cuModuleLoadData(&module, ptx.c_str()) == CUDA_ERROR_JIT_COMPILER_NOT_FOUND));
   CHECK((module == nullptr));
   CHECK(fixture.programLoads.load() == loadsBeforeMetadata + 1);
 
@@ -336,7 +452,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE((cuLibraryUnload(library) == CUDA_SUCCESS));
 
   library = nullptr;
-  CHECK((cuLibraryLoadData(&library, ptx.c_str(), nullptr, nullptr, 0, nullptr, nullptr, 0) == CUDA_ERROR_NOT_SUPPORTED));
+  CHECK((cuLibraryLoadData(&library, ptx.c_str(), nullptr, nullptr, 0, nullptr, nullptr, 0) == CUDA_ERROR_JIT_COMPILER_NOT_FOUND));
   CHECK((library == nullptr));
 
   setCodeMode("ptx");

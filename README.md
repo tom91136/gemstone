@@ -90,6 +90,7 @@ sbt 'server/run inspect|replay <journal>'
 | --- | --- |
 | `GEMSTONE_TRACE_LIST=cuda` | CUDA load and execution diagnostics |
 | `GEMSTONE_CUDA_CODE_MODE=ptx\|sass` | Strict CUDA code selection |
+| `GEMSTONE_CUDA_NVJITLINK_LIBRARY_FILE` | `libnvJitLink` that compiles run-time PTX in the `sass` code mode |
 | `GEMSTONE_EXECUTION_MAX_INSTRUCTION_COUNT` | Per-task instruction budget |
 | `GEMSTONE_EXECUTION_THREAD_COUNT` | Execution workers (default: two below the thread count, at most 62) |
 | `GEMSTONE_VULKAN_API_VERSION=1.0\|1.2` | Vulkan version (default 1.2); not certified |

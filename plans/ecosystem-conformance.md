@@ -168,6 +168,16 @@ From `/var/tmp/gs/t47/footprint-all.log`, measured with `du`:
 - Discovery failures: a program whose listing fails is now one failed case named `discovery` with the listing output and its classification, and every other program in the target still runs (CI run 43820128008 lost 16 of 23 shards to one program's failed listing, for example `conformance: test discovery failed for cuda-sass-sm_86/julia_tests_cuda (exit 1)`, `/var/tmp/gs/land/ci-conformancecuda-3.log`, line 1310).
 - Listing without a host driver: the Julia listing now runs under the route's emulated driver and clears only the device selectors, because CUDA.jl's `setup.jl` asserts `CUDA.functional(true)` and its list depends on the device. CI failed with `CUDA driver not found` since the listing had cleared the emulated driver. `listing.jl` stubs `Pkg.add` and the print-only `CUDA.versioninfo`, which hits the CUPTI gap above. Proof: a Fedora 45 container with no `/dev/nvidia*`, `/dev/kfd`, or `/dev/dri` and no driver libraries in `ldconfig -p` ran `emulate --dry-run` for `cuda-ptx/sm_89`, `hip/gfx1030`, and `levelzero` and listed `julia_tests_cuda` 4, `julia_tests_amdgpu` 2, and `julia_tests_oneapi` 3 cases (`/var/tmp/gs/t50/container-dry.log`, exit 0).
 
+## PTX on the `cuda-sass` routes
+
+- Programs that hand the driver PTX at run time (Numba through `cuLinkAddData` and `cuLinkComplete`, CUDA.jl through `cuModuleLoadDataEx`) failed with `CUDA_ERROR_NOT_SUPPORTED` on every SASS route, because the strict mode refused text PTX. A real driver compiles the PTX for its GPU.
+- Gemstone now compiles the PTX that a module load or link supplies to a cubin for the route's architecture with `libnvJitLink` (`nvJitLinkAddData` with PTX inputs and `-arch=sm_NN`, then `nvJitLinkGetLinkedCubin`), and executes the SASS. Several link inputs go to one link, so extern functions resolve across them. Embedded fatbin PTX is unchanged: the fatbin's cubin runs.
+- Why `libnvJitLink`: the CUDA toolkit EULA's Attachment A lists `libnvJitLink.so` and `libnvJitLink_static.a` as redistributable ("NVIDIA JIT Linking Library") and names neither `ptxas` nor `nvlink`. The 13.3 CUDA support closure already ships `libnvJitLink`, so nothing new enters the artifact.
+- `GEMSTONE_CUDA_NVJITLINK_LIBRARY_FILE` names the library. The `sbt` launcher derives it from `lib/libnvJitLink.so.<major>` in the artifact's support closure.
+- No library: `CUDA_ERROR_JIT_COMPILER_NOT_FOUND`. `nvJitLinkCreate` rejecting the architecture (`NVJITLINK_ERROR_UNSUPPORTED_ARCH`, which 13.3 returns for `sm_70` and below): `CUDA_ERROR_NO_BINARY_FOR_GPU`. PTX newer than the library (`Unsupported .version` in the error log): `CUDA_ERROR_UNSUPPORTED_PTX_VERSION`. Any other failure: `CUDA_ERROR_INVALID_PTX`. The library's error log goes to stderr.
+- The 11.8 support closure (`sm_35` to `sm_70` routes) has no `libnvJitLink`, which CUDA 12 introduced, so those routes report `CUDA_ERROR_JIT_COMPILER_NOT_FOUND` for run-time PTX. The 13.x library cannot target them either.
+- Open: Numba's NVVM 13.3 rejects `-arch=compute_50`, so libdevice cases that target `compute_50` fail before any driver call on both code modes.
+
 ## Non-goals
 
 - Replacing or patching any package or vendor library.
