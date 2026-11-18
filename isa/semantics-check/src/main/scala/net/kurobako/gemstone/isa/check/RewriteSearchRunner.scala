@@ -11,9 +11,51 @@ object RewriteSearchRunner {
 
   private val usage =
     "usage: RewriteSearchRunner <code-object> <kernel> <target> [--seed n] [--budget n] [--temperature t] " +
-      "[--window n] [--lanes n] [--shared bytes] [--placement n,n,...]"
+      "[--window n] [--lanes n] [--shared bytes] [--placement n,n,...] [--record groups [--arguments n,n,...]]"
 
-  private val flags = Set("--seed", "--budget", "--temperature", "--window", "--lanes", "--shared", "--placement")
+  private val flags = Set(
+    "--seed",
+    "--budget",
+    "--temperature",
+    "--window",
+    "--lanes",
+    "--shared",
+    "--placement",
+    "--record",
+    "--arguments"
+  )
+
+  /** The launch the flags state. `--record` has the VM launch that many workgroups of `--lanes` lanes of the kernel and
+    * costs from what it records, with one value of `--arguments` for each kernel parameter: a scalar's value, or the
+    * size in bytes of a zeroed buffer.
+    */
+  private def launch(
+      image: Vec[Byte],
+      kernel: String,
+      target: String,
+      options: Map[String, String]
+  ): Either[String, AMDGPUBlockCost.Launch] = {
+    val placement =
+      options.get("--placement").map(text => PipelineSimulator.Placement(Vec.from(text.split(',').map(_.toInt))))
+    val arguments = options.get("--arguments").map(text => Vec.from(text.split(',').map(_.toLong)))
+    for {
+      named  <- target.refine[Target].left.map(_.raw)
+      lanes  <- options.get("--lanes").fold(TargetDefaults.waveSize(named).raw)(_.toInt).refine[Int > 0].left.map(_.raw)
+      stated <- options.get("--record") match {
+        case None =>
+          for {
+            _      <- Either.cond(arguments.isEmpty, (), "--arguments needs --record")
+            shared <- options.get("--shared").fold(0L)(_.toLong).refine[Long >= 0].left.map(_.raw)
+          } yield AMDGPUBlockCost.Launch.Stated(lanes, shared, placement)
+        case Some(groups) =>
+          for {
+            _      <- Either.cond(!options.contains("--shared"), (), "--record takes the shared bytes the launch has")
+            count  <- groups.toInt.refine[Int > 0].left.map(_.raw)
+            stream <- AMDGPUBlockCost.record(image, kernel, lanes, count, arguments.getOrElse(Vec.empty))
+          } yield AMDGPUBlockCost.Launch.Recorded(stream, placement)
+      }
+    } yield stated
+  }
 
   def main(arguments: Array[String]): Unit = {
     if (arguments.length < 3) throw IllegalArgumentException(usage)
@@ -32,22 +74,13 @@ object RewriteSearchRunner {
       states = defaults.states,
       limit = defaults.limit
     )
-    val launch = for {
-      named  <- target.refine[Target].left.map(_.raw)
-      lanes  <- options.get("--lanes").fold(TargetDefaults.waveSize(named).raw)(_.toInt).refine[Int > 0].left.map(_.raw)
-      shared <- options.get("--shared").fold(0L)(_.toLong).refine[Long >= 0].left.map(_.raw)
-    } yield AMDGPUBlockCost.Launch(
-      lanes,
-      shared,
-      options.get("--placement").map(text => PipelineSimulator.Placement(Vec.from(text.split(',').map(_.toInt))))
-    )
     val file    = Path.of(path)
     val image   = Vec.unsafeWrapArray(Files.readAllBytes(file))
     val label   = file.getFileName.toString.takeWhile(_ != '.')
     val windows = options.get("--window").fold(AMDGPUWindows.of(image, kernel, target))(size =>
       AMDGPUWindows.of(image, kernel, target, size.toInt)
     )
-    launch.flatMap(stated => windows.map(_ -> stated)) match {
+    launch(image, kernel, target, options).flatMap(stated => windows.map(_ -> stated)) match {
       case Left(reason)           => throw IllegalArgumentException(reason)
       case Right((found, stated)) =>
         found.foreach { window =>

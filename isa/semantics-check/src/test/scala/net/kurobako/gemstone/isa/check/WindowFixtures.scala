@@ -57,11 +57,55 @@ object WindowFixtures {
     finally stream.close()
   }
 
-  /** The compiled object with `source` as its `window` kernel. */
-  def assembled(source: String): Vec[Byte] = {
+  /** The compiled object with `source` as its `kernel`, which keeps the parameters the object gives that kernel. */
+  def assembled(source: String, kernel: NonEmpty[String] = "window"): Vec[Byte] = {
     val code = AMDGPUModel.assemble(source, Some(calibrated)).flatMap(Hex.parse(_)).toOption.get
-    CodeObject.decode(compiled).flatMap(_.replaceKernel("window", code)).toOption.get.image
+    CodeObject.decode(compiled).flatMap(_.replaceKernel(kernel, code)).toOption.get.image
   }
+
+  val streaming: NonEmpty[String] = "square_plus_one"
+
+  /** A loop over the parameters of `square_plus_one` that loads an element, stores a result, and moves a value no
+    * instruction reads.
+    */
+  lazy val stream: Vec[Byte] = streamOf("v_mov_b32 v7, v5\n")
+
+  /** [[stream]] with `dead` after its last multiply-add. */
+  def streamOf(dead: String): Vec[Byte] = assembled(
+    s"""s_load_dword s8, s[4:5], 0x10
+      |s_load_dwordx4 s[0:3], s[4:5], 0x0
+      |v_mov_b32 v0, 0
+      |s_waitcnt lgkmcnt(0)
+      |loop:
+      |s_add_u32 s0, s0, 4
+      |s_addc_u32 s1, s1, 0
+      |s_load_dword s9, s[0:1], 0x0
+      |s_waitcnt lgkmcnt(0)
+      |v_fma_f32 v6, v6, s9, s6
+      |v_fma_f32 v5, v5, s9, s6
+      |${dead}global_store_dword v0, v6, s[2:3]
+      |s_add_i32 s8, s8, -1
+      |s_cmp_lg_u32 s8, 0
+      |s_cbranch_scc1 loop
+      |s_endpgm
+      |""".stripMargin,
+    streaming
+  )
+
+  /** A loop of `trips` iterations that skips its second block on the iteration that leaves `skipped` to go. */
+  def branching(trips: Int, skipped: Int): Vec[Byte] = assembled(
+    s"""s_mov_b32 s8, $trips
+       |loop:
+       |s_cmp_eq_u32 s8, $skipped
+       |s_cbranch_scc1 join
+       |v_fma_f32 v6, v6, s5, s6
+       |join:
+       |s_add_i32 s8, s8, -1
+       |s_cmp_lg_u32 s8, 0
+       |s_cbranch_scc1 loop
+       |s_endpgm
+       |""".stripMargin
+  )
 
   lazy val loop: Vec[Byte]  = patched(loopSource)
   lazy val state: Vec[Byte] = patched(stateSource)

@@ -54,7 +54,8 @@ object RewriteSearch {
       candidates: Int,
       wrong: Int,
       before: Measure,
-      rewrites: Vec[Rewrite]
+      rewrites: Vec[Rewrite],
+      uncosted: Vec[(candidate: String, reason: String)]
   )
 
   private enum Distance derives CanEqual {
@@ -89,7 +90,10 @@ object RewriteSearch {
         Vec(
           s"$head live-out=${window.liveOut.toVec.sorted.mkString(",")} candidates=${report.candidates} " +
             s"wrong=${report.wrong} rewrites=${report.rewrites.size}"
-        ) ++ report.rewrites.map(rewrite => s"[rewrite]   ${rewrite.line}")
+        ) ++ report.rewrites.map(rewrite => s"[rewrite]   ${rewrite.line}") ++
+          report.uncosted.groupMap(_.reason)(_.candidate).toVec.sortBy(_._1).map((reason, candidates) =>
+            s"[rewrite]   not costed candidates=${candidates.size}: $reason"
+          )
     }
   }
 
@@ -271,7 +275,7 @@ object RewriteSearch {
       val reason  = if (idle) "no write is live out" else "live-out writes proved equal"
       val before  = Measure(whole.cycles, whole.source)
       val random  = Random(config.seed)
-      val costs   = mutable.Map.empty[String, Option[AMDGPUBlockCost.Cost]]
+      val costs   = mutable.LinkedHashMap.empty[String, Either[String, AMDGPUBlockCost.Cost]]
       val seen    = mutable.LinkedHashMap.empty[String, (Vec[Instruction], Long, AMDGPUBlockCost.Cost)]
       val deleted = AMDGPUMoves.Candidate(AMDGPUMoves.Kind.Delete, Vec.empty, Vec.empty)
 
@@ -284,7 +288,7 @@ object RewriteSearch {
               case Distance.Refused(why) => Left(why)
             }
           ).toOption
-          after <- costs.getOrElseUpdate(key, cost.cost(window, text(candidate.instructions)).toOption)
+          after <- costs.getOrElseUpdate(key, cost.cost(window, text(candidate.instructions))).toOption
         } yield (bits, after)
         found.fold(walk.copy(evaluated = walk.evaluated + 1)) { (bits, after) =>
           if (!seen.contains(key)) seen.update(key, (candidate.instructions, bits, after))
@@ -349,7 +353,8 @@ object RewriteSearch {
         seen.size,
         seen.values.count(_._2 > 0L),
         before,
-        rewrites
+        rewrites,
+        costs.collect { case (candidate, Left(reason)) => (candidate = candidate, reason = reason) }.toVec
       )
     }
   }

@@ -14,7 +14,7 @@ class RewriteSearchSuite extends Suite {
   private val target = WindowFixtures.calibrated
   private val kernel = "window"
 
-  private val oneWave = AMDGPUBlockCost.Launch(32, 65536L, Some(PipelineSimulator.Placement(Vec(1, 0, 0, 0))))
+  private val oneWave = AMDGPUBlockCost.Launch.Stated(32, 65536L, Some(PipelineSimulator.Placement(Vec(1, 0, 0, 0))))
 
   private val search   = RewriteSearch.Config(seed = 1L, budget = 3, temperature = 1.0, states = 2, limit = 8)
   private val sentence = RewriteSearch.Config(seed = 7L, budget = 6, temperature = 1.0, states = 4, limit = 4)
@@ -91,6 +91,57 @@ class RewriteSearchSuite extends Suite {
     val window = holding("square_plus_one", 8, "v_fma_f32")
     val found  = RewriteSearch.amdgpu(WindowFixtures.compiled, "square_plus_one", target, window, oneWave)
     assert(found.left.exists(_.startsWith("no recorded memory traffic for ")), found)
+  }
+
+  test("a dead instruction in a loop that loads and stores is deleted as a proved rewrite under a recorded launch") {
+    installed()
+    val image    = WindowFixtures.stream
+    val function = WindowFixtures.streaming.raw
+    val text     = assembly(image, function)
+    val at       = text.indexWhere(_.startsWith("v_mov_b32 v7"))
+    val window   = windows(image, 2, function).find(window => window.first <= at && at <= window.last)
+      .getOrElse(fail(s"no window holds the dead move: $text"))
+    val stated = RewriteSearch.amdgpu(image, function, target, window, oneWave)
+    assert(stated.left.exists(_.startsWith("no recorded memory traffic for ")), stated)
+    def recorded(of: Vec[Byte]) =
+      AMDGPUBlockCost.record(of, function, 32, 1, Vec(4096L, 4096L, 5L)).fold(fail(_), identity)
+    val launch   = AMDGPUBlockCost.Launch.Recorded(recorded(image), oneWave.placement)
+    val report   = RewriteSearch.amdgpu(image, function, target, window, launch).fold(fail(_), identity)
+    val kept     = Vec.from(window.first to window.last).map(text(_)).filterNot(_.startsWith("v_mov_b32"))
+    val rewrite  = report.rewrites.find(_.rewrite == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
+    val relaunch = BlockAnalysis.of(recorded(WindowFixtures.streamOf("")), Architecture.gfx1036, oneWave.placement)
+      .fold(fail(_), _.regions.filter(_.kind == BlockAnalysis.Kind.Loop).map(_.status))
+    relaunch match {
+      case Vec(BlockAnalysis.Status.Executed(timing)) =>
+        assertEquals(rewrite.after.cycles, timing.block.cyclesPerIteration)
+      case other => fail(s"the loop without the move is not executed: $other")
+    }
+    assert(rewrite.after.cycles < rewrite.before.cycles, rewrite)
+    assertEquals(rewrite.source, Architecture.Source.weakest(rewrite.before.source, rewrite.after.source))
+    assert(rewrite.line.contains(s"(${rewrite.source.kind})"), rewrite.line)
+    assert(report.uncosted.isEmpty, report.uncosted)
+    println(s"[rewrite] stream ${rewrite.line}")
+  }
+
+  test("candidates the cost refuses are listed under the reason") {
+    val report = RewriteSearch.Report(
+      Window(0, 1, 2, Set.empty, Set("v1")),
+      seed = 1L,
+      budget = 3,
+      evaluated = 2,
+      candidates = 0,
+      wrong = 0,
+      before = RewriteSearch.Measure(1.0, Architecture.Source.Estimate("a test")),
+      rewrites = Vec.empty,
+      uncosted = Vec(("s_nop 0", "no model"), ("s_nop 1", "no model"))
+    )
+    assertEquals(
+      RewriteSearch.lines("fixture", report.window, Right(report)),
+      Vec(
+        "[rewrite] fixture 1..2 live-out=v1 candidates=0 wrong=0 rewrites=0",
+        "[rewrite]   not costed candidates=2: no model"
+      )
+    )
   }
 
   private val dead: Vec[Byte] = WindowFixtures.assembled(
