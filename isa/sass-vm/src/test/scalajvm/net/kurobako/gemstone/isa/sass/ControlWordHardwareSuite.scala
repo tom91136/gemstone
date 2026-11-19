@@ -15,7 +15,9 @@ import scala.util.Using
 /** What an RTX 4060 Ti (sm_89, driver 620.70.06) computed from the kernels under `controlwords` and from the same
   * cubins with regenerated scheduling fields. `hardware.tsv` holds, per launch, the arguments (`b:` a buffer, `s:` a
   * scalar, as little-endian hex) and the buffers the card returned, which were the same from both cubins;
-  * `regenerated.sha256` names the regenerated images that ran.
+  * `regenerated.sha256` names the regenerated images that ran. `exact-cuts.tsv` holds, for each distance of the table
+  * that a one-cycle cut made the card compute wrongly, one such cut as the instruction, its cut stall, the consumer,
+  * the producer and use the distance belongs to, the distance, and how many of 20 input sets the card got wrong.
   */
 class ControlWordHardwareSuite extends Suite {
   private def resource(name: String): Vec[Byte] =
@@ -138,6 +140,31 @@ class ControlWordHardwareSuite extends Suite {
         thread > 0 || warp > 0,
         s"$kernel #$at stall $stall: ${found.mkString(", ")}"
       )
+    }
+  }
+
+  test("the checker flags the cut that leaves the card a cycle short at each distance it needed") {
+    val rows = lines("exact-cuts.tsv")
+    assert(rows.nonEmpty)
+    rows.foreach {
+      case Vec(source, kernel, at, stall, consumer, producer, use, distance, _) =>
+        val module                      = Cubin.decode(resource(source)).value
+        val program                     = new LoadedProgram(module, Map.empty, Workgroups.Sequential, _ => None)
+        val (graph, uses, instructions) = program.staticCode(kernel.unsafe[NonEmpty[String]]).value
+        val path                        = ControlWords.paths(graph, uses, instructions)
+          .find(path => path.first <= at.toInt && at.toInt < path.first + path.steps.size)
+          .getOrElse(fail(s"$kernel has no #$at"))
+        val schedule = ControlWords.regenerate(table, path).value
+        val index    = at.toInt - path.first
+        assertEquals(table.distance(producer, use), distance.toInt, s"$kernel $producer to $use")
+        assertEquals(schedule(index).stall.raw, stall.toInt + 1, s"$kernel #$at")
+        val cut   = schedule.updated(index, schedule(index).copy(stall = stall.toInt.unsafe[Int in 0 ~ 15]))
+        val found = ControlWords.violations(table, path, cut, harvested = true)
+        assert(
+          found.exists((flagged, reason) => flagged == consumer.toInt && reason.contains("before its registers")),
+          s"$kernel #$at stall $stall: ${found.mkString(", ")}"
+        )
+      case other => fail(s"malformed cut $other")
     }
   }
 }
