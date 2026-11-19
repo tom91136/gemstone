@@ -1334,6 +1334,14 @@ TEST_CASE("HSA images are linear over their data and read through a descriptor o
   REQUIRE((hsa_memory_free(data) == HSA_STATUS_SUCCESS));
 }
 
+TEST_CASE("HSA memory copy moves bytes between untracked host buffers", "[hsa][memory-copy]") {
+  MemoryLockSession const session;
+  const std::array<uint32_t, 4> source{1, 2, 3, 4};
+  std::array<uint32_t, 4> destination{};
+  REQUIRE(hsa_memory_copy(destination.data(), source.data(), sizeof(source)) == HSA_STATUS_SUCCESS);
+  CHECK(destination == source);
+}
+
 TEST_CASE("HSA pitched copies outside an allocation are rejected", "[hsa][pitched]") {
   MemoryLockSession const session;
   const auto gpu = agentOf(HSA_DEVICE_TYPE_GPU);

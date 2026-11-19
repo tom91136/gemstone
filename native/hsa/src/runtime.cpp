@@ -1416,6 +1416,13 @@ template <typename Byte> struct Pitched {
   size_t rowPitch, slicePitch;
 };
 
+bool untracked(RuntimeState &runtime, const gemstone::MemoryRange &input, const gemstone::MemoryRange &output) {
+  const auto tracked = [&](const gemstone::MemoryRange &range) {
+    return findAllocation(runtime, reinterpret_cast<void *>(range.base)) || runtime.registrations.find(range.base, range.size);
+  };
+  return !tracked(input) && !tracked(output);
+}
+
 /** Copies `slices` slices of `rows` rows of `row` bytes between pitched layouts, each in order. A device side moves only its
  * rows, once in each direction. */
 hsa_status_t copyPitched(RuntimeState &runtime, Pitched<unsigned char> to, Pitched<const unsigned char> from, size_t row, size_t rows,
@@ -1430,9 +1437,7 @@ hsa_status_t copyPitched(RuntimeState &runtime, Pitched<unsigned char> to, Pitch
   AllocationRef destination;
   {
     std::scoped_lock const guard(runtime.lock);
-    if (!findAllocation(runtime, from.base) && !findAllocation(runtime, to.base) && !runtime.registrations.find(input.base, input.size)
-        && !runtime.registrations.find(output.base, output.size))
-      return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+    if (untracked(runtime, input, output)) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
     const auto deviceSide = [&](const gemstone::MemoryRange &range, AllocationRef &side) {
       for (const auto &[_, allocation] : runtime.allocations) {
         const gemstone::MemoryRange backing{.base = reinterpret_cast<uintptr_t>(allocation->base), .size = allocation->size};
@@ -1475,6 +1480,19 @@ extern "C" hsa_status_t hsa_memory_copy(void *dst, const void *src, size_t size)
   auto &runtime = state();
   if (const auto status = requireInitialised(runtime); status != HSA_STATUS_SUCCESS) return status;
   if ((!dst || !src) && size != 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  const gemstone::MemoryRange input{.base = reinterpret_cast<uintptr_t>(src), .size = size};
+  const gemstone::MemoryRange output{.base = reinterpret_cast<uintptr_t>(dst), .size = size};
+  if (size != 0 && input.valid() && output.valid()) {
+    bool host = false;
+    {
+      std::scoped_lock const guard(runtime.lock);
+      host = untracked(runtime, input, output);
+    }
+    if (host) {
+      std::memmove(dst, src, size);
+      return HSA_STATUS_SUCCESS;
+    }
+  }
   return copyPitched(runtime, {.base = static_cast<unsigned char *>(dst), .rowPitch = size, .slicePitch = size},
                      {.base = static_cast<const unsigned char *>(src), .rowPitch = size, .slicePitch = size}, size, 1, 1);
 }
