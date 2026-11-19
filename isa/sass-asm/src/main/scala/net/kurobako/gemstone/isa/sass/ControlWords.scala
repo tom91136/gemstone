@@ -31,6 +31,7 @@ object ControlWords {
   def heldOut(program: String): Boolean = Math.floorMod(program.hashCode, HeldOut) == 0
 
   private val MaxStall  = 15
+  private val Ungrouped = 1 to 11
   private val Departure = ""
 
   /** What scheduling reads of one instruction: its form, the registers it reads with how each is used (`g` as the
@@ -274,8 +275,10 @@ object ControlWords {
     0.unsafe[Int in 0 ~ 0xf]
   )
 
-  /** Whether ptxas marks a stall as the end of an issue group: a wait of three or more cycles on a register. */
-  private def yields(stall: Int, idle: Int): Boolean = stall >= 3 && stall > idle
+  /** Whether ptxas marks a stall as the end of an issue group: a wait of three or more cycles on a register, or a stall
+    * outside `Ungrouped`, which the encoding names only as the end of a group.
+    */
+  private def yields(stall: Int, idle: Int): Boolean = !Ungrouped.contains(stall) || stall >= 3 && stall > idle
 
   /** The scheduling of each instruction of `path`, or the instruction whose requirement no stall can meet. */
   def regenerate(table: Table, path: Path): Either[String, Vec[Scheduling]] = {

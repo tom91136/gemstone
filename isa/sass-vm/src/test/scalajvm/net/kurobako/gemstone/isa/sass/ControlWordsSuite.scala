@@ -100,13 +100,15 @@ class ControlWordsSuite extends Suite {
       unit.words.zip(unit.schedule).foreach((word, scheduling) =>
         assertEquals(ControlWords.encode(word, scheduling), word, unit.name)
       )
-      unit.words.zip(regenerated(unit)).foreach((word, scheduling) =>
+      unit.words.zip(regenerated(unit)).foreach { (word, scheduling) =>
+        val encoded = ControlWords.encode(word, scheduling)
+        assertEquals(Scheduling.decode(Generation.Modern, encoded), Right(Some(scheduling)), unit.name)
         assertEquals(
-          Scheduling.decode(Generation.Modern, ControlWords.encode(word, scheduling)),
-          Right(Some(scheduling)),
-          unit.name
+          Targets.disassemble(Array.tabulate(16)(at => (encoded >> (8 * at)).toByte), 89).map(_.operation),
+          Targets.disassemble(Array.tabulate(16)(at => (word >> (8 * at)).toByte), 89).map(_.operation),
+          s"${unit.name} stall ${scheduling.stall} yield ${scheduling.yieldHint}"
         )
-      )
+      }
     }
   }
 
