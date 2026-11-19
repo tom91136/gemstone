@@ -65,6 +65,8 @@ using namespace std::chrono_literals;
 // one with more keeps the recorded budget.
 inline constexpr uint32_t TimeoutReferenceCores = 32;
 namespace {
+inline constexpr std::string_view BatchBeginMarker = "conformance-case-begin: ";
+inline constexpr std::string_view BatchEndMarker = "conformance-case-end: ";
 struct TestProgram {
   std::string name;
   fs::path path;
@@ -209,8 +211,8 @@ std::vector<std::string> catchCaseNames(std::string_view json, std::string_view 
   }
   return result;
 }
-std::vector<std::string> listedCaseNames(std::string_view listing, std::string_view program) {
-  std::vector<std::string> result;
+std::vector<ListedCase> listedCases(std::string_view listing, std::string_view program) {
+  std::vector<ListedCase> result;
   std::set<std::string> names;
   while (!listing.empty()) {
     const auto end = listing.find('\n');
@@ -219,10 +221,13 @@ std::vector<std::string> listedCaseNames(std::string_view listing, std::string_v
     if (end == std::string_view::npos) listing = {};
     else listing.remove_prefix(end + 1);
     if (line.empty() || line.front() == '#') continue;
-    if (line.size() > 4096 || line.contains('\t') || line.contains('\0'))
+    const auto tab = line.find('\t');
+    const auto name = line.substr(0, tab);
+    const auto group = tab == std::string_view::npos ? std::string_view{} : line.substr(tab + 1);
+    if (line.size() > 4096 || group.contains('\t') || (tab != std::string_view::npos && group.empty()) || line.contains('\0'))
       throw std::runtime_error("invalid case name from " + std::string(program));
-    if (!names.insert(std::string(line)).second) throw std::runtime_error("duplicate case name from " + std::string(program));
-    result.emplace_back(line);
+    if (!names.insert(std::string(name)).second) throw std::runtime_error("duplicate case name from " + std::string(program));
+    result.push_back({.name = std::string(name), .group = std::string(group)});
   }
   return result;
 }
@@ -652,6 +657,7 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
     const bool listed = program.format == "cases";
     std::vector<std::string> vulkanCases;
     std::vector<std::string> names;
+    std::map<std::string, std::string> groups;
     if (hecbench) {
       names = {program.name};
     } else {
@@ -707,7 +713,10 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
       } else if (gtest) {
         names = gtestCaseNames(listing.output, program.name);
       } else if (listed) {
-        names = listedCaseNames(listing.output, program.name);
+        for (auto &listed : listedCases(listing.output, program.name)) {
+          if (!listed.group.empty()) groups[listed.name] = std::move(listed.group);
+          names.push_back(std::move(listed.name));
+        }
       } else {
         names = catchCaseNames(listing.output, program.name);
       }
@@ -738,9 +747,16 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
         (key.empty() ? std::nullopt : environment ^ get_maybe(std::string(key)))
         ^ map([&](const std::string &configured) { return budget(parseTimeout(configured, artifact / "test-programs.txt")); })
         ^ get_or_else(budget(suiteTimeout(program.name, program.timeoutSeconds, configuration.isolatedLauncher)));
-    for (uint32_t index = 0; index < count; ++index)
-      tests.push_back(
-          {.identity = std::move(names[index]), .program = program.name, .timeoutSeconds = timeout, .index = index, .count = count});
+    for (uint32_t index = 0; index < count; ++index) {
+      auto group = groups ^ get_maybe(names[index]);
+      tests.push_back({.identity = std::move(names[index]),
+                       .program = program.name,
+                       .timeoutSeconds = timeout,
+                       .index = index,
+                       .count = count,
+                       .discoveryFailure = std::nullopt,
+                       .group = std::move(group)});
+    }
   }
   return tests;
 }
@@ -818,21 +834,63 @@ static bool profileSkipped(const ExecutionConfig &config, const ScheduledCase &t
   return config.skips
          ^ exists([&](const std::string &pattern) { return globMatches(pattern, test.program) || globMatches(pattern, test.identity); });
 }
-CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test) {
+static CaseResult concludeCase(const ScheduledCase &test, std::string_view format, int32_t status, bool timedOut, std::string reason,
+                               std::string record, const fs::path &outputPath) {
+  const bool gtest = format == "gtest";
+  const bool deqp = format == "deqp";
+  const bool hecbench = format == "hecbench";
+  const bool listed = format == "cases";
+  std::string classification;
+  if (listed) {
+    try {
+      classification = caseClassification(readFile(outputPath));
+    } catch (const std::exception &error) {
+      status = status == 0 ? 1 : status;
+      reason = error.what();
+    }
+    if (timedOut) classification = "time limit";
+    if (status != 0 && classification.empty() && status != SkipReturnCode) classification = "unclassified";
+  }
+  if (hecbench) {
+    auto outcome = classifyHecbenchOutput(readFile(outputPath), timedOut);
+    if (status != 0 && outcome != HecbenchOutcome::TimeLimit) outcome = HecbenchOutcome::Fail;
+    classification = std::string(hecbenchOutcomeName(outcome));
+    switch (outcome) {
+      case HecbenchOutcome::Fail:
+        if (status == 0) status = 1;
+        reason = "output reports failure";
+        break;
+      case HecbenchOutcome::TimeLimit: reason = fmt::format("time limit after {} s", test.timeoutSeconds); break;
+      case HecbenchOutcome::Completion: reason = "completion only"; break;
+      case HecbenchOutcome::Pass: reason = "pass"; break;
+    }
+  }
+  if (status == SkipReturnCode && !gtest && !deqp && !hecbench) reason = listed ? "package skip" : catchSkipReason(readFile(outputPath));
+  std::string message = std::move(reason);
+  if (message.empty()) {
+    message = timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
+                       : fmt::format("exit status {}", status);
+  }
+  if (!classification.empty()) record += fmt::format("{}: {}\n", listed ? "classification" : "hecbench", classification);
+  record += fmt::format("conformance: {}, full output: {}\n", message, outputPath.string());
+  return {.status = status, .output = std::move(record), .message = std::move(message), .classification = std::move(classification)};
+}
+static std::optional<CaseResult> preflight(const ExecutionConfig &config, const ScheduledCase &test) {
   if (!validName(test.program)) throw std::invalid_argument("invalid test program");
   if (profileSkipped(config, test))
-    return {.status = SkipReturnCode,
-            .output = "SKIP " + test.identity + ": machine profile\n",
-            .message = "machine profile",
-            .classification = {}};
+    return CaseResult{.status = SkipReturnCode,
+                      .output = "SKIP " + test.identity + ": machine profile\n",
+                      .message = "machine profile",
+                      .classification = {}};
   if (test.discoveryFailure)
-    return {.status = 1,
-            .output = fmt::format("conformance: {}\n", test.discoveryFailure->message),
-            .message = test.discoveryFailure->message,
-            .classification = test.discoveryFailure->classification};
+    return CaseResult{.status = 1,
+                      .output = fmt::format("conformance: {}\n", test.discoveryFailure->message),
+                      .message = test.discoveryFailure->message,
+                      .classification = test.discoveryFailure->classification};
   if (const auto failure = config.jitFailures ^ get_maybe(test.program)) {
     auto message = fmt::format("JIT warm-up of {} failed: {}", test.program, *failure);
-    return {.status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message), .classification = {}};
+    return CaseResult{
+        .status = 1, .output = fmt::format("conformance: {}\n", message), .message = std::move(message), .classification = {}};
   }
   const auto environmentValue = [&](const char *key) -> std::string_view {
     const auto entry = config.environment.find(key);
@@ -851,11 +909,15 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
                           })
                         ^ filter([](std::string_view skip) { return !skip.empty(); });
     if (reason)
-      return {.status = SkipReturnCode,
-              .output = fmt::format("SKIP {}: {}\n", test.identity, *reason),
-              .message = std::string(*reason),
-              .classification = {}};
+      return CaseResult{.status = SkipReturnCode,
+                        .output = fmt::format("SKIP {}: {}\n", test.identity, *reason),
+                        .message = std::string(*reason),
+                        .classification = {}};
   }
+  return std::nullopt;
+}
+CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test) {
+  if (auto early = preflight(config, test)) return std::move(*early);
   const auto programs = testPrograms(config.directory, Workload{});
   const auto selected = programs ^ find_cref([&](const TestProgram &candidate) { return candidate.name == test.program; });
   if (!selected) throw std::runtime_error("test program absent from manifest");
@@ -908,7 +970,6 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
   auto status = process.status;
   std::string record;
   std::string reason;
-  std::string classification;
   if (status == 0 && deqp) {
     const auto result = deqpResult(readFile(report / "result.qpa"), test.identity);
     record = fmt::format("dEQP {}: {}\n", test.identity, result.statusCode);
@@ -926,39 +987,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     }
   }
   output.close();
-  if (listed) {
-    try {
-      classification = caseClassification(readFile(outputPath));
-    } catch (const std::exception &error) {
-      status = status == 0 ? 1 : status;
-      reason = error.what();
-    }
-    if (process.timedOut) classification = "time limit";
-    if (status != 0 && classification.empty() && status != SkipReturnCode) classification = "unclassified";
-  }
-  if (hecbench) {
-    auto outcome = classifyHecbenchOutput(readFile(outputPath), process.timedOut);
-    if (status != 0 && outcome != HecbenchOutcome::TimeLimit) outcome = HecbenchOutcome::Fail;
-    classification = std::string(hecbenchOutcomeName(outcome));
-    switch (outcome) {
-      case HecbenchOutcome::Fail:
-        if (status == 0) status = 1;
-        reason = "output reports failure";
-        break;
-      case HecbenchOutcome::TimeLimit: reason = fmt::format("time limit after {} s", test.timeoutSeconds); break;
-      case HecbenchOutcome::Completion: reason = "completion only"; break;
-      case HecbenchOutcome::Pass: reason = "pass"; break;
-    }
-  }
-  if (status == SkipReturnCode && !gtest && !deqp && !hecbench) reason = listed ? "package skip" : catchSkipReason(readFile(outputPath));
-  std::string message = std::move(reason);
-  if (message.empty()) {
-    message = process.timedOut ? fmt::format("timed out after {} s (exit status {})", test.timeoutSeconds, status)
-                               : fmt::format("exit status {}", status);
-  }
-  if (!classification.empty()) record += fmt::format("{}: {}\n", listed ? "classification" : "hecbench", classification);
-  record += fmt::format("conformance: {}, full output: {}\n", message, outputPath.string());
-  return {.status = status, .output = std::move(record), .message = std::move(message), .classification = std::move(classification)};
+  return concludeCase(test, selected->get().format, status, process.timedOut, std::move(reason), std::move(record), outputPath);
 }
 namespace {
 bool skipped(const CaseResult &result) { return result.status == SkipReturnCode; }
@@ -1091,10 +1120,106 @@ void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double time
                            std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count())
             << std::flush;
 }
-std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute) {
+void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> tests, const CaseSink &sink) {
+  const auto alone = [&](size_t position) {
+    const auto begin = std::chrono::steady_clock::now();
+    CaseResult result;
+    try {
+      result = executeCase(config, tests[position]);
+    } catch (const std::exception &error) {
+      result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
+    }
+    result.elapsed = std::chrono::steady_clock::now() - begin;
+    sink(position, std::move(result));
+  };
+  std::vector<size_t> pending;
+  for (size_t position = 0; position < tests.size(); ++position)
+    if (auto early = preflight(config, tests[position])) sink(position, std::move(*early));
+    else pending.push_back(position);
+  const auto programs = pending.empty() ? std::vector<TestProgram>{} : testPrograms(config.directory, Workload{});
+  const auto selected = pending.empty() ? std::nullopt : programs ^ find_cref([&](const TestProgram &candidate) {
+                                                           return candidate.name == tests[pending.front()].program;
+                                                         });
+  if (pending.size() < 2 || !selected || selected->get().format != "cases") {
+    for (const auto position : pending)
+      alone(position);
+    return;
+  }
+  const auto &first = tests[pending.front()];
+  const auto report = fs::path(config.reportDirectory) / first.program / fmt::to_string(first.index);
+  fs::create_directories(report);
+  const auto casesPath = report / "batch.cases";
+  {
+    std::ofstream cases(casesPath, std::ios::binary | std::ios::trunc);
+    for (const auto position : pending)
+      cases << tests[position].identity << '\n';
+    if (!cases) throw std::runtime_error("cannot write batch case list: " + casesPath.string());
+  }
+  auto environment = config.environment;
+  environment[environment::TestName] = first.identity;
+  environment[environment::ReportDir] = report.string();
+  const auto workingDirectory = config.programDirectories ^ get_maybe(first.program)
+                                ^ map([](const auto &directory) { return fs::path(directory); }) ^ get_or_else(report);
+  std::map<std::string_view, size_t> positions;
+  uint32_t longest = 0;
+  for (const auto position : pending) {
+    positions[tests[position].identity] = position;
+    longest = std::max(longest, tests[position].timeoutSeconds);
+  }
+  std::vector<bool> finished(tests.size(), false);
+  std::optional<size_t> current;
+  std::string text;
+  const auto start = std::chrono::steady_clock::now();
+  auto mark = start;
+  const auto conclude = [&](size_t position, int32_t status) {
+    const auto &test = tests[position];
+    const auto now = std::chrono::steady_clock::now();
+    const auto directory = fs::path(config.reportDirectory) / test.program / fmt::to_string(test.index);
+    fs::create_directories(directory);
+    const auto outputPath = directory / "output.log";
+    std::ofstream(outputPath, std::ios::binary | std::ios::trunc) << text;
+    auto result = concludeCase(test, "cases", status, false, {}, {}, outputPath);
+    result.elapsed = now - mark;
+    mark = now;
+    finished[position] = true;
+    current.reset();
+    sink(position, std::move(result));
+  };
+  const auto watch = [&](std::string_view line) -> std::optional<std::chrono::milliseconds> {
+    if (line.starts_with(BatchBeginMarker)) {
+      if (const auto found = positions.find(line.substr(BatchBeginMarker.size())); found != positions.end() && !finished[found->second]) {
+        current = found->second;
+        text.clear();
+        return std::chrono::seconds(tests[found->second].timeoutSeconds);
+      }
+    } else if (current && line.starts_with(BatchEndMarker)) {
+      const auto digits = line.substr(BatchEndMarker.size());
+      int32_t status = 0;
+      if (const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), status);
+          error == std::errc{} && end == digits.data() + digits.size()) {
+        conclude(*current, status);
+        return std::chrono::seconds(longest);
+      }
+    }
+    if (current) text.append(line).push_back('\n');
+    return std::nullopt;
+  };
+  std::ofstream log(report / "batch.log", std::ios::binary | std::ios::trunc);
+  (void)runProcess(launched(config.launcher, {selected->get().path.string(), "--batch", casesPath.string()}), workingDirectory, environment,
+                   std::chrono::seconds(longest), "[" + first.program + " batch] ", false, &log, watch);
+  for (const auto position : pending) {
+    if (finished[position]) continue;
+    if (const auto signal = Interruption::signal())
+      sink(position, {.status = 128 + signal, .output = "conformance: interrupted\n", .message = {}, .classification = {}});
+    else alone(position);
+  }
+}
+std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute,
+                                 const BatchExecutor &executeBatch) {
   const Interruption interruption;
   const auto total = targets ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
   auto results = targets ^ map([](const TargetExecution &target) { return std::vector<std::optional<CaseResult>>(target.tests.size()); });
+  auto claimed = targets ^ map([](const TargetExecution &target) { return std::vector<bool>(target.tests.size(), false); });
   // Cases on one physical device run one at a time; a device without an identity excludes every identified one.
   const auto resource = [](const TargetExecution &target) {
     return target.config.deviceLock ? std::string_view(target.config.device) : std::string_view{};
@@ -1113,8 +1238,8 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
     return next[index] < tests.size() && suiteExclusiveCase(tests[next[index]].program, tests[next[index]].identity);
   };
   // Interleave targets so every route makes progress from the start. A pending exclusive head holds back
-  // other starts, so a stream of ordinary cases cannot starve it.
-  const auto claim = [&] -> std::optional<std::pair<size_t, size_t>> {
+  // other starts, so a stream of ordinary cases cannot starve it. A case with a group takes the rest of its group with it.
+  const auto claim = [&] -> std::optional<std::pair<size_t, std::vector<size_t>>> {
     if (exclusiveActive) return std::nullopt;
     bool exclusivePending = false;
     for (size_t index = 0; index < targets.size(); ++index)
@@ -1127,48 +1252,85 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
       if (exclusive ? started != finished : exclusivePending) continue;
       if (!device.empty()) busy.insert(device);
       cursor = index + 1;
-      ++started;
+      const auto &tests = targets[index].tests;
+      std::vector<size_t> members{next[index]};
+      const auto &head = tests[members.front()];
+      if (executeBatch && head.group && !exclusive)
+        for (auto position = members.front() + 1; position < tests.size(); ++position)
+          if (!claimed[index][position] && tests[position].program == head.program && tests[position].group == head.group)
+            members.push_back(position);
+      for (const auto position : members)
+        claimed[index][position] = true;
+      while (next[index] < tests.size() && claimed[index][next[index]])
+        ++next[index];
+      started += members.size();
       exclusiveActive = exclusive;
-      return std::pair{index, next[index]++};
+      return std::pair{index, std::move(members)};
     }
     return std::nullopt;
   };
   std::mutex mutex;
   std::condition_variable released;
   const auto width = fmt::to_string(total).size();
+  const auto publish = [&](size_t index, size_t position, CaseResult result) {
+    const auto &test = targets[index].tests[position];
+    std::osyncstream message(std::cout);
+    message << fmt::format("[{:>{}}/{}] {}/{}/{} ... {} {:.2f} s\n", ++finished, width, total, targets[index].id, test.program,
+                           test.identity, resultLabel(result), result.elapsed.count());
+    if (failed(result)) message << result.output;
+    message << std::flush;
+    results[index][position] = std::move(result);
+    released.notify_all();
+  };
+  const auto failure = [](const std::exception &error) {
+    return CaseResult{.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
+  };
   {
     std::vector<std::jthread> workers;
     for (size_t worker = 0; worker < std::min<size_t>(jobs, total); ++worker)
       workers.emplace_back([&] {
         std::unique_lock lock(mutex);
         for (;;) {
-          std::optional<std::pair<size_t, size_t>> claimed;
+          std::optional<std::pair<size_t, std::vector<size_t>>> taken;
           // The signal handler cannot notify, so waiting polls for interruption.
-          while (started < total && !Interruption::stopRequested() && !(claimed = claim()))
+          while (started < total && !Interruption::stopRequested() && !(taken = claim()))
             released.wait_for(lock, 100ms);
-          if (!claimed) return;
-          const auto [index, position] = *claimed;
+          if (!taken) return;
+          const auto &[index, members] = *taken;
           const auto &target = targets[index];
-          const auto &test = target.tests[position];
           lock.unlock();
-          const auto begin = std::chrono::steady_clock::now();
-          CaseResult result;
-          try {
-            result = execute(target.config, test);
-          } catch (const std::exception &error) {
-            result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
+          if (executeBatch && target.tests[members.front()].group && members.size() > 1) {
+            std::vector<ScheduledCase> batch;
+            for (const auto position : members)
+              batch.push_back(target.tests[position]);
+            std::vector<bool> done(members.size(), false);
+            const auto sink = [&](size_t position, CaseResult result) {
+              const std::scoped_lock guard(mutex);
+              done[position] = true;
+              publish(index, members[position], std::move(result));
+            };
+            try {
+              executeBatch(target.config, batch, sink);
+            } catch (const std::exception &error) {
+              for (size_t position = 0; position < members.size(); ++position)
+                if (!done[position]) sink(position, failure(error));
+            }
+            lock.lock();
+          } else {
+            const auto begin = std::chrono::steady_clock::now();
+            CaseResult result;
+            try {
+              result = execute(target.config, target.tests[members.front()]);
+            } catch (const std::exception &error) {
+              result = failure(error);
+            }
+            result.elapsed = std::chrono::steady_clock::now() - begin;
+            if (Interruption::takeStoppedProcess()) result = notRunResult(result.elapsed);
+            lock.lock();
+            publish(index, members.front(), std::move(result));
           }
-          result.elapsed = std::chrono::steady_clock::now() - begin;
-          if (Interruption::takeStoppedProcess()) result = notRunResult(result.elapsed);
-          lock.lock();
           if (const auto device = resource(target); !device.empty()) busy.erase(device);
           exclusiveActive = false;
-          std::osyncstream message(std::cout);
-          message << fmt::format("[{:>{}}/{}] {}/{}/{} ... {} {:.2f} s\n", ++finished, width, total, target.id, test.program, test.identity,
-                                 resultLabel(result), result.elapsed.count());
-          if (failed(result)) message << result.output;
-          message << std::flush;
-          results[index][position] = std::move(result);
           released.notify_all();
         }
       });
@@ -1299,7 +1461,7 @@ int32_t run(RunOptions configuration) {
   if (prepared.empty()) throw std::runtime_error("conformance workload selected no tests: " + configuration.workload);
   warmUpJit(prepared, static_cast<uint32_t>(jobCount), configuration.timeoutScale, executeCase);
   const auto executed = std::chrono::steady_clock::now();
-  const auto results = runCases(prepared, static_cast<uint32_t>(jobCount), executeCase);
+  const auto results = runCases(prepared, static_cast<uint32_t>(jobCount), executeCase, executeBatch);
   writeJunit(reports / "junit.xml", results);
   const auto total = prepared ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
   const auto skips = results ^ count([](const CaseReport &report) { return skipped(report.result); });

@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <functional>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -43,14 +44,18 @@ class LineSink {
   std::string prefix, pending;
   std::string *capture;
   std::ostream *log;
+  std::function<void(std::string_view)> observe;
 
-  void emit(std::string_view line) { std::osyncstream(*stream) << prefix << line << '\n' << std::flush; }
+  void emit(std::string_view line) {
+    if (stream) std::osyncstream(*stream) << prefix << line << '\n' << std::flush;
+    if (observe) observe(line);
+  }
 
 public:
   bool overflow = false;
 
-  LineSink(std::ostream *stream, std::string prefix, std::string *capture, std::ostream *log)
-      : stream(stream), prefix(std::move(prefix)), capture(capture), log(log) {}
+  LineSink(std::ostream *stream, std::string prefix, std::string *capture, std::ostream *log, std::function<void(std::string_view)> observe)
+      : stream(stream), prefix(std::move(prefix)), capture(capture), log(log), observe(std::move(observe)) {}
   void write(const uint8_t *data, size_t size) {
     if (log) {
       log->write(reinterpret_cast<const char *>(data), static_cast<std::streamsize>(size));
@@ -60,7 +65,7 @@ public:
       if (capture->size() + size > size_t{128} * 1024 * 1024) overflow = true;
       else if (!overflow) capture->append(reinterpret_cast<const char *>(data), size);
     }
-    if (!stream) return;
+    if (!stream && !observe) return;
     pending.append(reinterpret_cast<const char *>(data), size);
     size_t begin = 0;
     for (auto end = pending.find('\n'); end != std::string::npos; end = pending.find('\n', begin)) {
@@ -71,7 +76,7 @@ public:
     if (pending.size() > 16384) finish();
   }
   void finish() {
-    if (stream && !pending.empty()) {
+    if ((stream || observe) && !pending.empty()) {
       emit(pending);
       pending.clear();
     }
@@ -160,11 +165,11 @@ bool Interruption::takeStoppedProcess() { return std::exchange(processStopped, f
 
 ProcessResult runProcess(const std::vector<std::string> &command, const std::filesystem::path &directory,
                          const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
-                         const std::string &prefix, bool captureOutput, std::ostream *outputLog) {
+                         const std::string &prefix, bool captureOutput, std::ostream *outputLog, const LineWatcher &watcher) {
   if (command.empty() || timeout.count() <= 0 || timeout.count() > INT32_MAX)
     throw std::invalid_argument("invalid process command or timeout");
   const auto working = directory.string();
-  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  auto deadline = std::chrono::steady_clock::now() + timeout;
 
   std::vector<std::string> argumentStorage(command);
   auto arguments = cStrings(argumentStorage);
@@ -175,8 +180,16 @@ ProcessResult runProcess(const std::vector<std::string> &command, const std::fil
 
   std::string output;
   std::string errorOutput;
-  LineSink stdoutSink(captureOutput || outputLog ? nullptr : &std::cout, prefix, captureOutput ? &output : nullptr, outputLog);
-  LineSink stderrSink(captureOutput || outputLog ? nullptr : &std::cerr, prefix, captureOutput ? &errorOutput : nullptr, outputLog);
+  const auto observe = [&](std::string_view line) {
+    if (const auto remaining = watcher(line)) {
+      timeout = *remaining;
+      deadline = std::chrono::steady_clock::now() + timeout;
+    }
+  };
+  const auto observer = watcher ? std::function<void(std::string_view)>(observe) : std::function<void(std::string_view)>();
+  LineSink stdoutSink(captureOutput || outputLog ? nullptr : &std::cout, prefix, captureOutput ? &output : nullptr, outputLog, observer);
+  LineSink stderrSink(captureOutput || outputLog ? nullptr : &std::cerr, prefix, captureOutput ? &errorOutput : nullptr, outputLog,
+                      observer);
 
   const auto completed = [&](int32_t status, bool timedOut = false) {
     if (stdoutSink.overflow || stderrSink.overflow)

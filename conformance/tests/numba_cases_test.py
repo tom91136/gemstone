@@ -21,6 +21,34 @@ sys.stdout.write(os.environ["FAKE_PYTEST_OUTPUT"] + "\\n")
 sys.exit(int(os.environ["FAKE_PYTEST_STATUS"]))
 """
 
+FAKE_PYTEST_PACKAGE = """
+import json
+import os
+import types
+
+
+def main(args, plugins=()):
+    with open(os.environ["FAKE_PYTEST_ARGV"], "w") as handle:
+        json.dump(list(args), handle)
+    for event in json.loads(os.environ.get("FAKE_PYTEST_EVENTS", "[]")):
+        for plugin in plugins:
+            if event["event"] == "start":
+                plugin.pytest_runtest_logstart(event["nodeid"], None)
+            else:
+                report = types.SimpleNamespace(
+                    when=event["when"],
+                    passed=event["outcome"] == "passed",
+                    failed=event["outcome"] == "failed",
+                    skipped=event["outcome"] == "skipped",
+                    longreprtext=event.get("text", ""),
+                    sections=[tuple(section) for section in event.get("sections", [])],
+                )
+                if event.get("xfail"):
+                    report.wasxfail = ""
+                plugin.pytest_runtest_logreport(report)
+    return int(os.environ.get("FAKE_PYTEST_STATUS", "0"))
+"""
+
 FAKE_DRIVER = """
 import os
 import enum
@@ -61,7 +89,7 @@ class NumbaCases(unittest.TestCase):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         root = self.directory.name
-        self.write("pytest/__init__.py", "")
+        self.write("pytest/__init__.py", FAKE_PYTEST_PACKAGE)
         self.write("pytest/__main__.py", FAKE_PYTEST)
         self.write("numba/__init__.py", "")
         self.write("numba/cuda/__init__.py", "")
@@ -133,7 +161,9 @@ class NumbaCases(unittest.TestCase):
     def test_listing_collects_with_the_shipped_configuration(self):
         status, output = self.run_script(["--list"], "cudapy/test_x.py::T::test")
         self.assertEqual(status, 0, output)
-        self.assertIn("cudapy/test_x.py::T::test", output)
+        self.assertIn("cudapy/test_x.py::T::test\tcudapy/test_x.py\n", output)
+        self.assertIn("inventory\n", output)
+        self.assertIn("smoke/vector_add\n", output)
         arguments = self.pytest_arguments()
         self.assertIn("--collect-only", arguments)
         self.assertUsesShippedConfiguration(arguments)
@@ -181,6 +211,95 @@ class NumbaCases(unittest.TestCase):
         status, output = self.run_case("cudapy/test_x.py::T::test", "AssertionError: 3 != 4\n1 failed", 1)
         self.assertEqual(status, 1, output)
         self.assertEqual(self.classification(output), "unclassified")
+
+    def run_batch(self, cases, events):
+        path = os.path.join(self.directory.name, "cases.txt")
+        with open(path, "w") as handle:
+            handle.write("".join(case + "\n" for case in cases))
+        environment = dict(self.environment, FAKE_PYTEST_EVENTS=json.dumps(events))
+        completed = subprocess.run(
+            [sys.executable, SCRIPT, "--batch", path],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=environment,
+        )
+        return completed.returncode, completed.stdout
+
+    def batch_records(self, output):
+        records = []
+        for line in output.splitlines():
+            if line.startswith("conformance-case-begin: "):
+                records.append([line.split(": ", 1)[1], [], None])
+            elif line.startswith("conformance-case-end: "):
+                records[-1][2] = int(line.split(": ", 1)[1])
+            elif records and records[-1][2] is None:
+                records[-1][1].append(line)
+        return records
+
+    @staticmethod
+    def phases(nodeid, call="passed", setup="passed", text="", sections=(), xfail=False):
+        events = [{"event": "start", "nodeid": nodeid}]
+        events.append({"event": "report", "when": "setup", "outcome": setup})
+        if setup == "passed":
+            events.append(
+                {"event": "report", "when": "call", "outcome": call, "text": text, "sections": list(sections), "xfail": xfail}
+            )
+        events.append({"event": "report", "when": "teardown", "outcome": "passed"})
+        return events
+
+    def test_batch_runs_every_case_in_one_pytest_with_the_shipped_configuration(self):
+        cases = ["cudapy/test_x.py::T::a", "cudapy/test_x.py::T::b[1]"]
+        events = self.phases(cases[0]) + self.phases(cases[1])
+        status, output = self.run_batch(cases, events)
+        self.assertEqual(status, 0, output)
+        arguments = self.pytest_arguments()
+        self.assertUsesShippedConfiguration(arguments)
+        self.assertEqual(arguments[-2:], cases)
+        self.assertIn("no:terminal", arguments)
+        self.assertEqual([(name, code) for name, _, code in self.batch_records(output)], [(cases[0], 0), (cases[1], 0)])
+
+    def test_batch_failure_prints_its_text_and_classification_before_its_end_marker(self):
+        cases = ["cudapy/test_x.py::T::a", "cudapy/test_x.py::T::b", "cudapy/test_x.py::T::c"]
+        events = (
+            self.phases(cases[0])
+            + self.phases(cases[1], call="failed", text="numba.cuda.cudadrv.driver.CudaAPIError: CUDA_ERROR_NOT_SUPPORTED")
+            + self.phases(cases[2], call="failed", text="AssertionError: 3 != 4", sections=[("Captured stdout call", "noise")])
+        )
+        status, output = self.run_batch(cases, events)
+        self.assertEqual(status, 0, output)
+        first, second, third = self.batch_records(output)
+        self.assertEqual(first, [cases[0], [], 0])
+        self.assertEqual(second[2], 1)
+        self.assertIn("CUDA_ERROR_NOT_SUPPORTED", "\n".join(second[1]))
+        self.assertEqual(self.classification("\n".join(second[1])), "emulator defect")
+        self.assertEqual(third[2], 1)
+        self.assertIn("noise", "\n".join(third[1]))
+        self.assertNotIn("CUDA_ERROR", "\n".join(third[1]))
+        self.assertEqual(self.classification("\n".join(third[1])), "unclassified")
+
+    def test_batch_skips_report_the_skip_status_and_xfails_pass(self):
+        cases = ["cudapy/test_x.py::T::a", "cudapy/test_x.py::T::b", "cudapy/test_x.py::T::c"]
+        events = (
+            self.phases(cases[0], setup="skipped")
+            + self.phases(cases[1], call="skipped", xfail=True)
+            + self.phases(cases[2], call="skipped")
+        )
+        status, output = self.run_batch(cases, events)
+        self.assertEqual(status, 0, output)
+        self.assertEqual([code for _, _, code in self.batch_records(output)], [SKIP_STATUS, 0, SKIP_STATUS])
+
+    def test_batch_failure_in_teardown_fails_the_case(self):
+        case = "cudapy/test_x.py::T::a"
+        events = [
+            {"event": "start", "nodeid": case},
+            {"event": "report", "when": "setup", "outcome": "passed"},
+            {"event": "report", "when": "call", "outcome": "passed"},
+            {"event": "report", "when": "teardown", "outcome": "failed", "text": "RuntimeError: teardown"},
+        ]
+        status, output = self.run_batch([case], events)
+        self.assertEqual(status, 0, output)
+        self.assertEqual(self.batch_records(output)[0][2], 1)
 
     def test_inventory_passes_when_every_numba_entry_point_resolves(self):
         status, output = self.run_case("inventory", absent="cuCalledByNobody")

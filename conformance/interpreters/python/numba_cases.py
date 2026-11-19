@@ -3,6 +3,8 @@
 The program speaks the conformance `cases` protocol: --list prints one case per line, --case runs one of them.
 Cases are the package's own pytest node identifiers (paths relative to numba/cuda/tests) plus a driver entry-point
 inventory and a kernel smoke case. Every failure prints a conformance-classification marker derived from its output.
+A pytest case lists its test module as its batch group, and --batch runs the cases named in a file in one pytest process,
+bracketing each with conformance-case-begin and conformance-case-end markers.
 """
 
 import argparse
@@ -160,6 +162,48 @@ def pytest_outcomes(output):
     return {outcome: int(count) for count, outcome in re.findall(r"(\d+) (passed|failed|skipped|xfailed|xpassed|errors?)", summary)}
 
 
+class CaseMarkers:
+    def __init__(self, stream):
+        self.stream = stream
+        self.text = []
+
+    def emit(self, text):
+        self.stream.write(text + "\n")
+        self.stream.flush()
+
+    def pytest_runtest_logstart(self, nodeid, location):
+        self.text = []
+        self.failed = self.skipped = self.passed = False
+        self.emit(f"conformance-case-begin: {nodeid}")
+
+    def pytest_runtest_logreport(self, report):
+        if report.failed:
+            self.failed = True
+            sections = "".join(f"\n----- {name} -----\n{content}" for name, content in report.sections)
+            self.text.append(report.longreprtext + sections)
+            self.emit(self.text[-1])
+        elif report.skipped and not hasattr(report, "wasxfail"):
+            self.skipped = True
+        elif report.passed and report.when == "call":
+            self.passed = True
+        if report.when == "teardown":
+            if self.failed:
+                self.emit(f"conformance-classification: {classify(chr(10).join(self.text))}")
+            status = 1 if self.failed else SKIP_STATUS if self.skipped and not self.passed else 0
+            self.emit(f"conformance-case-end: {status}")
+
+
+def run_batch(root, cases_path):
+    import pytest
+
+    with open(cases_path) as handle:
+        identities = [line.rstrip("\n") for line in handle if line.strip()]
+    stream = os.fdopen(os.dup(sys.stdout.fileno()), "w")
+    os.chdir(root)
+    plugins = ["-p", "numba_cases_pytest", "-p", "no:cacheprovider", "-p", "no:terminal"]
+    pytest.main(["-c", PYTEST_CONFIG, "--rootdir", root, *plugins, "-q", "--no-header", *identities], plugins=[CaseMarkers(stream)])
+
+
 def run_pytest(root, identity):
     completed = subprocess.run(
         pytest_command(root, "-q", "--no-header", identity),
@@ -183,6 +227,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--case")
+    parser.add_argument("--batch")
     arguments = parser.parse_args()
     root = tests_root()
     if arguments.list:
@@ -190,14 +235,17 @@ def main():
             print("inventory")
             print("smoke/vector_add")
             for case in list_pytest_cases(root):
-                print(case)
+                print(f"{case}\t{case.split('::', 1)[0]}")
         except BrokenPipeError:
             devnull = os.open(os.devnull, os.O_WRONLY)
             os.dup2(devnull, sys.stdout.fileno())
             sys.exit(0)
         return
+    if arguments.batch is not None:
+        run_batch(root, arguments.batch)
+        return
     if arguments.case is None:
-        parser.error("--case is required unless --list is given")
+        parser.error("--case is required unless --list or --batch is given")
     try:
         if arguments.case == "inventory":
             inventory()

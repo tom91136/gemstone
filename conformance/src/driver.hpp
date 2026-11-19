@@ -115,6 +115,8 @@ struct ScheduledCase {
   std::string identity, program;
   uint32_t timeoutSeconds, index, count;
   std::optional<DiscoveryFailure> discoveryFailure = std::nullopt;
+  // Cases of one program with the same group run in one process.
+  std::optional<std::string> group = std::nullopt;
 };
 struct TargetExecution {
   std::string id;
@@ -147,6 +149,13 @@ struct CaseReport {
   CaseResult result;
 };
 using CaseExecutor = std::function<CaseResult(const ExecutionConfig &, const ScheduledCase &)>;
+using CaseSink = std::function<void(size_t position, CaseResult result)>;
+using BatchExecutor = std::function<void(const ExecutionConfig &, std::span<const ScheduledCase>, const CaseSink &)>;
+// Sees every output line of a process; a returned value replaces the time the process has left.
+using LineWatcher = std::function<std::optional<std::chrono::milliseconds>(std::string_view line)>;
+struct ListedCase {
+  std::string name, group;
+};
 // While any instance lives, SIGINT and SIGTERM cancel child processes instead of terminating the driver.
 class Interruption {
 public:
@@ -168,7 +177,7 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
                                          const std::map<std::string, std::string> &environment, const std::string &id,
                                          const std::filesystem::path &reports);
 std::vector<std::string> catchCaseNames(std::string_view json, std::string_view program);
-std::vector<std::string> listedCaseNames(std::string_view listing, std::string_view program);
+std::vector<ListedCase> listedCases(std::string_view listing, std::string_view program);
 std::string caseClassification(std::string_view output);
 std::string deqpExactCaseList(const std::vector<std::string> &names);
 std::vector<std::string> deqpMustpassCases(const std::filesystem::path &root, const std::filesystem::path &manifest,
@@ -197,11 +206,14 @@ void applyDeviceProbe(ExecutionConfig &configuration, const conformance::DeviceP
 std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, const Workload &workload,
                                              const profile::ResolvedTarget &target, const std::filesystem::path &runDirectory);
 void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double timeoutScale, const CaseExecutor &execute);
-std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute);
+std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute,
+                                 const BatchExecutor &executeBatch = {});
 ProcessResult runProcess(const std::vector<std::string> &command, const std::filesystem::path &directory,
                          const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
-                         const std::string &prefix = {}, bool captureOutput = false, std::ostream *outputLog = nullptr);
+                         const std::string &prefix = {}, bool captureOutput = false, std::ostream *outputLog = nullptr,
+                         const LineWatcher &watcher = {});
 CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test);
+void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> tests, const CaseSink &sink);
 int32_t run(RunOptions configuration);
 } // namespace conformance::driver
 

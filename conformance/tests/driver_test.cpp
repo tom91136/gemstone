@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -664,16 +665,30 @@ TEST_CASE("a program whose discovery fails is one failed case and the others sti
 }
 
 TEST_CASE("case inventories accept package test identifiers and reject malformed lines", "[driver]") {
-  const auto names = listedCaseNames("# collected by the package suite\n"
-                                     "cudadrv/test_driver.py::test_init\n"
-                                     "\n"
-                                     "cudapy/test_atomics.py::TestAtomics::test_add[1]\n",
-                                     "python_numba");
-  CHECK(names == std::vector<std::string>{"cudadrv/test_driver.py::test_init", "cudapy/test_atomics.py::TestAtomics::test_add[1]"});
-  CHECK(listedCaseNames("", "empty").empty());
-  CHECK_THROWS(listedCaseNames("same\nsame\n", "duplicate"));
-  CHECK_THROWS(listedCaseNames("tab\tinside\n", "tab"));
-  CHECK_THROWS(listedCaseNames(std::string_view{"nul\0inside\n", 11}, "nul"));
+  const auto cases = listedCases("# collected by the package suite\n"
+                                 "cudadrv/test_driver.py::test_init\n"
+                                 "\n"
+                                 "cudapy/test_atomics.py::TestAtomics::test_add[1]\n",
+                                 "python_numba");
+  REQUIRE(cases.size() == 2);
+  CHECK(cases[0].name == "cudadrv/test_driver.py::test_init");
+  CHECK(cases[1].name == "cudapy/test_atomics.py::TestAtomics::test_add[1]");
+  CHECK(cases[0].group.empty());
+  CHECK(listedCases("", "empty").empty());
+  CHECK_THROWS(listedCases("same\nsame\n", "duplicate"));
+  CHECK_THROWS(listedCases("tab\tinside\tmore\n", "tab"));
+  CHECK_THROWS(listedCases("tab\t\n", "empty group"));
+  CHECK_THROWS(listedCases(std::string_view{"nul\0inside\n", 11}, "nul"));
+}
+
+TEST_CASE("case inventories carry the batch group of each case", "[driver]") {
+  const auto cases = listedCases("a.py::one\ta.py\na.py::two\ta.py\nb.py::one\tb.py\nsolo\n", "python_numba");
+  REQUIRE(cases.size() == 4);
+  CHECK(cases[0].name == "a.py::one");
+  CHECK(cases[0].group == "a.py");
+  CHECK(cases[1].group == "a.py");
+  CHECK(cases[2].group == "b.py");
+  CHECK(cases[3].group.empty());
 }
 
 TEST_CASE("case classification markers carry known failure kinds only", "[driver]") {
@@ -1789,4 +1804,237 @@ TEST_CASE("driver lists selected programs for routes and workload", "[driver][li
   REQUIRE(result.status == 0);
   CHECK(result.output == "first_prog\n");
   CHECK_FALSE(fs::exists(output));
+}
+
+namespace {
+struct BatchProgram {
+  TemporaryDirectory directory;
+  fs::path artifact = directory.path / "artifact";
+  fs::path reports = directory.path / "reports";
+  ExecutionConfig configuration;
+
+  explicit BatchProgram(std::string_view body) {
+    fs::create_directories(artifact);
+    fs::create_directories(reports);
+    std::ofstream(artifact / "test-programs.txt") << "batchy\t2\tcases\n";
+    const auto path = artifact / "batchy";
+    std::ofstream(path) << "#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/invocations\"\n" << body;
+    fs::permissions(path, fs::perms::owner_exec | fs::perms::owner_read, fs::perm_options::add);
+    configuration.directory = artifact.string();
+    configuration.reportDirectory = (reports / "run").string();
+    configuration.deviceLock = false;
+  }
+  [[nodiscard]] static std::vector<ScheduledCase> cases(const std::vector<std::string> &names, uint32_t timeoutSeconds = 10) {
+    std::vector<ScheduledCase> result;
+    result.reserve(names.size());
+    for (uint32_t index = 0; index < names.size(); ++index)
+      result.push_back({.identity = names[index],
+                        .program = "batchy",
+                        .timeoutSeconds = timeoutSeconds,
+                        .index = index,
+                        .count = static_cast<uint32_t>(names.size()),
+                        .group = "g"});
+    return result;
+  }
+  [[nodiscard]] std::vector<CaseResult> run(const std::vector<ScheduledCase> &tests) const {
+    std::vector<CaseResult> results(tests.size(), CaseResult{.status = -1, .output = {}, .message = {}, .classification = {}});
+    executeBatch(configuration, tests, [&](size_t position, CaseResult result) { results.at(position) = std::move(result); });
+    return results;
+  }
+  [[nodiscard]] std::vector<std::string> invocations() const {
+    std::vector<std::string> lines;
+    std::istringstream input(read(artifact / "invocations"));
+    for (std::string line; std::getline(input, line);)
+      lines.push_back(line.substr(0, line.find(' ')) + (line.starts_with("--case ") ? line.substr(line.find(' ')) : ""));
+    return lines;
+  }
+  [[nodiscard]] std::string log(uint32_t index) const { return read(reports / "run" / "batchy" / fmt::to_string(index) / "output.log"); }
+};
+constexpr std::string_view BatchBody = R"(
+case "$1" in
+  --batch)
+    while read -r name; do
+      echo "conformance-case-begin: $name"
+      case "$name" in
+        crash*) echo "about to crash $name"; kill -SEGV $$ ;;
+        hang*) echo "hanging $name"; sleep 30 ;;
+        slow*) echo "slow $name"; sleep 1; status=0 ;;
+        fail*) echo "boom $name"; echo "conformance-classification: emulator defect"; status=1 ;;
+        skip*) echo "skipping $name"; status=4 ;;
+        *) echo "ran $name"; status=0 ;;
+      esac
+      echo "conformance-case-end: ${status:-0}"
+    done < "$2" ;;
+  --case)
+    case "$2" in
+      hang*) echo "hanging alone $2"; sleep 30 ;;
+      crash*) echo "alone $2"; echo "conformance-classification: emulator defect"; exit 1 ;;
+      *) echo "alone $2" ;;
+    esac ;;
+esac
+)";
+} // namespace
+
+TEST_CASE("a batch runs its cases in one process and records one result and log per case", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "fail_one", "skip_one", "pass_two"}));
+  REQUIRE(results.size() == 4);
+  CHECK(results[0].status == 0);
+  CHECK(results[1].status == 1);
+  CHECK(results[1].classification == "emulator defect");
+  CHECK(results[2].status == SkipReturnCode);
+  CHECK(results[2].message == "package skip");
+  CHECK(results[3].status == 0);
+  CHECK(program.log(0).contains("ran pass_one"));
+  CHECK_FALSE(program.log(0).contains("fail_one"));
+  CHECK(program.log(1).contains("boom fail_one"));
+  CHECK(program.log(1).contains("conformance-classification: emulator defect"));
+  CHECK_FALSE(program.log(1).contains("pass_two"));
+  CHECK(program.log(3).contains("ran pass_two"));
+  CHECK(results[1].output.contains((program.reports / "run" / "batchy" / "1" / "output.log").string()));
+  for (const auto &result : results)
+    CHECK(result.elapsed.count() >= 0.0);
+  CHECK(program.invocations().size() == 1);
+  CHECK(program.invocations()[0] == "--batch");
+}
+
+TEST_CASE("a crashed batch reruns the cases it did not finish one per process", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "crash_two", "pass_three"}));
+  REQUIRE(results.size() == 3);
+  CHECK(results[0].status == 0);
+  CHECK(program.log(0).contains("ran pass_one"));
+  CHECK(results[1].status == 1);
+  CHECK(results[1].classification == "emulator defect");
+  CHECK(program.log(1).contains("alone crash_two"));
+  CHECK_FALSE(program.log(1).contains("about to crash"));
+  CHECK(results[2].status == 0);
+  CHECK(program.log(2).contains("alone pass_three"));
+  CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case crash_two", "--case pass_three"});
+}
+
+TEST_CASE("a batch timeout applies to each case and reruns the unfinished cases", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "hang_two", "pass_three"}, 1));
+  REQUIRE(results.size() == 3);
+  CHECK(results[0].status == 0);
+  CHECK(results[1].status != 0);
+  CHECK(results[1].classification == "time limit");
+  CHECK(results[1].message.contains("timed out after 1 s"));
+  CHECK(results[2].status == 0);
+  CHECK(program.log(2).contains("alone pass_three"));
+  CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case hang_two", "--case pass_three"});
+}
+
+TEST_CASE("a batch whose cases each fit their timeout can exceed it in total", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const auto results = program.run(BatchProgram::cases({"slow_one", "slow_two", "slow_three"}, 2));
+  for (const auto &result : results)
+    CHECK(result.status == 0);
+  CHECK(program.invocations() == std::vector<std::string>{"--batch"});
+  CHECK(results[1].elapsed.count() >= 0.9);
+  CHECK(results[1].elapsed.count() < 2.0);
+}
+
+TEST_CASE("profile skips are resolved before a batch starts", "[driver][batch]") {
+  BatchProgram program(BatchBody);
+  program.configuration.skips = {"skip_me"};
+  const auto results = program.run(BatchProgram::cases({"pass_one", "skip_me", "pass_three"}));
+  CHECK(results[1].status == SkipReturnCode);
+  CHECK(results[1].message == "machine profile");
+  CHECK(read(program.artifact / "invocations").contains("--batch"));
+  CHECK_FALSE(read(program.reports / "run" / "batchy" / "0" / "output.log").contains("skip_me"));
+}
+
+TEST_CASE("process watchers can extend the deadline of a running process", "[driver][process]") {
+  const std::vector<std::string> command{"/bin/sh", "-c", "echo extend; sleep 1.5; echo done"};
+  const auto plain = runProcess(command, fs::temp_directory_path(), baseEnvironment(), 1s, {}, true);
+  CHECK(plain.timedOut);
+  const auto watched = runProcess(command, fs::temp_directory_path(), baseEnvironment(), 1s, {}, true, nullptr,
+                                  [](std::string_view line) -> std::optional<std::chrono::milliseconds> {
+                                    if (line == "extend") return 5000ms;
+                                    return std::nullopt;
+                                  });
+  CHECK_FALSE(watched.timedOut);
+  CHECK(watched.status == 0);
+  CHECK(watched.output.contains("done"));
+}
+
+TEST_CASE("cases of one group run in one batch and other cases run alone", "[driver][batch]") {
+  std::mutex mutex;
+  std::vector<std::string> invocations;
+  TargetExecution target{.id = "t", .config = {}, .tests = {}};
+  target.config.deviceLock = false;
+  const std::vector<std::tuple<std::string, std::string>> cases{{"a1", "a"},  {"b1", "b"}, {"a2", "a"},
+                                                                {"solo", ""}, {"b2", "b"}, {"a3", "a"}};
+  for (uint32_t index = 0; index < cases.size(); ++index)
+    target.tests.push_back({.identity = std::get<0>(cases[index]),
+                            .program = "p",
+                            .timeoutSeconds = 1,
+                            .index = index,
+                            .count = static_cast<uint32_t>(cases.size()),
+                            .group = std::get<1>(cases[index]).empty() ? std::nullopt : std::optional(std::get<1>(cases[index]))});
+  const auto reports = runCases(
+      {target}, 4,
+      [&](const ExecutionConfig &, const ScheduledCase &test) {
+        const std::scoped_lock lock(mutex);
+        invocations.push_back("case:" + test.identity);
+        return CaseResult{.status = 0, .output = {}, .message = {}, .classification = {}};
+      },
+      [&](const ExecutionConfig &, std::span<const ScheduledCase> tests, const CaseSink &sink) {
+        {
+          const std::scoped_lock lock(mutex);
+          invocations.push_back("batch:" + (tests | map([](const ScheduledCase &test) { return test.identity; }) | mk_string(",")));
+        }
+        for (size_t position = 0; position < tests.size(); ++position)
+          sink(position,
+               CaseResult{
+                   .status = tests[position].identity == "a2" ? 1 : 0, .output = {}, .message = {}, .classification = {}, .elapsed = 2s});
+      });
+  invocations = invocations ^ sort();
+  CHECK(invocations == std::vector<std::string>{"batch:a1,a2,a3", "batch:b1,b2", "case:solo"});
+  REQUIRE(reports.size() == 6);
+  CHECK(reports[0].name == "t/p/a1");
+  CHECK(reports[2].name == "t/p/a2");
+  CHECK(reports[2].result.status == 1);
+  CHECK(reports[3].name == "t/p/solo");
+  CHECK(reports[5].name == "t/p/a3");
+  CHECK(reports[1].result.elapsed == 2s);
+}
+
+TEST_CASE("cases of a group fall back to one process each when the runner has no batch executor", "[driver][batch]") {
+  TargetExecution target{.id = "t", .config = {}, .tests = {}};
+  target.config.deviceLock = false;
+  for (uint32_t index = 0; index < 3; ++index)
+    target.tests.push_back(
+        {.identity = fmt::format("c{}", index), .program = "p", .timeoutSeconds = 1, .index = index, .count = 3, .group = "g"});
+  std::atomic<int32_t> calls{0};
+  const auto reports = runCases({target}, 2, [&](const ExecutionConfig &, const ScheduledCase &) {
+    ++calls;
+    return CaseResult{.status = 0, .output = {}, .message = {}, .classification = {}};
+  });
+  CHECK(calls == 3);
+  CHECK(reports.size() == 3);
+}
+
+TEST_CASE("discovery keeps the batch group of listed cases through workload selection", "[driver][batch]") {
+  const TemporaryDirectory directory;
+  const auto artifact = directory.path / "artifact";
+  const auto reports = directory.path / "reports";
+  fs::create_directories(artifact);
+  fs::create_directories(reports);
+  std::ofstream(artifact / "test-programs.txt") << "grouped\t2\tcases\n";
+  const auto path = artifact / "grouped";
+  std::ofstream(path) << "#!/bin/sh\nprintf 'a.py::one\\ta.py\\na.py::two\\ta.py\\nb.py::one\\tb.py\\nsolo\\n'\n";
+  fs::permissions(path, fs::perms::owner_exec | fs::perms::owner_read, fs::perm_options::add);
+  Workload workload;
+  workload.specs = {"*"};
+  workload.includeCases = {"a.py::*", "solo"};
+  const auto tests = discoverCases(RunOptions{}, workload, artifact, {}, "cuda-ptx/sm_89", reports);
+  REQUIRE(tests.size() == 3);
+  CHECK(tests[0].identity == "a.py::one");
+  CHECK(tests[0].group == "a.py");
+  CHECK(tests[1].group == "a.py");
+  CHECK(tests[2].identity == "solo");
+  CHECK_FALSE(tests[2].group.has_value());
 }
