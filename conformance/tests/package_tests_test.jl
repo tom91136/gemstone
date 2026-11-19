@@ -35,4 +35,88 @@ include(joinpath(@__DIR__, "..", "interpreters", "julia", "package_tests.jl"))
             @test cases(output) == ["LD_PRELOAD=", "LD_LIBRARY_PATH=/gemstone/driver", "ROCM_PATH=/gemstone/rocm", "CUDA_VISIBLE_DEVICES=", "HIP_VISIBLE_DEVICES=", "ROCR_VISIBLE_DEVICES="]
         end
     end
+
+    @testset "cases group by their top-level directory" begin
+        @test batch_group("core/array") == "core"
+        @test batch_group("gpuarrays/alloc cache") == "gpuarrays"
+        @test batch_group("libraries/cublas/level1") == "libraries"
+        @test batch_group("array") === nothing
+        @test listing_line("core/array") == "core/array\tcore"
+        @test listing_line("array") == "array"
+    end
+
+    @testset "runner rows become case markers" begin
+        translate = translator(Set(["core/alpha", "core/beta", "core/gamma delta"]))
+        @test translate("core/alpha         (1) \u2502         started at 2026-11-19T22:45:47.666") ==
+              ["conformance-case-begin: core/alpha", "core/alpha         (1) \u2502         started at 2026-11-19T22:45:47.666"]
+        passed = "core/alpha         (1) \u2502     0.08 \u2502     4.95 \u2502   96.81 \u2502   0.00 \u2502  0.0 \u2502       1.72 \u2502   466.16 \u2502"
+        @test translate(passed) == [passed, "conformance-case-end: ?"]
+        failed = "core/beta          (1) \u2502     0.02 \u2502     0.28 \u2502    failed at 2026-11-19T22:45:49.805"
+        @test translate(failed) == [failed, "conformance-case-end: 1"]
+        crashed = "core/beta          (1) \u2502         crashed at 2026-11-19T22:45:49.805"
+        @test translate(crashed) == [crashed, "conformance-case-end: 1"]
+        spaced = "core/gamma delta   (1) \u2502         started at 2026-11-19T22:45:49.831"
+        @test translate(spaced)[1] == "conformance-case-begin: core/gamma delta"
+        @test translate("    core/alpha       |    1            1  0.1s") == ["    core/alpha       |    1            1  0.1s"]
+        @test translate("other/case          (1) \u2502         started at 2026-11-19T22:45:49.831") ==
+              ["other/case          (1) \u2502         started at 2026-11-19T22:45:49.831"]
+        @test translate("\e[31mcore/beta          (1) \u2502     0.02 \u2502     0.28 \u2502    failed at 2026-11-19T22:45:49.805\e[0m")[2] ==
+              "conformance-case-end: 1"
+    end
+
+    @testset "the summary table says which tests failed" begin
+        output = "noise\nTest Summary:        | Pass  Fail  Error  Total  Time\n  Overall            |    2     1      1      4  7.9s\n    core/alpha       |    1                   1  0.1s\n    core/beta        |          1             1  0.0s\n    core/gamma delta |    1                   1  0.0s\n    core/crashed     |                 1      1  0.0s\n\nError in testset core/beta:\n"
+        names = ["core/alpha", "core/beta", "core/gamma delta", "core/crashed", "core/absent"]
+        @test summary_statuses(output, names) == Dict("core/alpha" => 0, "core/beta" => 1, "core/gamma delta" => 0, "core/crashed" => 1)
+        @test summary_statuses("no table here", names) == Dict{String, Int}()
+    end
+
+    @testset "a batch streams the runner's rows between markers and returns the whole output" begin
+        mktempdir() do directory
+            script = joinpath(directory, "runtests.jl")
+            write(script, """
+                println("jobs: ", join(ARGS, " "))
+                println("core/one          (1) \u2502         started at now")
+                println("core/one          (1) \u2502     0.08 \u2502     4.95 \u2502")
+                println("core/two          (1) \u2502         started at now")
+                println("core/two          (1) \u2502     0.09 \u2502     4.96 \u2502")
+                println("core/three        (1) \u2502         started at now")
+                println(stderr, "core/three        (1) \u2502     0.02 \u2502    failed at now")
+                println("Test Summary:  | Pass  Fail  Total  Time")
+                println("  Overall      |    2     2      4  7.9s")
+                println("    core/one   |    1            1  0.1s")
+                println("    core/two   |          1      1  0.0s")
+                println("    core/three |          1      1  0.0s")
+                exit(1)
+                """)
+            io = IOBuffer()
+            passed, output = run_batch(script, ["core/one", "core/two", "core/three"], io)
+            @test !passed
+            lines = split(String(take!(io)), '\n')
+            @test lines[1] == "jobs: --jobs=1 --verbose core/one core/two core/three"
+            @test lines[2:3] == ["conformance-case-begin: core/one", "core/one          (1) \u2502         started at now"]
+            @test count(==("conformance-case-end: ?"), lines) == 2
+            @test count(==("conformance-case-end: 1"), lines) == 1
+            @test findfirst(==("conformance-case-end: 1"), lines) < findfirst(startswith("Test Summary"), lines)
+            @test lines[end - 2:end - 1] == ["conformance-case-status: 0 core/one", "conformance-case-status: 1 core/two"]
+            @test occursin("Test Summary", output)
+        end
+    end
+
+    @testset "a passing batch settles every provisional case and a failure without a table settles none" begin
+        mktempdir() do directory
+            rows = "println(\"core/one          (1) \\u2502         started at now\")\nprintln(\"core/one          (1) \\u2502     0.08 \\u2502\")\n"
+            good = joinpath(directory, "good.jl")
+            write(good, rows)
+            io = IOBuffer()
+            passed, _ = run_batch(good, ["core/one"], io)
+            @test passed
+            @test occursin("conformance-case-status: 0 core/one", String(take!(io)))
+            bad = joinpath(directory, "bad.jl")
+            write(bad, rows * "exit(1)\n")
+            passed, _ = run_batch(bad, ["core/one"], io)
+            @test !passed
+            @test !occursin("conformance-case-status", String(take!(io)))
+        end
+    end
 end

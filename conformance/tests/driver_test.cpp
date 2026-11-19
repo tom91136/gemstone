@@ -1913,6 +1913,69 @@ TEST_CASE("a crashed batch reruns the cases it did not finish one per process", 
   CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case crash_two", "--case pass_three"});
 }
 
+constexpr std::string_view EpilogueBody = R"(
+case "$1" in
+  --batch)
+    while read -r name; do
+      echo "conformance-case-begin: $name"
+      case "$name" in
+        fail*) echo "row $name"; status=1 ;;
+        *) echo "row $name"; status=0 ;;
+      esac
+      echo "conformance-case-end: ${status:-0}"
+    done < "$2"
+    echo "summary of failures"
+    echo "conformance-classification: emulator defect"
+    exit 1 ;;
+esac
+)";
+
+TEST_CASE("output after the last case of a batch is added to the log of each failed case", "[driver][batch]") {
+  const BatchProgram program(EpilogueBody);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "fail_two", "pass_three"}));
+  REQUIRE(results.size() == 3);
+  CHECK(results[0].status == 0);
+  CHECK_FALSE(program.log(0).contains("summary of failures"));
+  CHECK(results[1].status == 1);
+  CHECK(results[1].classification == "emulator defect");
+  CHECK(program.log(1).contains("row fail_two"));
+  CHECK(program.log(1).contains("summary of failures"));
+  CHECK(results[2].status == 0);
+  CHECK_FALSE(program.log(2).contains("summary of failures"));
+  CHECK(program.invocations() == std::vector<std::string>{"--batch"});
+}
+
+constexpr std::string_view ProvisionalBody = R"(
+case "$1" in
+  --batch)
+    while read -r name; do
+      echo "conformance-case-begin: $name"
+      echo "row $name"
+      echo "conformance-case-end: ?"
+    done < "$2"
+    echo "summary of failures"
+    echo "conformance-case-status: 0 pass_one"
+    echo "conformance-case-status: 1 fail_two"
+    exit 1 ;;
+  --case) echo "alone $2" ;;
+esac
+)";
+
+TEST_CASE("a provisional case end takes its status from the program's closing status line", "[driver][batch]") {
+  const BatchProgram program(ProvisionalBody);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "fail_two", "unknown_three"}));
+  REQUIRE(results.size() == 3);
+  CHECK(results[0].status == 0);
+  CHECK(program.log(0).contains("row pass_one"));
+  CHECK_FALSE(program.log(0).contains("summary of failures"));
+  CHECK(results[1].status == 1);
+  CHECK(program.log(1).contains("row fail_two"));
+  CHECK(program.log(1).contains("summary of failures"));
+  CHECK(results[2].status == 0);
+  CHECK(program.log(2).contains("alone unknown_three"));
+  CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case unknown_three"});
+}
+
 TEST_CASE("a batch timeout concludes the case in flight and reruns only the cases that had not started", "[driver][batch]") {
   const BatchProgram program(BatchBody);
   const auto results = program.run(BatchProgram::cases({"pass_one", "hang_two", "pass_three"}, 1));

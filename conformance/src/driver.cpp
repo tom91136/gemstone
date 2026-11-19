@@ -67,6 +67,8 @@ inline constexpr uint32_t TimeoutReferenceCores = 32;
 namespace {
 inline constexpr std::string_view BatchBeginMarker = "conformance-case-begin: ";
 inline constexpr std::string_view BatchEndMarker = "conformance-case-end: ";
+inline constexpr std::string_view BatchProvisionalEnd = "?";
+inline constexpr std::string_view BatchStatusMarker = "conformance-case-status: ";
 struct TestProgram {
   std::string name;
   fs::path path;
@@ -1169,39 +1171,61 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
   std::vector<bool> finished(tests.size(), false);
   std::optional<size_t> current;
   std::string text;
+  std::string epilogue;
   const auto start = std::chrono::steady_clock::now();
   auto mark = start;
-  const auto conclude = [&](size_t position, int32_t status, bool timedOut) {
-    const auto &test = tests[position];
-    const auto now = std::chrono::steady_clock::now();
+  struct Concluded {
+    size_t position;
+    int32_t status;
+    std::string text;
+    std::chrono::duration<double> elapsed;
+  };
+  std::vector<Concluded> failures;
+  std::vector<Concluded> provisional;
+  const auto record = [&](const Concluded &concluded, bool timedOut) {
+    const auto &test = tests[concluded.position];
     const auto directory = fs::path(config.reportDirectory) / test.program / fmt::to_string(test.index);
     fs::create_directories(directory);
     const auto outputPath = directory / "output.log";
-    std::ofstream(outputPath, std::ios::binary | std::ios::trunc) << text;
-    auto result = concludeCase(test, "cases", status, timedOut, {}, {}, outputPath);
-    result.elapsed = now - mark;
+    std::ofstream(outputPath, std::ios::binary | std::ios::trunc) << concluded.text;
+    auto result = concludeCase(test, "cases", concluded.status, timedOut, {}, {}, outputPath);
+    result.elapsed = concluded.elapsed;
+    sink(concluded.position, std::move(result));
+  };
+  const auto conclude = [&](size_t position, int32_t status, bool timedOut, bool settled = true) {
+    const auto now = std::chrono::steady_clock::now();
+    Concluded concluded{.position = position, .status = status, .text = std::move(text), .elapsed = now - mark};
     mark = now;
     finished[position] = true;
     current.reset();
-    sink(position, std::move(result));
+    text.clear();
+    epilogue.clear();
+    if (!settled) provisional.push_back(std::move(concluded));
+    else if (status != 0 && status != 4 && !timedOut) failures.push_back(std::move(concluded));
+    else record(concluded, timedOut);
   };
   const auto watch = [&](std::string_view line) -> std::optional<std::chrono::milliseconds> {
     if (line.starts_with(BatchBeginMarker)) {
       if (const auto found = positions.find(line.substr(BatchBeginMarker.size())); found != positions.end() && !finished[found->second]) {
         current = found->second;
         text.clear();
+        epilogue.clear();
         return std::chrono::seconds(tests[found->second].timeoutSeconds);
       }
     } else if (current && line.starts_with(BatchEndMarker)) {
       const auto digits = line.substr(BatchEndMarker.size());
       int32_t status = 0;
+      if (digits == BatchProvisionalEnd) {
+        conclude(*current, 0, false, false);
+        return std::chrono::seconds(longest);
+      }
       if (const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), status);
           error == std::errc{} && end == digits.data() + digits.size()) {
         conclude(*current, status, false);
         return std::chrono::seconds(longest);
       }
     }
-    if (current) text.append(line).push_back('\n');
+    (current ? text : epilogue).append(line).push_back('\n');
     return std::nullopt;
   };
   std::ofstream log(report / "batch.log", std::ios::binary | std::ios::trunc);
@@ -1209,6 +1233,32 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
       runProcess(launched(config.launcher, {selected->get().path.string(), "--batch", casesPath.string()}), workingDirectory, environment,
                  std::chrono::seconds(longest), "[" + first.program + " batch] ", false, &log, watch);
   if (process.timedOut && current) conclude(*current, process.status, true);
+  std::map<std::string_view, int32_t> statuses;
+  for (std::string_view rest = epilogue; !rest.empty();) {
+    const auto end = rest.find('\n');
+    const auto line = rest.substr(0, end);
+    rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
+    if (!line.starts_with(BatchStatusMarker)) continue;
+    const auto fields = line.substr(BatchStatusMarker.size());
+    int32_t status = 0;
+    if (const auto [stop, error] = std::from_chars(fields.data(), fields.data() + fields.size(), status);
+        error == std::errc{} && stop != fields.data() + fields.size() && *stop == ' ')
+      statuses[std::string_view(stop + 1, fields.data() + fields.size())] = status;
+  }
+  for (auto &concluded : provisional) {
+    const auto amended = statuses.find(tests[concluded.position].identity);
+    if (amended == statuses.end()) {
+      finished[concluded.position] = false;
+      continue;
+    }
+    concluded.status = amended->second;
+    if (concluded.status != 0 && concluded.status != 4) failures.push_back(std::move(concluded));
+    else record(concluded, false);
+  }
+  for (auto &failure : failures) {
+    failure.text += epilogue;
+    record(failure, false);
+  }
   for (const auto position : pending) {
     if (finished[position]) continue;
     if (const auto signal = Interruption::signal())
