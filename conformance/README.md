@@ -56,6 +56,11 @@ to the device probe. Gemstone runs them as the plain capability, so `GEMSTONE_TA
 capability 9.0 and loads both the suffixed PTX and its cubin. Clang 22 accepts `a` targets but not `f` ones, so the
 `clang` compiler omits the `f` routes.
 
+Each interpreter package attaches to one backend, and the `vendor` routes of that backend run it: Numba and CUDA.jl on
+`cuda`, AMDGPU.jl on `hip` (not `hsa`), and oneAPI.jl on `levelzero` (not `sycl`). The `clang` and `gcc` routes carry
+none, because the interpreter brings its own compiler. Neither do the `a` and `f` CUDA architectures, since they run as
+the same capability as the plain architecture. The mapping lives in `interpreters/Packages.cmake`.
+
 Unsupported compiler and architecture combinations are omitted; a selection with none left fails. The GCC images
 rebuild libgomp 14.2.0 with a default-device fix, and the runner sets `OMP_TARGET_OFFLOAD=MANDATORY` so CPU
 fallback cannot pass.

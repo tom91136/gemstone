@@ -307,7 +307,7 @@ function(add_artifact backend architecture compiler code output supplement_outpu
   artifact_arguments("${backend}" "${architecture}" "${compiler}" "${output}" "${code}" arguments)
   conformance_support_supplement("${backend}" "${architecture}" "${compiler}" supplement)
 
-  conformance_interpreter_packages_for_backend("${backend}" interpreter_packages)
+  conformance_interpreter_packages_for_route("${backend}" "${architecture}" "${compiler}" interpreter_packages)
   string(REPLACE ";" "," interpreter_packages_argument "${interpreter_packages}")
   list(APPEND arguments
     "-DCONFORMANCE_SUPPORT_KEY=${support}"
