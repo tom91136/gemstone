@@ -1913,7 +1913,7 @@ TEST_CASE("a crashed batch reruns the cases it did not finish one per process", 
   CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case crash_two", "--case pass_three"});
 }
 
-TEST_CASE("a batch timeout applies to each case and reruns the unfinished cases", "[driver][batch]") {
+TEST_CASE("a batch timeout concludes the case in flight and reruns only the cases that had not started", "[driver][batch]") {
   const BatchProgram program(BatchBody);
   const auto results = program.run(BatchProgram::cases({"pass_one", "hang_two", "pass_three"}, 1));
   REQUIRE(results.size() == 3);
@@ -1921,9 +1921,10 @@ TEST_CASE("a batch timeout applies to each case and reruns the unfinished cases"
   CHECK(results[1].status != 0);
   CHECK(results[1].classification == "time limit");
   CHECK(results[1].message.contains("timed out after 1 s"));
+  CHECK_FALSE(program.log(1).contains("alone hang_two"));
   CHECK(results[2].status == 0);
   CHECK(program.log(2).contains("alone pass_three"));
-  CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case hang_two", "--case pass_three"});
+  CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case pass_three"});
 }
 
 TEST_CASE("a batch whose cases each fit their timeout can exceed it in total", "[driver][batch]") {
@@ -1975,7 +1976,7 @@ TEST_CASE("cases of one group run in one batch and other cases run alone", "[dri
                             .count = static_cast<uint32_t>(cases.size()),
                             .group = std::get<1>(cases[index]).empty() ? std::nullopt : std::optional(std::get<1>(cases[index]))});
   const auto reports = runCases(
-      {target}, 4,
+      {target}, 1,
       [&](const ExecutionConfig &, const ScheduledCase &test) {
         const std::scoped_lock lock(mutex);
         invocations.push_back("case:" + test.identity);
@@ -2000,6 +2001,32 @@ TEST_CASE("cases of one group run in one batch and other cases run alone", "[dri
   CHECK(reports[3].name == "t/p/solo");
   CHECK(reports[5].name == "t/p/a3");
   CHECK(reports[1].result.elapsed == 2s);
+}
+
+TEST_CASE("a group larger than its share of the job slots splits into several batches", "[driver][batch]") {
+  std::mutex mutex;
+  std::vector<std::string> batches;
+  TargetExecution target{.id = "t", .config = {}, .tests = {}};
+  target.config.deviceLock = false;
+  for (uint32_t index = 0; index < 8; ++index)
+    target.tests.push_back(
+        {.identity = fmt::format("c{}", index), .program = "p", .timeoutSeconds = 1, .index = index, .count = 8, .group = "g"});
+  const auto reports = runCases(
+      {target}, 2,
+      [&](const ExecutionConfig &, const ScheduledCase &) {
+        return CaseResult{.status = 0, .output = {}, .message = {}, .classification = {}};
+      },
+      [&](const ExecutionConfig &, std::span<const ScheduledCase> tests, const CaseSink &sink) {
+        {
+          const std::scoped_lock lock(mutex);
+          batches.push_back(tests | map([](const ScheduledCase &test) { return test.identity; }) | mk_string(","));
+        }
+        for (size_t position = 0; position < tests.size(); ++position)
+          sink(position, CaseResult{.status = 0, .output = {}, .message = {}, .classification = {}});
+      });
+  batches = batches ^ sort();
+  CHECK(batches == std::vector<std::string>{"c0,c1", "c2,c3", "c4,c5", "c6,c7"});
+  CHECK(reports.size() == 8);
 }
 
 TEST_CASE("cases of a group fall back to one process each when the runner has no batch executor", "[driver][batch]") {

@@ -1171,14 +1171,14 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
   std::string text;
   const auto start = std::chrono::steady_clock::now();
   auto mark = start;
-  const auto conclude = [&](size_t position, int32_t status) {
+  const auto conclude = [&](size_t position, int32_t status, bool timedOut) {
     const auto &test = tests[position];
     const auto now = std::chrono::steady_clock::now();
     const auto directory = fs::path(config.reportDirectory) / test.program / fmt::to_string(test.index);
     fs::create_directories(directory);
     const auto outputPath = directory / "output.log";
     std::ofstream(outputPath, std::ios::binary | std::ios::trunc) << text;
-    auto result = concludeCase(test, "cases", status, false, {}, {}, outputPath);
+    auto result = concludeCase(test, "cases", status, timedOut, {}, {}, outputPath);
     result.elapsed = now - mark;
     mark = now;
     finished[position] = true;
@@ -1197,7 +1197,7 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
       int32_t status = 0;
       if (const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), status);
           error == std::errc{} && end == digits.data() + digits.size()) {
-        conclude(*current, status);
+        conclude(*current, status, false);
         return std::chrono::seconds(longest);
       }
     }
@@ -1205,8 +1205,10 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
     return std::nullopt;
   };
   std::ofstream log(report / "batch.log", std::ios::binary | std::ios::trunc);
-  (void)runProcess(launched(config.launcher, {selected->get().path.string(), "--batch", casesPath.string()}), workingDirectory, environment,
-                   std::chrono::seconds(longest), "[" + first.program + " batch] ", false, &log, watch);
+  const auto process =
+      runProcess(launched(config.launcher, {selected->get().path.string(), "--batch", casesPath.string()}), workingDirectory, environment,
+                 std::chrono::seconds(longest), "[" + first.program + " batch] ", false, &log, watch);
+  if (process.timedOut && current) conclude(*current, process.status, true);
   for (const auto position : pending) {
     if (finished[position]) continue;
     if (const auto signal = Interruption::signal())
@@ -1220,6 +1222,9 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
   const auto total = targets ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
   auto results = targets ^ map([](const TargetExecution &target) { return std::vector<std::optional<CaseResult>>(target.tests.size()); });
   auto claimed = targets ^ map([](const TargetExecution &target) { return std::vector<bool>(target.tests.size(), false); });
+  // A batch holds one job slot, so its size is bounded to leave every slot several batches to work through.
+  const size_t slots = size_t{2} * jobs;
+  const auto batchLimit = std::max<size_t>(1, (total + slots - 1) / slots);
   // Cases on one physical device run one at a time; a device without an identity excludes every identified one.
   const auto resource = [](const TargetExecution &target) {
     return target.config.deviceLock ? std::string_view(target.config.device) : std::string_view{};
@@ -1256,7 +1261,7 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
       std::vector<size_t> members{next[index]};
       const auto &head = tests[members.front()];
       if (executeBatch && head.group && !exclusive)
-        for (auto position = members.front() + 1; position < tests.size(); ++position)
+        for (auto position = members.front() + 1; position < tests.size() && members.size() < batchLimit; ++position)
           if (!claimed[index][position] && tests[position].program == head.program && tests[position].group == head.group)
             members.push_back(position);
       for (const auto position : members)
