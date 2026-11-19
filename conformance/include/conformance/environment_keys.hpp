@@ -10,6 +10,7 @@
 namespace conformance::environment {
 inline constexpr char CaseShard[] = "CONFORMANCE_CASE_SHARD";
 inline constexpr char CudaCodeMode[] = "CONFORMANCE_CUDA_CODE_MODE";
+inline constexpr char Deadline[] = "CONFORMANCE_DEADLINE";
 inline constexpr char DeviceCount[] = "CONFORMANCE_DEVICE_COUNT";
 inline constexpr char DevicePattern[] = "CONFORMANCE_DEVICE_PATTERN";
 inline constexpr char InterpreterArchiveDirectory[] = "CONFORMANCE_INTERPRETER_ARCHIVE_DIRECTORY";

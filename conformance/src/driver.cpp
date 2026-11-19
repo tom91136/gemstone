@@ -106,6 +106,17 @@ uint32_t positiveSetting(const char *name, uint32_t fallback) {
     throw std::invalid_argument(fmt::format("{} must be a positive 32-bit integer, not '{}'", name, value));
   return result;
 }
+std::optional<std::chrono::steady_clock::time_point> deadlineSetting(const char *name) {
+  const auto *raw = std::getenv(name);
+  if (!raw || !*raw) return std::nullopt;
+  const std::string_view value(raw);
+  int64_t epoch = 0;
+  const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), epoch);
+  if (error != std::errc{} || end != value.data() + value.size())
+    throw std::invalid_argument(fmt::format("{} must be epoch seconds, not '{}'", name, value));
+  const auto remaining = std::chrono::system_clock::time_point(std::chrono::seconds(epoch)) - std::chrono::system_clock::now();
+  return std::chrono::steady_clock::now() + remaining;
+}
 double positiveScale(const char *name) {
   const auto *raw = std::getenv(name);
   if (!raw || !*raw) return 1.0;
@@ -953,11 +964,23 @@ namespace {
 bool skipped(const CaseResult &result) { return result.status == SkipReturnCode; }
 bool failed(const CaseResult &result) { return result.status != 0 && !skipped(result); }
 const char *resultLabel(const CaseResult &result) {
+  if (result.notRun) return "Not run";
   if (result.status == 0) return result.classification == "completion" ? "Completed" : "Passed";
   return skipped(result) ? "Skipped" : "***Failed";
 }
 std::string failureMessage(const CaseResult &result) {
   return result.message.empty() ? fmt::format("exit status {}", result.status) : result.message;
+}
+std::string stopReason() {
+  const auto signal = Interruption::signal();
+  return signal ? fmt::format("interrupted by signal {}", signal) : std::string("deadline reached");
+}
+int32_t stopStatus() {
+  const auto signal = Interruption::signal();
+  return signal ? 128 + signal : 124;
+}
+CaseResult notRunResult(std::chrono::duration<double> elapsed = {}) {
+  return {.output = {}, .message = stopReason(), .classification = {}, .elapsed = elapsed, .notRun = true};
 }
 std::string xmlEscaped(std::string_view value) {
   std::string result;
@@ -974,7 +997,7 @@ std::string xmlEscaped(std::string_view value) {
 }
 void writeJunit(const fs::path &path, const std::vector<CaseReport> &reports) {
   const auto failures = reports ^ count([](const CaseReport &report) { return failed(report.result); });
-  const auto skips = reports ^ count([](const CaseReport &report) { return skipped(report.result); });
+  const auto skips = reports ^ count([](const CaseReport &report) { return skipped(report.result) || report.result.notRun; });
   const auto seconds = reports ^ fold_left(0.0, [](double sum, const CaseReport &report) { return sum + report.result.elapsed.count(); });
   std::ofstream file(path, std::ios::binary | std::ios::trunc);
   file << fmt::format("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -983,6 +1006,10 @@ void writeJunit(const fs::path &path, const std::vector<CaseReport> &reports) {
   for (const auto &[name, result] : reports) {
     file << fmt::format(R"(  <testcase name="{}" classname="{}" time="{:.3f}")", xmlEscaped(name),
                         xmlEscaped(name.substr(0, name.find('/'))), result.elapsed.count());
+    if (result.notRun) {
+      file << fmt::format(">\n    <skipped message=\"not run: {}\"/>\n  </testcase>\n", xmlEscaped(result.message));
+      continue;
+    }
     if (result.status == 0) {
       file << "/>\n";
       continue;
@@ -1029,7 +1056,7 @@ void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double time
     std::vector<std::jthread> workers;
     for (size_t worker = 0; worker < std::min<size_t>(jobs, pending.size()); ++worker)
       workers.emplace_back([&] {
-        while (!Interruption::signal()) {
+        while (!Interruption::stopRequested()) {
           const auto index = next.fetch_add(1);
           if (index >= pending.size()) break;
           const auto &warmup = pending[index];
@@ -1117,7 +1144,7 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
         for (;;) {
           std::optional<std::pair<size_t, size_t>> claimed;
           // The signal handler cannot notify, so waiting polls for interruption.
-          while (started < total && !Interruption::signal() && !(claimed = claim()))
+          while (started < total && !Interruption::stopRequested() && !(claimed = claim()))
             released.wait_for(lock, 100ms);
           if (!claimed) return;
           const auto [index, position] = *claimed;
@@ -1132,6 +1159,7 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
             result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
           }
           result.elapsed = std::chrono::steady_clock::now() - begin;
+          if (Interruption::takeStoppedProcess()) result = notRunResult(result.elapsed);
           lock.lock();
           if (const auto device = resource(target); !device.empty()) busy.erase(device);
           exclusiveActive = false;
@@ -1147,17 +1175,19 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
   }
   std::vector<CaseReport> reports;
   for (size_t index = 0; index < targets.size(); ++index)
-    for (size_t position = 0; position < targets[index].tests.size(); ++position)
-      if (auto &result = results[index][position]) {
-        const auto &test = targets[index].tests[position];
-        reports.push_back({.name = fmt::format("{}/{}/{}", targets[index].id, test.program, test.identity), .result = std::move(*result)});
-      }
+    for (size_t position = 0; position < targets[index].tests.size(); ++position) {
+      const auto &test = targets[index].tests[position];
+      auto &result = results[index][position];
+      reports.push_back({.name = fmt::format("{}/{}/{}", targets[index].id, test.program, test.identity),
+                         .result = result ? std::move(*result) : notRunResult()});
+    }
   return reports;
 }
 int32_t run(RunOptions configuration) {
   validateRunOptions(configuration);
   configuration.threads = positiveSetting(environment::ThreadCount, availableThreadCount());
   configuration.timeoutScale = positiveScale(environment::TimeoutScale);
+  const auto deadline = deadlineSetting(environment::Deadline);
   const auto *jobs = std::getenv(environment::JobCount);
   const auto jobCount = configuredJobs(jobs ? jobs : "", configuration.threads);
   const auto *shard = std::getenv(environment::CaseShard);
@@ -1204,7 +1234,7 @@ int32_t run(RunOptions configuration) {
   std::cout << "conformance reports: " << reports << '\n';
   std::cout << "conformance workload: " << configuration.workload << '\n';
   std::cout << "conformance discovery: " << targets.size() << " routes, " << workers << " workers\n" << std::flush;
-  const Interruption interruption;
+  const Interruption interruption(deadline);
   std::vector<std::optional<TargetExecution>> discovered(targets.size());
   std::atomic<size_t> next{0};
   std::atomic<bool> aborted{false};
@@ -1215,7 +1245,7 @@ int32_t run(RunOptions configuration) {
     threads.reserve(workers);
     for (size_t worker = 0; worker < workers; ++worker) {
       threads.emplace_back([&] {
-        while (!aborted.load() && !Interruption::signal()) {
+        while (!aborted.load() && !Interruption::stopRequested()) {
           const auto index = next.fetch_add(1);
           if (index >= targets.size()) break;
           const auto &target = targets[index];
@@ -1242,7 +1272,7 @@ int32_t run(RunOptions configuration) {
       });
     }
   }
-  if (const auto signal = Interruption::signal()) return 128 + signal;
+  if (Interruption::stopRequested()) return stopStatus();
   if (failure) std::rethrow_exception(failure);
   std::vector<TargetExecution> prepared;
   for (auto &value : discovered)
@@ -1273,18 +1303,20 @@ int32_t run(RunOptions configuration) {
   writeJunit(reports / "junit.xml", results);
   const auto total = prepared ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
   const auto skips = results ^ count([](const CaseReport &report) { return skipped(report.result); });
+  const auto notRun = results ^ count([](const CaseReport &report) { return report.result.notRun; });
   const auto completion = results ^ count([](const CaseReport &report) { return report.result.classification == "completion"; });
   const auto timeLimit = results ^ count([](const CaseReport &report) { return report.result.classification == "time limit"; });
   const auto failures = results | filter([](const CaseReport &report) { return failed(report.result); })
                         | map([](const CaseReport &report) { return &report; }) | to_vector();
   std::cout << fmt::format(
       "conformance: {} passed ({} completion only), {} skipped, {} failed ({} time limit), {} not run of {} cases in {:.1f} s\n",
-      results.size() - static_cast<size_t>(skips) - failures.size(), completion, skips, failures.size(), timeLimit, total - results.size(),
-      total, std::chrono::duration<double>(std::chrono::steady_clock::now() - executed).count());
+      results.size() - static_cast<size_t>(skips) - failures.size() - static_cast<size_t>(notRun), completion, skips, failures.size(),
+      timeLimit, notRun, total, std::chrono::duration<double>(std::chrono::steady_clock::now() - executed).count());
   for (const auto *report : failures)
     std::cout << "  failed: " << report->name << " (" << failureMessage(report->result) << ")\n";
   std::cout << "conformance JUnit report: " << (reports / "junit.xml").string() << '\n';
   if (const auto signal = Interruption::signal()) return 128 + signal;
-  return failures.empty() && results.size() == total ? 0 : 1;
+  if (notRun) return 124;
+  return failures.empty() ? 0 : 1;
 }
 } // namespace conformance::driver

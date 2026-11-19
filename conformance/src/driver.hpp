@@ -133,6 +133,7 @@ struct CaseResult {
   // HeCBench-only outcome derived from the run's output.
   std::string classification;
   std::chrono::duration<double> elapsed{};
+  bool notRun = false;
 };
 struct DeqpResult {
   std::string statusCode;
@@ -149,11 +150,13 @@ using CaseExecutor = std::function<CaseResult(const ExecutionConfig &, const Sch
 // While any instance lives, SIGINT and SIGTERM cancel child processes instead of terminating the driver.
 class Interruption {
 public:
-  Interruption();
+  explicit Interruption(std::optional<std::chrono::steady_clock::time_point> deadline = std::nullopt);
   ~Interruption();
   Interruption(const Interruption &) = delete;
   Interruption &operator=(const Interruption &) = delete;
   static int32_t signal();
+  static bool stopRequested();
+  static bool takeStoppedProcess();
 };
 
 int32_t configuredJobs(std::string_view configured, uint32_t hardwareConcurrency);

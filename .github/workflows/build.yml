@@ -640,6 +640,7 @@ jobs:
     env:
       GEMSTONE_OFFLINE_ON: 1
       CONFORMANCE_CASE_SHARD: ${{ matrix.cases }}
+      EMULATE_TIMEOUT_MINUTES: 315
     steps:
       - *free-disk
       - *checkout
@@ -663,10 +664,12 @@ jobs:
       # the server heap is what the memory leaves after the concurrent cases and a reserve, so sbt, which also compiles
       # the emulator, gets a quarter
       - name: Emulate
+        timeout-minutes: ${{ fromJSON(env.EMULATE_TIMEOUT_MINUTES) }}
         run: |
           while sleep 60; do eval "$MEMORY_SAMPLE"; done &
           sampler=$!
           trap 'kill "$sampler"' EXIT
+          export CONFORMANCE_DEADLINE=$(($(date +%s) + EMULATE_TIMEOUT_MINUTES * 60 - 600))
           heap=$(awk '/^MemTotal:/ { printf "%dm", $2 / 1024 / 4 }' /proc/meminfo)
           sbt --server --batch "-J-Xmx$heap" 'set conformance / conformanceJfr := true' \
             "conformance/emulate --prebuilt --workload $CONFORMANCE_WORKLOAD ${{ matrix.routes }}"

@@ -5,6 +5,7 @@ object conformanceEnvironment {
   val BuildProfile: String = "CONFORMANCE_BUILD_PROFILE"
   val CaseShard: String = "CONFORMANCE_CASE_SHARD"
   val CudaCodeMode: String = "CONFORMANCE_CUDA_CODE_MODE"
+  val Deadline: String = "CONFORMANCE_DEADLINE"
   val DeviceCount: String = "CONFORMANCE_DEVICE_COUNT"
   val DevicePattern: String = "CONFORMANCE_DEVICE_PATTERN"
   val InterpreterArchiveDirectory: String = "CONFORMANCE_INTERPRETER_ARCHIVE_DIRECTORY"

@@ -11,6 +11,7 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -80,10 +81,12 @@ public:
 // The handler only publishes cancellation; each caller owns and reaps its child group.
 static_assert(std::atomic<int32_t>::is_always_lock_free);
 std::atomic<int32_t> interrupted{0};
+std::chrono::steady_clock::time_point runDeadline = std::chrono::steady_clock::time_point::max();
 std::mutex interruptionMutex;
 size_t interruptionScopes = 0;
 struct sigaction oldTerm = {}, oldInt = {};
 void forwardSignal(int32_t signal) { interrupted.store(signal); }
+thread_local bool processStopped = false;
 class ProcessGroup {
   Interruption interruption;
   int32_t leader = 0;
@@ -125,17 +128,18 @@ int waitForExit(int32_t pid, std::chrono::steady_clock::time_point deadline, boo
       if (errno == EINTR) continue;
       return -1;
     }
-    if (std::chrono::steady_clock::now() >= deadline || (cancellable && interrupted.load())) return -2;
+    if (std::chrono::steady_clock::now() >= deadline || (cancellable && Interruption::stopRequested())) return -2;
     std::this_thread::sleep_for(std::chrono::milliseconds(5));
   }
 }
 
 } // namespace
 
-Interruption::Interruption() {
+Interruption::Interruption(std::optional<std::chrono::steady_clock::time_point> deadline) {
   const std::scoped_lock lock(interruptionMutex);
   if (interruptionScopes++ == 0) {
     interrupted.store(0);
+    runDeadline = deadline.value_or(std::chrono::steady_clock::time_point::max());
     struct sigaction action = {};
     action.sa_handler = forwardSignal;
     sigemptyset(&action.sa_mask);
@@ -151,6 +155,8 @@ Interruption::~Interruption() {
   }
 }
 int32_t Interruption::signal() { return interrupted.load(); }
+bool Interruption::stopRequested() { return interrupted.load() != 0 || std::chrono::steady_clock::now() >= runDeadline; }
+bool Interruption::takeStoppedProcess() { return std::exchange(processStopped, false); }
 
 ProcessResult runProcess(const std::vector<std::string> &command, const std::filesystem::path &directory,
                          const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
@@ -258,7 +264,7 @@ ProcessResult runProcess(const std::vector<std::string> &command, const std::fil
   };
   while (open[0] || open[1]) {
     const auto now = std::chrono::steady_clock::now();
-    if (now >= deadline || interrupted.load()) {
+    if (now >= deadline || Interruption::stopRequested()) {
       expired = true;
       break;
     }
@@ -294,12 +300,13 @@ ProcessResult runProcess(const std::vector<std::string> &command, const std::fil
   stdoutSink.finish();
   stderrSink.finish();
   const auto status = expired ? -2 : waitForExit(pid, deadline);
-  if (status == -2) {
-    terminate();
-    closeStreams();
-  }
-  if (interrupted.load()) return completed(128 + interrupted.load());
-  return status == -2 ? timedOut() : completed(static_cast<int32_t>(status));
+  if (status != -2) return completed(static_cast<int32_t>(status));
+  terminate();
+  closeStreams();
+  if (!Interruption::stopRequested()) return timedOut();
+  processStopped = true;
+  const auto signal = Interruption::signal();
+  return completed(signal ? 128 + signal : 124);
 }
 
 } // namespace conformance::driver

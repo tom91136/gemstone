@@ -90,6 +90,46 @@ std::vector<std::string> listFixture() {
                             .output,
                         "fixture");
 }
+std::optional<std::array<int32_t, 3>> hungPids(const fs::path &reports) {
+  if (!fs::exists(reports)) return std::nullopt;
+  for (const auto &entry : fs::recursive_directory_iterator(reports))
+    if (entry.path().filename() == "hang.pids") {
+      std::array<int32_t, 3> result{};
+      std::ifstream(entry.path()) >> result[0] >> result[1] >> result[2];
+      return result;
+    }
+  return std::nullopt;
+}
+void writeInterruptedRunInputs(const fs::path &root) {
+  const auto artifact = root / "artifacts/opencl";
+  fs::create_directories(artifact);
+  fs::copy_file(Fixture, artifact / Fixture.filename());
+  fs::copy_file(Fixture, artifact / ("conformance-device" + Fixture.extension().string()));
+  std::ofstream(artifact / "artifact.toml") << "backend = 'opencl'\n";
+  std::ofstream(artifact / "test-programs.txt") << Fixture.stem().string() << "\t600\tcatch2\n";
+  fs::create_directories(root / "workloads");
+  std::ofstream(root / "workloads/short.toml") << "specs = ['[pass],[hang],[skip]']\n";
+}
+void checkInterruptedReports(const fs::path &reports, const std::string &message) {
+  bool passed = false;
+  for (const auto &entry : fs::recursive_directory_iterator(reports))
+    if (entry.path().filename() == "result.txt") {
+      passed = true;
+      CHECK(fs::exists(entry.path().parent_path() / "output.log"));
+    }
+  CHECK(passed);
+  REQUIRE(fs::exists(reports / "direct"));
+  for (const auto &report : fs::directory_iterator(reports / "direct")) {
+    const auto junit = read(report.path() / "junit.xml");
+    CHECK(junit.contains("a comma"));
+    CHECK(junit.contains("hung case"));
+    CHECK(junit.contains("z skipped"));
+    CHECK(junit.contains("message=\"not run: " + message + "\""));
+    CHECK(junit.contains("tests=\"3\""));
+    CHECK(junit.contains("failures=\"0\""));
+    CHECK(junit.contains("skipped=\"2\""));
+  }
+}
 } // namespace
 
 TEST_CASE("Catch JSON inventories preserve names and reject malformed input", "[driver]") {
@@ -867,16 +907,6 @@ TEST_CASE("a hung case is killed with its process tree on timeout or interruptio
   fs::create_directories(workloads);
   std::ofstream(workloads / "short.toml") << "specs = ['[hang],[pass]']\n";
   const auto reports = directory.path / "reports";
-  const auto pids = [&] -> std::optional<std::array<int32_t, 3>> {
-    if (!fs::exists(reports)) return std::nullopt;
-    for (const auto &entry : fs::recursive_directory_iterator(reports))
-      if (entry.path().filename() == "hang.pids") {
-        std::array<int32_t, 3> result{};
-        std::ifstream(entry.path()) >> result[0] >> result[1] >> result[2];
-        return result;
-      }
-    return std::nullopt;
-  };
   SECTION("timeout") {
     std::ofstream(artifact / "test-programs.txt") << Fixture.stem().string() << "\t1\tcatch2\n";
     RunOptions options;
@@ -886,7 +916,7 @@ TEST_CASE("a hung case is killed with its process tree on timeout or interruptio
     options.workloads = workloads;
     options.selectors = {"opencl"};
     CHECK(run(options) == 1);
-    const auto hung = pids();
+    const auto hung = hungPids(reports);
     if (!hung) FAIL("hung process ids were not recorded");
     CHECK(exited((*hung)[1]));
     CHECK(exited((*hung)[2]));
@@ -909,10 +939,10 @@ TEST_CASE("a hung case is killed with its process tree on timeout or interruptio
                         directory.path, baseEnvironment(), 30s, {}, true);
     });
     const auto deadline = std::chrono::steady_clock::now() + 10s;
-    auto hung = pids();
+    auto hung = hungPids(reports);
     while (!hung && std::chrono::steady_clock::now() < deadline) {
       std::this_thread::sleep_for(10ms);
-      hung = pids();
+      hung = hungPids(reports);
     }
     if (!hung) FAIL("hung process ids were not recorded");
     const auto start = std::chrono::steady_clock::now();
@@ -924,6 +954,60 @@ TEST_CASE("a hung case is killed with its process tree on timeout or interruptio
     CHECK(exited((*hung)[1]));
     CHECK(exited((*hung)[2]));
   }
+}
+
+TEST_CASE("an interrupted run keeps finished cases and marks in-flight and unstarted cases not run", "[driver][process]") {
+  TemporaryDirectory directory;
+  writeInterruptedRunInputs(directory.path);
+  const auto reports = directory.path / "reports";
+  auto environment = baseEnvironment();
+  environment[conformance::environment::JobCount] = "1";
+  auto running = std::async(std::launch::async, [&] {
+    return runProcess({Driver.string(), "run", "--direct", "--artifacts", (directory.path / "artifacts").string(), "--output",
+                       reports.string(), "--workloads", (directory.path / "workloads").string(), "opencl"},
+                      directory.path, environment, 30s, {}, true);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + 10s;
+  auto hung = hungPids(reports);
+  while (!hung && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(10ms);
+    hung = hungPids(reports);
+  }
+  if (!hung) FAIL("hung process ids were not recorded");
+  const auto start = std::chrono::steady_clock::now();
+  REQUIRE(kill((*hung)[0], SIGTERM) == 0);
+  const auto result = running.get();
+  INFO(result.output);
+  CHECK(result.status == 128 + SIGTERM);
+  CHECK(std::chrono::steady_clock::now() - start < 5s);
+  CHECK(exited((*hung)[1]));
+  CHECK(exited((*hung)[2]));
+  CHECK(result.output.contains("1 passed (0 completion only), 0 skipped, 0 failed (0 time limit), 2 not run of 3 cases"));
+  checkInterruptedReports(reports, fmt::format("interrupted by signal {}", SIGTERM));
+}
+
+TEST_CASE("a run past its deadline keeps finished cases and marks in-flight and unstarted cases not run", "[driver][process]") {
+  const TemporaryDirectory directory;
+  writeInterruptedRunInputs(directory.path);
+  const auto reports = directory.path / "reports";
+  auto environment = baseEnvironment();
+  environment[conformance::environment::JobCount] = "1";
+  const auto deadline = std::chrono::system_clock::now() + 10s;
+  environment[conformance::environment::Deadline] =
+      fmt::to_string(std::chrono::duration_cast<std::chrono::seconds>(deadline.time_since_epoch()).count());
+  const auto result = runProcess({Driver.string(), "run", "--direct", "--artifacts", (directory.path / "artifacts").string(), "--output",
+                                  reports.string(), "--workloads", (directory.path / "workloads").string(), "opencl"},
+                                 directory.path, environment, 30s, {}, true);
+  INFO(result.output);
+  CHECK(result.status == 124);
+  CHECK(std::chrono::system_clock::now() < deadline + 5s);
+  CHECK(result.output.contains("1 passed (0 completion only), 0 skipped, 0 failed (0 time limit), 2 not run of 3 cases"));
+  const auto hung = hungPids(reports);
+  if (!hung) FAIL("hung process ids were not recorded");
+  CHECK(exited((*hung)[0]));
+  CHECK(exited((*hung)[1]));
+  CHECK(exited((*hung)[2]));
+  checkInterruptedReports(reports, "deadline reached");
 }
 
 TEST_CASE("isolated routes deduplicate physical variants by artifact ABI", "[driver]") {
