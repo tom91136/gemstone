@@ -22,7 +22,21 @@ for directory in ${LD_LIBRARY_PATH-}; do
     done
   fi
 done
+
+rocm_overlay=
+if [ -n "${ROCM_PATH-}" ]; then
+  rocm_overlay=$(mktemp -d)
+  trap 'rm -rf "$rocm_overlay"' EXIT
+  for directory in "$ROCM_PATH" ${LD_LIBRARY_PATH-}; do
+    for library in "$directory"/lib*; do
+      [ -e "$library" ] && ln -s "$library" "$rocm_overlay/" 2>/dev/null || true
+    done
+  done
+  export ROCM_PATH="$rocm_overlay"
+fi
 IFS=$saved_ifs
 
-exec "$julia" --startup-file=no --project="$project" \
-  "$root/data/interpreters/@SCRIPT@" @ARGUMENTS@ "$@"
+status=0
+"$julia" --startup-file=no --project="$project" \
+  "$root/data/interpreters/@SCRIPT@" @ARGUMENTS@ "$@" || status=$?
+exit "$status"
