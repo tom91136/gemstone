@@ -1208,6 +1208,27 @@ TEST_CASE("HSA nested lock survives release of its enclosing lock", "[hsa][unifi
   CHECK((hsa_amd_memory_unlock(host.data() + 2) == HSA_STATUS_SUCCESS));
 }
 
+TEST_CASE("HSA signal handles address registered amd_signal_t storage", "[hsa][signal]") {
+  MemoryLockSession const session;
+  std::vector<hsa_signal_t> signals;
+  for (int64_t index = 0; index < 200; ++index) {
+    signals.push_back(createSignal(index + 7));
+    auto *words = reinterpret_cast<int64_t *>(signals.back().handle);
+    REQUIRE(words[0] == 1);
+    REQUIRE(words[1] == index + 7);
+    REQUIRE(hsa_memory_register(words, sizeof(int64_t) * 8) == HSA_STATUS_ERROR_INVALID_ALLOCATION);
+  }
+  for (size_t index = 1; index < signals.size(); ++index)
+    REQUIRE(signals[index].handle != signals[index - 1].handle);
+  const auto *words = reinterpret_cast<const int64_t *>(signals[3].handle);
+  hsa_signal_store_screlease(signals[3], 42);
+  CHECK(words[1] == 42);
+  hsa_signal_add_screlease(signals[3], 8);
+  CHECK(words[1] == 50);
+  for (const auto signal : signals)
+    CHECK(hsa_signal_destroy(signal) == HSA_STATUS_SUCCESS);
+}
+
 TEST_CASE("HSA disjoint registrations can be released and reused independently", "[hsa][unified-memory]") {
   MemoryLockSession const session;
   std::array<uint32_t, 8> host{};

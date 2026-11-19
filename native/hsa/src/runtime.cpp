@@ -91,6 +91,12 @@ struct Signal {
 };
 static_assert(offsetof(Signal, value) == 8);
 
+// Device code dereferences a signal handle as an amd_signal_t, so user signals live in registered 64-byte slots
+constexpr uint64_t SignalKindUser = 1;
+constexpr size_t SignalSlotBytes = 64;
+constexpr size_t SignalSlabBytes = 4096;
+static_assert(sizeof(Signal) <= SignalSlotBytes);
+
 struct Allocation {
   void *base = nullptr;
   size_t size = 0;
@@ -210,6 +216,10 @@ struct RuntimeState {
   std::unique_ptr<AqlRuntime> aql;
   std::unique_ptr<DoorbellMonitor> monitor;
   std::unordered_map<uint64_t, std::shared_ptr<Signal>> signals;
+  std::mutex signalSlotLock;
+  std::vector<void *> signalSlabs;
+  std::vector<void *> freeSignalSlots;
+  size_t signalSlotsInUse = 0;
   std::unordered_map<const hsa_queue_t *, QueueRef> queues;
   std::unordered_map<void *, AllocationRef> allocations;
   std::unordered_map<uint64_t, AllocationRef> allocationIds;
@@ -1107,19 +1117,26 @@ extern "C" hsa_status_t hsa_init() {
   return HSA_STATUS_SUCCESS;
 }
 
+namespace {
+void releaseSignalSlabs(RuntimeState &runtime);
+}
+
 extern "C" hsa_status_t hsa_shut_down() {
   auto &runtime = state();
   void *heap = nullptr;
   void *hostcall = nullptr;
+  bool lastReference = false;
   {
     std::scoped_lock const guard(runtime.deviceHeapMutex, runtime.hostcallMutex, runtime.lock);
-    if (runtime.references == 1) {
+    lastReference = runtime.references == 1;
+    if (lastReference) {
       heap = std::exchange(runtime.deviceHeap, nullptr);
       hostcall = std::exchange(runtime.hostcall, nullptr);
     }
   }
   if (heap) freeAllocation(runtime, heap, true);
   if (hostcall) freeAllocation(runtime, hostcall, true);
+  if (lastReference) releaseSignalSlabs(runtime);
   std::unique_lock<std::mutex> guard(runtime.lock);
   if (runtime.references == 0) return HSA_STATUS_ERROR_NOT_INITIALIZED;
   if (runtime.references > 1) {
@@ -1545,6 +1562,57 @@ extern "C" hsa_status_t hsa_memory_assign_agent(void *ptr, hsa_agent_t agent, hs
   return findAllocation(runtime, ptr) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR_INVALID_ALLOCATION;
 }
 
+namespace {
+
+void *acquireSignalSlot(RuntimeState &runtime) {
+  {
+    std::scoped_lock const guard(runtime.signalSlotLock);
+    if (!runtime.freeSignalSlots.empty()) {
+      auto *slot = runtime.freeSignalSlots.back();
+      runtime.freeSignalSlots.pop_back();
+      ++runtime.signalSlotsInUse;
+      return slot;
+    }
+  }
+  auto *slab = std::aligned_alloc(SignalSlabBytes, SignalSlabBytes);
+  if (!slab) return nullptr;
+  std::memset(slab, 0, SignalSlabBytes);
+  if (registerHostView(runtime, slab, SignalSlabBytes, false) != HSA_STATUS_SUCCESS) {
+    std::free(slab);
+    return nullptr;
+  }
+  std::scoped_lock const guard(runtime.signalSlotLock);
+  runtime.signalSlabs.push_back(slab);
+  for (size_t offset = SignalSlotBytes; offset < SignalSlabBytes; offset += SignalSlotBytes)
+    runtime.freeSignalSlots.push_back(static_cast<uint8_t *>(slab) + offset);
+  ++runtime.signalSlotsInUse;
+  return slab;
+}
+
+void releaseSignalSlot(RuntimeState &runtime, Signal *signal) {
+  signal->~Signal();
+  std::memset(static_cast<void *>(signal), 0, SignalSlotBytes);
+  std::scoped_lock const guard(runtime.signalSlotLock);
+  runtime.freeSignalSlots.push_back(signal);
+  --runtime.signalSlotsInUse;
+}
+
+void releaseSignalSlabs(RuntimeState &runtime) {
+  std::vector<void *> slabs;
+  {
+    std::scoped_lock const guard(runtime.signalSlotLock);
+    if (runtime.signalSlotsInUse != 0) return;
+    slabs = std::exchange(runtime.signalSlabs, {});
+    runtime.freeSignalSlots.clear();
+  }
+  for (auto *slab : slabs) {
+    (void)releaseHostView(runtime, slab, SignalSlabBytes);
+    std::free(slab);
+  }
+}
+
+} // namespace
+
 extern "C" hsa_status_t hsa_signal_create(hsa_signal_value_t initialValue, uint32_t numConsumers, const hsa_agent_t *consumers,
                                           hsa_signal_t *signal) {
   auto &runtime = state();
@@ -1552,11 +1620,15 @@ extern "C" hsa_status_t hsa_signal_create(hsa_signal_value_t initialValue, uint3
   if (!signal || (numConsumers != 0 && !consumers)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   for (uint32_t index = 0; index < numConsumers; ++index)
     if (!validAgent(consumers[index])) return HSA_STATUS_ERROR_INVALID_AGENT;
+  auto *slot = acquireSignalSlot(runtime);
+  if (!slot) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  auto *raw = new (slot) Signal;
+  raw->kind = SignalKindUser;
+  raw->value = initialValue;
+  std::shared_ptr<Signal> const value(raw, [&runtime](Signal *released) { releaseSignalSlot(runtime, released); });
   try {
-    auto value = std::make_shared<Signal>();
-    value->value = initialValue;
     std::scoped_lock const guard(runtime.lock);
-    const uint64_t handle = runtime.nextHandle++;
+    const auto handle = reinterpret_cast<uint64_t>(raw);
     runtime.signals.emplace(handle, value);
     signal->handle = handle;
     return HSA_STATUS_SUCCESS;
