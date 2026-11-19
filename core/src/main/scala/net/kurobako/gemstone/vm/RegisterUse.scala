@@ -12,9 +12,16 @@ object RegisterUse {
   *
   * A register is one 32-bit unit wide unless `units` says otherwise: a 64-bit register is 2, a 128-bit register 4, and
   * a predicate 0, as predicates are not general registers.
+  *
+  * `address` names the reads that decide where a memory instruction accesses, a subset of `reads`: it is empty for an
+  * instruction that does not reach memory, and holds every read of one whose address the machine cannot tell apart.
   */
-case class RegisterUse(reads: Vec[String], writes: Vec[String], units: Map[String, Int] = Map.empty)
-    derives CanEqual {
+case class RegisterUse(
+    reads: Vec[String],
+    writes: Vec[String],
+    units: Map[String, Int] = Map.empty,
+    address: Vec[String] = Vec.empty
+) derives CanEqual {
 
   /** Whether the issue names no register at all. */
   def isEmpty: Boolean = reads.isEmpty && writes.isEmpty
@@ -24,5 +31,10 @@ case class RegisterUse(reads: Vec[String], writes: Vec[String], units: Map[Strin
 
   /** The union of this use and `other`, each name once in the order it first appears. */
   def merge(other: RegisterUse): RegisterUse =
-    RegisterUse((reads ++ other.reads).distinct, (writes ++ other.writes).distinct, units ++ other.units)
+    RegisterUse(
+      (reads ++ other.reads).distinct,
+      (writes ++ other.writes).distinct,
+      units ++ other.units,
+      (address ++ other.address).distinct
+    )
 }

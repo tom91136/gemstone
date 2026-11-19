@@ -146,7 +146,12 @@ class ProfileSuite extends Suite {
     assertEquals(
       uses(result, "global_load_dwordx2"),
       Vector(
-        RegisterUse(Vec("exec_hi", "exec_lo", "m0", "s[2:3]", "v1"), Vec("v[4:5]"), Map("s[2:3]" -> 2, "v[4:5]" -> 2))
+        RegisterUse(
+          Vec("exec_hi", "exec_lo", "m0", "s[2:3]", "v1"),
+          Vec("v[4:5]"),
+          Map("s[2:3]" -> 2, "v[4:5]" -> 2),
+          Vec("s[2:3]", "v1")
+        )
       )
     )
     assertEquals(
@@ -155,7 +160,8 @@ class ProfileSuite extends Suite {
         RegisterUse(
           Vec("exec_hi", "exec_lo", "m0", "s[2:3]", "v1", "v[4:5]"),
           Vec.empty,
-          Map("s[2:3]" -> 2, "v[4:5]" -> 2)
+          Map("s[2:3]" -> 2, "v[4:5]" -> 2),
+          Vec("s[2:3]", "v1")
         )
       )
     )
@@ -186,7 +192,7 @@ class ProfileSuite extends Suite {
     )
     assertEquals(
       uses(result, "flat_load_dword"),
-      Vector(RegisterUse(Vec("exec_hi", "exec_lo", "m0", "v[3:4]"), Vec("v6"), Map("v[3:4]" -> 2)))
+      Vector(RegisterUse(Vec("exec_hi", "exec_lo", "m0", "v[3:4]"), Vec("v6"), Map("v[3:4]" -> 2), Vec("v[3:4]")))
     )
   }
 
@@ -194,7 +200,7 @@ class ProfileSuite extends Suite {
     val result = run("s_mov_b32 s4, 24\nv_mov_b32 v2, 7\nscratch_store_dword off, v2, s4")
     assertEquals(
       uses(result, "scratch_store_dword"),
-      Vector(RegisterUse(Vec("exec_hi", "exec_lo", "m0", "s4", "v2"), Vec.empty))
+      Vector(RegisterUse(Vec("exec_hi", "exec_lo", "m0", "s4", "v2"), Vec.empty, Map.empty, Vec("s4")))
     )
   }
 
@@ -206,7 +212,7 @@ class ProfileSuite extends Suite {
     )
     assertEquals(
       uses(result, "global_load_dword"),
-      Vector(RegisterUse(Vec("exec_lo", "m0", "s[2:3]", "v1"), Vec("v2"), Map("s[2:3]" -> 2)))
+      Vector(RegisterUse(Vec("exec_lo", "m0", "s[2:3]", "v1"), Vec("v2"), Map("s[2:3]" -> 2), Vec("s[2:3]", "v1")))
     )
   }
 

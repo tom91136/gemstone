@@ -17,7 +17,7 @@ import scala.annotation.tailrec
 private object RegisterUses {
   private case class Span(name: String, units: Int)
 
-  private case class Use(reads: Vec[Span], writes: Vec[Span])
+  private case class Use(reads: Vec[Span], writes: Vec[Span], address: Vec[Span] = Unused)
 
   private val Unused: Vec[Span] = Vec()
 
@@ -47,7 +47,8 @@ private object RegisterUses {
     RegisterUse(
       found.reads.map(_.name).distinct,
       found.writes.map(_.name).distinct,
-      (found.reads ++ found.writes).collect { case Span(name, units) if units > 1 => name -> units }.toMap
+      (found.reads ++ found.writes).collect { case Span(name, units) if units > 1 => name -> units }.toMap,
+      found.address.map(_.name).distinct
     )
 
   private class Derivation(maskWords: Int, m0: Int, discarded: Int, state: Boolean) {
@@ -132,7 +133,10 @@ private object RegisterUses {
 
     private def use(reads: Vec[Span], writes: Vec[Span]): Use = Use(reads, writes)
 
-    private def merged(parts: Use*): Use = Use(spans(parts.map(_.reads)*), spans(parts.map(_.writes)*))
+    private def merged(parts: Use*): Use =
+      Use(spans(parts.map(_.reads)*), spans(parts.map(_.writes)*), spans(parts.map(_.address)*))
+
+    private def access(where: Vec[Span], reads: Vec[Span], writes: Vec[Span]): Use = Use(reads, writes, where)
 
     private def accumulates(operation: VectorBinaryOperation): Boolean = operation match {
       case VectorBinaryOperation.MultiplyAccumulateF32 | VectorBinaryOperation.FusedMultiplyAccumulateF16 => true
@@ -232,7 +236,8 @@ private object RegisterUses {
 
     private def scalar(instruction: Scalar): Use = instruction match {
       case i: Instruction.SLoad =>
-        use(spans(scalar(i.base, 2), scalars(i.scalarOffset)), scalar(i.dest, i.count))
+        val where = spans(scalar(i.base, 2), scalars(i.scalarOffset))
+        access(where, where, scalar(i.dest, i.count))
       case i: Instruction.SMove      => use(source(i.src), scalar(i.dest))
       case i: Instruction.SWriteExec =>
         use(source(i.src, i.width / 32), scalar(i.dest, i.width / 32))
@@ -447,23 +452,36 @@ private object RegisterUses {
       case i: Instruction.VShiftRightArithmetic64 => use(source(i.amount) ++ source(i.src, 2), vector(i.dest, 2))
     }
 
-    private def memory(instruction: Memory): Use = instruction match {
+    private def memory(instruction: Memory): Use = {
+      val found = reaching(instruction)
+      if (found.address.isEmpty) found.copy(address = found.reads) else found
+    }
+
+    private def reaching(instruction: Memory): Use = instruction match {
       case Instruction.CacheInvalidate | Instruction.CacheWritebackInvalidate => NoUse
       case i: Instruction.Load                                                =>
         val existing = i.placement match {
           case LoadPlacement.Low | LoadPlacement.High => vector(i.dest, 1, i.bank)
           case LoadPlacement.Full | LoadPlacement.LowZeroingHigh | LoadPlacement.HighZeroingLow => Unused
         }
-        use(address(i.address) ++ existing, vector(i.dest, words(i.bytes), i.bank))
-      case i: Instruction.Store  => use(address(i.address) ++ vector(i.src, words(i.bytes), i.bank), Unused)
+        val where = address(i.address)
+        access(where, where ++ existing, vector(i.dest, words(i.bytes), i.bank))
+      case i: Instruction.Store =>
+        val where = address(i.address)
+        access(where, where ++ vector(i.src, words(i.bytes), i.bank), Unused)
       case i: Instruction.Atomic =>
         val returned = if (i.returnValue) vector(i.dest, words(i.bytes), i.bank) else Unused
-        use(address(i.address) ++ vector(i.src, words(i.bytes), i.bank), returned)
-      case i: Instruction.LocalSource2 => use(vector(i.address), Unused)
-      case i: Instruction.CompareSwap  =>
+        val where    = address(i.address)
+        access(where, where ++ vector(i.src, words(i.bytes), i.bank), returned)
+      case i: Instruction.LocalSource2 =>
+        val where = vector(i.address)
+        access(where, where, Unused)
+      case i: Instruction.CompareSwap =>
         val returned = if (i.returnValue) vector(i.dest, words(i.bytes), i.bank) else Unused
-        use(
-          address(i.address) ++ vector(i.data, words(i.bytes), i.bank) ++ vector(i.comparand, words(i.bytes), i.bank),
+        val where    = address(i.address)
+        access(
+          where,
+          where ++ vector(i.data, words(i.bytes), i.bank) ++ vector(i.comparand, words(i.bytes), i.bank),
           returned
         )
       case i: Instruction.AtomicExtended => of(i.access)
@@ -471,36 +489,50 @@ private object RegisterUses {
       case i: Instruction.ExchangePair   => merged(of(i.first), of(i.second))
       case i: Instruction.GlobalWaveSync => use(vector(i.data, 1, i.bank), Unused)
       case i: Instruction.LoadTranspose  =>
-        use(address(i.address), vector(i.dest, (i.layout.bits * i.layout.elements + 31) / 32))
+        val where = address(i.address)
+        access(where, where, vector(i.dest, (i.layout.bits * i.layout.elements + 31) / 32))
       case i: Instruction.LoadPair =>
-        use(vector(i.address), vector(i.dest, 2 * words(i.bytes), i.bank))
+        val where = vector(i.address)
+        access(where, where, vector(i.dest, 2 * words(i.bytes), i.bank))
       case i: Instruction.StorePair =>
-        use(
-          vector(i.address) ++ vector(i.srcA, words(i.bytes), i.bank) ++ vector(i.srcB, words(i.bytes), i.bank),
-          Unused
-        )
+        val where = vector(i.address)
+        access(where, where ++ vector(i.srcA, words(i.bytes), i.bank) ++ vector(i.srcB, words(i.bytes), i.bank), Unused)
       case i: Instruction.FormatLoad =>
-        use(
-          address(i.address) ++ preserved(i.dest, i.components, i.packing, i.bank),
+        val where = address(i.address)
+        access(
+          where,
+          where ++ preserved(i.dest, i.components, i.packing, i.bank),
           vector(i.dest, VMResourceDecoder.registers(i.components, i.packing), i.bank)
         )
       case i: Instruction.FormatStore =>
-        use(address(i.address) ++ vector(i.src, VMResourceDecoder.registers(i.components, i.packing), i.bank), Unused)
-      case i: Instruction.LoadLocal   => use(address(i.address) ++ m0Read, Unused)
-      case i: Instruction.StoreLocal  => use(address(i.address) ++ m0Read, Unused)
+        val where = address(i.address)
+        access(where, where ++ vector(i.src, VMResourceDecoder.registers(i.components, i.packing), i.bank), Unused)
+      case i: Instruction.LoadLocal =>
+        val where = address(i.address) ++ m0Read
+        access(where, where, Unused)
+      case i: Instruction.StoreLocal =>
+        val where = address(i.address) ++ m0Read
+        access(where, where, Unused)
       case i: Instruction.SBufferLoad =>
-        use(spans(scalar(i.resource, 4), scalars(i.scalarOffset)), scalar(i.dest, i.count))
+        val where = spans(scalar(i.resource, 4), scalars(i.scalarOffset))
+        access(where, where, scalar(i.dest, i.count))
       case i: Instruction.Image =>
         val components = Integer.bitCount(i.mask).max(1)
         val data       = vector(i.data, VMResourceDecoder.registers(components, i.packing), i.bank)
         val existing   = preserved(i.data, components, i.packing, i.bank)
         i.operation match {
-          case ImageOperation.Load(_, _) => use(imageAddress(i.address) ++ existing, data)
+          case ImageOperation.Load(_, _) =>
+            val where = imageAddress(i.address)
+            access(where, where ++ existing, data)
           case ImageOperation.Dimensions =>
-            use(i.address.words.headOption.fold(Unused)(vector(_)) ++ scalar(i.address.resource, 8) ++ existing, data)
-          case ImageOperation.Store(_)           => use(imageAddress(i.address) ++ data, Unused)
+            val where = i.address.words.headOption.fold(Unused)(vector(_)) ++ scalar(i.address.resource, 8)
+            access(where, where ++ existing, data)
+          case ImageOperation.Store(_) =>
+            val where = imageAddress(i.address)
+            access(where, where ++ data, Unused)
           case ImageOperation.Sample(sampler, _) =>
-            use(imageAddress(i.address) ++ scalar(sampler, 4) ++ existing, data)
+            val where = imageAddress(i.address) ++ scalar(sampler, 4)
+            access(where, where ++ existing, data)
         }
       case i: Instruction.WithStatus => merged(of(i.access), use(Unused, vector(i.status)))
       case i: Instruction.DSPermute  =>
@@ -509,13 +541,16 @@ private object RegisterUses {
         use(vector(i.address) ++ vector(i.src, 1, i.bank), vector(i.dest, 1, i.bank))
       case i: Instruction.DSSwizzle => use(vector(i.src), vector(i.dest, 1, i.bank))
       case i: Instruction.SStore    =>
-        use(scalar(i.src, i.count) ++ scalarAddress(i.address), Unused)
+        val where = scalarAddress(i.address)
+        access(where, scalar(i.src, i.count) ++ where, Unused)
       case i: Instruction.SAtomic =>
-        val data = scalar(i.data, words(i.bytes))
-        use(data ++ scalarAddress(i.address), if (i.returnValue) data else Unused)
+        val data  = scalar(i.data, words(i.bytes))
+        val where = scalarAddress(i.address)
+        access(where, data ++ where, if (i.returnValue) data else Unused)
       case i: Instruction.SCompareSwap =>
-        val data = scalar(i.data, 2 * words(i.bytes))
-        use(data ++ scalarAddress(i.address), if (i.returnValue) scalar(i.data, words(i.bytes)) else Unused)
+        val data  = scalar(i.data, 2 * words(i.bytes))
+        val where = scalarAddress(i.address)
+        access(where, data ++ where, if (i.returnValue) scalar(i.data, words(i.bytes)) else Unused)
     }
 
     private def control(instruction: Control): Use = instruction match {

@@ -70,8 +70,8 @@ object WindowFixtures {
     */
   lazy val stream: Vec[Byte] = streamOf("v_mov_b32 v7, v5\n")
 
-  /** [[stream]] with `dead` after its last multiply-add. */
-  def streamOf(dead: String): Vec[Byte] = assembled(
+  /** [[stream]] with `dead` after its last multiply-add, storing `stored`. */
+  def streamOf(dead: String, stored: String = "v6"): Vec[Byte] = assembled(
     s"""s_load_dword s8, s[4:5], 0x10
       |s_load_dwordx4 s[0:3], s[4:5], 0x0
       |v_mov_b32 v0, 0
@@ -83,7 +83,7 @@ object WindowFixtures {
       |s_waitcnt lgkmcnt(0)
       |v_fma_f32 v6, v6, s9, s6
       |v_fma_f32 v5, v5, s9, s6
-      |${dead}global_store_dword v0, v6, s[2:3]
+      |${dead}global_store_dword v0, $stored, s[2:3]
       |s_add_i32 s8, s8, -1
       |s_cmp_lg_u32 s8, 0
       |s_cbranch_scc1 loop

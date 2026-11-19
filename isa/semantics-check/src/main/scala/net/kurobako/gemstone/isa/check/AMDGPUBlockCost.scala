@@ -281,7 +281,8 @@ final class AMDGPUBlockCost private (
 
   /** What the rewrite may have changed by the end of `step`, given what it may have changed before. A register, or
     * memory, counts as changed once a deleted, changed or inserted instruction writes it, or a kept one that reads a
-    * changed value; it stays changed, since the register use does not say whether a later write replaces it whole.
+    * changed value; it stays changed, since the register use does not say whether a later write replaces it whole. A
+    * kept instruction that reaches memory is held to the registers its address reads, not the value it stores.
     */
   private def changed(window: Window, laid: Static, before: Set[String], step: Step): Either[String, Set[String]] =
     step match {
@@ -303,7 +304,8 @@ final class AMDGPUBlockCost private (
         val text = laid.text(index)
         val use  = laid.uses(index)
         reaches(text).flatMap { found =>
-          val read = (units(use, use.reads) ++ Option.when(found)(memoryUnit)).intersect(before)
+          val deciding = if (found && use.address.nonEmpty) use.address else use.reads
+          val read     = (units(use, deciding) ++ Option.when(found)(memoryUnit)).intersect(before)
           if (read.isEmpty) Right(before)
           else if (found)
             Left(

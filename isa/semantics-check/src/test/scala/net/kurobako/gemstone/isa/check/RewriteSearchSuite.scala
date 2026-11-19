@@ -123,6 +123,47 @@ class RewriteSearchSuite extends Suite {
     println(s"[rewrite] stream ${rewrite.line}")
   }
 
+  private val recomputed: Vec[Byte] = WindowFixtures.streamOf("v_lshlrev_b32 v7, 2, v6\nv_mov_b32 v7, v7\n", "v7")
+
+  private def recording(image: Vec[Byte], function: String) =
+    AMDGPUBlockCost.Launch.Recorded(
+      AMDGPUBlockCost.record(image, function, 32, 1, Vec(4096L, 4096L, 5L)).fold(fail(_), identity),
+      oneWave.placement
+    )
+
+  private def feedingStore(image: Vec[Byte], function: String): (Window, Vec[String]) = {
+    val text   = assembly(image, function)
+    val first  = text.indexWhere(_.startsWith("v_lshlrev_b32 v7"))
+    val last   = text.indexWhere(_.startsWith("global_store_dword"))
+    val window = windows(image, 3, function).find(window => window.first <= first && last <= window.last)
+      .getOrElse(fail(s"no window holds the shift, the copy and the store: $text"))
+    (window, Vec.from(window.first to window.last).map(text(_)))
+  }
+
+  test("a rewrite that changes only the value a kept store writes is proved and costed under a recorded launch") {
+    installed()
+    val function       = WindowFixtures.streaming.raw
+    val (window, code) = feedingStore(recomputed, function)
+    val report         = RewriteSearch.amdgpu(recomputed, function, target, window, recording(recomputed, function))
+      .fold(fail(_), identity)
+    val kept  = code.filterNot(_.startsWith("v_mov_b32 v7"))
+    val found = report.rewrites.find(_.rewrite == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
+    assert(found.after.cycles < found.before.cycles, found)
+    assert(!report.uncosted.exists(_.reason.contains("reads v7")), report.uncosted)
+  }
+
+  test("a rewrite that changes the address a kept store writes through is refused under a recorded launch") {
+    val function       = WindowFixtures.streaming.raw
+    val (window, code) = feedingStore(recomputed, function)
+    val cost           = AMDGPUBlockCost.of(recomputed, function, target, recording(recomputed, function))
+      .fold(fail(_), identity)
+    assert(cost.cost(window, code).isRight)
+    val valued = cost.cost(window, code.filterNot(_.startsWith("v_mov_b32 v7")))
+    assert(valued.isRight, valued)
+    val moved = cost.cost(window, code.init ++ Vec("v_add_nc_u32 v0, v0, 4", code.last))
+    assert(moved.left.exists(_.contains("reads v0, which the rewrite changes")), moved)
+  }
+
   test("candidates the cost refuses are listed under the reason") {
     val report = RewriteSearch.Report(
       Window(0, 1, 2, Set.empty, Set("v1")),
