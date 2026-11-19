@@ -11,7 +11,6 @@
 
 #include <gemstone/environment.hpp>
 #include <gemstone/export.h>
-#include <gemstone_device_presets.hpp>
 
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -19,10 +18,11 @@
 
 namespace {
 
-enum class Node { Module, InitState };
+enum class Node { Module, InitState, Kfd };
 
 constexpr std::string_view ModulePath = "/sys/module/amdgpu";
 constexpr std::string_view InitStatePath = "/sys/module/amdgpu/initstate";
+constexpr std::string_view KfdPath = "/dev/kfd";
 constexpr std::string_view InitStateText = "live\n";
 
 std::optional<Node> presented(const char *path) {
@@ -31,9 +31,10 @@ std::optional<Node> presented(const char *path) {
   std::optional<Node> node;
   if (view == ModulePath) node = Node::Module;
   else if (view == InitStatePath) node = Node::InitState;
+  else if (view == KfdPath) node = Node::Kfd;
   if (!node) return std::nullopt;
-  const auto preset = gemstone::environment::selectedDevicePreset();
-  if (!preset || !preset->target.starts_with("gfx")) return std::nullopt;
+  const auto target = gemstone::environment::targetArch();
+  if (!target || !target->starts_with("gfx")) return std::nullopt;
   return node;
 }
 
@@ -55,11 +56,16 @@ int initStateDescriptor(int flags) {
   return descriptor;
 }
 
+mode_t modeOf(Node node) {
+  if (node == Node::Module) return S_IFDIR | 0755;
+  return node == Node::Kfd ? S_IFCHR | 0666 : S_IFREG | 0444;
+}
+
 template <typename S> void describe(S &status, Node node) {
   std::memset(&status, 0, sizeof(status));
-  status.st_mode = node == Node::Module ? S_IFDIR | 0755 : S_IFREG | 0444;
+  status.st_mode = modeOf(node);
   status.st_nlink = node == Node::Module ? 2 : 1;
-  status.st_size = node == Node::Module ? 0 : static_cast<decltype(status.st_size)>(InitStateText.size());
+  status.st_size = node != Node::InitState ? 0 : static_cast<decltype(status.st_size)>(InitStateText.size());
   status.st_blksize = 4096;
 }
 
@@ -76,7 +82,7 @@ template <typename S> bool describePresented(const char *path, S *status) {
 }
 
 int accessible(Node node, int mode) {
-  if ((mode & W_OK) != 0 || ((mode & X_OK) != 0 && node == Node::InitState)) {
+  if (((mode & W_OK) != 0 && node != Node::Kfd) || ((mode & X_OK) != 0 && node != Node::Module)) {
     errno = EACCES;
     return -1;
   }

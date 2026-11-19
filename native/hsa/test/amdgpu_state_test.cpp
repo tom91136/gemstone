@@ -21,6 +21,7 @@ namespace {
 
 constexpr const char *ModulePath = "/sys/module/amdgpu";
 constexpr const char *InitStatePath = "/sys/module/amdgpu/initstate";
+constexpr const char *KfdPath = "/dev/kfd";
 
 std::string readAll(int descriptor) {
   std::string text;
@@ -60,10 +61,31 @@ TEST_CASE("an AMD preset presents a live amdgpu module", "[hsa][amdgpu-state]") 
   REQUIRE(openat(AT_FDCWD, InitStatePath, O_WRONLY) < 0);
 }
 
+TEST_CASE("an AMD preset presents the kfd device node", "[hsa][amdgpu-state]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
+  struct stat status{};
+  REQUIRE(statPath(KfdPath, &status) == 0);
+  REQUIRE(S_ISCHR(status.st_mode));
+  REQUIRE(access(KfdPath, F_OK) == 0);
+  REQUIRE(access(KfdPath, R_OK | W_OK) == 0);
+  REQUIRE(access(KfdPath, X_OK) != 0);
+  REQUIRE(faccessat(AT_FDCWD, KfdPath, F_OK, 0) == 0);
+}
+
+TEST_CASE("a gfx target architecture presents the amdgpu state without a preset", "[hsa][amdgpu-state]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, nullptr);
+  const gemstone_test::Environment arch(gemstone::environment::TargetArch, "gfx1030");
+  struct stat status{};
+  for (const char *path : {ModulePath, InitStatePath, KfdPath}) {
+    REQUIRE(statPath(path, &status) == 0);
+    REQUIRE(access(path, F_OK) == 0);
+  }
+}
+
 TEST_CASE("the amdgpu state follows the selected preset", "[hsa][amdgpu-state]") {
   for (const char *device : {"GeForce GTX 1080", static_cast<const char *>(nullptr)}) {
     const gemstone_test::Environment selected(gemstone::environment::Device, device);
-    for (const char *path : {ModulePath, InitStatePath}) {
+    for (const char *path : {ModulePath, InitStatePath, KfdPath}) {
       struct stat status{};
       REQUIRE((statPath(path, &status) == 0) == rawExists(path));
       REQUIRE((access(path, F_OK) == 0) == rawExists(path));
