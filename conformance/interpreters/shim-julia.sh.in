@@ -35,6 +35,7 @@ if [ -n "${ROCM_PATH-}" ]; then
   export ROCM_PATH="$rocm_overlay"
 fi
 IFS=$saved_ifs
+export LD_LIBRARY_PATH="$base/julia-@JULIA@/lib/julia${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 status=0
 "$julia" --startup-file=no --project="$project" \

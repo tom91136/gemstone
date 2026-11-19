@@ -19,7 +19,7 @@ configure_file("${interpreters}/shim-julia.sh.in" "${directory}/shim" @ONLY)
 file(CHMOD "${directory}/shim" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 file(MAKE_DIRECTORY "${directory}/base/julia-1.13.4/bin" "${directory}/native" "${directory}/other" "${directory}/vendor")
 file(WRITE "${directory}/base/julia-1.13.4/bin/julia"
-  "#!/bin/sh\nif [ -n \"\${ROCM_PATH-}\" ]; then echo \"ROCM_PATH=\$ROCM_PATH\"; for entry in \"\$ROCM_PATH\"/*; do echo \"ROCM_ENTRY=\$(basename \"\$entry\")->\$(readlink \"\$entry\")\"; done; fi\nprintf '%s\\n' \"$@\"\n")
+  "#!/bin/sh\necho \"LD_LIBRARY_PATH=\${LD_LIBRARY_PATH-}\"\nif [ -n \"\${ROCM_PATH-}\" ]; then echo \"ROCM_PATH=\$ROCM_PATH\"; for entry in \"\$ROCM_PATH\"/*; do echo \"ROCM_ENTRY=\$(basename \"\$entry\")->\$(readlink \"\$entry\")\"; done; fi\nprintf '%s\\n' \"$@\"\n")
 file(CHMOD "${directory}/base/julia-1.13.4/bin/julia" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
 
 function(shim_arguments preload output)
@@ -65,6 +65,17 @@ require_entries("${arguments}" "a HIP preload")
 
 shim_arguments("${directory}/other/libcuda.so.1:${directory}/native/libhsa-runtime64.so.1" arguments "${directory}/native:${directory}/vendor")
 require_entries("${arguments}" "a HIP library on the library path")
+
+set(julia_libraries "${directory}/base/julia-1.13.4/lib/julia")
+shim_arguments("${directory}/other/libcuda.so.1" arguments "${directory}/other")
+if(NOT "LD_LIBRARY_PATH=${julia_libraries}:${directory}/other" IN_LIST arguments)
+  fail("the interpreter libraries must precede the library path:\n${arguments}")
+endif()
+
+shim_arguments("${directory}/other/libcuda.so.1" arguments)
+if(NOT "LD_LIBRARY_PATH=${julia_libraries}" IN_LIST arguments)
+  fail("an empty library path must not gain an empty entry:\n${arguments}")
+endif()
 
 shim_arguments("${directory}/other/libcuda.so.1" arguments "${directory}/other")
 foreach(argument IN LISTS arguments)
