@@ -17,7 +17,8 @@ import scala.util.Using
   * scalar, as little-endian hex) and the buffers the card returned, which were the same from both cubins;
   * `regenerated.sha256` names the regenerated images that ran. `exact-cuts.tsv` holds, for each distance of the table
   * that a one-cycle cut made the card compute wrongly, one such cut as the instruction, its cut stall, the consumer,
-  * the producer and use the distance belongs to, the distance, and how many of 20 input sets the card got wrong.
+  * the producer and use the distance belongs to, the distance, and how many of the drawn input sets (20, or 500 with
+  * special values) the card got wrong.
   */
 class ControlWordHardwareSuite extends Suite {
   private def resource(name: String): Vec[Byte] =
