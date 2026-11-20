@@ -38,7 +38,10 @@ object Cubin {
       registerCount: Int >= 0 = 0,
       sharedSizeBytes: Int >= 0 = 0,
       localSizeBytes: Int >= 0 = 0
-  )
+  ) {
+    // constant loads are word-sized, so a trailing narrow parameter is readable up to the next word boundary
+    def parameterExtent: Int = (parameterSize + 3) / 4 * 4
+  }
   case class Global(
       name: NonEmpty[String],
       bytes: Vec[Byte],

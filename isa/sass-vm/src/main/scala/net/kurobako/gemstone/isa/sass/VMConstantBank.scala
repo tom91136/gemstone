@@ -160,7 +160,7 @@ private object VMConstantBank {
       val word = (at - launch) / 4 - (if (sm >= 100 && at >= launch + 16) 1 else 0)
       if (word < 3) Value.BlockDim(Axes(word)) else Value.GridDim(Axes(word - 3))
     }
-    if (c0 && offset >= kernel.parameterBase && offset + bytes <= kernel.parameterBase.raw + kernel.parameterSize) {
+    if (c0 && offset >= kernel.parameterBase && offset + bytes <= kernel.parameterBase.raw + kernel.parameterExtent) {
       emit(Load(
         result.slot,
         Value.Immediate(VMAddressSpace.ParameterBase + offset - kernel.parameterBase),

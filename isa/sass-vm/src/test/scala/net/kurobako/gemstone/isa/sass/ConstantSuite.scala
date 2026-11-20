@@ -31,6 +31,12 @@ class ConstantSuite extends Suite {
     assertEquals(run.words(0), Vec(4L, 2L, 3L, 5L, 6L, 7L))
   }
 
+  for (sm <- Vec(75, 89)) test(s"sm_$sm a word load at a trailing 16-bit parameter reads zeros past the argument") {
+    val run = program(sm, "LDC.64 R2, c[0x0][0x160]; ULDC UR4, c[0x0][0x168]; MOV R4, UR4; STG.E [R2.64], R4; EXIT")
+      .launch(1)(Arg.zeros(4), Arg.Scalar(LittleEndian.toVec(0xbeefL, 2)))
+    assertEquals(run.words(0), Vec(0xbeefL))
+  }
+
   // cooperative_groups reads the grid workspace the driver writes to c0: its high word, then its low word
   for {
     (sm, high, low) <- Vec(

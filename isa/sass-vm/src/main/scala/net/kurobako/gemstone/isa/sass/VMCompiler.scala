@@ -85,7 +85,7 @@ private object VMCompiler {
         VMAssembler.assemble(statements).map(program => (program, registerCount, function))
     }.map { (program, registerCount, function) =>
       val constants = module.sections.find(_.name == s".nv.constant0.${kernel.name}").fold(Vec.empty[Byte])(_.bytes)
-      val block     = constants.slice(kernel.parameterBase, kernel.parameterBase.raw + kernel.parameterSize)
+      val block     = constants.slice(kernel.parameterBase, kernel.parameterBase.raw + kernel.parameterExtent)
       // The slot names the explorer shows: the general and uniform banks this kernel addresses, and the physical
       // predicates, in slot order.
       val layout = VMRegisters.Layout.of(kernel, functions)
@@ -108,7 +108,7 @@ private object VMCompiler {
           kernel.parameters.map(parameter =>
             KernelParameter(s"param${parameter.ordinal}", parameter.offset, parameter.size)
           ),
-          block.padTo(kernel.parameterSize, 0.toByte)
+          block.padTo(kernel.parameterExtent, 0.toByte)
         ),
         "SASS",
         cluster = Option.when(kernel.requiredCluster != LaunchGeometry.Dimensions.One)(kernel.requiredCluster),
