@@ -2028,6 +2028,77 @@ TEST_CASE("a batch timeout concludes the case in flight and reruns only the case
   CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case pass_three"});
 }
 
+TEST_CASE("a batch stopped at the deadline keeps finished cases and marks the rest not run", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const Interruption interruption(std::chrono::steady_clock::now() + 1s);
+  const auto start = std::chrono::steady_clock::now();
+  const auto results = program.run(BatchProgram::cases({"pass_one", "hang_two", "pass_three", "fail_four"}));
+  CHECK(std::chrono::steady_clock::now() - start < 8s);
+  REQUIRE(results.size() == 4);
+  CHECK(results[0].status == 0);
+  CHECK_FALSE(results[0].notRun);
+  CHECK(program.log(0).contains("ran pass_one"));
+  for (const auto position : {1, 2, 3}) {
+    CHECK(results[position].notRun);
+    CHECK(results[position].message == "deadline reached");
+  }
+  CHECK(program.invocations() == std::vector<std::string>{"--batch"});
+}
+
+TEST_CASE("a batch that finds the deadline passed starts no process", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const Interruption interruption(std::chrono::steady_clock::now() - 1s);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "pass_two"}));
+  REQUIRE(results.size() == 2);
+  for (const auto &result : results) {
+    CHECK(result.notRun);
+    CHECK(result.message == "deadline reached");
+  }
+  CHECK_FALSE(fs::exists(program.artifact / "invocations"));
+}
+
+TEST_CASE("a batch interrupted by a signal marks the cases in flight and unstarted not run", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const Interruption interruption;
+  auto raised = std::async(std::launch::async, [] {
+    std::this_thread::sleep_for(1s);
+    std::raise(SIGTERM);
+  });
+  const auto start = std::chrono::steady_clock::now();
+  const auto results = program.run(BatchProgram::cases({"pass_one", "hang_two", "pass_three"}));
+  raised.get();
+  CHECK(std::chrono::steady_clock::now() - start < 8s);
+  REQUIRE(results.size() == 3);
+  CHECK_FALSE(results[0].notRun);
+  CHECK(results[0].status == 0);
+  for (const auto position : {1, 2}) {
+    CHECK(results[position].notRun);
+    CHECK(results[position].message == fmt::format("interrupted by signal {}", SIGTERM));
+  }
+  CHECK(program.invocations() == std::vector<std::string>{"--batch"});
+}
+
+TEST_CASE("a run past its deadline starts no batch and records every case not run", "[driver][batch]") {
+  const Interruption interruption(std::chrono::steady_clock::now() - 1s);
+  TargetExecution target{.id = "t", .config = {}, .tests = {}};
+  target.config.deviceLock = false;
+  for (uint32_t index = 0; index < 3; ++index)
+    target.tests.push_back(
+        {.identity = fmt::format("c{}", index), .program = "p", .timeoutSeconds = 1, .index = index, .count = 3, .group = "g"});
+  std::atomic<int> started{0};
+  const auto reports = runCases(
+      {target}, 2,
+      [&](const ExecutionConfig &, const ScheduledCase &) {
+        ++started;
+        return CaseResult{};
+      },
+      [&](const ExecutionConfig &, std::span<const ScheduledCase>, const CaseSink &) { ++started; });
+  CHECK(started == 0);
+  REQUIRE(reports.size() == 3);
+  for (const auto &report : reports)
+    CHECK(report.result.notRun);
+}
+
 TEST_CASE("a batch whose cases each fit their timeout can exceed it in total", "[driver][batch]") {
   const BatchProgram program(BatchBody);
   const auto results = program.run(BatchProgram::cases({"slow_one", "slow_two", "slow_three"}, 2));

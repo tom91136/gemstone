@@ -1211,7 +1211,8 @@ static std::optional<size_t> runBatchRound(const ExecutionConfig &config, std::s
   std::ofstream log(report / "batch.log", std::ios::binary | std::ios::trunc);
   const auto process = runProcess(launched(config.launcher, {program.string(), "--batch", casesPath.string()}), workingDirectory,
                                   environment, std::chrono::seconds(longest), "[" + first.program + " batch] ", false, &log, watch);
-  if (process.timedOut && current) conclude(*current, process.status, true);
+  if (Interruption::takeStoppedProcess()) current.reset();
+  else if (process.timedOut && current) conclude(*current, process.status, true);
   std::map<std::string_view, int32_t> statuses;
   for (std::string_view rest = epilogue; !rest.empty();) {
     const auto end = rest.find('\n');
@@ -1250,6 +1251,7 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
       result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
     }
     result.elapsed = std::chrono::steady_clock::now() - begin;
+    if (Interruption::takeStoppedProcess()) result = notRunResult(result.elapsed);
     sink(position, std::move(result));
   };
   std::vector<size_t> pending;
@@ -1262,18 +1264,17 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
                                                          });
   std::vector<bool> finished(tests.size(), false);
   const auto open = [&] { return pending ^ filter([&](size_t position) { return !finished[position]; }); };
-  while (selected && selected->get().format == "cases" && open().size() >= 2 && !Interruption::signal()) {
+  while (selected && selected->get().format == "cases" && open().size() >= 2 && !Interruption::stopRequested()) {
     const auto before = open().size();
     const auto inFlight = runBatchRound(config, tests, open(), selected->get().path, finished, sink);
-    if (inFlight && !Interruption::signal()) {
+    if (inFlight && !Interruption::stopRequested()) {
       alone(*inFlight);
       finished[*inFlight] = true;
     }
     if (open().size() == before) break;
   }
   for (const auto position : open()) {
-    if (const auto signal = Interruption::signal())
-      sink(position, {.status = 128 + signal, .output = "conformance: interrupted\n", .message = {}, .classification = {}});
+    if (Interruption::stopRequested()) sink(position, notRunResult());
     else alone(position);
   }
 }

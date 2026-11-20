@@ -157,6 +157,8 @@ Interruption::~Interruption() {
   if (--interruptionScopes == 0) {
     sigaction(SIGTERM, &oldTerm, nullptr);
     sigaction(SIGINT, &oldInt, nullptr);
+    interrupted.store(0);
+    runDeadline = std::chrono::steady_clock::time_point::max();
   }
 }
 int32_t Interruption::signal() { return interrupted.load(); }
