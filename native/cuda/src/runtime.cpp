@@ -5522,9 +5522,9 @@ CUresult cuStreamGetCaptureInfo_v3(CUstream stream, CUstreamCaptureStatus *statu
   return captureInfo(stream, status, id, graph, dependencies, edgeData, count);
 }
 
-CUresult cuEventCreate(CUevent *event, unsigned) {
+CUresult cuEventCreate(CUevent *event, unsigned flags) {
   if (!event) return CUDA_ERROR_INVALID_VALUE;
-  auto *const created = static_cast<CUevent>(commands().createEvent());
+  auto *const created = static_cast<CUevent>(commands().createEvent((flags & CU_EVENT_DISABLE_TIMING) == 0));
   {
     std::scoped_lock const lock{streamContextMutex};
     eventContexts.emplace(created, activeContext());
@@ -5540,10 +5540,16 @@ CUresult cuEventDestroy_v2(CUevent event) {
   return CUDA_SUCCESS;
 }
 
-CUresult cuEventElapsedTime_v2(float *milliseconds, CUevent, CUevent) {
+CUresult cuEventElapsedTime_v2(float *milliseconds, CUevent start, CUevent end) {
   if (!milliseconds) return CUDA_ERROR_INVALID_VALUE;
-  *milliseconds = 0.0F;
-  return CUDA_SUCCESS;
+  const auto interval = commands().elapsed(start, end);
+  if (!interval) return CUDA_ERROR_INVALID_HANDLE;
+  switch (interval->state) {
+    case gemstone::CommandQueue::Elapsed::Measured: *milliseconds = interval->milliseconds; return CUDA_SUCCESS;
+    case gemstone::CommandQueue::Elapsed::Pending: return CUDA_ERROR_NOT_READY;
+    case gemstone::CommandQueue::Elapsed::Unusable: return CUDA_ERROR_INVALID_HANDLE;
+  }
+  return CUDA_ERROR_INVALID_HANDLE;
 }
 
 CUresult cuEventQuery(CUevent event) {

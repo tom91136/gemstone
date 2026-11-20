@@ -2670,9 +2670,9 @@ extern "C" GEMSTONE_PUBLIC_API hipError_t hipExtModuleLaunchKernel(hipFunction_t
                         args, shared, stream, launchBuffer, &global);
 }
 
-extern "C" hipError_t hipEventCreateWithFlags(hipEvent_t *event, unsigned int) {
+extern "C" hipError_t hipEventCreateWithFlags(hipEvent_t *event, unsigned int flags) {
   if (!event) return remember(hipErrorInvalidValue);
-  *event = static_cast<hipEvent_t>(commands().createEvent());
+  *event = static_cast<hipEvent_t>(commands().createEvent((flags & hipEventDisableTiming) == 0));
   return remember(hipSuccess);
 }
 extern "C" hipError_t hipEventCreate(hipEvent_t *event) { return hipEventCreateWithFlags(event, 0); }
@@ -2697,9 +2697,14 @@ extern "C" hipError_t hipEventQuery(hipEvent_t event) {
 }
 extern "C" hipError_t hipEventElapsedTime(float *milliseconds, hipEvent_t start, hipEvent_t stop) {
   if (!milliseconds) return remember(hipErrorInvalidValue);
-  if (!commands().eventTicket(start) || !commands().eventTicket(stop)) return remember(hipErrorInvalidResourceHandle);
-  *milliseconds = 0.0F;
-  return remember(hipSuccess);
+  const auto interval = commands().elapsed(start, stop);
+  if (!interval) return remember(hipErrorInvalidResourceHandle);
+  switch (interval->state) {
+    case gemstone::CommandQueue::Elapsed::Measured: *milliseconds = interval->milliseconds; return remember(hipSuccess);
+    case gemstone::CommandQueue::Elapsed::Pending: return remember(hipErrorNotReady);
+    case gemstone::CommandQueue::Elapsed::Unusable: return remember(hipErrorInvalidResourceHandle);
+  }
+  return remember(hipErrorInvalidResourceHandle);
 }
 
 extern "C" GEMSTONE_PUBLIC_API void **__hipRegisterFatBinary(const void *fatbin) {

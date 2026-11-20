@@ -67,6 +67,7 @@ class CommandQueue {
     bool done = false;
     bool join = false;
     int32_t status = 0;
+    std::chrono::steady_clock::time_point finished;
     std::vector<std::shared_ptr<Completion>> dependencies;
   };
 
@@ -245,6 +246,12 @@ public:
     return entry.id;
   }
 
+  enum class Elapsed { Measured, Unusable, Pending };
+  struct Interval {
+    Elapsed state;
+    float milliseconds = 0;
+  };
+
   /** Destroys every stream and event this queue created; queued work keeps its own references. */
   void reset() {
     std::scoped_lock const lock(mutex);
@@ -260,10 +267,10 @@ public:
     }
   }
 
-  void *createEvent() {
+  void *createEvent(bool timing = true) {
     std::scoped_lock const lock(mutex);
     auto *event = mintHandle();
-    events.emplace(event, Ticket{});
+    events.emplace(event, Event{.ticket = {}, .timing = timing});
     return event;
   }
   bool destroyEvent(const void *event) {
@@ -274,7 +281,7 @@ public:
     std::unique_lock lock(mutex);
     const auto found = events.find(event);
     if (found == events.end()) return false;
-    found->second = submitLocked(streamKey(stream), [] { return 0; }, {}, Order::Ordered);
+    found->second.ticket = submitLocked(streamKey(stream), [] { return 0; }, {}, Order::Ordered);
     drainStopped(lock);
     return true;
   }
@@ -284,9 +291,10 @@ public:
     if (found == events.end()) return false;
     auto joined = std::make_shared<Completion>();
     joined->join = true;
+    joined->finished = std::chrono::steady_clock::now();
     for (const auto *target : targets)
       if (const auto stream = streams.find(streamKey(target)); stream != streams.end()) frontier(stream->second, joined->dependencies);
-    found->second = std::move(joined);
+    found->second.ticket = std::move(joined);
     return true;
   }
   /** The completion of the event's latest record; empty when the event is unknown. */
@@ -294,13 +302,24 @@ public:
     std::scoped_lock const lock(mutex);
     const auto found = events.find(event);
     if (found == events.end()) return std::nullopt;
-    return found->second;
+    return found->second.ticket;
+  }
+  /** Time from the completion of `start` to the completion of `stop`; empty when either event is unknown. */
+  std::optional<Interval> elapsed(const void *start, const void *stop) {
+    std::scoped_lock const lock(mutex);
+    const auto first = events.find(start);
+    const auto last = events.find(stop);
+    if (first == events.end() || last == events.end()) return std::nullopt;
+    if (!first->second.timing || !last->second.timing || !first->second.ticket || !last->second.ticket) return Interval{.state = Elapsed::Unusable};
+    if (!readyLocked(first->second.ticket) || !readyLocked(last->second.ticket)) return Interval{.state = Elapsed::Pending};
+    const auto span = finishLocked(last->second.ticket) - finishLocked(first->second.ticket);
+    return Interval{.state = Elapsed::Measured, .milliseconds = std::chrono::duration<float, std::milli>(span).count()};
   }
   bool waitEvent(const void *stream, const void *event) {
     std::unique_lock lock(mutex);
     const auto found = events.find(event);
     if (found == events.end()) return false;
-    submitLocked(streamKey(stream), [] { return 0; }, {found->second}, Order::Ordered);
+    submitLocked(streamKey(stream), [] { return 0; }, {found->second.ticket}, Order::Ordered);
     drainStopped(lock);
     return true;
   }
@@ -315,6 +334,10 @@ private:
     uint64_t id = 0;
     bool nonblocking = false;
     bool created = false;
+  };
+  struct Event {
+    Ticket ticket;
+    bool timing = true;
   };
   struct Job {
     Ticket ticket;
@@ -368,6 +391,12 @@ private:
     using namespace aspartame;
     return ticket->dependencies ^ forall(readyLocked);
   }
+  static std::chrono::steady_clock::time_point finishLocked(const Ticket &ticket) {
+    auto latest = ticket->finished;
+    for (const auto &dependency : ticket->dependencies)
+      latest = std::max(latest, finishLocked(dependency));
+    return latest;
+  }
   static int32_t statusLocked(const Ticket &ticket, bool consume) {
     if (!ticket) return 0;
     auto status = ticket->status;
@@ -396,6 +425,7 @@ private:
     activeQueue = previous;
     lock.lock();
     job.ticket->status = status == 0 ? inherited : status;
+    job.ticket->finished = std::chrono::steady_clock::now();
     job.ticket->done = true;
     job.ticket->dependencies.clear();
     lock.unlock();
@@ -461,7 +491,7 @@ private:
   std::condition_variable changed;
   std::deque<Job> jobs;
   std::map<const void *, Stream> streams;
-  std::map<const void *, Ticket> events;
+  std::map<const void *, Event> events;
   uint64_t nextHandle = 0x400000000;
   uint64_t nextStreamId = 13;
   unsigned blocked = 0;

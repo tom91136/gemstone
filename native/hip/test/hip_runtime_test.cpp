@@ -154,6 +154,40 @@ TEST_CASE("HIP stream callback reports completed work", "[hip]") {
   REQUIRE((hipStreamDestroy(stream) == hipSuccess));
 }
 
+TEST_CASE("HIP event elapsed time covers the work between the records", "[hip]") {
+  hipStream_t stream = nullptr;
+  hipEvent_t start = nullptr;
+  hipEvent_t stop = nullptr;
+  hipEvent_t untimed = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+  REQUIRE((hipEventCreate(&start) == hipSuccess));
+  REQUIRE((hipEventCreate(&stop) == hipSuccess));
+  REQUIRE((hipEventCreateWithFlags(&untimed, hipEventDisableTiming) == hipSuccess));
+  float elapsed = -1;
+  CHECK((hipEventElapsedTime(&elapsed, start, stop) == hipErrorInvalidHandle));
+
+  REQUIRE((hipEventRecord(start, stream) == hipSuccess));
+  REQUIRE((hipStreamAddCallback(
+               stream, [](hipStream_t, hipError_t, void *) { std::this_thread::sleep_for(std::chrono::milliseconds(150)); }, nullptr, 0)
+           == hipSuccess));
+  REQUIRE((hipEventRecord(stop, stream) == hipSuccess));
+  REQUIRE((hipEventRecord(untimed, stream) == hipSuccess));
+  CHECK((hipEventElapsedTime(&elapsed, start, stop) == hipErrorNotReady));
+  REQUIRE((hipEventSynchronize(untimed) == hipSuccess));
+
+  REQUIRE((hipEventElapsedTime(&elapsed, start, stop) == hipSuccess));
+  CHECK((elapsed >= 140.0F));
+  CHECK((elapsed < 5000.0F));
+  CHECK((hipEventElapsedTime(&elapsed, start, untimed) == hipErrorInvalidHandle));
+  CHECK((hipEventElapsedTime(&elapsed, untimed, stop) == hipErrorInvalidHandle));
+  CHECK((hipEventElapsedTime(nullptr, start, stop) == hipErrorInvalidValue));
+
+  REQUIRE((hipEventDestroy(start) == hipSuccess));
+  REQUIRE((hipEventDestroy(stop) == hipSuccess));
+  REQUIRE((hipEventDestroy(untimed) == hipSuccess));
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+}
+
 TEST_CASE("HIP pitched copies outside an allocation are invalid values", "[hip]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);

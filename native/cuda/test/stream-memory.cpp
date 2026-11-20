@@ -629,3 +629,121 @@ TEST_CASE("context wait orders existing and later streams after the recorded wor
   REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(producer) == CUDA_SUCCESS);
 }
+
+TEST_CASE("event elapsed time covers the work between the records", "[cuda][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent start = nullptr;
+  CUevent stop = nullptr;
+  REQUIRE(cuEventCreate(&start, 0) == CUDA_SUCCESS);
+  REQUIRE(cuEventCreate(&stop, 0) == CUDA_SUCCESS);
+
+  std::atomic<bool> delayed{false};
+  REQUIRE(cuEventRecord(start, stream) == CUDA_SUCCESS);
+  REQUIRE(cuLaunchHostFunc(stream, delayStream, &delayed) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(stop, stream) == CUDA_SUCCESS);
+  REQUIRE(cuEventSynchronize(stop) == CUDA_SUCCESS);
+
+  float forward = -1;
+  float backward = -1;
+  float same = -1;
+  REQUIRE(cuEventElapsedTime(&forward, start, stop) == CUDA_SUCCESS);
+  REQUIRE(cuEventElapsedTime(&backward, stop, start) == CUDA_SUCCESS);
+  REQUIRE(cuEventElapsedTime(&same, stop, stop) == CUDA_SUCCESS);
+  CHECK(forward >= 140.0F);
+  CHECK(forward < 5000.0F);
+  CHECK(backward == -forward);
+  CHECK(same == 0.0F);
+
+  REQUIRE(cuEventDestroy_v2(start) == CUDA_SUCCESS);
+  REQUIRE(cuEventDestroy_v2(stop) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("event elapsed time of back-to-back records is small and not negative", "[cuda][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent start = nullptr;
+  CUevent stop = nullptr;
+  REQUIRE(cuEventCreate(&start, 0) == CUDA_SUCCESS);
+  REQUIRE(cuEventCreate(&stop, 0) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(start, stream) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(stop, stream) == CUDA_SUCCESS);
+  REQUIRE(cuEventSynchronize(stop) == CUDA_SUCCESS);
+  float elapsed = -1;
+  REQUIRE(cuEventElapsedTime(&elapsed, start, stop) == CUDA_SUCCESS);
+  CHECK(elapsed >= 0.0F);
+  CHECK(elapsed < 100.0F);
+  REQUIRE(cuEventDestroy_v2(start) == CUDA_SUCCESS);
+  REQUIRE(cuEventDestroy_v2(stop) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("event elapsed time rejects unrecorded, untimed and pending events", "[cuda][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent timed = nullptr;
+  CUevent other = nullptr;
+  CUevent untimed = nullptr;
+  REQUIRE(cuEventCreate(&timed, 0) == CUDA_SUCCESS);
+  REQUIRE(cuEventCreate(&other, 0) == CUDA_SUCCESS);
+  REQUIRE(cuEventCreate(&untimed, CU_EVENT_DISABLE_TIMING) == CUDA_SUCCESS);
+  float elapsed = -1;
+
+  CHECK(cuEventElapsedTime(&elapsed, timed, other) == CUDA_ERROR_INVALID_HANDLE);
+  CHECK(cuEventElapsedTime(nullptr, timed, other) == CUDA_ERROR_INVALID_VALUE);
+
+  std::atomic<bool> delayed{false};
+  REQUIRE(cuEventRecord(timed, stream) == CUDA_SUCCESS);
+  CHECK(cuEventElapsedTime(&elapsed, timed, other) == CUDA_ERROR_INVALID_HANDLE);
+  REQUIRE(cuLaunchHostFunc(stream, delayStream, &delayed) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(other, stream) == CUDA_SUCCESS);
+  CHECK(cuEventElapsedTime(&elapsed, timed, other) == CUDA_ERROR_NOT_READY);
+  REQUIRE(cuEventRecord(untimed, stream) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+
+  CHECK(cuEventElapsedTime(&elapsed, timed, other) == CUDA_SUCCESS);
+  CHECK(cuEventElapsedTime(&elapsed, timed, untimed) == CUDA_ERROR_INVALID_HANDLE);
+  CHECK(cuEventElapsedTime(&elapsed, untimed, timed) == CUDA_ERROR_INVALID_HANDLE);
+  CHECK(cuEventElapsedTime(&elapsed, untimed, untimed) == CUDA_ERROR_INVALID_HANDLE);
+
+  delayed.store(false);
+  REQUIRE(cuLaunchHostFunc(stream, delayStream, &delayed) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(other, stream) == CUDA_SUCCESS);
+  CHECK(cuEventElapsedTime(&elapsed, timed, other) == CUDA_ERROR_NOT_READY);
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+  CHECK(cuEventElapsedTime(&elapsed, timed, other) == CUDA_SUCCESS);
+
+  REQUIRE(cuEventDestroy_v2(timed) == CUDA_SUCCESS);
+  REQUIRE(cuEventDestroy_v2(other) == CUDA_SUCCESS);
+  REQUIRE(cuEventDestroy_v2(untimed) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("event elapsed time of context events spans the recorded work", "[cuda][event][context]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent start = nullptr;
+  CUevent stop = nullptr;
+  REQUIRE(cuEventCreate(&start, 0) == CUDA_SUCCESS);
+  REQUIRE(cuEventCreate(&stop, 0) == CUDA_SUCCESS);
+  std::atomic<bool> delayed{false};
+  REQUIRE(cuCtxRecordEvent(context, start) == CUDA_SUCCESS);
+  REQUIRE(cuLaunchHostFunc(stream, delayStream, &delayed) == CUDA_SUCCESS);
+  REQUIRE(cuCtxRecordEvent(context, stop) == CUDA_SUCCESS);
+  REQUIRE(cuEventSynchronize(stop) == CUDA_SUCCESS);
+  float elapsed = -1;
+  REQUIRE(cuEventElapsedTime(&elapsed, start, stop) == CUDA_SUCCESS);
+  CHECK(elapsed >= 140.0F);
+  REQUIRE(cuEventDestroy_v2(start) == CUDA_SUCCESS);
+  REQUIRE(cuEventDestroy_v2(stop) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
