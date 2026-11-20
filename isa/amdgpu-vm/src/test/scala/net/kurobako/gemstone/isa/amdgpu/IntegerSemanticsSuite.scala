@@ -828,7 +828,7 @@ class IntegerSemanticsSuite extends Suite {
             clamp
           )(sinks, 0, 0, Values.Unused, Values.Unused, Values.Unused)
         ),
-        (result, java.lang.Long.compareUnsigned(sum, product) < 0),
+        (result, if (signed) BigInt(product) + BigInt(c) < 0 else java.lang.Long.compareUnsigned(sum, product) < 0),
         s"signed=$signed clamp=$clamp $a $b $c"
       )
     }

@@ -1517,8 +1517,8 @@ private object IntegerSemantics {
       )
   }
 
-  /** V_MAD_U64_U32 and V_MAD_I64_I32 on SRC0 and SRC1 dwords and a 64-bit addend; the flag is the unsigned carry out of
-    * the 64-bit addition, and `clamp` saturates the sum.
+  /** V_MAD_U64_U32 and V_MAD_I64_I32 on SRC0 and SRC1 dwords and a 64-bit addend. `clamp` saturates the sum. The
+    * unsigned flag is the carry out of the addition; the signed flag is set when the exact sum is negative.
     */
   inline def multiplyAdd64[V, R](inline algebra: Algebra[V], signed: Boolean, clamp: Boolean)(
       inline sinks: AMDGPUSinks[V, R],
@@ -1552,7 +1552,16 @@ private object IntegerSemantics {
           ),
         (a, b, c, _, _) =>
           algebra.let("p", algebra.multiply(algebra.signExtend(a, 32), algebra.signExtend(b, 32)))(product =>
-            algebra.lessThan(algebra.add(product, c), product, signed = false)
+            algebra.let("s", algebra.add(product, c))(sum =>
+              algebra.xor(
+                algebra.lessThan(sum, algebra.literal(0L), signed = true),
+                algebra.lessThan(
+                  algebra.and(algebra.xor(product, sum), algebra.xor(c, sum)),
+                  algebra.literal(0L),
+                  signed = true
+                )
+              )
+            )
           )
       )
     else

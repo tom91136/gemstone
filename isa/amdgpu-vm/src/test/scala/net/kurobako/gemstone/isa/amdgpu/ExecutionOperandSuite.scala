@@ -34,7 +34,7 @@ class ExecutionOperandSuite extends Suite {
           Fixed.VccLo,
           if (signal) one else zero,
           one,
-          if (signal) InstructionSource.Constant(-1L) else zero
+          if (signal) InstructionSource.Constant(-2L) else zero
         ),
         Instruction.VDivScaleF32(
           6,

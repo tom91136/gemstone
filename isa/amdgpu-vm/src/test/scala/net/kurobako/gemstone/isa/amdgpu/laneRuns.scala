@@ -25,14 +25,14 @@ private object laneRuns extends munit.Assertions {
 
   def octets(values: Int*): Vec[Byte] = Vec.from(values.map(_.toByte))
 
-  /** Each lane's dword in `result` after `operations`, with lane `i` reading `inputs(i)` from `first` onwards, `offset`
-    * holding its byte offset and `base` the base of the lanes' memory. EXEC starts as `exec`.
+  /** Each lane's dwords in `results` after `operations`, with lane `i` reading `inputs(i)` from `first` onwards,
+    * `offset` holding its byte offset and `base` the base of the lanes' memory. EXEC starts as `exec`.
     */
-  def laneResults(
+  def laneWords(
       target: Target,
       inputs: Vec[Vec[Long]],
       operations: Vec[Instruction],
-      result: VectorRegisterIndex = 2,
+      results: Vec[VectorRegisterIndex],
       exec: Long = -1L,
       wave32: Boolean = true,
       groupSegmentSize: Int >= 0 = 0,
@@ -40,7 +40,7 @@ private object laneRuns extends munit.Assertions {
       first: VectorRegisterIndex = 2,
       offset: VectorRegisterIndex = 1,
       base: ScalarRegisterIndex = 6
-  )(using munit.Location): Vec[Long] = {
+  )(using munit.Location): Vec[Vec[Long]] = {
     val count      = inputs.size
     val memory     = RegionMemory()
     val allocation = AllocationId(1L)
@@ -68,11 +68,11 @@ private object laneRuns extends munit.Assertions {
       Instruction.SMove64(base, Constant(address)),
       Instruction.VBinary(VectorBinaryOperation.ShiftLeft32, offset, Constant(6), Register(0), false)
     ) ++ loads :+ Instruction.SMove64(Fixed.ExecLo, Constant(exec & all))
-    val suffix = Vec(
-      Instruction.SMove64(Fixed.ExecLo, Constant(all)),
-      Instruction.Store(result, MemoryAddress.Global(offset, Some(base), Stride - 4), 4, false),
-      Instruction.End
-    )
+    def slot(index: Int): Int = Stride - 4 * (results.size - index)
+    val suffix                = Vec(Instruction.SMove64(Fixed.ExecLo, Constant(all))) ++
+      results.zipWithIndex.map((result, index) =>
+        Instruction.Store(result, MemoryAddress.Global(offset, Some(base), slot(index)), 4, false)
+      ) :+ Instruction.End
     val source = codeKernel(
       target = target,
       groupSegmentSize = groupSegmentSize,
@@ -82,9 +82,38 @@ private object laneRuns extends munit.Assertions {
     val task = KernelTask.validated("kernel", Dimensions(count.unsafe[Int > 0], 1, 1), Dimensions.One, Vec.empty).value
     assertEquals(runIR(prefix ++ operations ++ suffix, memory, source, task), Right(()))
     Vec.tabulate(count)(lane =>
-      memory.getInt(allocation, (lane * Stride + Stride - 4).unsafe[Int >= 0]).toLong & 0xffffffffL
+      Vec.tabulate(results.size)(index =>
+        memory.getInt(allocation, (lane * Stride + slot(index)).unsafe[Int >= 0]).toLong & 0xffffffffL
+      )
     )
   }
+
+  def laneResults(
+      target: Target,
+      inputs: Vec[Vec[Long]],
+      operations: Vec[Instruction],
+      result: VectorRegisterIndex = 2,
+      exec: Long = -1L,
+      wave32: Boolean = true,
+      groupSegmentSize: Int >= 0 = 0,
+      computePgmRsrc1: Int = CodeObjectKernel.DefaultComputePgmRsrc1,
+      first: VectorRegisterIndex = 2,
+      offset: VectorRegisterIndex = 1,
+      base: ScalarRegisterIndex = 6
+  )(using munit.Location): Vec[Long] =
+    laneWords(
+      target,
+      inputs,
+      operations,
+      Vec(result),
+      exec,
+      wave32,
+      groupSegmentSize,
+      computePgmRsrc1,
+      first,
+      offset,
+      base
+    ).map(_.head)
 
   /** Each lane's dword in `result` after the LLVM machine code `code`, as [[laneResults]] runs it. */
   def encoded(target: Target, code: Vec[Int], inputs: Vec[Vec[Long]], result: Int = 5, wave32: Boolean = true)(using
