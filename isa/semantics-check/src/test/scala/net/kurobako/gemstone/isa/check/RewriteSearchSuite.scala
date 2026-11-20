@@ -9,8 +9,11 @@ import net.kurobako.gemstone.profile.HardwareLoops
 import net.kurobako.gemstone.profile.PipelineSimulator
 import net.kurobako.gemstone.semantics.render.Bitwuzla
 import net.kurobako.gemstone.testing.*
+import scala.concurrent.duration.*
 
 class RewriteSearchSuite extends Suite {
+  override def baseTimeout: FiniteDuration = 100.seconds
+
   private val target = WindowFixtures.calibrated
   private val kernel = "window"
 

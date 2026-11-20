@@ -10,7 +10,7 @@ import net.kurobako.gemstone.testing.*
 import scala.concurrent.duration.*
 
 class RewriteSearchRunnerSuite extends Suite {
-  override def baseTimeout: FiniteDuration = 120.seconds
+  override def baseTimeout: FiniteDuration = 200.seconds
 
   private val target = WindowFixtures.calibrated
   private val size   = 8

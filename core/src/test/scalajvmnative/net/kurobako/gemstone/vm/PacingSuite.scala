@@ -162,9 +162,10 @@ class PacingSuite extends Suite {
     pacing.engage()
     val slowest         = pacing.join()
     val (leader, steps) = stepping(pacing.join(), 5000)
-    Thread.sleep(Settle)
+    val deadline        = 10.seconds.fromNow
+    while (steps.get() < Pacing.Skew && deadline.hasTimeLeft()) Thread.sleep(1L)
     val held = steps.get()
-    assert(held <= Pacing.Skew + 1, held)
+    assert(Pacing.Skew <= held && held <= Pacing.Skew + 1, held)
     (0 until 20).foreach { _ =>
       val visitor = pacing.join()
       (0 until 8).foreach(_ => visitor.step())
