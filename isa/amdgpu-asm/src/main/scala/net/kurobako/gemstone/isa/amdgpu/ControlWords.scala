@@ -488,13 +488,13 @@ object ControlWords {
       val imm = delayImm(delay)
       if (imm == 0) Right(state.copy(delays = pending, lastSgprFromValu = sgpr))
       else if ((imm & 0x780) == 0)
-        state.lastDelayAlu.fold(create(state, imm, pending, sgpr, target))(index =>
+        state.lastDelayAlu.fold(create(state, imm, pending, sgpr))(index =>
           extend(state, index, imm).flatMap {
             case Some(extended) => Right(extended.copy(delays = pending, lastSgprFromValu = sgpr))
-            case None           => create(state, imm, pending, sgpr, target)
+            case None           => create(state, imm, pending, sgpr)
           }
         )
-      else create(state, imm, pending, sgpr, target)
+      else create(state, imm, pending, sgpr)
     }
 
   /** `state` with `imm` folded into the `s_delay_alu` at `index`, if the skipped instructions fit in six. */
@@ -524,7 +524,7 @@ object ControlWords {
       }
   }
 
-  private def create(state: State, imm: Int, pending: Map[String, Delay], sgpr: Option[String], target: Target)
+  private def create(state: State, imm: Int, pending: Map[String, Delay], sgpr: Option[String])
       : Either[String, State] =
     delayInstruction(imm).map { delay =>
       state.copy(
