@@ -1159,6 +1159,16 @@ TEST_CASE("device count is a validated suite setting kept for runtime programs",
   CHECK(conformance::invalidSuiteSetting(conformance::environment::DeviceCount, "abc").has_value());
 }
 
+TEST_CASE("interpreter directory is forwarded to cases as a suite setting", "[driver]") {
+  const conformance_test::Environment directory(conformance::environment::InterpreterDirectory, "/work/interpreters");
+  TemporaryDirectory const scratch;
+  auto env = baseEnvironment();
+  CHECK(env.at(conformance::environment::InterpreterDirectory) == "/work/interpreters");
+  prepareRuntimeEnvironment(env, scratch.path / "artifact", scratch.path / "support", {}, "cuda");
+  CHECK(env.at(conformance::environment::InterpreterDirectory) == "/work/interpreters");
+  CHECK_FALSE(conformance::invalidSuiteSetting(conformance::environment::InterpreterDirectory, "/work/interpreters").has_value());
+}
+
 TEST_CASE("PTX-only artifacts warm every program's JIT cache unless an isolated launcher runs them", "[driver][jit]") {
   const std::vector<ScheduledCase> tests{{.identity = "a", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 3},
                                          {.identity = "b", .program = "minibude", .timeoutSeconds = 10, .index = 1, .count = 3},

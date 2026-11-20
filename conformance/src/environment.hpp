@@ -73,6 +73,7 @@ inline std::optional<std::string> invalidSuiteSetting(std::string_view key, std:
   if (key == environment::OpenclCtsWimpyOn)
     return environment::boolean(value) ? std::nullopt : rejected("one of 1 true on y yes 0 false off n no");
   if (key == environment::CudaCodeMode) return value == "ptx" || value == "sass" ? std::nullopt : rejected("one of ptx sass");
+  if (key == environment::InterpreterDirectory) return std::nullopt;
   if (!driver::suiteEnvironmentKey(key)) return std::nullopt;
   uint64_t parsed = 0;
   const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), parsed);

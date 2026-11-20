@@ -1099,6 +1099,13 @@ lazy val conformance = project.in(file("conformance"))
           val missing = backends.filterNot(directory.resolve(_).toFile.isDirectory)
           if (missing.nonEmpty)
             throw sbt.internal.util.MessageOnlyException(s"Missing prebuilt artifacts: ${missing.mkString(", ")}")
+          val prepare = conformanceDirectory.value / "interpreters/Prepare.cmake"
+          backends.foreach { backend =>
+            val backendDirectory = directory.resolve(backend)
+            val command          = Seq("cmake", "-DMODE=prebuilt", s"-DARTIFACTS=$backendDirectory", "-P", s"$prepare")
+            if (scala.sys.process.Process(command).! != 0)
+              throw sbt.internal.util.MessageOnlyException(s"Prebuilt $backend artifacts do not match this environment")
+          }
           directory
         }
         else build.toTask((s" --profile $profile" +: artifacts).mkString(" "))

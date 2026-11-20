@@ -11,11 +11,14 @@ endforeach()
 
 set(fragment "${CMAKE_CURRENT_BINARY_DIR}/interpreter-test-programs.txt")
 file(WRITE "${fragment}" "")
+set(keys "${CMAKE_CURRENT_BINARY_DIR}/interpreter-keys.txt")
+file(WRITE "${keys}" "")
 set(languages)
 foreach(package IN LISTS CONFORMANCE_INTERPRETER_PACKAGES)
   set(language "${conformance_interpreter_package_${package}_language}")
   list(APPEND languages "${language}")
   conformance_interpreter_environment_key("${package}" key)
+  file(APPEND "${keys}" "${package}\t${key}\n")
   foreach(program IN LISTS conformance_interpreter_package_${package}_programs)
     set(script "${conformance_interpreter_program_${program}_script}")
     set(arguments "${conformance_interpreter_program_${program}_arguments}")
@@ -38,7 +41,7 @@ foreach(package IN LISTS CONFORMANCE_INTERPRETER_PACKAGES)
 endforeach()
 list(REMOVE_DUPLICATES languages)
 
-install(FILES "${fragment}" DESTINATION . COMPONENT architecture)
+install(FILES "${fragment}" "${keys}" DESTINATION . COMPONENT architecture)
 
 if("python" IN_LIST languages)
   install(FILES

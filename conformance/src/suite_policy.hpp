@@ -54,10 +54,10 @@ inline void applySuiteIsolatedEnvironment(std::map<std::string, std::string> &en
 }
 
 // Suite knobs a machine profile or the invoking environment may set.
-inline constexpr auto SuiteEnvironmentKeys =
-    std::to_array<std::string_view>({environment::DeviceCount, environment::VulkanCtsTimeoutSeconds, environment::OpenclCtsElementCount,
-                                     environment::OpenclCtsTimeoutSeconds, environment::OpenclCtsWimpyOn,
-                                     environment::OpenclCtsAtomicIterationCount, environment::OpenclCtsAtomicThreadCount});
+inline constexpr auto SuiteEnvironmentKeys = std::to_array<std::string_view>(
+    {environment::DeviceCount, environment::VulkanCtsTimeoutSeconds, environment::OpenclCtsElementCount,
+     environment::OpenclCtsTimeoutSeconds, environment::OpenclCtsWimpyOn, environment::OpenclCtsAtomicIterationCount,
+     environment::OpenclCtsAtomicThreadCount, environment::InterpreterDirectory});
 
 inline bool suiteEnvironmentKey(std::string_view key) {
   using namespace aspartame;
