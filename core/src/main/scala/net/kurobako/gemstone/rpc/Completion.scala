@@ -45,7 +45,7 @@ private object Completion {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var last: Option[(AllocationId, WrittenRanges)] = None
 
-    def add(id: AllocationId, offset: Int >= 0, size: Int >= 0): Unit = last match {
+    def add(id: AllocationId, offset: Long >= 0, size: Int >= 0): Unit = last match {
       case Some((lastId, target)) if lastId == id => target.add(offset, size)
       case _                                      =>
         val selected = ranges.getOrElseUpdate(id, WrittenRanges())
@@ -122,7 +122,7 @@ private class Completion(
     readWaiters -= 1
   }
 
-  def markDirty(id: AllocationId, offset: Int >= 0, size: Int >= 0): Unit =
+  def markDirty(id: AllocationId, offset: Long >= 0, size: Int >= 0): Unit =
     workerWrites().add(id, offset, size)
 
   // A plain lookup first: computeIfAbsent locks the bin whenever the key is not its first node.

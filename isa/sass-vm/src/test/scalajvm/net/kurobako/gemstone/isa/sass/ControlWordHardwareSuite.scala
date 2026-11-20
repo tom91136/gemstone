@@ -55,7 +55,7 @@ class ControlWordHardwareSuite extends Suite {
       val buffers = launch.arguments.map(argument =>
         Option.when(argument.startsWith("b:")) {
           val bytes  = unhex(argument.drop(2))
-          val region = service.registerAllocation(bytes.size.unsafe[Int > 0]).value
+          val region = service.registerAllocation(bytes.size.toLong.unsafe[Long > 0]).value
           assert(service.write(region, 0L, bytes).isRight)
           region -> bytes.size
         }
@@ -68,7 +68,7 @@ class ControlWordHardwareSuite extends Suite {
       val program = service.load(ProgramEncoding.CUDACubin, image).value
       service.symbols(program).value.globals.foreach { symbol =>
         val global  = service.global(program, symbol.name).value
-        val storage = service.registerAllocation(global.size.raw.toInt.max(1).unsafe[Int > 0]).value
+        val storage = service.registerAllocation(global.size.raw.toLong.max(1L).unsafe[Long > 0]).value
         assert(service.write(storage, 0L, global.initial).isRight)
         assertEquals(service.bindGlobal(program, symbol.name, storage, 0L), Right(()))
       }

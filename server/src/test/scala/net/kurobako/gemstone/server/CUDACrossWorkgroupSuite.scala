@@ -33,7 +33,7 @@ class CUDACrossWorkgroupSuite extends Suite {
         val result = native.run(
           Vec.nonEmpty(
             client.toString,
-            "~[unified-memory]"
+            "~[unified-memory]~[large-memory]"
           ),
           directory,
           native.serverEnvironment(
@@ -47,6 +47,26 @@ class CUDACrossWorkgroupSuite extends Suite {
       }
 
     }
+
+  test("native CUDA allocations past 2 GiB are backed by the shared service") {
+    val directory = runtimeDirectory
+    Using.resource(Server.start(Server.Settings(limits = TaskControl.Limits(1000000L), parallelism = 2))) { server =>
+      val result = native.run(
+        Vec.nonEmpty(
+          directory.resolve("cuda_cross_workgroup_test").toString,
+          "CUDA device allocations past 2 GiB reach both ends and every power-of-two boundary"
+        ),
+        directory,
+        native.serverEnvironment(
+          server.endpoint,
+          server.client,
+          Map(env.TestCudaLibraryFile -> directory.resolve("libcuda.so.1").toString, env.SystemPagingOn -> "1")
+        ),
+        90.seconds
+      )
+      assertEquals(result.exit, 0, result.diagnostic)
+    }
+  }
 
   // One process per case keeps unsupported registration from hiding later cases.
   // These explicit allocations/registrations must not depend on system paging.

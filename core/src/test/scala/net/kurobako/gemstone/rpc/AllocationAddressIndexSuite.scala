@@ -12,7 +12,7 @@ class AllocationAddressIndexSuite extends Suite {
   private val FineSizes   = List(0, 1, 8)
 
   private def stored(base: Long, size: Int > 0, aliased: Boolean): StoredAllocation =
-    StoredAllocation(StoredAllocation.Storage(size), GuestAddress(base), aliased)
+    StoredAllocation(StoredAllocation.Storage(size.toLong.unsafe[Long > 0]), GuestAddress(base), aliased)
 
   private def indexed(allocations: Allocations): AllocationAddressIndex =
     allocations.foldLeft(AllocationAddressIndex.Empty)((index, allocation) =>

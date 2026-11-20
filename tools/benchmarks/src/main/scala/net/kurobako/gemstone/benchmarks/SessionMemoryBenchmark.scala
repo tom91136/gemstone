@@ -32,7 +32,7 @@ object SessionMemoryBenchmark {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private def run(parsed: Options): BenchmarkSample = {
     // Separate independent clients by one storage-lock stripe; shared mode deliberately uses the same word.
-    val bytes     = Math.multiplyExact(parsed.workers, 64).unsafe[Int > 0]
+    val bytes     = Math.multiplyExact(parsed.workers, 64).toLong.unsafe[Long > 0]
     val addresses = Array.tabulate(parsed.allocations)(index =>
       GuestAddress(0x100000L + index.toLong * (bytes.toLong + 4096L))
     )

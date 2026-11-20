@@ -217,7 +217,7 @@ object ExecutionRPC {
     case EnableHostMemory                                                         extends Operation[Unit]
     case PollHostMemory(completion: CompletionId)                                 extends Operation[HostMemoryBatch]
     case SupplyHostMemory(completion: CompletionId, ranges: Vec[HostMemoryBytes]) extends Operation[Unit]
-    case RegisterAllocation(size: Long in 1L ~ 2147483647L)                       extends Operation[AllocationId]
+    case RegisterAllocation(size: Long > 0)                                       extends Operation[AllocationId]
     case SupplyHostSync(completion: CompletionId, ticket: Long, observed: Long)   extends Operation[Unit]
     case RegisterAllocationAddress(
         allocation: AllocationId,

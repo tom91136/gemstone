@@ -112,6 +112,7 @@ class ExecutionRPCSuite extends Suite {
     Operation.SupplyHostMemory(completion, Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))),
     Operation.SupplyHostSync(completion, ticket = 71, observed = -1L),
     Operation.RegisterAllocation(64L),
+    Operation.RegisterAllocation(4294967296L),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L)),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), hostBacked = true),
     Operation.RegisterAllocationAddress(allocation, GuestAddress(0x1000L), devices = 0x6),

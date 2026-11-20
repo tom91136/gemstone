@@ -15,13 +15,13 @@ class GraphicsRuntime(workgroups: Workgroups = Workgroups.Sequential) extends Gr
   override def prepare(shader: ShaderStage): Either[Fault, PreparedShader] = ShaderPreparation.prepare(shader)
   override def validate(
       submission: GraphicsSubmission,
-      size: AllocationId => Option[Int > 0]
+      size: AllocationId => Option[Long > 0]
   ): Either[String, Set[AllocationId]] =
     GraphicsValidation.submission(submission, size)
   override def validateDescriptorBindings(
       bindings: Vec[DescriptorBinding],
       argumentCount: Int >= 0,
-      size: AllocationId => Option[Int > 0]
+      size: AllocationId => Option[Long > 0]
   ): Either[String, Set[AllocationId]] =
     GraphicsValidation.descriptorBindings(bindings, argumentCount, size)
 

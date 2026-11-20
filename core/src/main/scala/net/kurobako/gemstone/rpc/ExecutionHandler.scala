@@ -23,7 +23,7 @@ object ExecutionHandler {
       encode(request, session.supplyHostMemory(completion, ranges))
     case Operation.Ping                               => encode(Operation.Ping, Right(()))
     case request @ Operation.RegisterAllocation(size) =>
-      encode(request, session.registerAllocation(size.toIntExact.widen[Int > 0]))
+      encode(request, session.registerAllocation(size))
     case request @ Operation.RegisterAllocationAddress(allocation, nativeBase, hostBacked, devices) =>
       encode(request, session.registerAllocationAddress(allocation, nativeBase, hostBacked, devices))
     case request @ Operation.SetAllocationDevices(allocation, devices) =>

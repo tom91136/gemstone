@@ -7,6 +7,7 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <dlfcn.h>
 
@@ -908,6 +909,41 @@ TEST_CASE("CUDA free waits for queued memory uses", "[cuda][integration]") {
         check(library.load<decltype(&cuLaunchHostFunc)>("cuLaunchHostFunc")(nullptr, callback, data));
       },
       [&](void *p) { return library.load<decltype(&cuMemFree_v2)>("cuMemFree_v2")(devicePointer(p)); });
+  check(library.load<decltype(&cuCtxDestroy_v2)>("cuCtxDestroy_v2")(context));
+}
+
+TEST_CASE("CUDA device allocations past 2 GiB reach both ends and every power-of-two boundary", "[cuda][integration][large-memory]") {
+  const SharedLibrary library{cudaLibraryPath().c_str()};
+  check(library.load<decltype(&cuInit)>("cuInit")(0));
+  CUcontext context{};
+  check(library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2")(&context, 0, 0));
+  const auto allocate = library.load<decltype(&cuMemAlloc_v2)>("cuMemAlloc_v2");
+  const auto upload = library.load<decltype(&cuMemcpyHtoD_v2)>("cuMemcpyHtoD_v2");
+  const auto download = library.load<decltype(&cuMemcpyDtoH_v2)>("cuMemcpyDtoH_v2");
+
+  constexpr size_t size = (size_t{1} << 31) + 4096;
+  CUdeviceptr base{};
+  check(allocate(&base, size));
+
+  std::vector<size_t> offsets{0, size - 16};
+  for (size_t boundary = size_t{1} << 20; boundary < size; boundary <<= 1)
+    offsets.push_back(boundary - 8);
+  const auto pattern = [](size_t index) {
+    std::vector<uint8_t> bytes(16);
+    for (size_t at = 0; at < bytes.size(); ++at)
+      bytes[at] = static_cast<uint8_t>((index * 16) + at + 1);
+    return bytes;
+  };
+  for (size_t index = 0; index < offsets.size(); ++index) {
+    const auto bytes = pattern(index);
+    check(upload(base + offsets[index], bytes.data(), bytes.size()));
+  }
+  for (size_t index = 0; index < offsets.size(); ++index) {
+    std::vector<uint8_t> bytes(16);
+    check(download(bytes.data(), base + offsets[index], bytes.size()));
+    CHECK(bytes == pattern(index));
+  }
+  check(library.load<decltype(&cuMemFree_v2)>("cuMemFree_v2")(base));
   check(library.load<decltype(&cuCtxDestroy_v2)>("cuCtxDestroy_v2")(context));
 }
 

@@ -188,7 +188,6 @@ constexpr size_t MirrorChunkSize = size_t{1} * 1024 * 1024;
 constexpr uint32_t MaxWorkItems = 1024;
 constexpr uint32_t MaxWorkItemsZ = 64;
 constexpr uint64_t DeviceMemorySize = 1ULL << 40;
-constexpr size_t MaxServerAllocationSize = static_cast<size_t>(std::numeric_limits<int32_t>::max());
 constexpr uint32_t MaxImageDims = 16384;
 constexpr uint32_t MaxImageDims3D = 2048;
 constexpr uint32_t MaxImageArraySlices = 2048;
@@ -1830,7 +1829,6 @@ ze_result_t allocate(Context *context, Device *device, size_t size, size_t align
   reapDeferredFrees();
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (remote.mode() == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
-  if (remote.mode() == ClientMode::Ready && size > MaxServerAllocationSize) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   const size_t backing = backingSize(std::max(size, size_t{1}), type);
   *result = alignedAllocate(backing, granularityAlignment(alignment, type));
   if (!*result) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
@@ -2352,7 +2350,7 @@ ze_result_t ZE_APICALL virtualReserve(ze_context_handle_t contextHandle, const v
   if (address == MAP_FAILED) address = mmap(nullptr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
   if (address == MAP_FAILED) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   std::optional<uint64_t> allocationId;
-  if (remote.mode() == ClientMode::Ready && size <= MaxServerAllocationSize) {
+  if (remote.mode() == ClientMode::Ready) {
     std::scoped_lock const rpcLock(rpcTransactionMutex);
     const auto registered = registerAllocation(*remote.client(), size, address);
     if (!registered) {
@@ -2477,7 +2475,6 @@ ze_result_t ZE_APICALL virtualMap(ze_context_handle_t contextHandle, const void 
   if (record.context.get() != context || address < reservation->first || size > record.size
       || address - reservation->first > record.size - size)
     return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  if (remote.mode() == ClientMode::Ready && record.size > MaxServerAllocationSize) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   const auto next = record.mappings.lower_bound(address);
   if ((next != record.mappings.end() && next->first < address + size)
       || (next != record.mappings.begin() && std::prev(next)->first + std::prev(next)->second.size > address))

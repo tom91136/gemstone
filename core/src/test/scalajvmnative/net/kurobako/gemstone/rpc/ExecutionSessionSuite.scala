@@ -72,6 +72,34 @@ class ExecutionSessionSuite extends Suite {
   private def pooled(workers: WorkerPool, backend: Backend): ExecutionSession =
     ExecutionSession(List(backend), executionContext = workers, parallelism = workers.parallelism)
 
+  test("allocations past the Int range accept host and kernel accesses at their end") {
+    Using.resource(ExecutionSession(backends = List(TestBackend()))) { service =>
+      val size       = Int.MaxValue.toLong + 4096L
+      val allocation = service.registerAllocation(size.unsafe[Long > 0]).toOption.get
+      val tail       = (size - 8L).unsafe[Long >= 0]
+      assertEquals(service.write(allocation, tail, Vec[Byte](1, 2, 3, 4, 5, 6, 7, 8)), Right(()))
+      assertEquals(service.read(AllocationRange(allocation, tail, 8)), Right(Vec[Byte](1, 2, 3, 4, 5, 6, 7, 8)))
+      assertEquals(service.readValue(AllocationScalar(allocation, tail, 8)), Right(0x0807060504030201L))
+      assert(service.write(allocation, (size - 1L).unsafe[Long >= 0], Vec[Byte](1, 2)).isLeft)
+      val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+      val completion = service.launch(program, task("write", KernelTask.Argument.Memory(allocation, tail))).toOption.get
+      assertEquals(service.awaitCompletion(completion), Right(()))
+      assertEquals(service.read(AllocationRange(allocation, tail, 2)), Right(Vec[Byte](42, 2)))
+      assertEquals(service.completionDirtyRanges(completion, 0, 8), Right(Vec(DirtyRange(allocation, tail, 1))))
+    }
+  }
+
+  test("an allocation beyond the storage limit is refused") {
+    Using.resource(ExecutionSession(backends = List(TestBackend()))) { service =>
+      val refused = service.registerAllocation((StoredAllocation.MaximumBytes + 1L).unsafe[Long > 0])
+      refused match {
+        case Left(ExecutionFailure.OutOfResources(_)) => ()
+        case other                                    => fail(s"expected out of resources, got $other")
+      }
+      assert(service.registerAllocation(StoredAllocation.MaximumBytes.unsafe[Long > 0]).isRight)
+    }
+  }
+
   test("printf keeps standard output and standard error apart") {
     val backend = TestBackend((_, _, handler) =>
       for {
@@ -294,7 +322,7 @@ class ExecutionSessionSuite extends Suite {
   for ((name, size, secondOffset) <- List(("an unrelated allocation", 8, None), ("a disjoint range", 256, Some(128L))))
     test(s"an atomic update does not block writes to $name") {
       Using.resource(ExecutionSession(List(TestBackend()))) { service =>
-        val first   = service.registerAllocation(size.unsafe[Int > 0]).toOption.get
+        val first   = service.registerAllocation(size.toLong.unsafe[Long > 0]).toOption.get
         val second  = if (secondOffset.isEmpty) service.registerAllocation(8).toOption.get else first
         val offset  = secondOffset.getOrElse(0L).unsafe[Long >= 0]
         val entered = CountDownLatch(1)
@@ -358,7 +386,7 @@ class ExecutionSessionSuite extends Suite {
       }
     )
     Using.resource(ExecutionSession(List(backend))) { service =>
-      val allocation = service.registerAllocation((count * 2).unsafe[Int > 0]).toOption.get
+      val allocation = service.registerAllocation((count * 2).toLong.unsafe[Long > 0]).toOption.get
       val program    = service.load(encoding, Vec[Byte](1)).toOption.get
       val completion = service.launch(program, task("write", KernelTask.Argument.Memory(allocation, 0L))).toOption.get
       assertEquals(service.awaitCompletion(completion), Right(()))
@@ -456,7 +484,7 @@ class ExecutionSessionSuite extends Suite {
       }
     }
     Using.resource(ExecutionSession(List(backend))) { session =>
-      val allocation = session.registerAllocation((count * 16).unsafe[Int > 0]).toOption.get
+      val allocation = session.registerAllocation((count * 16).toLong.unsafe[Long > 0]).toOption.get
       val program    = session.load(encoding, Vec[Byte](1)).toOption.get
       val completion = session.launch(program, task("write", KernelTask.Argument.Memory(allocation, 0L))).toOption.get
       assertEquals(session.awaitCompletion(completion), Right(()))

@@ -10,11 +10,14 @@ import net.kurobako.gemstone.vm.*
 /** Shader preparation and rendering supplied by the application to an execution session. */
 trait GraphicsBackend {
   def prepare(shader: ShaderStage): Either[Fault, PreparedShader]
-  def validate(submission: GraphicsSubmission, size: AllocationId => Option[Int > 0]): Either[String, Set[AllocationId]]
+  def validate(
+      submission: GraphicsSubmission,
+      size: AllocationId => Option[Long > 0]
+  ): Either[String, Set[AllocationId]]
   def validateDescriptorBindings(
       bindings: Vec[DescriptorBinding],
       argumentCount: Int >= 0,
-      size: AllocationId => Option[Int > 0]
+      size: AllocationId => Option[Long > 0]
   ): Either[String, Set[AllocationId]]
   def withDescriptorBindings[A](
       bindings: Vec[DescriptorBinding],

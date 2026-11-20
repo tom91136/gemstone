@@ -16,11 +16,25 @@ import scala.util.Using
 /** Socket-level isolation coverage shared by both server implementations. */
 class SharedServerSuite extends Suite {
 
-  private def register(client: connections.Client, size: Long in 1L ~ 2147483647L): AllocationId =
+  private def register(client: connections.Client, size: Long > 0): AllocationId =
     client.call(Operation.RegisterAllocation(size)).fold(
       error => fail(error.message),
       value => value
     )
+
+  test("an allocation past the Int range is addressable at its end over the wire") {
+    Using.Manager { use =>
+      val server     = use(Server.start(Server.Settings(parallelism = 2)))
+      val client     = use(connections.Client(server.endpoint, Control.register(server.endpoint)))
+      val size       = Int.MaxValue.toLong + 4096L
+      val allocation = register(client, size.unsafe[Long > 0])
+      val value      = Vec.unsafeWrapArray(ByteBuffer.allocate(4).putInt(0x0a0b0c0d).array())
+      val tail       = (size - 4L).unsafe[Long >= 0]
+      assertEquals(client.call(Operation.WriteAllocation(allocation, tail, value)), Right(()))
+      assertEquals(client.call(Operation.ReadAllocation(allocation, tail, 4)).map(int(_)), Right(0x0a0b0c0d))
+      assert(client.call(Operation.ReadAllocation(allocation, (size - 3L).unsafe[Long >= 0], 4)).isLeft)
+    }.get
+  }
 
   private def int(bytes: Vec[Byte]): Int = ByteBuffer.wrap(Vec.toArray(bytes)).getInt()
   test("shared clients cannot access each other's allocations or identify as each other") {

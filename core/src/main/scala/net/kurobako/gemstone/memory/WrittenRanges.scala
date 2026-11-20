@@ -2,24 +2,23 @@ package net.kurobako.gemstone.memory
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
-import net.kurobako.gemstone.constraint.auto.*
 import scala.collection.mutable
 
 /** Exact byte intervals. Adjacent writes merge; unwritten gaps never enter writeback. */
 class WrittenRanges {
-  private val intervals = java.util.TreeMap[Int >= 0, Int >= 0]()
+  private val intervals = java.util.TreeMap[Long >= 0, Long >= 0]()
   // Intervals only grow by merging, so the last one touched keeps covering what it covered.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var lastStart: Int >= 0 = 0
+  private var lastStart: Long >= 0 = 0L
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var lastEnd: Int >= 0 = 0
+  private var lastEnd: Long >= 0 = 0L
   // The start of the interval after the last one; sequential writes extend the last interval up to it in place.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private var lastNext: Int >= 0 = 0
+  private var lastNext: Long >= 0 = 0L
 
-  def add(offset: Int >= 0, size: Int >= 0): Unit =
+  def add(offset: Long >= 0, size: Int >= 0): Unit =
     if (size > 0) {
-      val limit = offset + size
+      val limit = java.lang.Math.addExact(offset, size.toLong).unsafe[Long >= 0]
       if (offset >= lastStart && limit <= lastEnd) ()
       else if (offset >= lastStart && offset <= lastEnd && limit < lastNext) {
         val _ = intervals.put(lastStart, limit)
@@ -28,7 +27,7 @@ class WrittenRanges {
     }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  private def insert(offset: Int >= 0, limit: Int >= 0): Unit = {
+  private def insert(offset: Long >= 0, limit: Long >= 0): Unit = {
     val previous = Option(intervals.floorEntry(offset))
     var start    = offset
     var end      = limit
@@ -53,18 +52,17 @@ class WrittenRanges {
     }
     lastStart = start
     lastEnd = end
-    lastNext = Option(intervals.higherKey(start)).getOrElse[Int >= 0](2147483647)
+    lastNext = Option(intervals.higherKey(start)).getOrElse[Long >= 0](Long.MaxValue)
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def chunks(maxChunkSize: Int > 0): Vec[(Int >= 0, Int > 0)] = {
-    val result = mutable.ArrayBuffer.empty[(Int >= 0, Int > 0)]
+  def chunks(maxChunkSize: Int > 0): Vec[(Long >= 0, Int > 0)] = {
+    val result = mutable.ArrayBuffer.empty[(Long >= 0, Int > 0)]
     intervals.forEach { (begin, end) =>
-      var offset = begin
+      var offset: Long = begin
       while (offset < end) {
-        val remaining = (end - offset).unsafe[Int > 0]
-        val size      = maxChunkSize.min(remaining)
-        result += ((offset, size))
+        val size = math.min(maxChunkSize.toLong, end.raw - offset).toInt.unsafe[Int > 0]
+        result += ((offset.unsafe[Long >= 0], size))
         offset += size
       }
     }

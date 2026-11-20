@@ -12,7 +12,7 @@ private object AllocationAddressIndex {
 
   class Entry private (val id: AllocationId, val allocation: StoredAllocation) {
     def base: GuestAddress = allocation.base
-    def size: Int > 0      = allocation.size
+    def size: Long > 0     = allocation.size
 
     /** Only for addresses this entry resolved. */
     def offsetOf(address: GuestAddress): Long >= 0 = (address.raw - base.raw).unsafe[Long >= 0]

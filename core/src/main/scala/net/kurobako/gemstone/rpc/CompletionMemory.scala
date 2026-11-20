@@ -23,7 +23,7 @@ private object CompletionMemory {
     def lock: ReentrantLock
     def index: AllocationAddressIndex
     protected def unregistered(id: AllocationId): Fault
-    protected def outside(range: AllocationRange, limit: Int > 0): Fault
+    protected def outside(range: AllocationRange, limit: Long > 0): Fault
 
     def read(entry: Entry, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]]
     def readValueInto(entry: Entry, offset: Long >= 0, size: Int in 1 ~ 8, into: LongRef): Fault | Null

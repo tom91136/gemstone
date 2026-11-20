@@ -10,18 +10,39 @@ class WrittenRangesSuite extends Suite {
   test("the transfer size is chosen by the caller without changing recorded intervals") {
     val ranges = WrittenRanges()
     ranges.add(5, 7)
-    assertEquals(ranges.chunks(3), Vec[(Int >= 0, Int > 0)]((5, 3), (8, 3), (11, 1)))
-    assertEquals(ranges.chunks(10), Vec[(Int >= 0, Int > 0)]((5, 7)))
+    assertEquals(ranges.chunks(3), Vec[(Long >= 0, Int > 0)]((5, 3), (8, 3), (11, 1)))
+    assertEquals(ranges.chunks(10), Vec[(Long >= 0, Int > 0)]((5, 7)))
     assert(typeCheckErrors("""import net.kurobako.gemstone.memory.*; WrittenRanges().add(-1, 1)""").nonEmpty)
     assert(typeCheckErrors("""import net.kurobako.gemstone.memory.*; WrittenRanges().add(1, -1)""").nonEmpty)
-    val _ = intercept[ArithmeticException](ranges.add(Int.MaxValue, 1))
-    assertEquals(ranges.chunks(10), Vec[(Int >= 0, Int > 0)]((5, 7)))
+    val _ = intercept[ArithmeticException](ranges.add(Long.MaxValue, 1))
+    assertEquals(ranges.chunks(10), Vec[(Long >= 0, Int > 0)]((5, 7)))
+  }
+
+  test("intervals past the Int range merge and chunk") {
+    def at(value: Long): Long >= 0 = value.unsafe[Long >= 0]
+    val ranges                     = WrittenRanges()
+    val base                       = Int.MaxValue.toLong + 10L
+    val top                        = Long.MaxValue - 8L
+    ranges.add(at(base), 4)
+    ranges.add(at(base + 4L), 4)
+    ranges.add(at(top), 8)
+    assertEquals(
+      ranges.chunks(3),
+      Vec[(Long >= 0, Int > 0)](
+        (at(base), 3),
+        (at(base + 3L), 3),
+        (at(base + 6L), 2),
+        (at(top), 3),
+        (at(top + 3L), 3),
+        (at(top + 6L), 2)
+      )
+    )
   }
 
   test("writeback preserves unwritten bytes within a word and across a transfer boundary") {
     val ranges = WrittenRanges()
     Vec[Int >= 0](65, 67, 65535, 65537).foreach(offset => ranges.add(offset, 1))
-    assertEquals(ranges.chunks(65536), Vec[(Int >= 0, Int > 0)]((65, 1), (67, 1), (65535, 1), (65537, 1)))
+    assertEquals(ranges.chunks(65536), Vec[(Long >= 0, Int > 0)]((65, 1), (67, 1), (65535, 1), (65537, 1)))
   }
 
   test("overlapping and adjacent writes merge without duplicating bytes") {
@@ -32,47 +53,47 @@ class WrittenRangesSuite extends Suite {
     ranges.add(11, 1)
     ranges.add(24, 1)
     ranges.add(0, 0)
-    assertEquals(ranges.chunks(65536), Vec[(Int >= 0, Int > 0)]((10, 15)))
+    assertEquals(ranges.chunks(65536), Vec[(Long >= 0, Int > 0)]((10, 15)))
     assertEquals(
       ranges.chunks(65536),
-      Vec[(Int >= 0, Int > 0)]((10, 15))
+      Vec[(Long >= 0, Int > 0)]((10, 15))
     ) // Queries must not consume completion metadata.
   }
 
   test("long written intervals stay bounded without rounding into neighbouring memory") {
     val ranges = WrittenRanges()
     ranges.add(7, 131073)
-    assertEquals(ranges.chunks(65536), Vec[(Int >= 0, Int > 0)]((7, 65536), (65543, 65536), (131079, 1)))
+    assertEquals(ranges.chunks(65536), Vec[(Long >= 0, Int > 0)]((7, 65536), (65543, 65536), (131079, 1)))
   }
 
   test("repeated contained writes preserve gaps and allow later expansion on either side") {
     val ranges = WrittenRanges()
     ranges.add(10, 10)
     ranges.add(30, 10)
-    val expected = Vec[(Int >= 0, Int > 0)]((10, 10), (30, 10))
+    val expected = Vec[(Long >= 0, Int > 0)]((10, 10), (30, 10))
     List[(Int >= 0, Int >= 0)]((10, 10), (10, 1), (19, 1), (13, 4), (30, 10), (35, 0)).foreach { (offset, size) =>
       (0 until 3).foreach(_ => ranges.add(offset, size))
       assertEquals(ranges.chunks(100), expected)
     }
     ranges.add(5, 10)
     ranges.add(35, 10)
-    assertEquals(ranges.chunks(100), Vec[(Int >= 0, Int > 0)]((5, 15), (30, 15)))
+    assertEquals(ranges.chunks(100), Vec[(Long >= 0, Int > 0)]((5, 15), (30, 15)))
     ranges.add(20, 10)
-    assertEquals(ranges.chunks(100), Vec[(Int >= 0, Int > 0)]((5, 40)))
+    assertEquals(ranges.chunks(100), Vec[(Long >= 0, Int > 0)]((5, 40)))
   }
 
   test("contained writes near the address limit still reject overflow") {
     val ranges = WrittenRanges()
-    ranges.add(Int.MaxValue - 8, 8)
-    ranges.add(Int.MaxValue - 4, 4)
-    val _ = intercept[ArithmeticException](ranges.add(Int.MaxValue - 4, 5))
-    assertEquals(ranges.chunks(8), Vec[(Int >= 0, Int > 0)]((Int.MaxValue - 8, 8)))
+    ranges.add(Long.MaxValue - 8, 8)
+    ranges.add(Long.MaxValue - 4, 4)
+    val _ = intercept[ArithmeticException](ranges.add(Long.MaxValue - 4, 5))
+    assertEquals(ranges.chunks(8), Vec[(Long >= 0, Int > 0)]((Long.MaxValue - 8, 8)))
   }
 
   test("a write bridges adjacent intervals regardless of insertion order") {
     val writes  = Vec[(Int >= 0, Int >= 0)]((10, 4), (14, 6), (20, 4))
-    val whole   = Vec[(Int >= 0, Int > 0)]((10, 14))
-    val chunked = Vec[(Int >= 0, Int > 0)]((10, 5), (15, 5), (20, 4))
+    val whole   = Vec[(Long >= 0, Int > 0)]((10, 14))
+    val chunked = Vec[(Long >= 0, Int > 0)]((10, 5), (15, 5), (20, 4))
     writes.permutations.foreach { ordered =>
       val ranges = WrittenRanges()
       ordered.foreach((offset, size) => ranges.add(offset, size))
@@ -88,7 +109,7 @@ class WrittenRangesSuite extends Suite {
     writes.reverse.foreach((offset, size) => ranges.add(offset, size))
     val expected = writes.flatMap((offset, size) => offset.raw until offset + size).toSet
     val actual   = ranges.chunks(65536).flatMap((offset, size) => Vec.from(offset.raw until offset + size))
-    assertEquals(actual.toSet, expected)
+    assertEquals(actual.toSet.map(_.toInt), expected)
     assertEquals(actual.size, expected.size)
   }
 
@@ -96,9 +117,9 @@ class WrittenRangesSuite extends Suite {
     val ranges = WrittenRanges()
     ranges.add(50, 10)
     (0 until 12).foreach(index => ranges.add((index * 4).unsafe[Int >= 0], 4))
-    assertEquals(ranges.chunks(1024), Vec[(Int >= 0, Int > 0)]((0, 48), (50, 10)))
+    assertEquals(ranges.chunks(1024), Vec[(Long >= 0, Int > 0)]((0, 48), (50, 10)))
     ranges.add(48, 2)
     ranges.add(60, 4)
-    assertEquals(ranges.chunks(1024), Vec[(Int >= 0, Int > 0)]((0, 64)))
+    assertEquals(ranges.chunks(1024), Vec[(Long >= 0, Int > 0)]((0, 64)))
   }
 }

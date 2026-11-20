@@ -61,7 +61,7 @@ class HostMemoryExecutionSuite extends Suite {
       val allocations = mutable.LongMap.empty[AllocationId]
       fragments.foreach { (address, contents) =>
         val allocation =
-          service.registerAllocation(contents.size.unsafe[Int > 0]).toOption.get
+          service.registerAllocation(contents.size.toLong.unsafe[Long > 0]).toOption.get
         assertEquals(service.registerAllocationAddress(allocation, GuestAddress(address), hostBacked), Right(()))
         assertEquals(service.write(allocation, 0L, contents), Right(()))
         allocations.update(address, allocation)

@@ -248,7 +248,7 @@ class ConstantSuite extends Suite {
         val alias = named.alias.getOrElse(fail("named constant has no bank alias"))
         val bank  = service.global(catalogue, alias.name).fold(e => fail(e.message), identity)
         assert(alias.offset.raw + named.size <= bank.size)
-        val storage = service.registerAllocation(bank.size.toInt.unsafe[Int > 0]).toOption.get
+        val storage = service.registerAllocation(bank.size.toLong.unsafe[Long > 0]).toOption.get
         assert(service.write(storage, 0L, bank.initial).isRight)
         val output  = service.registerAllocation(8).toOption.get
         val program = service.load(ProgramEncoding.CUDACubin, fixtures.image(lowered))

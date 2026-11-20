@@ -9,15 +9,15 @@ import scala.collection.mutable
 
 /** Validate storage and invocation layouts before reserving a completion or touching host memory. */
 private object GraphicsValidation {
-  def submission(value: GraphicsSubmission, size: AllocationId => Option[Int > 0]): Either[String, Set[AllocationId]] =
+  def submission(value: GraphicsSubmission, size: AllocationId => Option[Long > 0]): Either[String, Set[AllocationId]] =
     checked(size)(_.submission(value))
   def descriptorBindings(
       values: Vec[DescriptorBinding],
       count: Int >= 0,
-      size: AllocationId => Option[Int > 0]
+      size: AllocationId => Option[Long > 0]
   ): Either[String, Set[AllocationId]] =
     checked(size)(_.descriptorBindings(values, count))
-  private def checked(size: AllocationId => Option[Int > 0])(validate: GraphicsValidation => Unit)
+  private def checked(size: AllocationId => Option[Long > 0])(validate: GraphicsValidation => Unit)
       : Either[String, Set[AllocationId]] = {
     val validator = GraphicsValidation(size)
     try {
@@ -29,10 +29,10 @@ private object GraphicsValidation {
     }
   }
 }
-private class GraphicsValidation(allocationSize: AllocationId => Option[Int > 0]) {
+private class GraphicsValidation(allocationSize: AllocationId => Option[Long > 0]) {
   private val referenced                                              = mutable.Set.empty[AllocationId]
   private def range(id: AllocationId, offset: Long, size: Long): Unit = {
-    val length = allocationSize(id).map(_.raw.toLong)
+    val length = allocationSize(id).map(_.raw)
       .getOrElse(throw IllegalArgumentException(s"graphics allocation ${id.raw} is not registered"))
     require(
       offset >= 0 && size >= 0 && offset <= length && size <= length - offset,

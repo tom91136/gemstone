@@ -89,7 +89,7 @@ class HostSubwordAtomicSuite extends Suite {
         service =>
           assertEquals(service.enableHostMemory(), Right(()))
           tracked.foreach { size =>
-            val id = service.registerAllocation(size.unsafe[Int > 0]).toOption.get
+            val id = service.registerAllocation(size.toLong.unsafe[Long > 0]).toOption.get
             assertEquals(service.registerAllocationAddress(id, GuestAddress(base), hostBacked = true), Right(()))
           }
           val program = service.load(encoding, Vec[Byte](1)).toOption.get

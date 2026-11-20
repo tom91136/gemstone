@@ -71,10 +71,8 @@ object ExecutionSession {
 
   private def memoryFault(error: ExecutionFailure): Fault = Fault.Memory(s"memory operation failed: ${error.message}")
 
-  private def outOfRange(range: AllocationRange, limit: Int > 0): ExecutionFailure =
-    ExecutionFailure.InvalidRequest(
-      s"allocation ${range.allocation}: byte range ${range.offset} + ${range.size} exceeds allocation size $limit"
-    )
+  private def outOfRange(id: AllocationId, offset: Long, size: Long, limit: Long > 0): ExecutionFailure =
+    ExecutionFailure.InvalidRequest(s"allocation $id: byte range $offset + $size exceeds allocation size $limit")
 
   private val Written: Either[Fault, Unit] = Right(())
 
@@ -175,7 +173,8 @@ class ExecutionSession(
     address =>
       state.get().addresses.resolve(address, 1) match {
         case null  => None
-        case entry => Some(HostMemoryRange(entry.base, entry.size))
+        case entry =>
+          Option.when(entry.size <= Int.MaxValue)(HostMemoryRange(entry.base, entry.size.toInt.unsafe[Int > 0]))
       },
     () => state.get().hasHostBackedAllocations
   )
@@ -183,18 +182,21 @@ class ExecutionSession(
   /** The current state of an open session; callers hold the state lock. */
   private def open: Either[ExecutionFailure, State] = if (closed) Left(Closed) else Right(state.get())
 
-  def registerAllocation(size: Int > 0): Either[ExecutionFailure, AllocationId] = stateLock.withLock {
+  def registerAllocation(size: Long > 0): Either[ExecutionFailure, AllocationId] = stateLock.withLock {
     open.flatMap { current =>
-      current.window match {
-        case None =>
-          Left(
-            ExecutionFailure.OutOfResources(s"session exhausted its $SyntheticAllocationCapacity allocation windows")
-          )
-        case Some((id, reserved)) =>
-          val allocation = StoredAllocation(StoredAllocation.Storage(size), syntheticAddress(id))
-          state.set(reserved.withAllocation(id, allocation))
-          Right(id)
-      }
+      if (size > StoredAllocation.MaximumBytes)
+        Left(ExecutionFailure.OutOfResources(s"allocation of $size bytes exceeds ${StoredAllocation.MaximumBytes}"))
+      else
+        current.window match {
+          case None =>
+            Left(
+              ExecutionFailure.OutOfResources(s"session exhausted its $SyntheticAllocationCapacity allocation windows")
+            )
+          case Some((id, reserved)) =>
+            val allocation = StoredAllocation(StoredAllocation.Storage(size), syntheticAddress(id))
+            state.set(reserved.withAllocation(id, allocation))
+            Right(id)
+        }
     }
   }
 
@@ -207,7 +209,7 @@ class ExecutionSession(
   ): Either[ExecutionFailure, Unit] = stateLock.withLock {
     open.flatMap { current =>
       current.allocation(id).toRight(notRegistered(id)).flatMap { allocation =>
-        val size = allocation.size.toLong
+        val size = allocation.size.raw
         if (address.raw <= 0 || address.raw > Long.MaxValue - size)
           Left(ExecutionFailure.InvalidRequest("allocation address alias has an invalid or overflowing range"))
         else if (allocation.aliased && allocation.base == address && allocation.hostBacked == hostBacked) Right(())
@@ -395,23 +397,23 @@ class ExecutionSession(
     override def lock: ReentrantLock           = stateLock
     override def index: AllocationAddressIndex = state.get().addresses
 
-    override protected def unregistered(id: AllocationId): Fault                  = memoryFault(notRegistered(id))
-    override protected def outside(range: AllocationRange, limit: Int > 0): Fault =
-      memoryFault(outOfRange(range, limit))
+    override protected def unregistered(id: AllocationId): Fault                   = memoryFault(notRegistered(id))
+    override protected def outside(range: AllocationRange, limit: Long > 0): Fault =
+      memoryFault(outOfRange(range.allocation, range.offset, range.size.toLong, limit))
 
     override def read(
         entry: AllocationAddressIndex.Entry,
         offset: Long >= 0,
         size: Int >= 0
     ): Either[Fault, Vec[Byte]] = {
-      val start = offset.toIntExact
-      entry.allocation.storage.read(start, size) { live =>
+      val storage = entry.allocation.storage
+      storage.read(offset, size.toLong) { live =>
         if (!live) Left(unregistered(entry.id))
-        else Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(
-          entry.allocation.bytes,
-          start,
-          start.raw + size
-        )))
+        else {
+          val bytes = Array.ofDim[Byte](size)
+          storage.copyTo(offset, bytes, 0, size)
+          Right(Vec.unsafeWrapArray(bytes))
+        }
       }
     }
 
@@ -422,10 +424,10 @@ class ExecutionSession(
         size: Int in 1 ~ 8,
         into: LongRef
     ): Fault | Null = {
-      val start = offset.toIntExact
-      entry.allocation.storage.read(start, size) { live =>
+      val storage = entry.allocation.storage
+      storage.read(offset, size.toLong) { live =>
         if (!live) unregistered(entry.id)
-        else { into.elem = LittleEndian.decode(entry.allocation.bytes, start, size.widen[Int in 0 ~ 8]); null }
+        else { into.elem = storage.decode(offset, size.widen[Int in 0 ~ 8]); null }
       }
     }
 
@@ -435,12 +437,12 @@ class ExecutionSession(
         bytes: Vec[Byte],
         completion: Completion
     ): Either[Fault, Unit] = {
-      val start = offset.toIntExact
-      entry.allocation.storage.write(start, bytes.length) { live =>
+      val storage = entry.allocation.storage
+      storage.write(offset, bytes.length) { live =>
         if (!live) Left(unregistered(entry.id))
         else {
-          val _ = bytes.copyToArray(entry.allocation.bytes, start, bytes.length)
-          if (bytes.nonEmpty) completion.markDirty(entry.id, start, bytes.nonNegativeSize)
+          storage.copyFrom(offset, bytes)
+          if (bytes.nonEmpty) completion.markDirty(entry.id, offset, bytes.nonNegativeSize)
           Written
         }
       }
@@ -453,12 +455,12 @@ class ExecutionSession(
         size: Int in 1 ~ 8,
         completion: Completion
     ): Either[Fault, Unit] = {
-      val start = offset.toIntExact
-      entry.allocation.storage.write(start, size) { live =>
+      val storage = entry.allocation.storage
+      storage.write(offset, size.toLong) { live =>
         if (!live) Left(unregistered(entry.id))
         else {
-          LittleEndian.write(value, entry.allocation.bytes, start, size.widen[Int in 0 ~ 8])
-          completion.markDirty(entry.id, start, size)
+          storage.encode(offset, value, size.widen[Int in 0 ~ 8])
+          completion.markDirty(entry.id, offset, size)
           Written
         }
       }
@@ -470,14 +472,14 @@ class ExecutionSession(
         size: Int in 1 ~ 8,
         completion: Completion
     )(update: Long => Long): Either[Fault, Long] = {
-      val start = offset.toIntExact
-      entry.allocation.storage.write(start, size) { live =>
+      val storage = entry.allocation.storage
+      storage.write(offset, size.toLong) { live =>
         if (!live) Left(unregistered(entry.id))
         else {
           val width    = size.widen[Int in 0 ~ 8]
-          val previous = LittleEndian.decode(entry.allocation.bytes, start, width)
-          LittleEndian.write(update(previous), entry.allocation.bytes, start, width)
-          completion.markDirty(entry.id, start, size)
+          val previous = storage.decode(offset, width)
+          storage.encode(offset, update(previous), width)
+          completion.markDirty(entry.id, offset, size)
           Right(previous)
         }
       }
@@ -548,7 +550,7 @@ class ExecutionSession(
           loaded.kernel(effective.kernelName).left.map(failure(_)).flatMap(metadata =>
             Either.cond(
               metadata.argumentBlockSize.toLong <=
-                current.addresses.entry(buffer.region).size.toLong - buffer.offset,
+                current.addresses.entry(buffer.region).size.raw - buffer.offset,
               (),
               ExecutionFailure.InvalidRequest("kernel argument block exceeds its allocation")
             )
@@ -821,39 +823,43 @@ class ExecutionSession(
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
-  private inline def accessAllocation[A](id: AllocationId, offset: Long >= 0, size: Int >= 0)(
-      inline access: (StoredAllocation, Int) => Either[ExecutionFailure, A]
+  private inline def accessAllocation[A](id: AllocationId, offset: Long >= 0, size: Long)(
+      inline access: StoredAllocation => Either[ExecutionFailure, A]
   ): Either[ExecutionFailure, A] =
     if (closed) Left(Closed)
     else {
       val entry = state.get().addresses.entry(id)
       if (entry == null) Left(notRegistered(id))
-      else if (!ByteRange.contains(entry.size, offset, size.toLong))
-        Left(outOfRange(AllocationRange(id, offset, size), entry.size))
-      else access(entry.allocation, offset.toInt)
+      else if (!ByteRange.contains(entry.size, offset, size))
+        Left(outOfRange(id, offset, size, entry.size))
+      else access(entry.allocation)
     }
 
   def read(range: AllocationRange): Either[ExecutionFailure, Vec[Byte]] =
-    accessAllocation(range.allocation, range.offset, range.size)((allocation, start) =>
-      allocation.storage.read(start, range.size)(live =>
+    accessAllocation(range.allocation, range.offset, range.size.toLong)(allocation =>
+      allocation.storage.read(range.offset, range.size.toLong)(live =>
         if (!live) Left(notRegistered(range.allocation))
-        else Right(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(allocation.bytes, start, start + range.size)))
+        else {
+          val bytes = Array.ofDim[Byte](range.size)
+          allocation.storage.copyTo(range.offset, bytes, 0, range.size)
+          Right(Vec.unsafeWrapArray(bytes))
+        }
       )
     )
 
   def readValue(scalar: AllocationScalar): Either[ExecutionFailure, Long] =
-    accessAllocation(scalar.allocation, scalar.offset, scalar.size)((allocation, start) =>
-      allocation.storage.read(start, scalar.size)(live =>
+    accessAllocation(scalar.allocation, scalar.offset, scalar.size.toLong)(allocation =>
+      allocation.storage.read(scalar.offset, scalar.size.toLong)(live =>
         if (!live) Left(notRegistered(scalar.allocation))
-        else Right(LittleEndian.decode(allocation.bytes, start, scalar.size.widen[Int in 0 ~ 8]))
+        else Right(allocation.storage.decode(scalar.offset, scalar.size.widen[Int in 0 ~ 8]))
       )
     )
 
   def write(id: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[ExecutionFailure, Unit] =
-    accessAllocation(id, offset, bytes.nonNegativeSize)((allocation, start) =>
-      allocation.storage.write(start, bytes.length)(live =>
+    accessAllocation(id, offset, bytes.length.toLong)(allocation =>
+      allocation.storage.write(offset, bytes.length)(live =>
         if (!live) Left(notRegistered(id))
-        else Right { val _ = bytes.copyToArray(allocation.bytes, start, bytes.length) }
+        else Right(allocation.storage.copyFrom(offset, bytes))
       )
     )
 
@@ -881,39 +887,24 @@ class ExecutionSession(
       )
   }
 
-  private inline def rectangleAccess[A](
-      id: AllocationId,
-      offset: Long >= 0,
-      layout: (Int, Long)
-  )(
-      inline access: (StoredAllocation, Int, Int) => Either[ExecutionFailure, A]
-  ): Either[ExecutionFailure, A] = {
-    val span = math.min(layout._2, Int.MaxValue.toLong).toInt.unsafe[Int >= 0]
-    accessAllocation(id, offset, span)((allocation, start) =>
-      if (layout._2 > span)
-        Left(ExecutionFailure.InvalidRequest(s"allocation $id: rectangle span ${layout._2} is too large"))
-      else access(allocation, start, span)
-    )
-  }
-
   private inline def eachRectangleRow(rowBytes: Int, rowCount: Int, sliceCount: Int, rowPitch: Int, slicePitch: Int)(
-      inline visit: (Int, Int) => Unit
+      inline visit: (Long, Int) => Unit
   ): Unit =
     for {
       slice <- 0 until sliceCount
       row   <- 0 until rowCount
-    } visit(slice * slicePitch + row * rowPitch, (slice * rowCount + row) * rowBytes)
+    } visit(slice.toLong * slicePitch + row.toLong * rowPitch, (slice * rowCount + row) * rowBytes)
 
   def readRectangle(id: AllocationId, rectangle: Rectangle): Either[ExecutionFailure, Vec[Byte]] = {
     import rectangle.*
     rectangleLayout(rowBytes, rowCount, sliceCount, rowPitch, slicePitch).flatMap(layout =>
-      rectangleAccess(id, offset, layout)((allocation, start, span) =>
-        allocation.storage.read(start, span)(live =>
+      accessAllocation(id, offset, layout._2)(allocation =>
+        allocation.storage.read(offset, layout._2)(live =>
           if (!live) Left(notRegistered(id))
           else {
             val packed = Array.ofDim[Byte](layout._1)
             eachRectangleRow(rowBytes, rowCount, sliceCount, rowPitch, slicePitch)((from, to) =>
-              Array.copy(allocation.bytes, start + from, packed, to, rowBytes)
+              allocation.storage.copyTo(offset.raw + from, packed, to, rowBytes)
             )
             Right(Vec.unsafeWrapArray(packed))
           }
@@ -928,13 +919,13 @@ class ExecutionSession(
       if (bytes.length != layout._1)
         Left(ExecutionFailure.InvalidRequest(s"rectangle needs ${layout._1} bytes, got ${bytes.length}"))
       else
-        rectangleAccess(id, offset, layout)((allocation, start, span) =>
-          allocation.storage.write(start, span)(live =>
+        accessAllocation(id, offset, layout._2)(allocation =>
+          allocation.storage.write(offset, layout._2)(live =>
             if (!live) Left(notRegistered(id))
             else {
               val packed = bytes.toArray
               eachRectangleRow(rowBytes, rowCount, sliceCount, rowPitch, slicePitch)((to, from) =>
-                Array.copy(packed, from, allocation.bytes, start + to, rowBytes)
+                allocation.storage.copyFrom(offset.raw + to, packed, from, rowBytes)
               )
               Right(())
             }
@@ -944,21 +935,21 @@ class ExecutionSession(
   }
 
   def writeValue(scalar: AllocationScalar, value: Long): Either[ExecutionFailure, Unit] =
-    accessAllocation(scalar.allocation, scalar.offset, scalar.size)((allocation, start) =>
-      allocation.storage.write(start, scalar.size)(live =>
+    accessAllocation(scalar.allocation, scalar.offset, scalar.size.toLong)(allocation =>
+      allocation.storage.write(scalar.offset, scalar.size.toLong)(live =>
         if (!live) Left(notRegistered(scalar.allocation))
-        else Right(LittleEndian.write(value, allocation.bytes, start, scalar.size.widen[Int in 0 ~ 8]))
+        else Right(allocation.storage.encode(scalar.offset, value, scalar.size.widen[Int in 0 ~ 8]))
       )
     )
 
   def atomicModifyValue(scalar: AllocationScalar)(update: Long => Long): Either[ExecutionFailure, Long] =
-    accessAllocation(scalar.allocation, scalar.offset, scalar.size)((allocation, start) =>
-      allocation.storage.write(start, scalar.size) { live =>
+    accessAllocation(scalar.allocation, scalar.offset, scalar.size.toLong)(allocation =>
+      allocation.storage.write(scalar.offset, scalar.size.toLong) { live =>
         if (!live) Left(notRegistered(scalar.allocation))
         else {
           val width    = scalar.size.widen[Int in 0 ~ 8]
-          val previous = LittleEndian.decode(allocation.bytes, start, width)
-          LittleEndian.write(update(previous), allocation.bytes, start, width)
+          val previous = allocation.storage.decode(scalar.offset, width)
+          allocation.storage.encode(scalar.offset, update(previous), width)
           Right(previous)
         }
       }
