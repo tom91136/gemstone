@@ -224,14 +224,31 @@ bool classifyPointerValueLocked(uintptr_t pointer, uint64_t &allocationId, uint6
   return false;
 }
 
+struct AllocationSpan {
+  uintptr_t low = std::numeric_limits<uintptr_t>::max();
+  uintptr_t high = 0;
+  [[nodiscard]] bool contains(uint64_t pointer) const { return pointer >= low && pointer <= high; }
+};
+
+AllocationSpan allocationSpanLocked() {
+  AllocationSpan span;
+  for (const auto &[base, allocation] : allocations) {
+    span.low = std::min(span.low, reinterpret_cast<uintptr_t>(base));
+    span.high = std::max(span.high, reinterpret_cast<uintptr_t>(base) + allocation->size);
+  }
+  return span;
+}
+
 std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &kernel, LaunchPerformance &performance) {
   std::vector<PointerRelocation> result;
   if (kernel.indirect) {
     std::scoped_lock const lock(allocationsMutex);
+    const auto span = allocationSpanLocked();
     for (const auto &[base, source] : allocations) {
       if (source->type != ZE_MEMORY_TYPE_DEVICE || !source->id || source->size < sizeof(uintptr_t)) continue;
       performance.relocationScanBytes += source->size;
       scanPointers(base, source->size, [&](size_t offset, uint64_t pointer) {
+        if (!span.contains(pointer)) return;
         uint64_t targetId = 0;
         uint64_t targetOffset = 0;
         if (classifyPointerValueLocked(pointer, targetId, targetOffset))
@@ -244,12 +261,14 @@ std::vector<PointerRelocation> collectPointerRelocations(const KernelLaunch &ker
   }
   {
     std::scoped_lock const lock(allocationsMutex);
+    const auto span = allocationSpanLocked();
     for (size_t argument = 0; argument < kernel.arguments.size(); ++argument) {
       const auto &input = kernel.arguments[argument];
       if (input.local || input.bytes.size() < sizeof(uintptr_t)) continue;
       if (argument < kernel.parameters.size() && !kernel.parameters[argument].containsPointer) continue;
       performance.relocationScanBytes += input.bytes.size();
       scanPointers(input.bytes.data(), input.bytes.size(), [&](size_t offset, uint64_t pointer) {
+        if (!span.contains(pointer)) return;
         uint64_t targetId = 0;
         uint64_t targetOffset = 0;
         if (classifyPointerValueLocked(pointer, targetId, targetOffset))
