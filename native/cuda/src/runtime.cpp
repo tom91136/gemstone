@@ -1120,6 +1120,15 @@ CUresult arrayCreate(CUarray *handle, size_t width, size_t height, size_t depth,
   return CUDA_SUCCESS;
 }
 
+std::optional<CUdeviceptr> arrayAddress(CUarray handle, size_t offset, size_t count) {
+  const auto *array = arrayOf(handle);
+  if (!array) return std::nullopt;
+  if (count == 0) return array->device;
+  size_t end = 0;
+  if (array->dimensions > 1 || !sizeAdd(offset, count, &end) || end > array->pitch * array->height * array->depth) return std::nullopt;
+  return array->device + offset;
+}
+
 struct CudaMipmappedArray {
   CUdeviceptr device;
   std::vector<std::unique_ptr<CudaArray>> levels;
@@ -3595,6 +3604,26 @@ CUresult cuMemcpyDtoHAsync_v2(void *destination, CUdeviceptr source, size_t size
   const auto queued = enqueueCommand(stream, [=] { return cuMemcpyDtoH_v2(destination, source, size); });
   if (queued != CUDA_SUCCESS || !destination || size == 0 || !pageableHost(destination, size) || streamDeferred(stream)) return queued;
   return cuStreamSynchronize(stream);
+}
+
+CUresult cuMemcpyHtoA_v2(CUarray destination, size_t offset, const void *source, size_t count) {
+  const auto device = arrayAddress(destination, offset, count);
+  return device ? cuMemcpyHtoD_v2(*device, source, count) : CUDA_ERROR_INVALID_VALUE;
+}
+
+CUresult cuMemcpyAtoH_v2(void *destination, CUarray source, size_t offset, size_t count) {
+  const auto device = arrayAddress(source, offset, count);
+  return device ? cuMemcpyDtoH_v2(destination, *device, count) : CUDA_ERROR_INVALID_VALUE;
+}
+
+CUresult cuMemcpyHtoAAsync_v2(CUarray destination, size_t offset, const void *source, size_t count, CUstream stream) {
+  const auto device = arrayAddress(destination, offset, count);
+  return device ? cuMemcpyHtoDAsync_v2(*device, source, count, stream) : CUDA_ERROR_INVALID_VALUE;
+}
+
+CUresult cuMemcpyAtoHAsync_v2(void *destination, CUarray source, size_t offset, size_t count, CUstream stream) {
+  const auto device = arrayAddress(source, offset, count);
+  return device ? cuMemcpyDtoHAsync_v2(destination, *device, count, stream) : CUDA_ERROR_INVALID_VALUE;
 }
 
 CUresult cuMemcpyDtoDAsync_v2(CUdeviceptr destination, CUdeviceptr source, size_t size, CUstream stream) {
