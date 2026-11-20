@@ -1976,6 +1976,44 @@ TEST_CASE("a provisional case end takes its status from the program's closing st
   CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case unknown_three"});
 }
 
+constexpr std::string_view StopBody = R"(
+case "$1" in
+  --batch)
+    while read -r name; do
+      echo "conformance-case-begin: $name"
+      case "$name" in
+        fail*) echo "boom $name"; echo "conformance-case-end: 1"; exit 0 ;;
+        *) echo "ran $name"; echo "conformance-case-end: 0" ;;
+      esac
+    done < "$2" ;;
+  --case) echo "alone $2" ;;
+esac
+)";
+
+TEST_CASE("cases left over when a batch stops early run as a new batch", "[driver][batch]") {
+  const BatchProgram program(StopBody);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "fail_two", "pass_three", "pass_four"}));
+  REQUIRE(results.size() == 4);
+  CHECK(results[0].status == 0);
+  CHECK(results[1].status == 1);
+  CHECK(results[2].status == 0);
+  CHECK(program.log(2).contains("ran pass_three"));
+  CHECK(results[3].status == 0);
+  CHECK(program.log(3).contains("ran pass_four"));
+  CHECK(program.invocations() == std::vector<std::string>{"--batch", "--batch"});
+}
+
+TEST_CASE("after a crash the case in flight runs alone and the cases that had not started run as a batch", "[driver][batch]") {
+  const BatchProgram program(BatchBody);
+  const auto results = program.run(BatchProgram::cases({"pass_one", "crash_two", "pass_three", "pass_four"}));
+  REQUIRE(results.size() == 4);
+  CHECK(results[1].status == 1);
+  CHECK(program.log(1).contains("alone crash_two"));
+  CHECK(program.log(2).contains("ran pass_three"));
+  CHECK(program.log(3).contains("ran pass_four"));
+  CHECK(program.invocations() == std::vector<std::string>{"--batch", "--case crash_two", "--batch"});
+}
+
 TEST_CASE("a batch timeout concludes the case in flight and reruns only the cases that had not started", "[driver][batch]") {
   const BatchProgram program(BatchBody);
   const auto results = program.run(BatchProgram::cases({"pass_one", "hang_two", "pass_three"}, 1));

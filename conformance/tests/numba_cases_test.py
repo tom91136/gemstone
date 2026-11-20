@@ -34,6 +34,10 @@ def main(args, plugins=()):
     if "no:terminal" in args and ("-q" in args or "--no-header" in args):
         sys.stderr.write("ERROR: usage: unrecognized arguments: -q --no-header\\n")
         return 4
+    session = types.SimpleNamespace(shouldstop=False)
+    for plugin in plugins:
+        if hasattr(plugin, "pytest_sessionstart"):
+            plugin.pytest_sessionstart(session)
     for event in json.loads(os.environ.get("FAKE_PYTEST_EVENTS", "[]")):
         for plugin in plugins:
             if event["event"] == "start":
@@ -50,6 +54,10 @@ def main(args, plugins=()):
                 if event.get("xfail"):
                     report.wasxfail = ""
                 plugin.pytest_runtest_logreport(report)
+        if session.shouldstop:
+            break
+    with open(os.environ["FAKE_PYTEST_ARGV"] + ".stop", "w") as handle:
+        handle.write(str(session.shouldstop))
     return int(os.environ.get("FAKE_PYTEST_STATUS", "0"))
 """
 
@@ -264,23 +272,43 @@ class NumbaCases(unittest.TestCase):
         self.assertEqual([(name, code) for name, _, code in self.batch_records(output)], [(cases[0], 0), (cases[1], 0)])
 
     def test_batch_failure_prints_its_text_and_classification_before_its_end_marker(self):
-        cases = ["cudapy/test_x.py::T::a", "cudapy/test_x.py::T::b", "cudapy/test_x.py::T::c"]
-        events = (
-            self.phases(cases[0])
-            + self.phases(cases[1], call="failed", text="numba.cuda.cudadrv.driver.CudaAPIError: CUDA_ERROR_NOT_SUPPORTED")
-            + self.phases(cases[2], call="failed", text="AssertionError: 3 != 4", sections=[("Captured stdout call", "noise")])
+        cases = ["cudapy/test_x.py::T::a", "cudapy/test_x.py::T::b"]
+        events = self.phases(cases[0]) + self.phases(
+            cases[1], call="failed", text="numba.cuda.cudadrv.driver.CudaAPIError: CUDA_ERROR_NOT_SUPPORTED"
         )
         status, output = self.run_batch(cases, events)
         self.assertEqual(status, 0, output)
-        first, second, third = self.batch_records(output)
+        first, second = self.batch_records(output)
         self.assertEqual(first, [cases[0], [], 0])
         self.assertEqual(second[2], 1)
         self.assertIn("CUDA_ERROR_NOT_SUPPORTED", "\n".join(second[1]))
         self.assertEqual(self.classification("\n".join(second[1])), "emulator defect")
-        self.assertEqual(third[2], 1)
-        self.assertIn("noise", "\n".join(third[1]))
-        self.assertNotIn("CUDA_ERROR", "\n".join(third[1]))
-        self.assertEqual(self.classification("\n".join(third[1])), "unclassified")
+
+    def test_batch_failure_includes_captured_sections_without_other_cases_text(self):
+        case = "cudapy/test_x.py::T::c"
+        events = self.phases(case, call="failed", text="AssertionError: 3 != 4", sections=[("Captured stdout call", "noise")])
+        status, output = self.run_batch([case], events)
+        self.assertEqual(status, 0, output)
+        (record,) = self.batch_records(output)
+        self.assertEqual(record[2], 1)
+        self.assertIn("noise", "\n".join(record[1]))
+        self.assertNotIn("CUDA_ERROR", "\n".join(record[1]))
+        self.assertEqual(self.classification("\n".join(record[1])), "unclassified")
+
+    def test_batch_stops_after_a_failed_case_and_not_after_a_skip(self):
+        cases = ["cudapy/test_x.py::T::a", "cudapy/test_x.py::T::b", "cudapy/test_x.py::T::c"]
+        events = self.phases(cases[0], call="skipped") + self.phases(cases[1], call="failed", text="AssertionError") + self.phases(cases[2])
+        status, output = self.run_batch(cases, events)
+        self.assertEqual(status, 0, output)
+        self.assertEqual([(name, code) for name, _, code in self.batch_records(output)], [(cases[0], SKIP_STATUS), (cases[1], 1)])
+        self.assertTrue(self.stopped())
+        status, output = self.run_batch(cases, self.phases(cases[0]) + self.phases(cases[1], call="skipped") + self.phases(cases[2]))
+        self.assertEqual(len(self.batch_records(output)), 3)
+        self.assertFalse(self.stopped())
+
+    def stopped(self):
+        with open(os.path.join(self.directory.name, "argv.json.stop")) as handle:
+            return handle.read() != "False"
 
     def test_batch_skips_report_the_skip_status_and_xfails_pass(self):
         cases = ["cudapy/test_x.py::T::a", "cudapy/test_x.py::T::b", "cudapy/test_x.py::T::c"]

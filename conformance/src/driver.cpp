@@ -1122,38 +1122,25 @@ void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double time
                            std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count())
             << std::flush;
 }
-void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> tests, const CaseSink &sink) {
-  const auto alone = [&](size_t position) {
-    const auto begin = std::chrono::steady_clock::now();
-    CaseResult result;
-    try {
-      result = executeCase(config, tests[position]);
-    } catch (const std::exception &error) {
-      result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
-    }
-    result.elapsed = std::chrono::steady_clock::now() - begin;
-    sink(position, std::move(result));
-  };
-  std::vector<size_t> pending;
-  for (size_t position = 0; position < tests.size(); ++position)
-    if (auto early = preflight(config, tests[position])) sink(position, std::move(*early));
-    else pending.push_back(position);
-  const auto programs = pending.empty() ? std::vector<TestProgram>{} : testPrograms(config.directory, Workload{});
-  const auto selected = pending.empty() ? std::nullopt : programs ^ find_cref([&](const TestProgram &candidate) {
-                                                           return candidate.name == tests[pending.front()].program;
-                                                         });
-  if (pending.size() < 2 || !selected || selected->get().format != "cases") {
-    for (const auto position : pending)
-      alone(position);
-    return;
-  }
-  const auto &first = tests[pending.front()];
+namespace {
+struct Concluded {
+  size_t position;
+  int32_t status;
+  std::string text;
+  std::chrono::duration<double> elapsed;
+};
+} // namespace
+// Runs the open cases in one process and returns the case in flight when the process ended without concluding it.
+static std::optional<size_t> runBatchRound(const ExecutionConfig &config, std::span<const ScheduledCase> tests,
+                                           const std::vector<size_t> &open, const fs::path &program, std::vector<bool> &finished,
+                                           const CaseSink &sink) {
+  const auto &first = tests[open.front()];
   const auto report = fs::path(config.reportDirectory) / first.program / fmt::to_string(first.index);
   fs::create_directories(report);
   const auto casesPath = report / "batch.cases";
   {
     std::ofstream cases(casesPath, std::ios::binary | std::ios::trunc);
-    for (const auto position : pending)
+    for (const auto position : open)
       cases << tests[position].identity << '\n';
     if (!cases) throw std::runtime_error("cannot write batch case list: " + casesPath.string());
   }
@@ -1164,22 +1151,15 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
                                 ^ map([](const auto &directory) { return fs::path(directory); }) ^ get_or_else(report);
   std::map<std::string_view, size_t> positions;
   uint32_t longest = 0;
-  for (const auto position : pending) {
+  for (const auto position : open) {
     positions[tests[position].identity] = position;
     longest = std::max(longest, tests[position].timeoutSeconds);
   }
-  std::vector<bool> finished(tests.size(), false);
   std::optional<size_t> current;
   std::string text;
   std::string epilogue;
   const auto start = std::chrono::steady_clock::now();
   auto mark = start;
-  struct Concluded {
-    size_t position;
-    int32_t status;
-    std::string text;
-    std::chrono::duration<double> elapsed;
-  };
   std::vector<Concluded> failures;
   std::vector<Concluded> provisional;
   const auto record = [&](const Concluded &concluded, bool timedOut) {
@@ -1229,9 +1209,8 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
     return std::nullopt;
   };
   std::ofstream log(report / "batch.log", std::ios::binary | std::ios::trunc);
-  const auto process =
-      runProcess(launched(config.launcher, {selected->get().path.string(), "--batch", casesPath.string()}), workingDirectory, environment,
-                 std::chrono::seconds(longest), "[" + first.program + " batch] ", false, &log, watch);
+  const auto process = runProcess(launched(config.launcher, {program.string(), "--batch", casesPath.string()}), workingDirectory,
+                                  environment, std::chrono::seconds(longest), "[" + first.program + " batch] ", false, &log, watch);
   if (process.timedOut && current) conclude(*current, process.status, true);
   std::map<std::string_view, int32_t> statuses;
   for (std::string_view rest = epilogue; !rest.empty();) {
@@ -1259,8 +1238,40 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
     failure.text += epilogue;
     record(failure, false);
   }
-  for (const auto position : pending) {
-    if (finished[position]) continue;
+  return current;
+}
+void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> tests, const CaseSink &sink) {
+  const auto alone = [&](size_t position) {
+    const auto begin = std::chrono::steady_clock::now();
+    CaseResult result;
+    try {
+      result = executeCase(config, tests[position]);
+    } catch (const std::exception &error) {
+      result = {.status = 2, .output = fmt::format("conformance: {}\n", error.what()), .message = {}, .classification = {}};
+    }
+    result.elapsed = std::chrono::steady_clock::now() - begin;
+    sink(position, std::move(result));
+  };
+  std::vector<size_t> pending;
+  for (size_t position = 0; position < tests.size(); ++position)
+    if (auto early = preflight(config, tests[position])) sink(position, std::move(*early));
+    else pending.push_back(position);
+  const auto programs = pending.empty() ? std::vector<TestProgram>{} : testPrograms(config.directory, Workload{});
+  const auto selected = pending.empty() ? std::nullopt : programs ^ find_cref([&](const TestProgram &candidate) {
+                                                           return candidate.name == tests[pending.front()].program;
+                                                         });
+  std::vector<bool> finished(tests.size(), false);
+  const auto open = [&] { return pending ^ filter([&](size_t position) { return !finished[position]; }); };
+  while (selected && selected->get().format == "cases" && open().size() >= 2 && !Interruption::signal()) {
+    const auto before = open().size();
+    const auto inFlight = runBatchRound(config, tests, open(), selected->get().path, finished, sink);
+    if (inFlight && !Interruption::signal()) {
+      alone(*inFlight);
+      finished[*inFlight] = true;
+    }
+    if (open().size() == before) break;
+  }
+  for (const auto position : open()) {
     if (const auto signal = Interruption::signal())
       sink(position, {.status = 128 + signal, .output = "conformance: interrupted\n", .message = {}, .classification = {}});
     else alone(position);

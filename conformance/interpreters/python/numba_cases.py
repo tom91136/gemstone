@@ -171,6 +171,9 @@ class CaseMarkers:
         self.stream.write(text + "\n")
         self.stream.flush()
 
+    def pytest_sessionstart(self, session):
+        self.session = session
+
     def pytest_runtest_logstart(self, nodeid, location):
         self.text = []
         self.failed = self.skipped = self.passed = False
@@ -190,6 +193,8 @@ class CaseMarkers:
             if self.failed:
                 self.emit(f"conformance-classification: {classify(chr(10).join(self.text))}")
             status = 1 if self.failed else SKIP_STATUS if self.skipped and not self.passed else 0
+            if self.failed:
+                self.session.shouldstop = "a failed case can leave the device context unusable"
             self.emit(f"conformance-case-end: {status}")
 
 
