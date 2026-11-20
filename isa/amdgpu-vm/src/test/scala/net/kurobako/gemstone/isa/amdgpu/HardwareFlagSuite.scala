@@ -1,6 +1,9 @@
 package net.kurobako.gemstone.isa.amdgpu
 
+import EncodingConstants.Fixed
 import VMIR.*
+import cmpxFlagTables.edge
+import cmpxFlagTables.masks
 import hardwareFlagTables.*
 import hardwareGolden.descriptor
 import laneRuns.*
@@ -131,4 +134,56 @@ class HardwareFlagSuite extends Suite {
       (inputs, expected, produced)
     })
   }
+
+  private val sentinel = 0xdeadbeefL
+
+  private val cmpxResults: Vec[VectorRegisterIndex] = Vec(10, 11, 12, 13, 14)
+
+  private def cmpxOperations(mask: Long, code: Vec[Int]): Vec[Instruction] = {
+    import InstructionSource.*
+    Vec(
+      Instruction.VMove(10, Constant(sentinel)),
+      Instruction.SMove(14, Constant(sentinel)),
+      Instruction.SMove(15, Constant(sentinel)),
+      Instruction.SMove64(Fixed.ExecLo, Constant(mask))
+    ) ++ program(gfx1036, octets(code*)) ++ Vec(
+      Instruction.SMove(20, Scalar(Fixed.ExecLo)),
+      Instruction.SMove(21, Scalar(Fixed.ExecHi)),
+      Instruction.VMove(10, Constant(1)),
+      Instruction.SMove64(Fixed.ExecLo, Constant(0xffffffffL)),
+      Instruction.VMove(11, Scalar(14)),
+      Instruction.VMove(12, Scalar(15)),
+      Instruction.VMove(13, Scalar(20)),
+      Instruction.VMove(14, Scalar(21))
+    )
+  }
+
+  private def cmpxCheck(form: cmpxFlagTables.CmpxForm, code: Vec[Int])(using munit.Location): Unit = {
+    val exec = words(form.execs)
+    report(Vec.tabulate(masks.size) { row =>
+      val (mask, rot) = masks(row)
+      val lanes       = laneWords(
+        gfx1036,
+        Vec.tabulate(32) { lane =>
+          val j = (lane + rot.toInt) & 31
+          Vec(edge(lane), edge(lane) >>> 32, 0L, 0L, edge(j), edge(j) >>> 32)
+        },
+        cmpxOperations(mask, code),
+        cmpxResults,
+        computePgmRsrc1 = kernel,
+        base = 40
+      )
+      val marks = (0 until 32).foldLeft(0L)((acc, lane) => if (lanes(lane)(0) == 1L) acc | (1L << lane) else acc)
+      (
+        Vec(mask, rot),
+        Vec(sentinel, sentinel, exec(row), 0L, exec(row)),
+        Vec(lanes(0)(1), lanes(0)(2), lanes(0)(3), lanes(0)(4), marks)
+      )
+    })
+  }
+
+  for form <- cmpxFlagTables.forms do test(form.text)(cmpxCheck(form, form.code))
+
+  for form <- cmpxFlagTables.forms if form.code.size == 8 do
+    test(s"${form.text} with s14")(cmpxCheck(form, form.code.updated(0, 14)))
 }
