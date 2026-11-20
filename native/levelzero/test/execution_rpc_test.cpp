@@ -173,6 +173,12 @@ private:
         const auto request = gemstone_test::decodePayload<UnloadProgram>(payload);
         REQUIRE((std::cmp_equal(request.program.value, TestProgramId)));
         respond(connection);
+      } else if (operationTag == operation::DescribeProgram) {
+        const auto request = gemstone_test::decodePayload<DescribeProgram>(payload);
+        REQUIRE((std::cmp_equal(request.program.value, TestProgramId)));
+        std::vector<uint8_t> response;
+        gemstone_test::encodePayload(response, ProgramSymbols{});
+        respond(connection, response);
       } else if (operationTag == operation::DescribeKernel) {
         describeKernel(connection, payload);
       } else if (operationTag == operation::Launch) {
@@ -1085,6 +1091,48 @@ TEST_CASE("Level Zero kernel destroyed after a recorded launch still runs", "[le
   REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
   REQUIRE((server.launches.load() == 1U));
   server.check();
+}
+
+TEST_CASE("Level Zero module creation binds every program global to an allocation", "[level-zero][rpc]") {
+  gemstone_test::RpcFixture server;
+  const gemstone_test::RpcEnvironment environment(server);
+  server.programCatalogue({}, {{.name = "table", .virtualAddress = 0, .size = 8, .pointerOffsets = {}}});
+  server.describeGlobal("table", 8);
+  server.expectGlobalBinding("table", 0, {1, 2, 3, 4, 5, 6, 7, 8});
+  REQUIRE((zeInit(ZE_INIT_FLAG_GPU_ONLY) == ZE_RESULT_SUCCESS));
+
+  ze_driver_handle_t driver = nullptr;
+  auto *const device = gemstoneDevice(&driver);
+  REQUIRE((device));
+  ze_context_desc_t contextDesc{};
+  contextDesc.stype = ZE_STRUCTURE_TYPE_CONTEXT_DESC;
+  ze_context_handle_t context = nullptr;
+  REQUIRE((zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS));
+
+  ze_module_desc_t moduleDesc{};
+  moduleDesc.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
+  moduleDesc.format = ZE_MODULE_FORMAT_IL_SPIRV;
+  moduleDesc.inputSize = sizeof(gemstone_test::RpcFixture::Spirv);
+  moduleDesc.pInputModule = reinterpret_cast<const uint8_t *>(gemstone_test::RpcFixture::Spirv);
+  ze_module_handle_t module = nullptr;
+  REQUIRE((zeModuleCreate(context, device, &moduleDesc, &module, nullptr) == ZE_RESULT_SUCCESS));
+  server.checkGlobalBindings();
+
+  void *base = nullptr;
+  size_t size = 0;
+  REQUIRE((zeModuleGetGlobalPointer(module, "table", &size, &base) == ZE_RESULT_SUCCESS));
+  CHECK((size == 8));
+  void *range = nullptr;
+  size_t rangeSize = 0;
+  CHECK((zeMemGetAddressRange(context, static_cast<uint8_t *>(base) + 3, &range, &rangeSize) == ZE_RESULT_SUCCESS));
+  CHECK((range == base));
+  CHECK((rangeSize == 8));
+  ze_memory_allocation_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
+  REQUIRE((zeMemGetAllocProperties(context, base, &properties, nullptr) == ZE_RESULT_SUCCESS));
+  CHECK((properties.type == ZE_MEMORY_TYPE_SHARED));
+  REQUIRE((zeModuleDestroy(module) == ZE_RESULT_SUCCESS));
+  REQUIRE((zeContextDestroy(context) == ZE_RESULT_SUCCESS));
 }
 
 TEST_CASE("Level Zero device lost is sticky", "[level-zero][rpc]") {

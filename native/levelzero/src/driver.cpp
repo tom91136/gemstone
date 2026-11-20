@@ -2956,6 +2956,7 @@ std::shared_ptr<LoadedProgram> loadSpirvProgram(const std::vector<uint8_t> &byte
 bool programTeardown(LoadedProgram &program);
 
 size_t spirvInstructionBytes(const std::vector<uint8_t> &bytes);
+ze_result_t bindModuleGlobal(Module *module, const char *name, size_t *size, void **pointer);
 
 ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device_handle_t deviceHandle, const ze_module_desc_t *desc,
                                     ze_module_handle_t *result, ze_module_build_log_handle_t *log) {
@@ -3064,6 +3065,24 @@ ze_result_t ZE_APICALL moduleCreate(ze_context_handle_t contextHandle, ze_device
   auto *created = createHandle<Module>(context, device, std::move(bytes), std::move(program), desc->pBuildFlags ? desc->pBuildFlags : "");
   if (!created) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   created->linkageNames = linkageNameTable(kernels);
+  {
+    auto catalogue = [&] {
+      std::scoped_lock const rpcLock(rpcTransactionMutex);
+      return remote.client()->call(DescribeProgram{.program = ProgramId{static_cast<int64_t>(created->program->id)}});
+    }();
+    if (!catalogue) {
+      setBuildLog(log, recordRemoteError(catalogue.error().detail));
+      delete created;
+      return ZE_RESULT_ERROR_MODULE_BUILD_FAILURE;
+    }
+    for (const auto &global : catalogue.value().globals) {
+      if (global.size.value == 0) continue;
+      if (const auto bound = bindModuleGlobal(created, global.name.value.c_str(), nullptr, nullptr); bound != ZE_RESULT_SUCCESS) {
+        delete created;
+        return bound;
+      }
+    }
+  }
   if (log) {
     auto *buildLog = createHandle<BuildLog>("");
     if (!buildLog) {
@@ -3136,10 +3155,7 @@ ze_result_t ZE_APICALL moduleGetKernelNames(ze_module_handle_t handle, uint32_t 
   return ZE_RESULT_SUCCESS;
 }
 
-ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char *name, size_t *size, void **pointer) {
-  auto *module = cast<Module>(handle);
-  if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
-  if (!name || (!size && !pointer)) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+ze_result_t bindModuleGlobal(Module *module, const char *name, size_t *size, void **pointer) {
   {
     std::scoped_lock const globalsLock(module->program->globalsMutex);
     if (const auto global = module->program->globals ^ find_cref([&](const LoadedProgram::Global &entry) { return entry.name == name; })) {
@@ -3159,7 +3175,7 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
   }
   const auto bytes = static_cast<size_t>(described.value().size.value);
   void *base = nullptr;
-  const auto result = allocate(module->context.get(), module->device, bytes, 0, ZE_MEMORY_TYPE_DEVICE, &base);
+  const auto result = allocate(module->context.get(), module->device, bytes, 0, ZE_MEMORY_TYPE_SHARED, &base);
   if (result != ZE_RESULT_SUCCESS) return result;
   const auto discard = [&] {
     std::optional<uint64_t> id;
@@ -3208,6 +3224,14 @@ ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char
   if (pointer) *pointer = base;
   return ZE_RESULT_SUCCESS;
 }
+
+ze_result_t ZE_APICALL moduleGlobalPointer(ze_module_handle_t handle, const char *name, size_t *size, void **pointer) {
+  auto *module = cast<Module>(handle);
+  if (!module) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!name || (!size && !pointer)) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  return bindModuleGlobal(module, name, size, pointer);
+}
+
 bool programTeardown(LoadedProgram &program) {
   {
     std::scoped_lock const rpcLock(rpcTransactionMutex);
