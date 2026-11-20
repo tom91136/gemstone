@@ -176,6 +176,14 @@ private object VMLoader {
               ))
           }
         case Instruction.SpecConstantOp(resultType, dest, opcode, Vec(operand))
+            if unsigned(opcode) == SPIRV.Opcode.ConvertPtrToU &&
+              (globals.contains(id(operand)) || isAddress(constants.get(id(operand)))) &&
+              (types.get(id(resultType)) match {
+                case Some(RuntimeType.Integer(width, _)) => width.raw == 64
+                case _                                   => false
+              }) =>
+          constants.update(id(dest), Constant.Composite(id(resultType), Vec(0L), Vec(0 -> id(operand))))
+        case Instruction.SpecConstantOp(resultType, dest, opcode, Vec(operand))
             if pointerCasts(unsigned(opcode).toInt) &&
               (constants.get(id(operand)) match {
                 case Some(Constant.NullPointer(_, _, _)) => true

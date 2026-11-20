@@ -43,6 +43,49 @@ class GlobalVariableSuite extends Suite {
     assertEquals(word(memory, out, 0), 29L)
   }
 
+  test(
+    "OpSpecConstantOp ConvertPtrToU yields the dispatch address of a global and of a constant access chain into it"
+  ) {
+    val module = spv"""
+      $openCL
+      OpEntryPoint Kernel %main "address" %table
+      %void = OpTypeVoid
+      %uint = OpTypeInt 32 0
+      %ulong = OpTypeInt 64 0
+      %ulong_0 = OpConstant %ulong 0
+      %ulong_1 = OpConstant %ulong 1
+      %ulong_2 = OpConstant %ulong 2
+      %array = OpTypeArray %uint %ulong_2
+      %array_ptr = OpTypePointer CrossWorkgroup %array
+      %uint_ptr = OpTypePointer CrossWorkgroup %uint
+      %ulong_ptr = OpTypePointer CrossWorkgroup %ulong
+      %fn = OpTypeFunction %void %ulong_ptr
+      %uint_0 = OpConstant %uint 0
+      %initial = OpConstantComposite %array %uint_0 %uint_0
+      %table = OpVariable %array_ptr CrossWorkgroup %initial
+      %second = OpSpecConstantOp %uint_ptr InBoundsPtrAccessChain %table %ulong_0 %ulong_1
+      %base_address = OpSpecConstantOp %ulong ConvertPtrToU %table
+      %second_address = OpSpecConstantOp %ulong ConvertPtrToU %second
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %ulong_ptr
+      %entry = OpLabel
+      %live = OpConvertPtrToU %ulong %table
+      %out1 = OpPtrAccessChain %ulong_ptr %out %ulong_1
+      %out2 = OpPtrAccessChain %ulong_ptr %out %ulong_2
+      OpStore %out %base_address
+      OpStore %out1 %second_address
+      OpStore %out2 %live
+      OpReturn
+      OpFunctionEnd
+    """
+    val memory = RegionMemory()
+    val out    = memory.allocate(24L)
+    assertEquals(run(module, "address", memory, Vec(buffer(out))), Right(()))
+    val addresses = Vec.tabulate(3)(i => word(memory, out, i * 8) | (word(memory, out, i * 8 + 4) << 32))
+    assertEquals(addresses(0), addresses(2))
+    assertEquals(addresses(1), addresses(2) + 4L)
+  }
+
   test("Workgroup and Private variables are rematerialised at their SPIR-V lifetime boundaries") {
     for (
       (storage, local, groups) <- Seq(
