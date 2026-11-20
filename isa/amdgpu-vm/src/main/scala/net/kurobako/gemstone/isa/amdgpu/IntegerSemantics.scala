@@ -959,14 +959,12 @@ private object IntegerSemantics {
     case ScalarBinaryOperation.SubtractU32 =>
       sinks.scalarDwordFlagged(dest, srcA, srcB)(
         (a, b, _) => algebra.truncate(algebra.subtract(a, b), 32),
-        (a, b, _, _) => algebra.lessOrEqual(b, a, signed = true)
+        (a, b, _, _) => algebra.lessThan(a, b, signed = true)
       )
     case ScalarBinaryOperation.SubtractBorrowU32 =>
       sinks.scalarDwordFlagged(dest, srcA, srcB)(
-        (a, b, carry) =>
-          algebra.truncate(algebra.subtract(algebra.subtract(a, b), algebra.subtract(algebra.literal(1L), carry)), 32),
-        (a, b, carry, _) =>
-          algebra.lessOrEqual(algebra.add(b, algebra.subtract(algebra.literal(1L), carry)), a, signed = true)
+        (a, b, carry) => algebra.truncate(algebra.subtract(algebra.subtract(a, b), carry), 32),
+        (a, b, carry, _) => algebra.lessThan(a, algebra.add(b, carry), signed = true)
       )
     case ScalarBinaryOperation.MultiplyI32 =>
       sinks.scalarDword(dest, srcA, srcB)((a, b, _) => algebra.truncate(algebra.multiply(a, b), 32))

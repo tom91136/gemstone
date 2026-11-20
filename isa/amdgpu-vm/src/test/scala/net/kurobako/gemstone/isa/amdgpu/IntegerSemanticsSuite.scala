@@ -91,10 +91,10 @@ class IntegerSemanticsSuite extends Suite {
         val sum = left + right + (if (scc) 1L else 0L)
         scc = sum > Bits.Mask32
         sum
-      case ScalarBinaryOperation.SubtractU32       => scc = left >= right; left - right
+      case ScalarBinaryOperation.SubtractU32       => scc = left < right; left - right
       case ScalarBinaryOperation.SubtractBorrowU32 =>
-        val borrow = if (scc) 0L else 1L
-        scc = left >= right + borrow
+        val borrow = if (scc) 1L else 0L
+        scc = left < right + borrow
         left - right - borrow
       case ScalarBinaryOperation.Xor32  => val value = left ^ right; scc = value != 0L; value
       case ScalarBinaryOperation.Nand32 => val value = Bits.low32(~(left & right)).toLong; scc = value != 0L; value
