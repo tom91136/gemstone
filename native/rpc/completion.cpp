@@ -254,7 +254,10 @@ bool collectCompletion(Client &client, CompletionId completion, CompletionResult
     succeeded = static_cast<bool>(prints);
     if (succeeded) {
       const auto &text = prints.value().value;
-      if (!text.empty()) std::fwrite(text.data(), 1, text.size(), stdout);
+      if (!text.empty()) {
+        std::fwrite(text.data(), 1, text.size(), stdout);
+        std::fflush(stdout);
+      }
     } else {
       error = prints.error().detail;
     }

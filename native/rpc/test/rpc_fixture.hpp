@@ -335,6 +335,10 @@ public:
     GEMSTONE_RPC_REQUIRE(!active && launches > 0 && awaited == launches);
   }
   void failNextGraphicsStatistics() { failGraphicsStatistics = true; }
+  void printOnCompletion(std::string text) {
+    std::scoped_lock const lock(stateMutex);
+    completionPrints = std::move(text);
+  }
   // The next request with this operation tag fails without changing fixture state.
   void rejectNext(std::string_view operation, FailureKind kind = FailureKind::Failed) {
     std::scoped_lock const lock(stateMutex);
@@ -824,7 +828,7 @@ private:
       } else if (operationTag == operation::CompletionPrints) {
         decodePayload<CompletionPrints>(payload);
         GEMSTONE_RPC_REQUIRE(completed);
-        encodePayload(result, PrintText{});
+        encodePayload(result, PrintText{completionPrints});
       } else if (operationTag == operation::CompletionErrorPrints) {
         decodePayload<CompletionErrorPrints>(payload);
         GEMSTONE_RPC_REQUIRE(completed);
@@ -1120,6 +1124,7 @@ private:
   std::map<std::string, std::pair<uint64_t, std::vector<uint8_t>>> expectedGlobals;
   std::vector<std::pair<uint64_t, uint32_t>> ranges;
   std::atomic_bool failGraphicsStatistics{false};
+  std::string completionPrints;
   std::string rejectedOperation, droppedOperation, linkRejection;
   std::map<std::string, uint64_t> describedGlobals;
   FailureKind rejectedKind = FailureKind::Failed;

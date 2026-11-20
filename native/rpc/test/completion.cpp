@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -77,6 +78,56 @@ TEST_CASE("Completion collection retrieves every bounded metadata page", "[rpc]"
     REQUIRE(client->call(UnloadProgram{program.value()}));
     fixture.check();
   }
+}
+
+TEST_CASE("Completion prints reach the process stdout descriptor before collection returns", "[rpc]") {
+  gemstone_test::RpcFixture fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  auto client = Client::fromEnvironment();
+  REQUIRE(client);
+  fixture.expect({.local = 1, .groups = 1, .global = 1, .offset = 0, .seed = 0});
+  fixture.printOnCompletion("device print");
+  auto allocation = client->call(RegisterAllocation{{4}});
+  REQUIRE(allocation);
+  auto program = client->call(LoadProgram{.encoding = ProgramEncoding::SPIRVOpenCLCompute, .image = {3, 2, 35, 7}});
+  REQUIRE(program);
+  auto completion =
+      client->call(Launch{.program = program.value(),
+                          .kernelName = {"write"},
+                          .groupSize = {.x = {1}, .y = {1}, .z = {1}},
+                          .groupCount = {.x = {1}, .y = {1}, .z = {1}},
+                          .globalSize = {.x = {1}, .y = {1}, .z = {1}},
+                          .workDim = {1},
+                          .globalOffset = {.x = {0}, .y = {0}, .z = {0}},
+                          .privateSegmentBytes = {0},
+                          .groupSegmentBytes = {0},
+                          .arguments = {ArgumentMemory{.region = allocation.value(), .offset = {0}}, ArgumentScalar{{{0, 0, 0, 0}}}},
+                          .pointerRelocations = {}});
+  REQUIRE(completion);
+
+  char path[] = "/tmp/gemstone-print-XXXXXX";
+  const int capture = ::mkstemp(path);
+  REQUIRE(capture >= 0);
+  std::fflush(stdout);
+  const int saved = ::dup(STDOUT_FILENO);
+  REQUIRE(saved >= 0);
+  REQUIRE(::dup2(capture, STDOUT_FILENO) >= 0);
+  CompletionResult result;
+  std::string error;
+  const bool collected = collectCompletion(*client, completion.value(), result, error);
+  std::string captured(64, '\0');
+  const auto count = ::pread(capture, captured.data(), captured.size(), 0);
+  ::dup2(saved, STDOUT_FILENO);
+  ::close(saved);
+  ::close(capture);
+  ::unlink(path);
+  REQUIRE(collected);
+  REQUIRE(count >= 0);
+  captured.resize(static_cast<size_t>(count));
+  CHECK(captured == "device print");
+  REQUIRE(client->call(ReleaseAllocation{allocation.value()}));
+  REQUIRE(client->call(UnloadProgram{program.value()}));
+  fixture.check();
 }
 
 TEST_CASE("Failures carry the kind the service reported", "[rpc]") {
