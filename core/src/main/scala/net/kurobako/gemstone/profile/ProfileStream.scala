@@ -51,7 +51,7 @@ object ProfileStream {
   }
 
   private val Magic   = 0x47454d50524f4631L
-  private val Version = 5
+  private val Version = 6
 
   private val spaces = Space.values
   private val kinds  = AccessKind.values
@@ -94,6 +94,7 @@ object ProfileStream {
     val reads    = readNames(in)
     val writes   = readNames(in)
     val units    = Vec.fill(in.readInt())(in.readUTF() -> in.readInt())
+    val reaching = readNames(in)
     val schedule = Option.when(in.readBoolean())(readSchedule(in))
     val pipe     = Option.when(in.readBoolean())(readPipe(in))
     Instruction(
@@ -101,7 +102,7 @@ object ProfileStream {
       function,
       Option.when(address >= 0L)(address.unsafe[Long >= 0]),
       text,
-      RegisterUse(reads, writes, units.toMap),
+      RegisterUse(reads, writes, units.toMap, reaching),
       schedule,
       pipe
     )
@@ -311,6 +312,8 @@ class ProfileStream private (
         out.writeUTF(name)
         out.writeInt(units)
       }
+      out.writeInt(instruction.use.address.size)
+      instruction.use.address.foreach(out.writeUTF(_))
       out.writeBoolean(instruction.schedule.nonEmpty)
       instruction.schedule.foreach {
         case Schedule.Encoded(stall, writeBarrier) =>

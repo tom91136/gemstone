@@ -128,6 +128,18 @@ class ProfileStreamSuite extends Suite {
     assertEquals(read.map(_.instructions.map(_.schedule)), Right(Vec(Some(stalled), None, Some(modelled))))
   }
 
+  test("the address registers of each instruction survive a round trip") {
+    val recorder = ProfileRecorder()
+    val lanes    = Vec[Int >= 0](0)
+    val store    = RegisterUse(Vec("s16", "v0", "v2"), Vec(), Map("s16" -> 2), Vec("v0", "s16"))
+    assertEquals(recorder.instruction(at(0x10L, 0), State(0L, 0, lanes, "global_store_dword")), Right(()))
+    recorder.registers(0L, store)
+    val bytes = ByteArrayOutputStream()
+    recorder.stream.write(DataOutputStream(bytes))
+    val read = ProfileStream.read(DataInputStream(ByteArrayInputStream(bytes.toByteArray)))
+    assertEquals(read.map(_.instructions.map(_.use)), Right(Vec(store)))
+  }
+
   test("the pipe of each instruction survives a round trip") {
     val recorder = ProfileRecorder()
     val lanes    = Vec[Int >= 0](0)
