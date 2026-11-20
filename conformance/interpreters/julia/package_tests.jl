@@ -71,14 +71,14 @@ end
 
 const RUNNER_ROW = Regex("^(.+?)\\s+\\(\\d+\\)\\s+\u2502(.*)\$")
 
-function translator(names, provisional = String[])
+function translator(names, provisional = String[], failed = Set{String}())
     return function (line)
         row = match(RUNNER_ROW, replace(line, r"\e\[[0-9;]*m" => ""))
         row === nothing && return [line]
         name = row.captures[1]
         name in names || return [line]
         occursin("started at", row.captures[2]) && return ["conformance-case-begin: $name", line]
-        occursin(r"\b(failed|crashed) at\b", row.captures[2]) && return [line, "conformance-case-end: 1"]
+        occursin(r"\b(failed|crashed) at\b", row.captures[2]) && push!(failed, name)
         push!(provisional, name)
         return [line, "conformance-case-end: ?"]
     end
@@ -107,7 +107,8 @@ end
 
 function run_batch(script, names, io = stdout)
     provisional = String[]
-    translate = translator(Set(names), provisional)
+    failed = Set{String}()
+    translate = translator(Set(names), provisional, failed)
     command = `$(Base.julia_cmd()) --startup-file=no --project=$(Base.active_project()) $script --jobs=1 --verbose $names`
     pipe = Pipe()
     process = Base.run(pipeline(command, stdout = pipe, stderr = pipe); wait = false)
@@ -124,8 +125,13 @@ function run_batch(script, names, io = stdout)
     passed = success(process)
     text = String(take!(output))
     statuses = passed ? Dict(name => 0 for name in provisional) : summary_statuses(text, provisional)
+    for name in failed
+        statuses[name] = 1
+    end
     for name in provisional
-        haskey(statuses, name) && println(io, "conformance-case-status: $(statuses[name]) $name")
+        haskey(statuses, name) || break
+        println(io, "conformance-case-status: $(statuses[name]) $name")
+        statuses[name] == 0 || break
     end
     flush(io)
     return passed, text

@@ -52,16 +52,16 @@ include(joinpath(@__DIR__, "..", "interpreters", "julia", "package_tests.jl"))
         passed = "core/alpha         (1) \u2502     0.08 \u2502     4.95 \u2502   96.81 \u2502   0.00 \u2502  0.0 \u2502       1.72 \u2502   466.16 \u2502"
         @test translate(passed) == [passed, "conformance-case-end: ?"]
         failed = "core/beta          (1) \u2502     0.02 \u2502     0.28 \u2502    failed at 2026-11-19T22:45:49.805"
-        @test translate(failed) == [failed, "conformance-case-end: 1"]
+        @test translate(failed) == [failed, "conformance-case-end: ?"]
         crashed = "core/beta          (1) \u2502         crashed at 2026-11-19T22:45:49.805"
-        @test translate(crashed) == [crashed, "conformance-case-end: 1"]
+        @test translate(crashed) == [crashed, "conformance-case-end: ?"]
         spaced = "core/gamma delta   (1) \u2502         started at 2026-11-19T22:45:49.831"
         @test translate(spaced)[1] == "conformance-case-begin: core/gamma delta"
         @test translate("    core/alpha       |    1            1  0.1s") == ["    core/alpha       |    1            1  0.1s"]
         @test translate("other/case          (1) \u2502         started at 2026-11-19T22:45:49.831") ==
               ["other/case          (1) \u2502         started at 2026-11-19T22:45:49.831"]
         @test translate("\e[31mcore/beta          (1) \u2502     0.02 \u2502     0.28 \u2502    failed at 2026-11-19T22:45:49.805\e[0m")[2] ==
-              "conformance-case-end: 1"
+              "conformance-case-end: ?"
     end
 
     @testset "the summary table says which tests failed" begin
@@ -95,10 +95,10 @@ include(joinpath(@__DIR__, "..", "interpreters", "julia", "package_tests.jl"))
             lines = split(String(take!(io)), '\n')
             @test lines[1] == "jobs: --jobs=1 --verbose core/one core/two core/three"
             @test lines[2:3] == ["conformance-case-begin: core/one", "core/one          (1) \u2502         started at now"]
-            @test count(==("conformance-case-end: ?"), lines) == 2
-            @test count(==("conformance-case-end: 1"), lines) == 1
-            @test findfirst(==("conformance-case-end: 1"), lines) < findfirst(startswith("Test Summary"), lines)
+            @test count(==("conformance-case-end: ?"), lines) == 3
+            @test count(==("conformance-case-end: 1"), lines) == 0
             @test lines[end - 2:end - 1] == ["conformance-case-status: 0 core/one", "conformance-case-status: 1 core/two"]
+            @test !any(line -> startswith(line, "conformance-case-status: ") && occursin("core/three", line), lines)
             @test occursin("Test Summary", output)
         end
     end
@@ -117,6 +117,28 @@ include(joinpath(@__DIR__, "..", "interpreters", "julia", "package_tests.jl"))
             passed, _ = run_batch(bad, ["core/one"], io)
             @test !passed
             @test !occursin("conformance-case-status", String(take!(io)))
+        end
+    end
+
+    @testset "cases after the first failure are left unsettled so the driver reruns them in a fresh process" begin
+        mktempdir() do directory
+            script = joinpath(directory, "runtests.jl")
+            write(script, """
+                for name in ("core/one", "core/two", "core/three", "core/four")
+                    println(name, "  (1) \\u2502         started at now")
+                    println(name == "core/two" ? stderr : stdout, name, "  (1) \\u2502     0.02 \\u2502    ", name == "core/two" ? "failed at now" : "0.5 \\u2502")
+                end
+                println("Test Summary:  | Pass  Fail  Total  Time")
+                println("  Overall      |    3     1      4  7.9s")
+                for name in ("core/one", "core/two", "core/three", "core/four")
+                    println("    ", name, " |", name == "core/two" ? "          1" : "    1    ", "      1  0.1s")
+                end
+                exit(1)
+                """)
+            io = IOBuffer()
+            run_batch(script, ["core/one", "core/two", "core/three", "core/four"], io)
+            statuses = filter(startswith("conformance-case-status: "), split(String(take!(io)), '\n'))
+            @test statuses == ["conformance-case-status: 0 core/one", "conformance-case-status: 1 core/two"]
         end
     end
 end
