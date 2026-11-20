@@ -4,8 +4,20 @@
 # under emulation.
 # assert is not here: under emulation its device asserts print nothing and the case returns ERROR.
 specs = ['*']
-include_programs = ['hecbench_bitpacking', 'hecbench_laplace', 'hecbench_minimod', 'hecbench_overlap']
+include_programs = [
+  'hecbench_abacus', 'hecbench_bitpacking', 'hecbench_fsm', 'hecbench_laplace', 'hecbench_minimod', 'hecbench_overlap',
+  'hecbench_sdma', 'hecbench_streamcluster'
+]
 
 # minimod: the Makefile run target (grid 256, 1000 steps) exceeds the 300 s budget; run its default case.
 [program_arguments]
 hecbench_minimod = []
+
+# abacus: the Makefile run target (argument 100) exceeds the 300 s budget; this reduced case takes seconds.
+hecbench_abacus = ['4', '1', '4', '0.04', '1']
+# fsm: a 1024-entry trace; the staged source also lowers the compile-time repeat count to 1.
+hecbench_fsm = ['1024']
+# sdma: one repeat of each size in the sweep up to 1 GiB; the Makefile run target uses 100.
+hecbench_sdma = ['1']
+# streamcluster: 4096 points in one chunk; the Makefile run target uses 65536. The case has no pass or fail marker.
+hecbench_streamcluster = ['10', '20', '256', '4096', '4096', '1000', 'none', 'output.txt', '1']

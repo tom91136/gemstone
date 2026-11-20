@@ -524,7 +524,10 @@ TEST_CASE("hecbench workloads include the corpus and the bounded selection", "[d
   CHECK(bounded.includePrograms ^ none_match([](const auto &pattern) { return pattern == "hecbench_mdh"; }));
   CHECK(bounded.includePrograms ^ none_match([](const auto &pattern) { return pattern == "hecbench_assert"; }));
   CHECK(conformance::driver::programSelected(full, "hecbench_assert"));
-  CHECK(bounded.programArguments.size() == 1);
+  for (const auto &[program, arguments] : bounded.programArguments) {
+    CAPTURE(program);
+    CHECK(bounded.includePrograms ^ exists([&](const auto &pattern) { return pattern == program; }));
+  }
   CHECK(bounded.programArguments.at("hecbench_minimod").empty());
   CHECK(full.excludePrograms.empty());
   CHECK(bounded.excludePrograms.empty());

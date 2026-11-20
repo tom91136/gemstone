@@ -26,6 +26,11 @@ patch_exact("${staging}/src/laplace-cuda/main.cu"
   "Real tol = 1.e-6;"
   "Real tol = 1.e-4;")
 
+# Bounded workload: the kernel repeat count is a compile-time constant; one launch of 1024 blocks takes about a minute.
+patch_exact("${staging}/src/fsm-cuda/parameters.h"
+  "#define REPEAT  10"
+  "#define REPEAT  1")
+
 hecbench_dvc_entries("${source}" dvc_entries)
 hecbench_licence_classification("${source}" licence_rows)
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/hecbench-licences.csv" "benchmark,licence,class,files\n")

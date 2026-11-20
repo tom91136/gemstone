@@ -9,7 +9,8 @@ set(conformance_shard_wall_seconds 14400)
 
 set(conformance_cost_programs
   python_numba julia_babelstream_cuda julia_tests_cuda julia_babelstream_amdgpu julia_tests_amdgpu
-  julia_babelstream_oneapi julia_tests_oneapi hecbench_bitpacking hecbench_laplace hecbench_minimod hecbench_overlap)
+  julia_babelstream_oneapi julia_tests_oneapi hecbench_abacus hecbench_bitpacking hecbench_fsm hecbench_laplace
+  hecbench_minimod hecbench_overlap hecbench_sdma hecbench_streamcluster)
 set(conformance_cost_python_numba 10824)
 set(conformance_cost_julia_babelstream_cuda 24)
 set(conformance_cost_julia_tests_cuda 17134)
@@ -17,10 +18,14 @@ set(conformance_cost_julia_babelstream_amdgpu 62)
 set(conformance_cost_julia_tests_amdgpu 7688)
 set(conformance_cost_julia_babelstream_oneapi 25)
 set(conformance_cost_julia_tests_oneapi 7889)
+set(conformance_cost_hecbench_abacus 9)
 set(conformance_cost_hecbench_bitpacking 2341)
+set(conformance_cost_hecbench_fsm 89)
 set(conformance_cost_hecbench_laplace 347)
 set(conformance_cost_hecbench_minimod 29)
 set(conformance_cost_hecbench_overlap 181)
+set(conformance_cost_hecbench_sdma 103)
+set(conformance_cost_hecbench_streamcluster 202)
 
 set(conformance_cost_base_cuda 1766)
 set(conformance_cost_base_openacc 111)
