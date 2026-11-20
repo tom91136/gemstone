@@ -202,6 +202,14 @@ list(JOIN built_lines "\n" built_text)
 file(WRITE "${directory}/runs/targets.txt" "${target_text}\n")
 file(WRITE "${directory}/runs/built.txt" "${built_text}\n")
 file(MAKE_DIRECTORY "${directory}/runs/tree")
+find_program(real_make make REQUIRED)
+write("${directory}/bin/make"
+  "#!/bin/sh\n[ -z \"\${MAKEFLAGS}\${MFLAGS}\${MAKELEVEL}\" ] || { echo 'jobserver flags reached make' >&2; exit 2; }\nexec ${real_make} \"$@\"\n")
+file(CHMOD "${directory}/bin/make" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+set(path_before "$ENV{PATH}")
+set(ENV{PATH} "${directory}/bin:${path_before}")
+set(ENV{MAKEFLAGS} " -j2 --jobserver-auth=fifo:/nonexistent")
+set(ENV{MAKELEVEL} "1")
 hecbench_generate_invocations(
   "${directory}/runs"
   "${directory}/runs/targets.txt"
@@ -211,6 +219,9 @@ hecbench_generate_invocations(
   "${directory}/runs/directories.json"
   "${directory}/runs/missing.txt"
   "${directory}/runs/unparsed.txt")
+set(ENV{PATH} "${path_before}")
+unset(ENV{MAKEFLAGS})
+unset(ENV{MAKELEVEL})
 file(READ "${directory}/runs/arguments.json" runs)
 if(NOT runs MATCHES "\"hecbench_alpha\": \\[\"1\", \"2\"\\]")
   message(FATAL_ERROR "yaml arguments did not override the run target: ${runs}")

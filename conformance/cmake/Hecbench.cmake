@@ -296,7 +296,7 @@ endfunction()
 # The YAML test arguments are a subset of the runs HeCBench maintains. The per-benchmark Makefile run target is the
 # invocation upstream actually runs, so expand it with make instead of reimplementing make variables and conditions.
 function(hecbench_run_command directory output_var)
-  execute_process(COMMAND make -n run
+  execute_process(COMMAND "${CMAKE_COMMAND}" -E env --unset=MAKEFLAGS --unset=MFLAGS --unset=MAKELEVEL make -n run
     WORKING_DIRECTORY "${directory}"
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr
