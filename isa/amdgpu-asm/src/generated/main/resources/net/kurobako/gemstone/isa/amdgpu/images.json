@@ -45,7 +45,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_gather4_l": {
     "atomic": false,
@@ -225,7 +230,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_gather4_b": {
     "atomic": false,
@@ -249,7 +259,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_c_d_o_g16": {
     "atomic": false,
@@ -321,7 +336,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_b_cl_o": {
     "atomic": false,
@@ -417,7 +437,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_l": {
     "atomic": false,
@@ -501,7 +526,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_get_lod": {
     "atomic": false,
@@ -561,7 +591,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_cd_g16": {
     "atomic": false,
@@ -585,7 +620,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_cl": {
     "atomic": false,
@@ -684,7 +724,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_cd": {
     "atomic": false,
@@ -720,7 +765,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_store_pck": {
     "atomic": false,
@@ -924,7 +974,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_atomic_smin": {
     "atomic": true,
@@ -936,7 +991,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_b_o": {
     "atomic": false,
@@ -1020,7 +1080,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_load_mip_pck_sgn": {
     "atomic": false,
@@ -1068,7 +1133,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_load": {
     "atomic": false,
@@ -1119,7 +1189,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_atomic_fcmpswap": {
     "atomic": true,
@@ -1131,7 +1206,13 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      2,
+      3,
+      4,
+      5
+    ]
   },
   "image_sample_c_d_g16": {
     "atomic": false,
@@ -1218,7 +1299,13 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      2,
+      3,
+      4,
+      5
+    ]
   },
   "image_atomic_smax": {
     "atomic": true,
@@ -1230,7 +1317,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_sample_c_cd_cl_g16": {
     "atomic": false,
@@ -1266,7 +1358,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_atomic_fmin": {
     "atomic": true,
@@ -1278,7 +1375,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_msaa_load": {
     "atomic": false,
@@ -1362,7 +1464,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_atomic_xor": {
     "atomic": true,
@@ -1374,7 +1481,12 @@
     "lodOrClampOrMip": false,
     "numExtraArgs": 0,
     "sampler": false,
-    "store": false
+    "store": false,
+    "legalDataWords": [
+      1,
+      2,
+      3
+    ]
   },
   "image_store": {
     "atomic": false,

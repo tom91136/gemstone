@@ -133,7 +133,9 @@ private object ImageOperands {
                   if layout.byName.contains(EncodingField.ACC) =>
                 vector(Operand.Register(RegisterFile.VectorRegister, first, last))
               case _ => vector(data)
-            }).filter(_._2 == dataCount(opcode, fields)).map(_._1)
+            }).filter { case (_, width) =>
+              width == dataCount(opcode, fields) && ImageMetadata.forOpcode(opcode).get.allowsDataWords(width)
+            }.map(_._1)
             descriptor <-
               scalar(
                 resource,

@@ -38,7 +38,8 @@ case class ImageMetadata(
     bvh: Boolean,
     bvhAddressWords: Int = 0,
     bvhPackedAddressWords: Int = 0,
-    bvhDataWords: Int = 0
+    bvhDataWords: Int = 0,
+    legalDataWords: Option[Vector[Int]] = None
 ) derives ReadWriter {
   def addressWords(dimension: ImageDimension, a16: Boolean, packedGradients: Boolean): Int = {
     val coords          = if (coordinates) dimension.coordinates else 0
@@ -55,4 +56,6 @@ case class ImageMetadata(
     val components = if (bvh) bvhDataWords else if (gather4 && sampler) 4 else Integer.bitCount(mask).max(1)
     (if (d16) (components + 1) / 2 else components) + (if (tfe) 1 else 0)
   }
+
+  def allowsDataWords(words: Int): Boolean = legalDataWords.forall(_.contains(words))
 }

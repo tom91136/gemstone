@@ -502,6 +502,10 @@ for name in sorted(module.instructions):
         properties("bvhPackedAddressWords") =
           if (packed.nonEmpty) ujson.Num(width("VAddrDwords", packed)) else properties("bvhAddressWords")
       }
+      if (properties("atomic").bool) {
+        val words = rows.map(row => number(row("VDataDwords"))).distinct.sorted
+        properties("legalDataWords") = ujson.Arr.from(words.map(ujson.Num(_)))
+      }
       name.toLowerCaseRoot -> properties
     }
 
