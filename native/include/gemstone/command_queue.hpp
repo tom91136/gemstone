@@ -226,6 +226,24 @@ public:
     const auto found = streams.find(stream);
     return found != streams.end() && found->second.created;
   }
+  bool isNonBlocking(const void *stream) {
+    stream = streamKey(stream);
+    std::scoped_lock const lock(mutex);
+    const auto found = streams.find(stream);
+    return found != streams.end() && found->second.nonblocking;
+  }
+  /** Ids are assigned on first query; empty for destroyed or unknown streams. */
+  std::optional<uint64_t> streamId(const void *stream) {
+    stream = streamKey(stream);
+    std::scoped_lock const lock(mutex);
+    if (stream != &perThreadStream()) {
+      const auto found = streams.find(stream);
+      if (found == streams.end() || !found->second.created) return std::nullopt;
+    }
+    auto &entry = streams[stream];
+    if (!entry.id) entry.id = nextStreamId++;
+    return entry.id;
+  }
 
   /** Destroys every stream and event this queue created; queued work keeps its own references. */
   void reset() {
@@ -294,6 +312,7 @@ private:
   struct Stream {
     Ticket tail;
     std::vector<Ticket> outstanding;
+    uint64_t id = 0;
     bool nonblocking = false;
     bool created = false;
   };
@@ -444,6 +463,7 @@ private:
   std::map<const void *, Stream> streams;
   std::map<const void *, Ticket> events;
   uint64_t nextHandle = 0x400000000;
+  uint64_t nextStreamId = 13;
   unsigned blocked = 0;
   bool stopping = false;
   bool parking = false;

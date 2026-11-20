@@ -622,8 +622,18 @@ const char *executablePtx(const std::optional<Fatbin> &fatbin) {
 thread_local CUcontext currentContext = nullptr;
 thread_local CUcontext contextStack[ContextCapacity];
 thread_local size_t contextStackSize = 0;
+struct ContextLimits {
+  size_t stackSize = 1024;
+  size_t printfFifoSize = 1671168;
+  size_t deviceRuntimeSyncDepth = 2;
+  size_t devicePendingLaunchCount = 2048;
+  size_t l2FetchGranularity = 64;
+  size_t persistingL2CacheSize = 6291456;
+};
 std::mutex contextMutex;
 std::map<CUcontext, int> contexts;
+std::map<CUcontext, CUfunc_cache> cacheConfigs;
+std::map<CUcontext, ContextLimits> contextLimits;
 std::atomic<uint64_t> nextContext{1};
 struct PrimaryContext {
   CUcontext context = nullptr;
@@ -796,6 +806,8 @@ void untrackContext(CUcontext context) {
   {
     std::scoped_lock const lock{contextMutex};
     contexts.erase(context);
+    cacheConfigs.erase(context);
+    contextLimits.erase(context);
   }
   size_t output = 0;
   for (size_t index = 0; index < contextStackSize; ++index)
@@ -2878,6 +2890,8 @@ CUresult cuDeviceGetDefaultMemPool(CUmemoryPool *pool, CUdevice device) {
 
 CUresult cuDeviceSetMemPool(CUdevice device, CUmemoryPool) { return validDevice(device) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
 
+CUresult cuDeviceGraphMemTrim(CUdevice device) { return validDevice(device) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_DEVICE; }
+
 CUresult cuCtxCreate_v2(CUcontext *context, unsigned, CUdevice device) {
   if (!context || !validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
   const uint64_t handle = nextContext.fetch_add(1);
@@ -3006,19 +3020,34 @@ CUresult cuCtxGetDevice_v2(CUdevice *device, CUcontext) { return cuCtxGetDevice(
 
 CUresult cuCtxGetCacheConfig(CUfunc_cache *config) {
   if (!config) return CUDA_ERROR_INVALID_VALUE;
-  *config = CU_FUNC_CACHE_PREFER_NONE;
+  auto *const context = activeContext();
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  std::scoped_lock const lock{contextMutex};
+  const auto found = cacheConfigs.find(context);
+  *config = found == cacheConfigs.end() ? CU_FUNC_CACHE_PREFER_NONE : found->second;
   return CUDA_SUCCESS;
 }
 
-CUresult cuCtxSetCacheConfig(CUfunc_cache) { return CUDA_SUCCESS; }
+CUresult cuCtxSetCacheConfig(CUfunc_cache config) {
+  if (config < CU_FUNC_CACHE_PREFER_NONE || config > CU_FUNC_CACHE_PREFER_EQUAL) return CUDA_ERROR_INVALID_VALUE;
+  auto *const context = activeContext();
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  std::scoped_lock const lock{contextMutex};
+  cacheConfigs[context] = config;
+  return CUDA_SUCCESS;
+}
 
 CUresult cuCtxGetSharedMemConfig(CUsharedconfig *config) {
   if (!config) return CUDA_ERROR_INVALID_VALUE;
-  *config = CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE;
+  *config = CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE;
   return CUDA_SUCCESS;
 }
 
-CUresult cuCtxSetSharedMemConfig(CUsharedconfig) { return CUDA_SUCCESS; }
+CUresult cuCtxSetSharedMemConfig(CUsharedconfig config) {
+  const auto value = static_cast<int>(config);
+  if (value < CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE || value > CU_SHARED_MEM_CONFIG_EIGHT_BYTE_BANK_SIZE) return CUDA_ERROR_INVALID_VALUE;
+  return CUDA_SUCCESS;
+}
 
 CUresult cuCtxGetStreamPriorityRange(int *least, int *greatest) {
   if (!least || !greatest) return CUDA_ERROR_INVALID_VALUE;
@@ -3071,25 +3100,65 @@ CUresult deviceHeapFor(std::optional<DeviceHeap> &heap) {
   heap = DeviceHeap{.region = AllocationId{static_cast<int64_t>(binding->allocation)}, .offset = {0}, .size = {static_cast<int64_t>(size)}};
   return CUDA_SUCCESS;
 }
+
+size_t *contextLimitField(ContextLimits &limits, CUlimit limit) {
+  switch (limit) {
+    case CU_LIMIT_STACK_SIZE: return &limits.stackSize;
+    case CU_LIMIT_PRINTF_FIFO_SIZE: return &limits.printfFifoSize;
+    case CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH: return &limits.deviceRuntimeSyncDepth;
+    case CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT: return &limits.devicePendingLaunchCount;
+    case CU_LIMIT_MAX_L2_FETCH_GRANULARITY: return &limits.l2FetchGranularity;
+    case CU_LIMIT_PERSISTING_L2_CACHE_SIZE: return &limits.persistingL2CacheSize;
+    default: return nullptr;
+  }
+}
+
+bool reportedLimit(CUlimit limit, size_t *value) {
+  switch (limit) {
+    case CU_LIMIT_SHMEM_SIZE: *value = 101376; return true;
+    case CU_LIMIT_CIG_ENABLED: *value = 0; return true;
+    default: return false;
+  }
+}
+
+CUresult rejectedLimit(CUlimit limit) {
+  switch (limit) {
+    case CU_LIMIT_SHMEM_SIZE:
+    case CU_LIMIT_CIG_ENABLED: return CUDA_ERROR_NOT_PERMITTED;
+    case CU_LIMIT_CIG_SHMEM_FALLBACK_ENABLED: return CUDA_ERROR_UNSUPPORTED_LIMIT;
+    default: return CUDA_ERROR_INVALID_VALUE;
+  }
+}
 } // namespace
 
 CUresult cuCtxGetLimit(size_t *value, CUlimit limit) {
   if (!value) return CUDA_ERROR_INVALID_VALUE;
   auto *const context = activeContext();
   if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
-  *value = 0;
   if (limit == CU_LIMIT_MALLOC_HEAP_SIZE) {
     std::scoped_lock const lock{deviceHeapMutex};
     const auto found = deviceHeaps.find(context);
     *value = found == deviceHeaps.end() ? DeviceHeapDefaultLimit : found->second.limit;
+    return CUDA_SUCCESS;
   }
+  if (reportedLimit(limit, value)) return CUDA_SUCCESS;
+  std::scoped_lock const lock{contextMutex};
+  auto *const field = contextLimitField(contextLimits[context], limit);
+  if (!field) return rejectedLimit(limit);
+  *value = *field;
   return CUDA_SUCCESS;
 }
 
 CUresult cuCtxSetLimit(CUlimit limit, size_t value) {
-  if (limit != CU_LIMIT_MALLOC_HEAP_SIZE) return CUDA_SUCCESS;
   auto *const context = activeContext();
   if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  if (limit != CU_LIMIT_MALLOC_HEAP_SIZE) {
+    std::scoped_lock const lock{contextMutex};
+    auto *const field = contextLimitField(contextLimits[context], limit);
+    if (!field) return rejectedLimit(limit);
+    *field = value;
+    return CUDA_SUCCESS;
+  }
   if (value > DeviceHeapMaximumLimit) return CUDA_ERROR_OUT_OF_MEMORY;
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
   std::scoped_lock const lock{deviceHeapMutex};
@@ -3173,6 +3242,29 @@ CUresult cuMemAllocManaged(CUdeviceptr *pointer, size_t size, unsigned) {
   return status;
 }
 
+CUresult cuMemAdvise(CUdeviceptr devPtr, size_t, CUmem_advise advice, CUdevice device) {
+  const auto found = pointerMetadata(devPtr);
+  if (!found) return CUDA_ERROR_INVALID_VALUE;
+  switch (advice) {
+    case CU_MEM_ADVISE_SET_READ_MOSTLY:
+    case CU_MEM_ADVISE_UNSET_READ_MOSTLY:
+    case CU_MEM_ADVISE_UNSET_PREFERRED_LOCATION: return found->managed ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+    case CU_MEM_ADVISE_SET_PREFERRED_LOCATION:
+    case CU_MEM_ADVISE_SET_ACCESSED_BY:
+    case CU_MEM_ADVISE_UNSET_ACCESSED_BY:
+      if (device != CU_DEVICE_CPU && !validDevice(device)) return CUDA_ERROR_INVALID_DEVICE;
+      return found->managed ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+    default: return CUDA_ERROR_INVALID_VALUE;
+  }
+}
+
+CUresult cuMemPrefetchAsync(CUdeviceptr devPtr, size_t, CUdevice device, CUstream stream) {
+  if (device != CU_DEVICE_CPU && !validDevice(device)) return CUDA_ERROR_INVALID_DEVICE;
+  const auto found = pointerMetadata(devPtr);
+  if (!found || !found->managed) return CUDA_ERROR_INVALID_VALUE;
+  return enqueueCommand(stream, [] { return CUDA_SUCCESS; });
+}
+
 CUresult cuMemAllocHost_v2(void **pointer, size_t size) {
   if (const auto status = unlessCaptureProhibits(); status != CUDA_SUCCESS) return status;
   return mirroredAllocate(pointer, size, true);
@@ -3187,6 +3279,7 @@ CUresult cuMemHostAlloc(void **pointer, size_t size, unsigned flags) {
 
 CUresult cuMemFreeHost(void *pointer) {
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
+  if (!pointer) return CUDA_SUCCESS;
   return freeMirror(reinterpret_cast<uintptr_t>(pointer)).value_or(CUDA_ERROR_INVALID_VALUE);
 }
 
@@ -3389,6 +3482,13 @@ CUresult cuPointerGetAttribute(void *data, CUpointer_attribute attribute, CUdevi
     case CU_POINTER_ATTRIBUTE_MEMPOOL_HANDLE: *static_cast<CUmemoryPool *>(data) = nullptr; return CUDA_SUCCESS;
     default: return CUDA_ERROR_INVALID_VALUE;
   }
+}
+
+CUresult cuPointerSetAttribute(const void *value, CUpointer_attribute attribute, CUdeviceptr ptr) {
+  if (!value) return CUDA_ERROR_INVALID_VALUE;
+  if (attribute != CU_POINTER_ATTRIBUTE_SYNC_MEMOPS) return CUDA_ERROR_NOT_SUPPORTED;
+  if (!pointerMetadata(ptr)) return CUDA_ERROR_INVALID_VALUE;
+  return CUDA_SUCCESS;
 }
 
 CUresult cuPointerGetAttributes(unsigned count, CUpointer_attribute *attributes, void **data, CUdeviceptr pointer) {
@@ -5372,6 +5472,27 @@ CUresult cuStreamGetCtx(CUstream stream, CUcontext *context) {
 CUresult cuStreamGetCtx_v2(CUstream stream, CUcontext *context, CUgreenCtx *green) {
   if (green) *green = nullptr;
   return cuStreamGetCtx(stream, context);
+}
+
+CUresult cuStreamGetFlags(CUstream stream, unsigned int *flags) {
+  if (!flags) return CUDA_ERROR_INVALID_VALUE;
+  if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
+  if (!commands().hasStream(stream)) return CUDA_ERROR_INVALID_HANDLE;
+  *flags = commands().isNonBlocking(stream) ? CU_STREAM_NON_BLOCKING : 0;
+  return CUDA_SUCCESS;
+}
+
+CUresult cuStreamGetId(CUstream stream, unsigned long long *id) {
+  if (!id) return CUDA_ERROR_INVALID_VALUE;
+  if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
+  if (!stream || stream == CU_STREAM_LEGACY) {
+    *id = 7;
+    return CUDA_SUCCESS;
+  }
+  const auto assigned = commands().streamId(stream);
+  if (!assigned) return CUDA_ERROR_INVALID_HANDLE;
+  *id = *assigned;
+  return CUDA_SUCCESS;
 }
 
 // Green-context creation is unsupported, so every stream has an ordinary context.

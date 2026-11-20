@@ -28,10 +28,18 @@ CUcontext createContext() {
   return context;
 }
 
-size_t heapLimit() {
+size_t limit(CUlimit id) {
   size_t value = 0;
-  REQUIRE(cuCtxGetLimit(&value, CU_LIMIT_MALLOC_HEAP_SIZE) == CUDA_SUCCESS);
+  REQUIRE(cuCtxGetLimit(&value, id) == CUDA_SUCCESS);
   return value;
+}
+
+size_t heapLimit() { return limit(CU_LIMIT_MALLOC_HEAP_SIZE); }
+
+CUfunc_cache cacheConfig() {
+  auto config = static_cast<CUfunc_cache>(-1);
+  REQUIRE(cuCtxGetCacheConfig(&config) == CUDA_SUCCESS);
+  return config;
 }
 
 } // namespace
@@ -79,6 +87,121 @@ TEST_CASE("CUDA malloc heap limit beyond the session allocation size is out of m
   auto *const context = createContext();
   CHECK(cuCtxSetLimit(CU_LIMIT_MALLOC_HEAP_SIZE, size_t{4} << 30) == CUDA_ERROR_OUT_OF_MEMORY);
   CHECK(heapLimit() == DefaultHeap);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA cache config defaults to prefer none and reads back each accepted value", "[cuda][limits]") {
+  auto *const context = createContext();
+  CHECK(cacheConfig() == CU_FUNC_CACHE_PREFER_NONE);
+  for (const auto config : {CU_FUNC_CACHE_PREFER_NONE, CU_FUNC_CACHE_PREFER_SHARED, CU_FUNC_CACHE_PREFER_L1, CU_FUNC_CACHE_PREFER_EQUAL}) {
+    REQUIRE(cuCtxSetCacheConfig(config) == CUDA_SUCCESS);
+    CHECK(cacheConfig() == config);
+  }
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA cache config rejects values outside its enum and keeps the stored value", "[cuda][limits]") {
+  auto *const context = createContext();
+  REQUIRE(cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_L1) == CUDA_SUCCESS);
+  CHECK(cuCtxSetCacheConfig(static_cast<CUfunc_cache>(4)) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuCtxSetCacheConfig(static_cast<CUfunc_cache>(-1)) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cacheConfig() == CU_FUNC_CACHE_PREFER_L1);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA cache config is per context", "[cuda][limits]") {
+  auto *const first = createContext();
+  REQUIRE(cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_L1) == CUDA_SUCCESS);
+  auto *const second = createContext();
+  CHECK(cacheConfig() == CU_FUNC_CACHE_PREFER_NONE);
+  REQUIRE(cuCtxSetCacheConfig(CU_FUNC_CACHE_PREFER_EQUAL) == CUDA_SUCCESS);
+  REQUIRE(cuCtxSetCurrent(first) == CUDA_SUCCESS);
+  CHECK(cacheConfig() == CU_FUNC_CACHE_PREFER_L1);
+  CHECK(cuCtxDestroy_v2(second) == CUDA_SUCCESS);
+  CHECK(cuCtxDestroy_v2(first) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA shared memory config reads four byte banks and accepts the first three values", "[cuda][limits]") {
+  auto *const context = createContext();
+  CUsharedconfig config = CU_SHARED_MEM_CONFIG_DEFAULT_BANK_SIZE;
+  REQUIRE(cuCtxGetSharedMemConfig(&config) == CUDA_SUCCESS);
+  CHECK(config == CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE);
+  for (const auto accepted : {0, 1, 2}) {
+    REQUIRE(cuCtxSetSharedMemConfig(static_cast<CUsharedconfig>(accepted)) == CUDA_SUCCESS);
+    REQUIRE(cuCtxGetSharedMemConfig(&config) == CUDA_SUCCESS);
+    CHECK(config == CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE);
+  }
+  for (const auto rejected : {3, -1, 4}) {
+    CHECK(cuCtxSetSharedMemConfig(static_cast<CUsharedconfig>(rejected)) == CUDA_ERROR_INVALID_VALUE);
+  }
+  REQUIRE(cuCtxGetSharedMemConfig(&config) == CUDA_SUCCESS);
+  CHECK(config == CU_SHARED_MEM_CONFIG_FOUR_BYTE_BANK_SIZE);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA context limits default to the values the driver reports", "[cuda][limits]") {
+  auto *const context = createContext();
+  CHECK(limit(CU_LIMIT_STACK_SIZE) == 1024);
+  CHECK(limit(CU_LIMIT_PRINTF_FIFO_SIZE) == 1671168);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH) == 2);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT) == 2048);
+  CHECK(limit(CU_LIMIT_MAX_L2_FETCH_GRANULARITY) == 64);
+  CHECK(limit(CU_LIMIT_PERSISTING_L2_CACHE_SIZE) == 6291456);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA context limits read back the value set", "[cuda][limits]") {
+  auto *const context = createContext();
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 2048) == CUDA_SUCCESS);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_PRINTF_FIFO_SIZE, size_t{2} << 20) == CUDA_SUCCESS);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT, 4096) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_STACK_SIZE) == 2048);
+  CHECK(limit(CU_LIMIT_PRINTF_FIFO_SIZE) == (size_t{2} << 20));
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT) == 4096);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA query-only context limits report the driver's values and reject sets", "[cuda][limits]") {
+  auto *const context = createContext();
+  CHECK(limit(CU_LIMIT_SHMEM_SIZE) == 101376);
+  CHECK(limit(CU_LIMIT_CIG_ENABLED) == 0);
+  CHECK(cuCtxSetLimit(CU_LIMIT_SHMEM_SIZE, 1) == CUDA_ERROR_NOT_PERMITTED);
+  CHECK(cuCtxSetLimit(CU_LIMIT_CIG_ENABLED, 1) == CUDA_ERROR_NOT_PERMITTED);
+  CHECK(limit(CU_LIMIT_SHMEM_SIZE) == 101376);
+  CHECK(limit(CU_LIMIT_CIG_ENABLED) == 0);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA stack and device sync depth limits are per context", "[cuda][limits]") {
+  auto *const first = createContext();
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 2048) == CUDA_SUCCESS);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH, 5) == CUDA_SUCCESS);
+  auto *const second = createContext();
+  CHECK(limit(CU_LIMIT_STACK_SIZE) == 1024);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH) == 2);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH, 7) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH) == 7);
+  REQUIRE(cuCtxSetCurrent(first) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_STACK_SIZE) == 2048);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH) == 5);
+  CHECK(cuCtxDestroy_v2(second) == CUDA_SUCCESS);
+  CHECK(cuCtxDestroy_v2(first) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA context limit CIG shared memory fallback is unsupported", "[cuda][limits]") {
+  auto *const context = createContext();
+  size_t value = 0;
+  CHECK(cuCtxGetLimit(&value, CU_LIMIT_CIG_SHMEM_FALLBACK_ENABLED) == CUDA_ERROR_UNSUPPORTED_LIMIT);
+  CHECK(cuCtxSetLimit(CU_LIMIT_CIG_SHMEM_FALLBACK_ENABLED, 1) == CUDA_ERROR_UNSUPPORTED_LIMIT);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA context limit ids beyond the driver's enum are invalid values", "[cuda][limits]") {
+  auto *const context = createContext();
+  const auto unknown = static_cast<CUlimit>(99);
+  size_t value = 0;
+  CHECK(cuCtxGetLimit(&value, unknown) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuCtxSetLimit(unknown, 1) == CUDA_ERROR_INVALID_VALUE);
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 

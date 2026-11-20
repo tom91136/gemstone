@@ -95,7 +95,7 @@ cuCtxSetSharedMemConfig cuCtxSynchronize cuCtxSynchronize_v2 cuCtxWaitEvent cuDe
 cuDeviceGet cuDeviceGetAttribute cuDeviceGetByPCIBusId cuDeviceGetCount cuDeviceGetDefaultMemPool
 cuDeviceGetHostAtomicCapabilities cuDeviceGetMemPool cuDeviceGetName cuDeviceGetP2PAtomicCapabilities
 cuDeviceGetP2PAttribute cuDeviceGetPCIBusId cuDeviceGetProperties cuDeviceGetTexture1DLinearMaxWidth
-cuDeviceGetUuid_v2 cuDevicePrimaryCtxGetState cuDevicePrimaryCtxRelease_v2 cuDevicePrimaryCtxReset_v2
+cuDeviceGetUuid_v2 cuDeviceGraphMemTrim cuDevicePrimaryCtxGetState cuDevicePrimaryCtxRelease_v2 cuDevicePrimaryCtxReset_v2
 cuDevicePrimaryCtxRetain cuDevicePrimaryCtxSetFlags_v2 cuDeviceSetMemPool cuDeviceTotalMem_v2 cuDriverGetVersion
 cuEventCreate cuEventDestroy_v2 cuEventElapsedTime_v2 cuEventQuery cuEventRecord cuEventRecordWithFlags
 cuEventSynchronize cuFlushGPUDirectRDMAWrites cuFuncGetAttribute cuFuncGetParamCount cuFuncGetParamInfo cuFuncSetAttribute cuFuncSetCacheConfig
@@ -118,8 +118,8 @@ cuModuleGetTexRef cuModuleLoadData cuModuleLoadDataEx cuModuleLoadFatBinary cuMo
 cuOccupancyAvailableDynamicSMemPerBlock cuOccupancyMaxActiveBlocksPerMultiprocessor
 cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags cuOccupancyMaxActiveClusters cuOccupancyMaxPotentialBlockSize
 cuOccupancyMaxPotentialBlockSizeWithFlags cuOccupancyMaxPotentialClusterSize cuPointerGetAttribute
-cuPointerGetAttributes cuStreamAddCallback cuStreamCreate cuStreamCreateWithPriority cuStreamDestroy_v2
-cuStreamGetCaptureInfo_v3 cuStreamGetCtx cuStreamGetCtx_v2 cuStreamGetGreenCtx cuStreamGetPriority cuStreamIsCapturing cuStreamQuery cuStreamSynchronize
+cuPointerGetAttributes cuPointerSetAttribute cuStreamAddCallback cuStreamCreate cuStreamCreateWithPriority cuStreamDestroy_v2
+cuStreamGetCaptureInfo_v3 cuStreamGetCtx cuStreamGetCtx_v2 cuStreamGetFlags cuStreamGetGreenCtx cuStreamGetId cuStreamGetPriority cuStreamIsCapturing cuStreamQuery cuStreamSynchronize
 cuStreamWaitEvent cuSurfObjectCreate cuSurfObjectDestroy cuSurfObjectGetResourceDesc cuTensorMapEncodeIm2col cuTensorMapEncodeIm2colWide cuTensorMapEncodeTiled cuTensorMapReplaceAddress cuTexObjectCreate cuTexObjectDestroy cuTexObjectGetResourceDesc
 cuTexObjectGetResourceViewDesc cuTexObjectGetTextureDesc
 cudaDeviceCanAccessPeer cudaDeviceDisablePeerAccess cudaDeviceEnablePeerAccess cudaMemcpyPeer cudaMemcpyPeerAsync
@@ -148,7 +148,6 @@ cudaStreamAttachMemAsync cudaStreamBeginCapture cudaStreamEndCapture"""),
         // vendor libraries still request these older ABI names directly
         legacy = Vector(
           "cuGraphKernelNodeGetParams" -> "decltype(cuGraphKernelNodeGetParams_v2)",
-          "cuMemPrefetchAsync"         -> "decltype(cuMemPrefetchAsync_v2)",
           "cuStreamBatchMemOp"         -> "decltype(cuStreamBatchMemOp_v2)",
           "cuStreamWaitValue32"        -> "decltype(cuStreamWaitValue32_v2)"
         )

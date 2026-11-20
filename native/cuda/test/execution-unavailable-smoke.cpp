@@ -146,7 +146,7 @@ constexpr std::array Lookups{
     Lookup{.symbol = "cuLibraryLoadData", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuLibraryLoadData"},
     Lookup{.symbol = "cuGetExportTable", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuGetExportTable"},
     Lookup{.symbol = "cuGraphCreate", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuGraphCreate"},
-    Lookup{.symbol = "cuMemAdvise", .version = 12000, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = Unsupported},
+    Lookup{.symbol = "cuMemAdvise", .version = 12000, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAdvise"},
     Lookup{.symbol = "cuMemAdvise", .version = 12020, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAdvise_v2"},
     Lookup{.symbol = "cuMemAdvise", .version = 13030, .status = CU_GET_PROC_ADDRESS_SUCCESS, .expected = "cuMemAdvise_v2"},
     Lookup{.symbol = "cuDefinitelyMissing", .version = 13030, .status = CU_GET_PROC_ADDRESS_SYMBOL_NOT_FOUND, .expected = nullptr},

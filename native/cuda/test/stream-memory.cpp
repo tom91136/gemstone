@@ -20,6 +20,12 @@ extern "C" CUresult cuCtxCreate_v2(CUcontext *context, unsigned flags, CUdevice 
 extern "C" CUresult cuProfilerStart();
 extern "C" CUresult cuProfilerStop();
 
+// cuda.h maps these names to their _v2 entry points; declare the unversioned exports.
+#undef cuMemAdvise
+#undef cuMemPrefetchAsync
+extern "C" CUresult cuMemPrefetchAsync(CUdeviceptr devPtr, size_t count, CUdevice device, CUstream stream);
+extern "C" CUresult cuMemAdvise(CUdeviceptr devPtr, size_t count, CUmem_advise advice, CUdevice device);
+
 namespace {
 
 // The facade connects to the execution service once per process, so every case shares this fixture.
@@ -132,6 +138,30 @@ TEST_CASE("stream context reports the context that created the stream", "[cuda][
   REQUIRE(cuCtxDestroy_v2(first) == CUDA_SUCCESS);
 }
 
+TEST_CASE("stream flags report whether the stream is non-blocking", "[cuda][stream]") {
+  auto *const context = createContext();
+  unsigned flags = ~0U;
+  REQUIRE(cuStreamGetFlags(nullptr, &flags) == CUDA_SUCCESS);
+  CHECK(flags == 0);
+
+  CUstream blocking = nullptr;
+  REQUIRE(cuStreamCreate(&blocking, 0) == CUDA_SUCCESS);
+  CUstream nonBlocking = nullptr;
+  REQUIRE(cuStreamCreate(&nonBlocking, CU_STREAM_NON_BLOCKING) == CUDA_SUCCESS);
+
+  REQUIRE(cuStreamGetFlags(blocking, &flags) == CUDA_SUCCESS);
+  CHECK(flags == 0);
+  REQUIRE(cuStreamGetFlags(nonBlocking, &flags) == CUDA_SUCCESS);
+  CHECK(flags == CU_STREAM_NON_BLOCKING);
+  CHECK(cuStreamGetFlags(blocking, nullptr) == CUDA_ERROR_INVALID_VALUE);
+
+  REQUIRE(cuStreamDestroy_v2(blocking) == CUDA_SUCCESS);
+  CHECK(cuStreamGetFlags(blocking, &flags) == CUDA_ERROR_INVALID_HANDLE);
+
+  REQUIRE(cuStreamDestroy_v2(nonBlocking) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("memory pool accounting follows allocation, free and trim", "[cuda][memory-pool]") {
   auto *const context = createContext();
   constexpr size_t bytes = static_cast<size_t>(256 * 1024);
@@ -184,6 +214,16 @@ TEST_CASE("memory pool accounting follows allocation, free and trim", "[cuda][me
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
+TEST_CASE("graph memory trim succeeds on device 0 and rejects ordinals past the device count", "[cuda][memory-pool]") {
+  auto *const context = createContext();
+  int count = 0;
+  REQUIRE(cuDeviceGetCount(&count) == CUDA_SUCCESS);
+  CHECK(cuDeviceGraphMemTrim(0) == CUDA_SUCCESS);
+  CHECK(cuDeviceGraphMemTrim(count) == CUDA_ERROR_INVALID_DEVICE);
+  CHECK(cuDeviceGraphMemTrim(-1) == CUDA_ERROR_INVALID_DEVICE);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("host-visible allocations are zero filled when recycled", "[cuda][host]") {
   auto *const context = createContext();
   constexpr size_t byteCount = 1 << 18;
@@ -207,6 +247,12 @@ TEST_CASE("host-visible allocations are zero filled when recycled", "[cuda][host
       else REQUIRE(cuMemFreeHost(memory) == CUDA_SUCCESS);
     }
   }
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("freeing a null host pointer succeeds", "[cuda][host]") {
+  auto *const context = createContext();
+  CHECK(cuMemFreeHost(nullptr) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
@@ -237,6 +283,102 @@ TEST_CASE("managed attach validates the attach flag and orders on the stream", "
   CHECK(readDevice(managed, size) == std::vector<uint8_t>(size, 0x66));
 
   REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(managed) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("stream id is 7 for the null and legacy streams", "[cuda][stream]") {
+  auto *const context = createContext();
+  unsigned long long id = 0;
+  CHECK(cuStreamGetId(nullptr, &id) == CUDA_SUCCESS);
+  CHECK(id == 7);
+  CHECK(cuStreamGetId(CU_STREAM_LEGACY, &id) == CUDA_SUCCESS);
+  CHECK(id == 7);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("created and per-thread stream ids are distinct and stable", "[cuda][stream]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  unsigned long long createdId = 0;
+  unsigned long long repeatedId = 0;
+  unsigned long long perThreadId = 0;
+  REQUIRE(cuStreamGetId(stream, &createdId) == CUDA_SUCCESS);
+  CHECK(createdId >= 13);
+  REQUIRE(cuStreamGetId(stream, &repeatedId) == CUDA_SUCCESS);
+  CHECK(repeatedId == createdId);
+  REQUIRE(cuStreamGetId(CU_STREAM_PER_THREAD, &perThreadId) == CUDA_SUCCESS);
+  CHECK(perThreadId >= 13);
+  CHECK(perThreadId != createdId);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("SYNC_MEMOPS pointer attribute is accepted on device and managed pointers", "[cuda][memory]") {
+  auto *const context = createContext();
+  constexpr size_t size = 64;
+  CUdeviceptr device = 0;
+  CUdeviceptr managed = 0;
+  REQUIRE(cuMemAlloc_v2(&device, size) == CUDA_SUCCESS);
+  REQUIRE(cuMemAllocManaged(&managed, size, CU_MEM_ATTACH_GLOBAL) == CUDA_SUCCESS);
+  int enabled = 1;
+  CHECK(cuPointerSetAttribute(&enabled, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, device) == CUDA_SUCCESS);
+  enabled = 0;
+  CHECK(cuPointerSetAttribute(&enabled, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS, managed) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(managed) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(device) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("cuMemPrefetchAsync v1 checks the device and then the memory kind", "[cuda][memory][managed]") {
+  auto *const context = createContext();
+  constexpr size_t size = 4096;
+  CUdeviceptr managed = 0;
+  CUdeviceptr device = 0;
+  REQUIRE(cuMemAllocManaged(&managed, size, CU_MEM_ATTACH_GLOBAL) == CUDA_SUCCESS);
+  REQUIRE(cuMemAlloc_v2(&device, size) == CUDA_SUCCESS);
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CHECK(cuMemPrefetchAsync(managed, size, 0, stream) == CUDA_SUCCESS);
+  CHECK(cuMemPrefetchAsync(managed, size, CU_DEVICE_CPU, stream) == CUDA_SUCCESS);
+  CHECK(cuMemPrefetchAsync(managed, size, 1, stream) == CUDA_ERROR_INVALID_DEVICE);
+  CHECK(cuMemPrefetchAsync(managed, size, 99, stream) == CUDA_ERROR_INVALID_DEVICE);
+  CHECK(cuMemPrefetchAsync(device, size, 0, stream) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemPrefetchAsync(device, size, 1, stream) == CUDA_ERROR_INVALID_DEVICE);
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(device) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(managed) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("cuMemAdvise v1 checks the advice, the device for location advices and the memory kind", "[cuda][memory][managed]") {
+  auto *const context = createContext();
+  constexpr size_t size = 4096;
+  CUdeviceptr managed = 0;
+  CUdeviceptr device = 0;
+  REQUIRE(cuMemAllocManaged(&managed, size, CU_MEM_ATTACH_GLOBAL) == CUDA_SUCCESS);
+  REQUIRE(cuMemAlloc_v2(&device, size) == CUDA_SUCCESS);
+  for (const auto advice : {CU_MEM_ADVISE_SET_READ_MOSTLY, CU_MEM_ADVISE_UNSET_READ_MOSTLY, CU_MEM_ADVISE_UNSET_PREFERRED_LOCATION}) {
+    CHECK(cuMemAdvise(managed, size, advice, 0) == CUDA_SUCCESS);
+    CHECK(cuMemAdvise(managed, size, advice, CU_DEVICE_CPU) == CUDA_SUCCESS);
+    CHECK(cuMemAdvise(managed, size, advice, 1) == CUDA_SUCCESS);
+    CHECK(cuMemAdvise(managed, size, advice, 99) == CUDA_SUCCESS);
+  }
+  for (const auto advice : {CU_MEM_ADVISE_SET_PREFERRED_LOCATION, CU_MEM_ADVISE_SET_ACCESSED_BY, CU_MEM_ADVISE_UNSET_ACCESSED_BY}) {
+    CHECK(cuMemAdvise(managed, size, advice, 0) == CUDA_SUCCESS);
+    CHECK(cuMemAdvise(managed, size, advice, CU_DEVICE_CPU) == CUDA_SUCCESS);
+    CHECK(cuMemAdvise(managed, size, advice, 1) == CUDA_ERROR_INVALID_DEVICE);
+    CHECK(cuMemAdvise(managed, size, advice, 99) == CUDA_ERROR_INVALID_DEVICE);
+  }
+  CHECK(cuMemAdvise(managed, size, static_cast<CUmem_advise>(0), 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemAdvise(managed, size, static_cast<CUmem_advise>(7), 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemAdvise(managed, size, static_cast<CUmem_advise>(99), 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemAdvise(device, size, CU_MEM_ADVISE_SET_READ_MOSTLY, 1) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemAdvise(device, size, CU_MEM_ADVISE_SET_PREFERRED_LOCATION, 1) == CUDA_ERROR_INVALID_DEVICE);
+  CHECK(cuMemAdvise(device, size, CU_MEM_ADVISE_SET_ACCESSED_BY, 99) == CUDA_ERROR_INVALID_DEVICE);
+  REQUIRE(cuMemFree_v2(device) == CUDA_SUCCESS);
   REQUIRE(cuMemFree_v2(managed) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
