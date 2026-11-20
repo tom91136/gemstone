@@ -37,6 +37,15 @@ class ConstantSuite extends Suite {
     assertEquals(run.words(0), Vec(0xbeefL))
   }
 
+  for (sm <- Vec(75, 89)) test(s"sm_$sm a constant half source with a half selector reads the packed half") {
+    val run = program(
+      sm,
+      "LDC.64 R2, c[0x0][0x160]; LDC.U16 R0, c[0x0][0x168]; HADD2 R0, R0.H0_H0, c[0x0][0x168].H1_H1; " +
+        "STG.E.U16 [R2.64], R0; EXIT"
+    ).launch(1)(Arg.zeros(4), Arg.u32(0x42004248L))
+    assertEquals(run.words(0, 2).head, 0x4624L)
+  }
+
   // cooperative_groups reads the grid workspace the driver writes to c0: its high word, then its low word
   for {
     (sm, high, low) <- Vec(
