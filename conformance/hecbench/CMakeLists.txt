@@ -8,11 +8,14 @@ set(source "${hecbench_SOURCE_DIR}")
 set(staging "${CMAKE_CURRENT_BINARY_DIR}/source")
 stage_source("${source}" "${staging}")
 
-# Bounded workload: three of the 1000 compress iterations (179.5 s in the bounded run, within the 300 s budget that
-# leaves half the 600 s case limit).
+# Bounded workload: three compress iterations and a 2,000,001-element largest size keep a case within the 300 s
+# bounded budget under two execution workers. The verification still samples the output at every size.
 patch_exact("${staging}/src/bitpacking-cuda/kernels.cu"
   "for (int n = 0; n < 1000; n++)"
   "for (int n = 0; n < 3; n++)")
+patch_exact("${staging}/src/bitpacking-cuda/main.cu"
+  "100000001"
+  "2000001")
 
 # Bounded workload: NUM 256 at tolerance 1e-4 (733 iterations, 183.6 s in the bounded run; the default NUM 1024 needs
 # 27,250 iterations and its serial CPU reference exceeds 15 minutes).
