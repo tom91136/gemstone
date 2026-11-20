@@ -10,6 +10,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
+#include <cuda_runtime_api.h>
 
 #include <gemstone/test_support.hpp>
 
@@ -103,6 +104,42 @@ TEST_CASE("pitched memset writes each row and leaves padding", "[cuda][memset]")
   REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
   REQUIRE(cuMemFree_v2(device) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("runtime memset fills linear and pitched allocations", "[cuda][memset]") {
+  constexpr size_t size = 64;
+  void *device = nullptr;
+  REQUIRE(cudaMalloc(&device, size) == cudaSuccess);
+  const auto base = reinterpret_cast<CUdeviceptr>(device);
+  std::vector<uint8_t> host(size, 0x11);
+  REQUIRE(cudaMemcpy(device, host.data(), size, cudaMemcpyHostToDevice) == cudaSuccess);
+
+  REQUIRE(cudaMemset(device, 0, size) == cudaSuccess);
+  CHECK(readDevice(base, size) == std::vector<uint8_t>(size, 0));
+
+  cudaStream_t stream = nullptr;
+  REQUIRE(cudaStreamCreate(&stream) == cudaSuccess);
+  REQUIRE(cudaMemsetAsync(device, 0x7B, size / 2, stream) == cudaSuccess);
+  REQUIRE(cudaStreamSynchronize(stream) == cudaSuccess);
+  std::vector<uint8_t> expected(size, 0);
+  std::fill_n(expected.begin(), size / 2, 0x7B);
+  CHECK(readDevice(base, size) == expected);
+
+  constexpr size_t pitch = 16;
+  REQUIRE(cudaMemset2D(device, pitch, 0x5A, 6, 4) == cudaSuccess);
+  setRows<uint8_t>(expected, pitch, 0x5A, 6, 4);
+  CHECK(readDevice(base, size) == expected);
+
+  REQUIRE(cudaMemset2DAsync(device, pitch, 0x3C, 2, 2, stream) == cudaSuccess);
+  REQUIRE(cudaStreamSynchronize(stream) == cudaSuccess);
+  setRows<uint8_t>(expected, pitch, 0x3C, 2, 2);
+  CHECK(readDevice(base, size) == expected);
+
+  CHECK(cudaMemset(device, 0, 0) == cudaSuccess);
+  CHECK(cudaMemset2D(device, 4, 0, 8, 2) == cudaErrorInvalidValue);
+
+  REQUIRE(cudaStreamDestroy(stream) == cudaSuccess);
+  REQUIRE(cudaFree(device) == cudaSuccess);
 }
 
 TEST_CASE("stream context reports the context that created the stream", "[cuda][stream]") {

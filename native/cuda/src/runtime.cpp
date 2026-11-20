@@ -6018,6 +6018,23 @@ cudaError_t cudaMemcpyAsync(void *destination, const void *source, size_t size, 
   }
 }
 
+cudaError_t cudaMemset(void *device, int value, size_t size) {
+  return runtimeStatus(cuMemsetD8_v2(reinterpret_cast<uintptr_t>(device), static_cast<unsigned char>(value), size));
+}
+
+cudaError_t cudaMemsetAsync(void *device, int value, size_t size, cudaStream_t stream) {
+  return runtimeStatus(cuMemsetD8Async(reinterpret_cast<uintptr_t>(device), static_cast<unsigned char>(value), size, stream));
+}
+
+cudaError_t cudaMemset2D(void *device, size_t pitch, int value, size_t width, size_t height) {
+  return runtimeStatus(cuMemsetD2D8_v2(reinterpret_cast<uintptr_t>(device), pitch, static_cast<unsigned char>(value), width, height));
+}
+
+cudaError_t cudaMemset2DAsync(void *device, size_t pitch, int value, size_t width, size_t height, cudaStream_t stream) {
+  return runtimeStatus(
+      cuMemsetD2D8Async(reinterpret_cast<uintptr_t>(device), pitch, static_cast<unsigned char>(value), width, height, stream));
+}
+
 const char *cudaGetErrorString(cudaError_t status) {
   const auto *text = errorText(status);
   return text ? text->message : "Gemstone CUDA error";
