@@ -129,6 +129,7 @@ private[isa] object Machine {
     case MemoryAccess.Generic(_) => ""
     case MemoryAccess.Shared     => "Shared"
     case MemoryAccess.Local      => "Local"
+    case MemoryAccess.Parameter  => ""
   }
 
   private def spaceSuffix(space: MemorySpace): String = space match {

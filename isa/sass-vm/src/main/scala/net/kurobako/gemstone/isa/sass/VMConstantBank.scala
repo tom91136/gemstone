@@ -127,7 +127,7 @@ private object VMConstantBank {
         binary(IntegerOperation.Add, base, wideOffset, 64),
         bits,
         false,
-        if (parameters) MemoryAccess.Generic(false) else MemoryAccess.Global(false)
+        if (parameters) MemoryAccess.Parameter else MemoryAccess.Global(false)
       ))
       result
     }
@@ -171,7 +171,7 @@ private object VMConstantBank {
         Value.Immediate(VMAddressSpace.ParameterBase + offset - kernel.parameterBase),
         bits,
         false,
-        MemoryAccess.Generic(false)
+        MemoryAccess.Parameter
       ))
       result
     } else if (bits == 32 && isDimension(offset)) {

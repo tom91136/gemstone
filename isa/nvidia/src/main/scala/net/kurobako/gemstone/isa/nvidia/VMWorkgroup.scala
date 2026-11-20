@@ -100,11 +100,13 @@ private class VMWorkgroup(val laneCount: Int in 1 ~ 1024) {
   def writeLocal(lane: WorkgroupLane, address: Long, width: ScalarBitWidth, value: Long): Unit =
     local(lane.raw).write(address, value, width.toScalarByteWidth.widen)
 
-  /** Buffers occupy their own aperture; the first one allocated after a reset is the kernel parameter block. */
+  /** Buffers occupy their own aperture, each 256-byte aligned; the first one allocated after a reset is the kernel
+    * parameter block.
+    */
   def allocateBuffer(bytes: Array[Byte]): Long = {
     val base = nextBuffer
     val _    = buffers.put(base, if (bytes.isEmpty) Array.ofDim[Byte](1) else bytes)
-    nextBuffer = Math.addExact(base, math.max(bytes.length, 1).toLong + 0x100L)
+    nextBuffer = Math.addExact(base, math.max(bytes.length, 1).toLong + 0x1ffL) & ~0xffL
     base
   }
 

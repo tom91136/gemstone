@@ -84,6 +84,47 @@ class AlignmentSuite extends Suite {
     }
   }
 
+  private def runParameter(access: String, offset: Int): Either[Fault, Unit] = {
+    val source = s""".version 8.0
+      |.target sm_80
+      |.address_size 64
+      |.visible .entry access(.param .align 16 .b8 blob[32]) {
+      |  .reg .u64 %p, %d;
+      |  .reg .u32 %r<4>;
+      |  cvta.param.u64 %p, blob;
+      |  $access
+      |  ret;
+      |}""".stripMargin
+    execute(
+      compileKernel(source.replace("OFFSET", offset.toString)),
+      1,
+      1,
+      Map(("blob": NonEmpty[String]) -> Argument(Vec.fill(32)(0.toByte).unsafe[NonEmpty[Vec[Byte]]])),
+      DeviceMemory(64)
+    )
+  }
+
+  // sm_89 hardware faults these through a generic address into kernel parameters, as in global memory
+  private val parameterAccesses = Vec(
+    ("ld.u32 %r0, [%p+OFFSET];", 4),
+    ("ld.u64 %d, [%p+OFFSET];", 8),
+    ("ld.v2.u32 {%r0, %r1}, [%p+OFFSET];", 8),
+    ("ld.v4.u32 {%r0, %r1, %r2, %r3}, [%p+OFFSET];", 16),
+    ("ld.v2.u64 {%d, %d}, [%p+OFFSET];", 16)
+  )
+
+  for ((access, size) <- parameterAccesses) {
+    test(s"$access in a parameter buffer at a multiple of $size bytes runs") {
+      assertEquals(runParameter(access, size), Right(()))
+    }
+    test(s"$access in a parameter buffer at an odd multiple of ${size / 2} bytes faults as misaligned") {
+      assert(
+        runParameter(access, size / 2).left.exists { case Fault.Misaligned(_) => true; case _ => false },
+        runParameter(access, size / 2)
+      )
+    }
+  }
+
   test("byte accesses at any offset run") {
     assertEquals(run(global, "ld.global.u8 %h, [%p+OFFSET]; st.global.u8 [%p+OFFSET], %h;", 3), Right(()))
   }

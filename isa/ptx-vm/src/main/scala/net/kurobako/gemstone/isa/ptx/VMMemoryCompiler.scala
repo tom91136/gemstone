@@ -93,7 +93,7 @@ private object VMMemoryCompiler {
       case Space.Parameter =>
         parameterAddress(address) match {
           case Some((name, offset)) if scope.isKernelParameter(name) =>
-            plain(Value.Immediate(scope.kernelParameter(name).getOrElse(0L) + offset), MemoryAccess.Generic(false))
+            plain(Value.Immediate(scope.kernelParameter(name).getOrElse(0L) + offset), MemoryAccess.Parameter)
           case Some((name, offset)) =>
             scope.spilledParameter(name).fold(
               for {
@@ -167,7 +167,7 @@ private object VMMemoryCompiler {
       case Space.Parameter =>
         parameterAddress(address) match {
           case Some((name, offset)) if scope.isKernelParameter(name) =>
-            plain(Value.Immediate(scope.kernelParameter(name).getOrElse(0L) + offset), MemoryAccess.Generic(false))
+            plain(Value.Immediate(scope.kernelParameter(name).getOrElse(0L) + offset), MemoryAccess.Parameter)
           case Some((name, offset)) =>
             scope.spilledParameter(name).fold(
               for {

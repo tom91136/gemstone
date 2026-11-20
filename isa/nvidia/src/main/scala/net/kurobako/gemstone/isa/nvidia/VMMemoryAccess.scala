@@ -183,13 +183,14 @@ private object VMMemoryAccess {
       context.workgroup.withBuffer(address, size)((_, _) => false)(true))
 
   /** The misaligned-address fault of an access of `size` bytes at `address`, or null where it is aligned to the largest
-    * power of two dividing `size`. NVIDIA GPUs fault such an access in every state space; parameter buffers are exempt,
-    * as ptxas resolves their offsets statically.
+    * power of two dividing `size`. NVIDIA GPUs fault such an access in every state space, kernel parameters reached
+    * through a generic or global address included. Reads of the parameter block that ptxas resolves by static offset
+    * are exempt.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
   inline def misaligned(context: VMContext, access: MemoryAccess, lane: WorkgroupLane, address: Long, size: Int)
       : Fault | Null =
-    if ((address & ((size & -size) - 1).toLong) == 0L || parameterBuffer(context, access, address, size)) null
+    if ((address & ((size & -size) - 1).toLong) == 0L || access == MemoryAccess.Parameter) null
     else Fault.Misaligned(s"pc ${context.pc}, lane $lane: $size-byte access at 0x${address.toHexString}")
 
   /** [[misaligned]] for an atomic, which no state space exempts. */
@@ -201,10 +202,6 @@ private object VMMemoryAccess {
       Fault.Misaligned(
         s"pc ${context.pc}, lane $lane: ${width.toScalarByteWidth}-byte atomic at 0x${address.toHexString}"
       )
-
-  private def parameterBuffer(context: VMContext, access: MemoryAccess, address: Long, size: Int): Boolean =
-    access != MemoryAccess.Shared && access != MemoryAccess.Local &&
-      context.workgroup.withBuffer(address, size.unsafe[Int >= 0])((_, _) => true)(false)
 
   def atomicTarget(space: MemorySpace, address: Long, width: ScalarBitWidth): AtomicTarget =
     if (space == MemorySpace.Shared) AtomicTarget.Shared

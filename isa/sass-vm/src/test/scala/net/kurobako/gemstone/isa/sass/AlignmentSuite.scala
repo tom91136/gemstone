@@ -48,6 +48,34 @@ class AlignmentSuite extends Suite {
     }
   }
 
+  // generic addresses into the kernel parameter block; sm_89 hardware faults these as it does global memory
+  private def parameter(access: String, offset: Int): Either[Fault, Run] =
+    program(
+      89,
+      s"MOV R2, RZ; MOV R3, 0x50000000; MOV R4, 0x1; MOV R5, 0x2; MOV R6, 0x3; MOV R7, 0x4; ${access.replace(
+          "OFFSET",
+          s"0x${offset.toHexString}"
+        )}; EXIT"
+    ).run(1)(Arg.u64(0), Arg.u64(0), Arg.u64(0), Arg.u64(0))
+
+  private val parameterAccesses = Vec(
+    "LD.E R4, [R2.64+OFFSET]"     -> 4,
+    "LD.E.64 R4, [R2.64+OFFSET]"  -> 8,
+    "LD.E.128 R4, [R2.64+OFFSET]" -> 16
+  )
+
+  for ((access, size) <- parameterAccesses) {
+    test(s"$access in a parameter buffer at a multiple of $size bytes runs") {
+      assert(parameter(access, size).isRight, parameter(access, size))
+    }
+    test(s"$access in a parameter buffer at an odd multiple of ${size / 2} bytes faults as misaligned") {
+      assert(
+        parameter(access, size / 2).left.exists { case Fault.Misaligned(_) => true; case _ => false },
+        parameter(access, size / 2)
+      )
+    }
+  }
+
   private def wide(access: String, offset: Int): Either[Fault, Run] =
     program(
       100,

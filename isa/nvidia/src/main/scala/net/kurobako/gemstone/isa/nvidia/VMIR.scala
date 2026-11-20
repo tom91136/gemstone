@@ -374,6 +374,7 @@ private[isa] object VMIR {
     case Generic(system: Boolean)
     case Shared
     case Local
+    case Parameter
 
     def generic: Boolean = this match {
       case Generic(_) => true

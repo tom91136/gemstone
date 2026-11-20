@@ -148,6 +148,8 @@ st.param.u32 [output], %r0;
       case VMI.Store(access = MemoryAccess.Shared)           => "store-shared"
       case VMI.Load(access = MemoryAccess.Local)             => "load-local"
       case VMI.Store(access = MemoryAccess.Local)            => "store-local"
+      case VMI.Load(access = MemoryAccess.Parameter)         => "load-parameter"
+      case VMI.Store(access = MemoryAccess.Parameter)        => "store-parameter"
       case other                                             => s"other:$other"
     }
 
@@ -162,8 +164,8 @@ st.param.u32 [output], %r0;
         "store-shared",
         "load-local",
         "store-local",
-        "load-generic",
-        "store-generic",
+        "load-parameter",
+        "store-parameter",
         "other:Return"
       )
     )
