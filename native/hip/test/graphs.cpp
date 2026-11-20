@@ -347,6 +347,73 @@ TEST_CASE("HIP host node runs its callback on each launch", "[hip][graph][host]"
   REQUIRE((hipStreamDestroy(stream) == hipSuccess));
 }
 
+TEST_CASE("HIP captured stream allocation survives repeated launches", "[hip][graph][capture][alloc]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  constexpr size_t size = 64;
+  void *output = allocate(size);
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+
+  REQUIRE((hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal) == hipSuccess));
+  void *scratch = nullptr;
+  REQUIRE((hipMallocAsync(&scratch, size, stream) == hipSuccess));
+  REQUIRE((scratch != nullptr));
+  REQUIRE((hipMemsetAsync(scratch, 0x5a, size, stream) == hipSuccess));
+  REQUIRE((hipMemcpyAsync(output, scratch, size, hipMemcpyDeviceToDevice, stream) == hipSuccess));
+  REQUIRE((hipFreeAsync(scratch, stream) == hipSuccess));
+  hipGraph_t graph = nullptr;
+  REQUIRE((hipStreamEndCapture(stream, &graph) == hipSuccess));
+  hipGraphExec_t exec = nullptr;
+  REQUIRE((hipGraphInstantiateWithFlags(&exec, graph, 0) == hipSuccess));
+  REQUIRE((hipGraphDestroy(graph) == hipSuccess));
+
+  for (int launch = 0; launch < 3; ++launch) {
+    REQUIRE((hipMemset(output, 0, size) == hipSuccess));
+    REQUIRE((hipGraphLaunch(exec, stream) == hipSuccess));
+    REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
+    CHECK((readDevice(output, size) == std::vector<uint8_t>(size, 0x5a)));
+  }
+
+  REQUIRE((hipGraphExecDestroy(exec) == hipSuccess));
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+  REQUIRE((hipFree(output) == hipSuccess));
+}
+
+TEST_CASE("HIP freeing a captured allocation explicitly leaves later allocations alone", "[hip][graph][capture][alloc]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  constexpr size_t size = 64;
+  constexpr size_t graphSize = size_t{1} << 16;
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+
+  REQUIRE((hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal) == hipSuccess));
+  void *scratch = nullptr;
+  REQUIRE((hipMallocAsync(&scratch, graphSize, stream) == hipSuccess));
+  REQUIRE((hipMemsetAsync(scratch, 0x5a, graphSize, stream) == hipSuccess));
+  hipGraph_t graph = nullptr;
+  REQUIRE((hipStreamEndCapture(stream, &graph) == hipSuccess));
+  hipGraphExec_t exec = nullptr;
+  REQUIRE((hipGraphInstantiateWithFlags(&exec, graph, 0) == hipSuccess));
+  REQUIRE((hipGraphLaunch(exec, stream) == hipSuccess));
+  REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
+  REQUIRE((hipFree(scratch) == hipSuccess));
+
+  std::vector<void *> later(8);
+  for (void *&pointer : later)
+    pointer = allocate(size);
+  REQUIRE((hipGraphExecDestroy(exec) == hipSuccess));
+  REQUIRE((hipGraphDestroy(graph) == hipSuccess));
+
+  for (void *pointer : later) {
+    REQUIRE((hipMemset(pointer, 0x33, size) == hipSuccess));
+    CHECK((readDevice(pointer, size) == std::vector<uint8_t>(size, 0x33)));
+    CHECK((hipFree(pointer) == hipSuccess));
+  }
+  REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+}
+
 TEST_CASE("HIP graph exec update accepts same topology and rejects a changed one", "[hip][graph][update]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);

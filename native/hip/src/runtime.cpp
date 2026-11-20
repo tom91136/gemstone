@@ -289,6 +289,8 @@ struct DeviceAllocation {
   size_t size = 0;
   int device = 0;
   hipMemPool_t pool = nullptr;
+  std::weak_ptr<void> graphOwner;
+  uint64_t graphSerial = 0;
 };
 
 struct MemoryPool {
@@ -1349,6 +1351,7 @@ extern "C" hipError_t hipMemGetInfo(size_t *free, size_t *total) {
 }
 
 static hipError_t allocateDeviceMemory(void **pointer, size_t size, int device, hipMemPool_t poolHandle);
+static hipError_t releaseDeviceMemory(void *pointer, uint64_t graphSerial = 0);
 
 extern "C" hipError_t hipDeviceGetDefaultMemPool(hipMemPool_t *pool, int device) {
   if (!pool) return remember(hipErrorInvalidValue);
@@ -1454,6 +1457,22 @@ extern "C" hipError_t hipMemPoolSetAttribute(hipMemPool_t pool, hipMemPoolAttr a
   return remember(hipSuccess);
 }
 
+static hipError_t allocateStreamMemory(void **pointer, size_t size, int device, hipMemPool_t pool, hipStream_t stream) {
+  const auto status = allocateDeviceMemory(pointer, size, device, pool);
+  if (status != hipSuccess || !*pointer || !captures.capturing(stream)) return status;
+  static std::atomic<uint64_t> serials{0};
+  const uint64_t serial = ++serials;
+  std::shared_ptr<void> owner(*pointer, [serial](void *held) { (void)releaseDeviceMemory(held, serial); });
+  {
+    auto &runtime = state();
+    std::scoped_lock const guard(runtime.lock);
+    auto &allocation = runtime.deviceAllocations.at(*pointer);
+    allocation.graphOwner = owner;
+    allocation.graphSerial = serial;
+  }
+  return remember(enqueueCommand(stream, [owner = std::move(owner)] { return int32_t{0}; }));
+}
+
 extern "C" hipError_t hipMallocAsync(void **pointer, size_t size, hipStream_t stream) {
   if (!pointer) return remember(hipErrorInvalidValue);
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
@@ -1465,7 +1484,7 @@ extern "C" hipError_t hipMallocAsync(void **pointer, size_t size, hipStream_t st
     std::scoped_lock const guard(runtime.lock);
     pool = currentMemoryPool(runtime, device);
   }
-  return allocateDeviceMemory(pointer, size, device, pool);
+  return allocateStreamMemory(pointer, size, device, pool, stream);
 }
 
 extern "C" hipError_t hipMallocFromPoolAsync(void **pointer, size_t size, hipMemPool_t pool, hipStream_t stream) {
@@ -1480,11 +1499,21 @@ extern "C" hipError_t hipMallocFromPoolAsync(void **pointer, size_t size, hipMem
     if (!found) return remember(hipErrorInvalidValue);
     device = found->device;
   }
-  return allocateDeviceMemory(pointer, size, device, pool);
+  return allocateStreamMemory(pointer, size, device, pool, stream);
 }
 
 extern "C" hipError_t hipFreeAsync(void *pointer, hipStream_t stream) {
   if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  if (captures.capturing(stream)) {
+    std::shared_ptr<void> owner;
+    {
+      auto &runtime = state();
+      std::scoped_lock const guard(runtime.lock);
+      if (const auto found = runtime.deviceAllocations.find(pointer); found != runtime.deviceAllocations.end())
+        owner = found->second.graphOwner.lock();
+    }
+    if (owner) return remember(enqueueCommand(stream, [owner = std::move(owner)] { return int32_t{0}; }));
+  }
   return remember(enqueueCommand(stream, [=] { return hipFree(pointer); }));
 }
 
@@ -1674,7 +1703,7 @@ static hipError_t allocateDeviceMemory(void **pointer, size_t size, int device, 
   if (status == HSA_STATUS_SUCCESS) {
     auto &runtime = state();
     std::scoped_lock const guard(runtime.lock);
-    runtime.deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = device, .pool = poolHandle});
+    runtime.deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = device, .pool = poolHandle, .graphOwner = {}});
     if (poolHandle)
       if (auto *pool = memoryPool(runtime, poolHandle)) accountPoolAllocation(*pool, size);
     for (int peer = 0; validDevice(peer); ++peer)
@@ -1698,8 +1727,18 @@ extern "C" hipError_t hipMalloc(void **pointer, size_t size) {
 
 extern "C" hipError_t hipFree(void *pointer) {
   if (const auto pending = waitCommands(); pending != hipSuccess) return remember(pending);
+  return releaseDeviceMemory(pointer);
+}
+
+static hipError_t releaseDeviceMemory(void *pointer, uint64_t graphSerial) {
   if (!pointer) return remember(hipSuccess);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
+  if (graphSerial != 0) {
+    auto &runtime = state();
+    std::scoped_lock const guard(runtime.lock);
+    const auto found = runtime.deviceAllocations.find(pointer);
+    if (found == runtime.deviceAllocations.end() || found->second.graphSerial != graphSerial) return remember(hipSuccess);
+  }
   const hsa_status_t status = hsa_memory_free(pointer);
   if (status == HSA_STATUS_SUCCESS) {
     auto &runtime = state();
@@ -1918,7 +1957,7 @@ extern "C" hipError_t hipMallocManaged(void **pointer, size_t size, unsigned int
   if (status != HSA_STATUS_SUCCESS) return remember(mapHsa(status));
   try {
     std::scoped_lock const guard(state().lock);
-    state().deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = currentDevice});
+    state().deviceAllocations.emplace(*pointer, DeviceAllocation{.size = size, .device = currentDevice, .graphOwner = {}});
     state().managedAllocations.emplace(*pointer, size);
   } catch (...) {
     (void)hipFree(*pointer);
