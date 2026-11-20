@@ -2,7 +2,7 @@
 # HeCBench runs only the bounded programs it inherits; the full corpus runs through the hecbench workload.
 extends = "long"
 exclude_programs = ["opencl_cts_thread_dimensions", "sycl_cts_full_conformance_*", "hecbench_*"]
-exclude_cases = []
+exclude_cases = ["kernelabstractions_tests"]
 add_levelzero_cases = [
   "InterdependCMDListsPairSameEngineTypeParameterization/zeTestMixedCMDListsInterdependPairSameEngineType.*",
   "InterdependCMDListsPipeliningParameterization/zeTestMixedCMDListsInterdependPipelining.GivenRegularAndImmCMDListsOnComputeEngineThenCorrectResultsAreReturned/*",

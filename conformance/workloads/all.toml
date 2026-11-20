@@ -3,6 +3,7 @@
 extends = "xlong"
 specs = ['*']
 exclude_programs = []
+exclude_cases = []
 levelzero_cases = []
 vulkan_cases = []
 vulkan_mustpass = "mustpass/vk-default.txt"

@@ -1735,6 +1735,13 @@ TEST_CASE("tiers nest and the release programs are selected only by all", "[driv
     CHECK_FALSE(selected(xlong, "opencl_cts_thread_dimensions", "cts/opencl/thread_dimensions/x", "[cts][opencl]"));
     CHECK(selected(all, "opencl_cts_thread_dimensions", "cts/opencl/thread_dimensions/x", "[cts][opencl]"));
   }
+  SECTION("kernelabstractions cases need all") {
+    const auto *const identity = "kernelabstractions_tests";
+    CHECK_FALSE(selected(shortTier, "julia_tests_amdgpu", identity, "[julia][amdgpu]"));
+    CHECK_FALSE(selected(longTier, "julia_tests_amdgpu", identity, "[julia][amdgpu]"));
+    CHECK_FALSE(selected(xlong, "julia_tests_amdgpu", identity, "[julia][amdgpu]"));
+    CHECK(selected(all, "julia_tests_amdgpu", identity, "[julia][amdgpu]"));
+  }
   SECTION("case lists grow with the tier") {
     CHECK(subset(shortTier.levelzeroCases, longTier.levelzeroCases));
     CHECK(subset(longTier.levelzeroCases, xlong.levelzeroCases));

@@ -47,7 +47,8 @@ exclude_programs = [
   "vendor_*",
   "hecbench_*",
 ]
-exclude_cases = ["algorithms/roc-thrust-semantic/*"]
+# kernelabstractions_tests launches 2^31-work-item grids that exhaust the emulator instruction budget; all runs it.
+exclude_cases = ["algorithms/roc-thrust-semantic/*", "kernelabstractions_tests"]
 levelzero_cases = [
   # barrier, usm, cmdlist and multithread: image, sampler, multi-device and P2P cases excluded
   "zeCommandListAppendBarrierTests.*",
