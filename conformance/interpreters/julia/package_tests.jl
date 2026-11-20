@@ -128,6 +128,7 @@ function run_batch(script, names, io = stdout)
     for name in failed
         statuses[name] = 1
     end
+    process.termsignal == 0 || empty!(statuses)
     for name in provisional
         haskey(statuses, name) || break
         println(io, "conformance-case-status: $(statuses[name]) $name")

@@ -141,4 +141,27 @@ include(joinpath(@__DIR__, "..", "interpreters", "julia", "package_tests.jl"))
             @test statuses == ["conformance-case-status: 0 core/one", "conformance-case-status: 1 core/two"]
         end
     end
+
+    @testset "a process killed by a signal after a summary belongs to no case, so every case reruns alone" begin
+        mktempdir() do directory
+            script = joinpath(directory, "runtests.jl")
+            write(script, """
+                for name in ("core/one", "core/two")
+                    println(name, "  (1) \\u2502         started at now")
+                    println(name, "  (1) \\u2502     0.02 \\u2502    0.5 \\u2502")
+                end
+                println("Test Summary:  | Pass  Total  Time")
+                println("  Overall      |    2      2  7.9s")
+                println("    core/one   |    1      1  0.1s")
+                println("    core/two   |    1      1  0.1s")
+                println("    SUCCESS")
+                flush(stdout)
+                ccall(:raise, Cint, (Cint,), 6)
+                """)
+            io = IOBuffer()
+            passed, _ = run_batch(script, ["core/one", "core/two"], io)
+            @test !passed
+            @test !occursin("conformance-case-status", String(take!(io)))
+        end
+    end
 end
