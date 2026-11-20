@@ -302,6 +302,7 @@ class NvidiaStagedSuite extends Suite {
     assertEquals(
       show(Instruction.StoreVector(rc, Vec(rc, Value.Immediate(0L)), 32, MemoryAccess.Shared)),
       """def op(c: UInt[32])(using memory: Memory): Unit = {
+        |  memory.alignStoreShared((c.to[UInt[64]] + 0).to[UInt[64]], UInt[64](8))
         |  memory.storeShared[UInt[32]]((c.to[UInt[64]] + 0).to[UInt[64]], c)
         |  memory.storeShared[UInt[32]]((c.to[UInt[64]] + 4).to[UInt[64]], UInt[32](0))
         |  ()

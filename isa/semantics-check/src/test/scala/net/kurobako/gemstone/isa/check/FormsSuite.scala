@@ -188,13 +188,32 @@ class FormsSuite extends Suite {
       "EXIT"                         -> "has no rendering: lowers to Return, with no staged semantics",
       "LDS R5, [R2]"                 -> "is refused: Memory.loadShared is not a plain memory access",
       "UMOV UR4, 0x1"                -> "is refused: Warp.leader is not a plain memory access",
-      "LDG.E.64 R4, [R2.64]"         -> "is refused: Memory.loadGlobal is not a plain memory access",
       "LDC R5, c[0x3][R2]"           -> "reads a constant bank at an offset a register holds",
       "IADD3 R1, P1, P2, R2, R3, R4" -> "has no checked case of"
     ).foreach { (text, reason) =>
       assert(written(text).left.exists(_.contains(reason)), written(text))
       assert(written(s"@P0 $text").left.exists(_.contains(reason)), written(s"@P0 $text"))
       assert(written(s"@!P0 $text").left.exists(_.contains(reason)), written(s"@!P0 $text"))
+    }
+  }
+
+  test("a wide global access renders the check of its whole width beside its 32-bit elements, under a guard too") {
+    def checks(text: String): Vec[(String, Long)] = admitted(text).kase.definition.body.flatMap(statement =>
+      Rejection.terms(statement.term).collect {
+        case Term.Context(method = method @ ("alignLoad" | "alignStore"), arguments = Vec(_, _, Term.Literal(bytes))) =>
+          (method, bytes)
+      }
+    )
+    Vec(
+      "LDG.E.64 R4, [R2.64]"  -> Vec(("alignLoad", 8L)),
+      "LDG.E.128 R4, [R2.64]" -> Vec(("alignLoad", 16L)),
+      "STG.E.64 [R4.64], R2"  -> Vec(("alignStore", 8L)),
+      "STG.E.128 [R4.64], R8" -> Vec(("alignStore", 16L)),
+      "LDG.E R4, [R2.64]"     -> Vec.empty[(String, Long)],
+      "STG.E [R4.64], R2"     -> Vec.empty[(String, Long)]
+    ).foreach { (text, expected) =>
+      assertEquals(checks(text), expected, text)
+      assertEquals(checks(s"@P0 $text"), expected, s"@P0 $text")
     }
   }
 

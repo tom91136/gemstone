@@ -315,7 +315,7 @@ class SmtBackendSuite extends Suite {
     effect = false
   )
 
-  private val bit = "(Array (_ BitVec 64) (_ BitVec 8))"
+  private val bit = "(Array (_ BitVec 64) (_ BitVec 16))"
 
   test("the stores each side makes are compared by address and width when memory is live-out") {
     val text = SmtBackend.equivalence(storing(Term.Variable("a")), storing(Term.Variable("a")), memory = true)
@@ -324,11 +324,54 @@ class SmtBackendSuite extends Suite {
     assert(
       text.contains(
         s"(define-fun l_stored_Global_1 () $bit " +
-          "(store stored_Global (_ bv0 64) (bvor (select stored_Global (_ bv0 64)) (_ bv8 8))))"
+          "(store stored_Global (_ bv0 64) (bvor (select stored_Global (_ bv0 64)) (_ bv8 16))))"
       ),
       text
     )
     assert(text.contains("(distinct l_stored_Global_1 r_stored_Global_1)"), text)
+  }
+
+  private def alignment(method: String, address: Term, bytes: Long): Term = Term.Context(
+    RenderMachine.Machine.contextType,
+    RenderMachine.Machine.context,
+    method,
+    Vec.empty,
+    Vec(Term.Constant("Space.Global"), address, Term.Literal(bytes)),
+    Vec(None, None, None),
+    None,
+    effect = true
+  )
+
+  private def aligning(effect: Term): Definition =
+    Definition(
+      "f",
+      Vec(("a", u32)),
+      Vec.empty,
+      Vec.empty,
+      Vec(Definition.Statement(Definition.Target.Effect, effect)),
+      Vec.empty
+    )
+
+  test("a whole-access alignment check marks the footprint of its direction at its width, up to 16 bytes") {
+    val text = SmtBackend.equivalence(
+      aligning(alignment("alignLoad", Term.Literal(0L), 16L)),
+      aligning(alignment("alignLoad", Term.Literal(0L), 8L)),
+      memory = true
+    ).fold(identity, identity)
+    assert(text.contains("(bvor (select loaded_Global (_ bv0 64)) (_ bv32768 16))"), text)
+    assert(text.contains("(bvor (select loaded_Global (_ bv0 64)) (_ bv128 16))"), text)
+    assert(text.contains("(distinct l_loaded_Global_0 r_loaded_Global_0)"), text)
+  }
+
+  test("a whole-access alignment check of a store marks the stored footprint, and only under its guard") {
+    val check = alignment("alignStore", Term.Literal(4L), 8L)
+    val text  = SmtBackend.equivalence(
+      aligning(check),
+      aligning(Term.Select(Term.Variable("a"), check, Term.Constant("()"))),
+      memory = true
+    ).fold(identity, identity)
+    assert(text.contains(s"(define-fun r_stored_Global_0 () $bit (ite (distinct a (_ bv0 32)) (store "), text)
+    assert(text.contains("(distinct l_stored_Global_0 r_stored_Global_0)"), text)
   }
 
   test("a side that loads nothing is told apart from one that loads") {

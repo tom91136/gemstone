@@ -248,6 +248,19 @@ class NvidiaHarness(val seed: Long) {
       )
     }
 
+    def alignLoadGlobal(address: UInt[64], bytes: UInt[64]): Unit  = wide(address, bytes)
+    def alignStoreGlobal(address: UInt[64], bytes: UInt[64]): Unit = wide(address, bytes)
+
+    private def wide(address: UInt[64], bytes: UInt[64]): Unit =
+      if ((address.raw & ((bytes.raw & -bytes.raw) - 1)) != 0L) throw IllegalArgumentException("misaligned")
+
+    def alignLoad(address: UInt[64], bytes: UInt[64]): Unit        = unstaged("alignLoad")
+    def alignLoadShared(address: UInt[64], bytes: UInt[64]): Unit  = unstaged("alignLoadShared")
+    def alignLoadLocal(address: UInt[64], bytes: UInt[64]): Unit   = unstaged("alignLoadLocal")
+    def alignStore(address: UInt[64], bytes: UInt[64]): Unit       = unstaged("alignStore")
+    def alignStoreShared(address: UInt[64], bytes: UInt[64]): Unit = unstaged("alignStoreShared")
+    def alignStoreLocal(address: UInt[64], bytes: UInt[64]): Unit  = unstaged("alignStoreLocal")
+
     def localBase(): UInt[64]                                                    = unstaged("localBase")
     def sharedWindow(): UInt[64]                                                 = unstaged("sharedWindow")
     def load[T](address: UInt[64])(using Type.Reified[T]): T                     = unstaged("load")

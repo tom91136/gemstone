@@ -23,6 +23,18 @@ private[isa] trait Memory {
   def storeShared[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit
   def storeLocal[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit
 
+  /** Faults unless an access of `bytes` at `address` is aligned to the largest power of two dividing `bytes`, as a
+    * vector access is as a whole.
+    */
+  def alignLoad(address: UInt[64], bytes: UInt[64]): Unit
+  def alignLoadGlobal(address: UInt[64], bytes: UInt[64]): Unit
+  def alignLoadShared(address: UInt[64], bytes: UInt[64]): Unit
+  def alignLoadLocal(address: UInt[64], bytes: UInt[64]): Unit
+  def alignStore(address: UInt[64], bytes: UInt[64]): Unit
+  def alignStoreGlobal(address: UInt[64], bytes: UInt[64]): Unit
+  def alignStoreShared(address: UInt[64], bytes: UInt[64]): Unit
+  def alignStoreLocal(address: UInt[64], bytes: UInt[64]): Unit
+
   def reduceGlobal(
       address: UInt[64],
       data: Array[Byte],

@@ -450,13 +450,14 @@ private[isa] class StepRenderer(names: Names) extends NvidiaSinks[Term, Option[T
   ): Option[Term.Steps] = lifted {
     val base = names.value(address)
     val tpe  = Machine.bits(width.widen[Int in 1 ~ 64])
-    parallel(
-      names,
-      destinations.map(names.register(_)),
-      destinations.indices.toVec.map(index =>
-        value(Machine.load(Machine.loadMethod(access), tpe, element(base, Term.Literal(index.toLong))))
+    aligned("machine", Machine.alignLoadMethod(access), element(base, Term.Literal(0L)), destinations.size, width) ++
+      parallel(
+        names,
+        destinations.map(names.register(_)),
+        destinations.indices.toVec.map(index =>
+          value(Machine.load(Machine.loadMethod(access), tpe, element(base, Term.Literal(index.toLong))))
+        )
       )
-    )
   }
 
   inline def loadParameter(destinations: Vec[Register], parameter: Parameter, offset: Int >= 0, width: ScalarBitWidth)(
@@ -497,19 +498,25 @@ private[isa] class StepRenderer(names: Names) extends NvidiaSinks[Term, Option[T
   ): Option[Term.Steps] = lifted {
     val base = names.value(address)
     val tpe  = Machine.bits(width.widen[Int in 1 ~ 64])
-    Term.Steps.concat(sources.zipWithIndex.map((source, index) =>
-      assign(
-        names,
-        Machine.memory,
-        Machine.store(
-          Machine.storeMethod(access),
-          tpe,
-          element(base, Term.Literal(index.toLong)),
-          value(names.value(source))
+    aligned(Machine.memory, Machine.alignStoreMethod(access), element(base, Term.Literal(0L)), sources.size, width) ++
+      Term.Steps.concat(sources.zipWithIndex.map((source, index) =>
+        assign(
+          names,
+          Machine.memory,
+          Machine.store(
+            Machine.storeMethod(access),
+            tpe,
+            element(base, Term.Literal(index.toLong)),
+            value(names.value(source))
+          )
         )
-      )
-    ))
+      ))
   }
+
+  private def aligned(step: String, method: String, address: Term, elements: Int, width: ScalarBitWidth): Term.Steps =
+    if (elements <= 1) Term.Steps.empty
+    else
+      Term.Steps(Term.Step(step, Machine.alignment(method, address, elements.toLong * width.toScalarByteWidth.toLong)))
 
   inline def storeParameter(parameter: Parameter, offset: Int >= 0, source: Value, width: ScalarBitWidth)(
       inline element: (Term, Term) => Term,

@@ -41,6 +41,11 @@ object GlobalAccess {
     effect = true
   )
 
+  private def width(bytes: Term): Term = bytes match {
+    case Term.Call(_, Vec(literal @ Term.Literal(_))) => literal
+    case other                                        => other
+  }
+
   private def plain(term: Term): Term = term match {
     case Term.Context(contextType = `amdgpu`, method = Sized("load", width), arguments = Vec(address)) =>
       load(Type.unsigned(width.toInt.unsafe[Int in 1 ~ 64]), address)
@@ -54,6 +59,21 @@ object GlobalAccess {
           typeArguments = Vec(tpe),
           arguments = Vec(address, value)
         ) if bytes(tpe) => store(tpe, address, value)
+    case Term.Context(
+          contextType = `nvidia`,
+          method = check @ ("alignLoadGlobal" | "alignStoreGlobal"),
+          arguments = Vec(address, bytes)
+        ) =>
+      Term.context(
+        RenderMachine.Machine,
+        MachineCall(
+          check.stripSuffix("Global"),
+          Vec.empty,
+          Vec((global, None), (plain(address), Some(RenderMachine.Word)), (width(bytes), None))
+        ),
+        None,
+        effect = true
+      )
     case other => other.mapChildren(plain(_))
   }
 
@@ -84,9 +104,7 @@ object GlobalAccess {
       body = body,
       results = results
     )
-    val accesses = terms(made).count(term => machine("load")(term) || machine("store")(term))
-    val single   = accesses == 1 || !known.exists(_._2 == nvidia)
-    if (single && !(loads(made) && terms(made).exists(machine("store")))) made else definition
+    if (!(loads(made) && terms(made).exists(machine("store")))) made else definition
   }
 
   /** Whether `definition` loads or stores memory through the machine's plain accesses. */

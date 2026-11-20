@@ -53,9 +53,10 @@ object SmtBackend extends Backend {
   private val Memory = "(Array (_ BitVec 64) (_ BitVec 8))"
 
   /** The accesses a definition makes of a space, loads and stores apart: at the address of each, a bit per width in
-    * bytes. An access may fault by its address, width and direction, so sequences that make the same ones fault alike.
+    * bytes, up to 16, which a whole-access alignment check of a vector marks too. An access may fault by its address,
+    * width and direction, so sequences that make the same ones fault alike.
     */
-  private val Footprint = "(Array (_ BitVec 64) (_ BitVec 8))"
+  private val Footprint = "(Array (_ BitVec 64) (_ BitVec 16))"
   private val Loaded    = "loaded"
   private val Stored    = "stored"
 
@@ -204,7 +205,8 @@ object SmtBackend extends Backend {
     private def touch(direction: String, space: String, address: String, width: Int, guard: Option[String]): Unit = {
       val footprint = s"${direction}_${spaceName(space)}"
       val previous  = touched.getOrElse(footprint, symbol(footprint))
-      val marked = s"(store $previous $address (bvor (select $previous $address) ${literal(1L << (width / 8 - 1), 8)}))"
+      val marked    =
+        s"(store $previous $address (bvor (select $previous $address) ${literal(1L << (width / 8 - 1), 16)}))"
       val target = symbol(s"$prefix${footprint}_${counter.next()}")
       emit(
         s"(define-fun $target () $Footprint ${guard.fold(marked)(condition => s"(ite $condition $marked $previous)")})"
@@ -271,6 +273,15 @@ object SmtBackend extends Backend {
             case _                      => Left(s"${term.show} stores a value that is not a bit-vector")
           }
         } yield store(key, bits(a, 64), bits(d, width), width, guard)
+      case Term.Context(
+            contextType = contextType,
+            method = check @ ("alignLoad" | "alignStore"),
+            arguments = Vec(space, address, Term.Literal(bytes))
+          ) if isMachine(contextType) && bytes > 0 && bytes <= 16 =>
+        for {
+          key <- spaceKey(space)
+          a   <- expression(address)
+        } yield touch(if (check == "alignLoad") Loaded else Stored, key, bits(a, 64), bytes.toInt * 8, guard)
       case other => Left(s"${other.show} is not a supported effect")
     }
 

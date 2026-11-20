@@ -114,6 +114,11 @@ private[isa] object Machine {
 
   def loadMethod(space: MemorySpace): String = "load" + spaceSuffix(space)
 
+  /** The method of each state space's check that a load of several elements is aligned as a whole. */
+  def alignLoadMethod(access: MemoryAccess): String = "alignLoad" + spaceSuffix(access)
+
+  def alignStoreMethod(access: MemoryAccess): String = "alignStore" + spaceSuffix(access)
+
   /** The method of each state space's stores. */
   def storeMethod(access: MemoryAccess): String = "store" + spaceSuffix(access)
 
@@ -139,6 +144,15 @@ private[isa] object Machine {
     Term.context(
       memoryContext,
       MachineCall(method, Vec(tpe), Vec((address, Some(u64)), (value, Some(tpe)))),
+      None,
+      effect = true
+    )
+
+  /** The check that an access of `bytes` at `address` is aligned to the largest power of two dividing `bytes`. */
+  def alignment(method: String, address: Term, bytes: Long): Term =
+    Term.context(
+      memoryContext,
+      MachineCall(method, Vec.empty, Vec((address, Some(u64)), (Term.Literal(bytes), Some(u64)))),
       None,
       effect = true
     )

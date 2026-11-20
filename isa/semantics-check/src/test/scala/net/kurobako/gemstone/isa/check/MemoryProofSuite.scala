@@ -21,12 +21,12 @@ class MemoryProofSuite extends Suite {
   private def installed(): Unit =
     assume(Bitwuzla.executable.isDefined, "no bitwuzla binary on GEMSTONE_BITWUZLA_EXE or PATH")
 
-  private def nvidia(lines: String*): Vec[Step] = Vec.from(lines).map { line =>
-    val parsed = sass.asm.Parser.parseProgram(s"$line;").toOption.flatMap(_.statements.collectFirst {
-      case sass.asm.Program.Statement.Operation(operation, _, _) => operation
-    }).getOrElse(fail(s"$line does not parse"))
-    SASSForms.of("sm_89", parsed).fold(fail(_), identity)
-  }
+  private def parse(line: String) = sass.asm.Parser.parseProgram(s"$line;").toOption.flatMap(_.statements.collectFirst {
+    case sass.asm.Program.Statement.Operation(operation, _, _) => operation
+  }).getOrElse(fail(s"$line does not parse"))
+
+  private def nvidia(lines: String*): Vec[Step] =
+    Vec.from(lines).map(line => SASSForms.of("sm_89", parse(line)).fold(fail(_), identity))
 
   private def amd(lines: String*): Vec[Step] = Vec.from(lines).map(AMDGPUForms.of(gfx906, _).fold(fail(_), identity))
 
@@ -191,32 +191,79 @@ class MemoryProofSuite extends Suite {
     rejected(prove(SASSReference, nvidia(fails, s"@!P0 $load"), nvidia(fails), "R7", "P0"))
   }
 
-  private def refusal(text: String): String = {
-    val parsed = sass.asm.Parser.parseProgram(s"$text;").toOption.flatMap(_.statements.collectFirst {
-      case sass.asm.Program.Statement.Operation(operation, _, _) => operation
-    }).getOrElse(fail(s"$text does not parse"))
-    SASSForms.of("sm_89", parsed).fold(identity, _ => fail(s"$text is admitted"))
-  }
+  private def refusal(text: String): String =
+    SASSForms.of("sm_89", parse(text)).fold(identity, _ => fail(s"$text is admitted"))
 
-  test("SASS accesses of shared memory, atomics and wide accesses stay refused") {
+  test("SASS accesses of shared memory and atomics stay refused") {
     Vec("LDS R7, [R5.X4]", "STS [R5.X4], R0", "ATOMG.E.AND P0, R0, desc[UR4][R8.64], R12").foreach(text =>
       assert(refusal(text).nonEmpty, text)
     )
-    Vec("LDG.E.64.CONSTANT R2, [R2.64]", "STG.E.64 [R4.64], R2").foreach(text =>
-      assert(refusal(text).contains("is not a plain memory access"), refusal(text))
+  }
+
+  test("wide SASS loads and stores are admitted") {
+    Vec("LDG.E.64 R4, [R2.64]", "LDG.E.128 R4, [R2.64]", "STG.E.64 [R4.64], R2", "STG.E.128 [R4.64], R8").foreach(
+      text =>
+        assert(SASSForms.of("sm_89", parse(text)).isRight, SASSForms.of("sm_89", parse(text)))
     )
+  }
+
+  test("a wide SASS load is not the loads of its parts, which fault where it does not") {
+    installed()
+    val halves = nvidia("LDG.E R4, [R2.64]", "LDG.E R5, [R2.64+0x4]")
+    val pairs  = nvidia("LDG.E.64 R4, [R2.64]", "LDG.E.64 R6, [R2.64+0x8]")
+    rejected(prove(SASSReference, nvidia("LDG.E.64 R4, [R2.64]"), halves, "R4", "R5"))
+    rejected(prove(SASSReference, nvidia("LDG.E.128 R4, [R2.64]"), pairs, "R4", "R5", "R6", "R7"))
+  }
+
+  test("a wide SASS store is not the stores of its parts, which fault where it does not") {
+    installed()
+    val halves = nvidia("STG.E [R2.64], R4", "STG.E [R2.64+0x4], R5")
+    val pairs  = nvidia("STG.E.64 [R2.64], R4", "STG.E.64 [R2.64+0x8], R6")
+    rejected(prove(SASSReference, nvidia("STG.E.64 [R2.64], R4"), halves))
+    rejected(prove(SASSReference, nvidia("STG.E.128 [R2.64], R4"), pairs))
+  }
+
+  test("a wide SASS load moved across a store it cannot overlap is proved equal, across one it may overlap rejected") {
+    installed()
+    val store = "STG.E [R2.64+0x8], R9"
+    val live  = Vec("R4", "R5", "R6", "R7")
+    val apart = "LDG.E.128 R4, [R2.64+0x10]"
+    val near  = "LDG.E.128 R4, [R2.64]"
+    proved(prove(SASSReference, nvidia(store, apart), nvidia(apart, store), live*), "LDG")
+    rejected(prove(SASSReference, nvidia(store, near), nvidia(near, store), live*))
+  }
+
+  test(
+    "a wide SASS store moved across a load it cannot overlap is proved equal, across one it overlaps in part rejected"
+  ) {
+    installed()
+    val store = "STG.E.64 [R2.64], R4"
+    val apart = "LDG.E R9, [R2.64+0x8]"
+    val part  = "LDG.E R9, [R2.64+0x4]"
+    proved(prove(SASSReference, nvidia(store, apart), nvidia(apart, store), "R9"), "STG")
+    rejected(prove(SASSReference, nvidia(store, part), nvidia(part, store), "R9"))
+  }
+
+  test("two wide SASS stores at the same address are told apart by their widths") {
+    installed()
+    rejected(prove(SASSReference, nvidia("STG.E.64 [R2.64], R4"), nvidia("STG.E.128 [R2.64], R4")))
   }
 
   test("a constant read at an offset a register holds stays refused, though it lowers to a load") {
     assert(refusal("LDC.U8 R0, c[0x3][R4]").contains("at an offset a register holds"))
   }
 
-  test("the SASS lane checks plain global loads and stores, and no atomic or wide access among them") {
+  test("the SASS lane checks plain global loads and stores, wide ones among them, and no atomic") {
     val cases = SASSGenerator.describe("sm_86", Set("LDG", "STG", "ATOMG").contains).map(_.instance)
     assert(cases.exists(_.startsWith("LDG")) && cases.exists(_.startsWith("STG")), cases)
-    assertEquals(
-      cases.filter(instance => instance.startsWith("ATOMG") || instance.matches(raw".*\.(64|128) .*")),
-      Vec.empty[String]
-    )
+    for {
+      mnemonic <- Vec("LDG", "STG")
+      width    <- Vec("64", "128")
+    }
+      assert(
+        cases.exists(instance => instance.startsWith(mnemonic) && instance.matches(raw".*\.$width .*")),
+        (mnemonic, width)
+      )
+    assertEquals(cases.filter(_.startsWith("ATOMG")), Vec.empty[String])
   }
 }

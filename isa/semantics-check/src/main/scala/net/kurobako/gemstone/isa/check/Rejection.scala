@@ -34,7 +34,7 @@ object Rejection {
       val owner   = contextType.substring(contextType.lastIndexOf('.') + 1)
       val machine = contextType == RenderMachine.Machine.contextType
       if (constant(contextType, method) || LaneMasks.admitted(term)) None
-      else if (!machine || !Set("load", "store", "storeBytes").contains(method))
+      else if (!machine || !Set("load", "store", "storeBytes", "alignLoad", "alignStore").contains(method))
         Some(s"$owner.$method is not a plain memory access")
       else if (effect && result.nonEmpty) Some(s"atomic update through $owner.$method")
       else None
