@@ -762,6 +762,11 @@ lazy val conformanceTool = module(project.in(file("tools/conformance")))
     Compile / unmanagedSourceDirectories += baseDirectory.value / "src/generated/main/scala",
     Compile / run / fork := true,
     Compile / run / javaOptions += "--sun-misc-unsafe-memory-access=allow",
+    Test / javaOptions += Def.uncached {
+      val converter = fileConverter.value
+      val classpath = (Runtime / fullClasspath).value.map(entry => converter.toPath(entry.data))
+      s"-Dgemstone.conformance.classpath=${classpath.mkString(java.io.File.pathSeparator)}"
+    },
     libraryDependencies += "com.monovore" %% "decline" % declineVersion
   )
 

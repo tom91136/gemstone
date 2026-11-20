@@ -8,6 +8,7 @@ import java.lang.management.ManagementFactory
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicReference
 import net.kurobako.gemstone.*
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -16,6 +17,8 @@ import scala.sys.process.ProcessLogger
 import scala.util.Try
 import scala.util.Using
 import scala.util.control.NonFatal
+import sun.misc.Signal
+import sun.misc.SignalHandler
 
 object CLI {
   case class Suite(executable: Path, artifacts: Path, output: Path, root: Path)
@@ -109,7 +112,22 @@ object CLI {
     val command =
       Vector(s"${suite.executable}", "run", "--artifacts", s"${suite.artifacts}", "--output", s"${suite.output}") ++
         arguments
-    Process(command, suite.root.toFile, variables.toSeq*).!
+    val driver                 = AtomicReference(Option.empty[java.lang.Process])
+    val forward: SignalHandler = signal =>
+      driver.get().foreach { process =>
+        val _ = ProcessBuilder("kill", "-s", signal.getName, process.pid().toString).start().waitFor()
+      }
+    val previous = Vector("INT", "TERM").map(Signal(_)).map(signal => (signal, Signal.handle(signal, forward)))
+    try {
+      val builder = ProcessBuilder(command*)
+        .directory(suite.root.toFile)
+        .inheritIO()
+        .redirectInput(ProcessBuilder.Redirect.from(Path.of("/dev/null").toFile))
+      builder.environment().putAll(variables.asJava)
+      val started = builder.start()
+      driver.set(Some(started))
+      started.waitFor()
+    } finally previous.foreach((signal, handler) => Signal.handle(signal, handler))
   }
 
   private def positive(name: String, default: Int): Int = configuration.lookup(sys.env, name).fold(default) { value =>
