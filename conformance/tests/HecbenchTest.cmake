@@ -139,6 +139,13 @@ if(NOT rows STREQUAL expected)
   message(FATAL_ERROR "licence classification changed: ${rows}")
 endif()
 
+hecbench_nested_configure_arguments("${directory}/source" "${directory}/build" 89
+  "${directory}/cxxopts" "${directory}/fmt" configure_arguments)
+string(JOIN " " configure_text ${configure_arguments})
+if(configure_text MATCHES "NDEBUG|CMAKE_BUILD_TYPE=(Release|RelWithDebInfo|MinSizeRel)")
+  message(FATAL_ERROR "nested HeCBench configure defines NDEBUG: ${configure_text}")
+endif()
+
 write("${directory}/benchmarks.yaml" [=[
 accuracy:
   categories: [algorithms]

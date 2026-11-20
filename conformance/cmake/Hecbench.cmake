@@ -514,6 +514,25 @@ function(hecbench_invocation_data source benchmark directory tree output_paths o
   set(${output_missing} "${missing}" PARENT_SCOPE)
 endfunction()
 
+function(hecbench_nested_configure_arguments source build cuda_arch cxxopts fmt output)
+  set(arguments
+    -S "${source}" -B "${build}" -G Ninja
+    -DCMAKE_BUILD_TYPE=
+    -DCMAKE_C_FLAGS=-O3
+    -DCMAKE_CXX_FLAGS=-O3
+    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+    -DHECBENCH_ENABLE_CUDA=ON
+    -DHECBENCH_ENABLE_HIP=OFF
+    -DHECBENCH_ENABLE_SYCL=OFF
+    -DHECBENCH_ENABLE_OPENMP=OFF
+    -DHECBENCH_ENABLE_TESTING=OFF
+    "-DHECBENCH_CUDA_ARCH=${cuda_arch}"
+    "-DFETCHCONTENT_SOURCE_DIR_CXXOPTS=${cxxopts}"
+    "-DFETCHCONTENT_SOURCE_DIR_FMT=${fmt}"
+    "-DCMAKE_CUDA_FLAGS=-Wno-deprecated-gpu-targets -O3")
+  set(${output} "${arguments}" PARENT_SCOPE)
+endfunction()
+
 # Writes the arguments and working directory of every built benchmark from the pinned source. `targets` is
 # targets.txt (name|target|program) and `built` is built.txt (program|binary).
 function(hecbench_generate_invocations source targets_file built_file tree manifest directories missing unparsed)

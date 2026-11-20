@@ -33,19 +33,7 @@ if(EXISTS "${PREREQUISITES}")
   endforeach()
 endif()
 
-set(configure_arguments
-  -S "${SOURCE}" -B "${BUILD}" -G Ninja
-  -DCMAKE_BUILD_TYPE=Release
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-  -DHECBENCH_ENABLE_CUDA=ON
-  -DHECBENCH_ENABLE_HIP=OFF
-  -DHECBENCH_ENABLE_SYCL=OFF
-  -DHECBENCH_ENABLE_OPENMP=OFF
-  -DHECBENCH_ENABLE_TESTING=OFF
-  "-DHECBENCH_CUDA_ARCH=${CUDA_ARCH}"
-  "-DFETCHCONTENT_SOURCE_DIR_CXXOPTS=${CXXOPTS}"
-  "-DFETCHCONTENT_SOURCE_DIR_FMT=${FMT}"
-  -DCMAKE_CUDA_FLAGS=-Wno-deprecated-gpu-targets)
+hecbench_nested_configure_arguments("${SOURCE}" "${BUILD}" "${CUDA_ARCH}" "${CXXOPTS}" "${FMT}" configure_arguments)
 if(DEFINED ENV{CXX} AND NOT "$ENV{CXX}" STREQUAL "")
   list(APPEND configure_arguments "-DCMAKE_CXX_COMPILER=$ENV{CXX}")
 endif()
