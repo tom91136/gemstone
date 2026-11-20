@@ -24,12 +24,16 @@ sys.exit(int(os.environ["FAKE_PYTEST_STATUS"]))
 FAKE_PYTEST_PACKAGE = """
 import json
 import os
+import sys
 import types
 
 
 def main(args, plugins=()):
     with open(os.environ["FAKE_PYTEST_ARGV"], "w") as handle:
         json.dump(list(args), handle)
+    if "no:terminal" in args and ("-q" in args or "--no-header" in args):
+        sys.stderr.write("ERROR: usage: unrecognized arguments: -q --no-header\\n")
+        return 4
     for event in json.loads(os.environ.get("FAKE_PYTEST_EVENTS", "[]")):
         for plugin in plugins:
             if event["event"] == "start":

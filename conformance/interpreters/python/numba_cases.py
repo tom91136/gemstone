@@ -201,7 +201,7 @@ def run_batch(root, cases_path):
     stream = os.fdopen(os.dup(sys.stdout.fileno()), "w")
     os.chdir(root)
     plugins = ["-p", "numba_cases_pytest", "-p", "no:cacheprovider", "-p", "no:terminal"]
-    pytest.main(["-c", PYTEST_CONFIG, "--rootdir", root, *plugins, "-q", "--no-header", *identities], plugins=[CaseMarkers(stream)])
+    pytest.main(["-c", PYTEST_CONFIG, "--rootdir", root, *plugins, *identities], plugins=[CaseMarkers(stream)])
 
 
 def run_pytest(root, identity):
