@@ -41,7 +41,7 @@ object SPIRVModel extends Model {
     val words = definition.shapes.filter(_.quantifier == OperandQuantifier.One).zipWithIndex.map((shape, index) =>
       Word(if (shape.kind.category == OperandKind.Category.Id) index + 1 else 0)
     )
-    definition.decoder(RawInstruction(definition.opcodeNumber, words)).toOption
+    definition.decoder(RawInstruction(definition.opcodeNumber, words), Map.empty).toOption
   }
 
   private def operandDetail(shape: OperandShape, constraint: Option[OperandConstraint]): String =

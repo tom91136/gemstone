@@ -40,7 +40,8 @@ class AssemblySuite extends Suite {
           ))
       }
       val raw         = RawInstruction(definition.opcodeNumber, words)
-      val instruction = Instruction.decode(raw).fold(error => fail(s"${definition.opcode}: $error"), identity)
+      val instruction =
+        Instruction.decode(raw, Map.empty).fold(error => fail(s"${definition.opcode}: $error"), identity)
       Endianness.values.foreach { order =>
         val module   = Module(Header(ISA.version, Word(0), Word(2), Word(0)), Vec(instruction), order)
         val bytes    = encode(module)
@@ -185,6 +186,26 @@ class AssemblySuite extends Suite {
       |%2 = OpConstant %1 4294967297
       |OpSwitch %2 %3 4294967297 %4 8589934594 %5""".stripMargin)
     assertEquals(Instruction.encode(module.instructions.last).operandWords, Vec(2, 3, 1, 1, 4, 2, 2, 5).map(Word(_)))
+    roundTrip(module)
+  }
+
+  for {
+    width <- Vec(32, 64)
+    cases <- 1 to 4
+  } test(s"OpSwitch $width-bit round trips $cases case/label pairs") {
+    val high   = if (width == 64) 1L << 32 else 0L
+    val pairs  = (0 until cases).map(index => s"${high + index + 1} %${4 + index}")
+    val module = parse(s"""%1 = OpTypeInt $width 0
+      |%2 = OpConstant %1 1
+      |OpSwitch %2 %3 ${pairs.mkString(" ")}""".stripMargin)
+    val expected = Vec.from((0 until cases).map { index =>
+      val literal = if (width == 64) Vec(Word(index + 1), Word(1)) else Vec(Word(index + 1))
+      literal ++ Vec(Word(4 + index))
+    })
+    module.instructions.last match {
+      case Instruction.Switch(_, _, target) => assertEquals(target.map(_.words), expected)
+      case other                            => fail(other.toString)
+    }
     roundTrip(module)
   }
 

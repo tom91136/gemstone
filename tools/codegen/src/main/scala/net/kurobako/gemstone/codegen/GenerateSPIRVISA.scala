@@ -234,7 +234,7 @@ object GenerateSPIRVISA {
         |import net.kurobako.gemstone.isa.spirv.OperandDecoder.*
         |
         |${GeneratedHeader.annotation()}object Instruction {
-        |  type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
+        |  type Decoder = (RawInstruction, Map[Word, Int]) => Either[InstructionDecodeError, Instruction]
         |
         |  enum Definition(
         |      val opcode: NonEmpty[java.lang.String],
@@ -268,14 +268,14 @@ object GenerateSPIRVISA {
         |  def definitionsFor(opcode: NonEmpty[java.lang.String]): Vec[Definition] =
         |    byOpcode.getOrElse(opcode, aliases.get(opcode).toVec)
         |
-        |  def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
+        |  def decode(raw: RawInstruction, widths: Map[Word, Int]): Either[InstructionDecodeError, Instruction] = {
         |    val candidates = definitionsFor(raw.opcodeNumber)
         |    candidates match {
         |      case Vec() => Left(InstructionDecodeError.UnknownOpcode(raw.opcodeNumber))
-        |      case Vec(definition) => definition.decoder(raw)
+        |      case Vec(definition) => definition.decoder(raw, widths)
         |      case _ =>
         |        val matches = candidates.flatMap(definition =>
-        |          definition.decoder(raw).toOption.map(instruction => definition -> instruction)
+        |          definition.decoder(raw, widths).toOption.map(instruction => definition -> instruction)
         |        )
         |        matches match {
         |          case Vec((_, instruction)) => Right(instruction)
@@ -299,18 +299,15 @@ object GenerateSPIRVISA {
         |  private def decodeDefinition(
         |      definition: Definition,
         |      raw: RawInstruction,
+        |      widths: Map[Word, Int],
         |      construct: DecodedOperands => Instruction
         |  ): Either[InstructionDecodeError, Instruction] =
         |    if (raw.opcodeNumber != definition.opcodeNumber)
         |      Left(InstructionDecodeError.DecoderOpcodeMismatch(definition.opcodeNumber, raw.opcodeNumber))
-        |    else {
-        |      val decoded = OperandDecoder.decode(definition.opcode, raw.operandWords, definition.shapes, operandKinds)
-        |      // The grammar uses 32-bit switch literals; retain 64-bit cases until the selector type is resolved.
-        |      val operands = if (definition == Definition.Switch)
-        |        decoded.orElse(OperandDecoder.decodeSwitch64(definition.opcode, raw.operandWords).orElse(decoded))
-        |      else decoded
-        |      operands.map(construct)
-        |    }
+        |    else
+        |      OperandDecoder
+        |        .decode(definition.opcode, raw.operandWords, definition.shapes, operandKinds, widths)
+        |        .map(construct)
         |}
         |
         |${GeneratedHeader.annotation()}enum Instruction(val definition: Instruction.Definition, operandValues: Operand*) derives CanEqual {
@@ -330,7 +327,8 @@ object GenerateSPIRVISA {
     val caseName  = normaliseCase(entry.name.stripPrefix("Op"))
     val parameter = if (fields.isEmpty) "_" else "values"
     val decoder   =
-      s"definition => raw => Instruction.decodeDefinition(definition, raw, $parameter => ${construct(entry, fields)})"
+      "definition => (raw, widths) =>" +
+        s" Instruction.decodeDefinition(definition, raw, widths, $parameter => ${construct(entry, fields)})"
     s"    case $caseName extends Definition(\"${Emission.escape(entry.name)}\", " +
       s"SPIRVOpcodeNumber(${entry.opcode}), $decoder, ${Emission.literal(renderShapes(fields))})"
   }

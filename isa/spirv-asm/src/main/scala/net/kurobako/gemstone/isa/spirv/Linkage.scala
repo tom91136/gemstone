@@ -156,7 +156,8 @@ object Linkage {
   private def withName(instruction: Instruction, name: String): Either[Fault, Instruction] = {
     val operands = instruction.operands
     val words    = operands.take(2).flatMap(_.words) ++ LiteralString.encode(name) ++ operands.drop(3).flatMap(_.words)
-    Instruction.decode(RawInstruction(instruction.opcodeNumber, words)).left.map(error => failure(error.message))
+    Instruction.decode(RawInstruction(instruction.opcodeNumber, words), Map.empty)
+      .left.map(error => failure(error.message))
   }
 
   private def memoryModel(module: Module): Option[Vec[Word]] =
@@ -287,11 +288,12 @@ object Linkage {
     kept.result()
   }
 
-  private def rewrite(instructions: Vector[Instruction], f: Int => Int): Either[Fault, Vector[Instruction]] =
-    instructions.traverse { instruction =>
-      Instruction.decode(RawInstruction(instruction.opcodeNumber, instruction.operands.flatMap(remap(_, f))))
-        .left.map(error => failure(error.message))
-    }
+  private def rewrite(instructions: Vector[Instruction], f: Int => Int): Either[Fault, Vector[Instruction]] = {
+    val raws = instructions.map(instruction =>
+      RawInstruction(instruction.opcodeNumber, instruction.operands.flatMap(remap(_, f)))
+    )
+    ISA.decodeAll(Vec.from(raws)).map(_.toVector).left.map(error => failure(error.message))
+  }
 
   /** The words of `operand` with every id, including those in enumerant parameters, mapped through `f`. */
   private def remap(operand: Operand, f: Int => Int): Vec[Word] = {

@@ -24,7 +24,7 @@ class FamilySuite extends Suite {
       val words = definition.shapes.filter(_.quantifier == OperandQuantifier.One).zipWithIndex.map((shape, index) =>
         Word(if (shape.kind.category == OperandKind.Category.Id) index + 1 else 0)
       )
-      definition.decoder(RawInstruction(definition.opcodeNumber, words)).toOption
+      definition.decoder(RawInstruction(definition.opcodeNumber, words), Map.empty).toOption
     }
     .filter(instruction =>
       instruction.definition.shapes.take(2).map(_.kind) == resultKinds &&
@@ -35,8 +35,8 @@ class FamilySuite extends Suite {
     Vec.from(ExtendedInstruction.names(set.name)).map { (name, encoded) =>
       val definition = Instruction.Definition.ExtInst
       val words      = Vec(1, 2, 3, encoded, 4, 5, 6, 7, 8).map(Word(_))
-      name ->
-        definition.decoder(RawInstruction(definition.opcodeNumber, words)).fold(error => fail(error.message), identity)
+      val raw        = RawInstruction(definition.opcodeNumber, words)
+      name -> definition.decoder(raw, Map.empty).fold(error => fail(error.message), identity)
     }
 
   /** The families that render rather than defer, a family that throws counting as one that renders. A family that

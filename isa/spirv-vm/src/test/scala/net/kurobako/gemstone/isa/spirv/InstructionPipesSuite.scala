@@ -59,7 +59,8 @@ class InstructionPipesSuite extends Suite {
 
   private def decode(opcode: String, words: Int*): Instruction = {
     val definition = Instruction.definitions.find(_.opcode.raw == opcode).getOrElse(fail(s"no definition for $opcode"))
-    definition.decoder(RawInstruction(definition.opcodeNumber, Vec.from(words.map(Word(_))))).fold(
+    val raw        = RawInstruction(definition.opcodeNumber, Vec.from(words.map(Word(_))))
+    definition.decoder(raw, Map.empty).fold(
       error => fail(error.message),
       identity
     )
@@ -85,8 +86,8 @@ class InstructionPipesSuite extends Suite {
       val words = definition.shapes.filter(_.quantifier == OperandQuantifier.One).zipWithIndex.map((shape, index) =>
         Word(if (shape.kind.category == OperandKind.Category.Id) index + 1 else 0)
       )
-      val instruction =
-        definition.decoder(RawInstruction(definition.opcodeNumber, words)).fold(error => fail(error.message), identity)
+      val raw         = RawInstruction(definition.opcodeNumber, words)
+      val instruction = definition.decoder(raw, Map.empty).fold(error => fail(error.message), identity)
       if (InstructionPipes.of(instruction, _ => floatType, _ => Some(32), _ => false, _ => None).isEmpty)
         Some(definition.opcode.raw)
       else None

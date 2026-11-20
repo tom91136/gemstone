@@ -2,6 +2,7 @@ package net.kurobako.gemstone.isa.spirv
 
 import VMMemory.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.spirv.asm.*
 import net.kurobako.gemstone.semantics.render.*
 import scala.util.control.NonFatal
@@ -1194,9 +1195,10 @@ object MachineSemantics {
       Instruction.definitions.find(_.opcode.raw == found.opcode).toRight(
         Unrendered.Undefined(s"${found.opcode} is not in the grammar.")
       ).flatMap(definition =>
-        definition.decoder(RawInstruction(definition.opcodeNumber, found.words.map(Word(_)))).left.map(error =>
-          Unrendered.Undefined(error.toString)
-        )
+        definition.decoder(
+          RawInstruction(definition.opcodeNumber, found.words.map(Word(_))),
+          found.shapes.collect { case (id, Shape.Scalar(tpe)) => Word(id) -> tpe.bits.raw }
+        ).left.map(error => Unrendered.Undefined(error.toString))
       ).flatMap { decoded =>
         ControlSemantics.render(decoded, machine).orElse(MemoryAccessSemantics.render(decoded, machine, found.bytes))
           .orElse(IntelBlockSemantics.render(decoded, machine, found.bytes))

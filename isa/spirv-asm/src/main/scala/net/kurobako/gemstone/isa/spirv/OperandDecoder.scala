@@ -16,33 +16,19 @@ private object OperandDecoder {
       opcode: NonEmpty[String],
       words: Vec[Word],
       shapes: Vec[OperandShape],
-      kinds: Map[OperandKind, OperandKindInfo]
+      kinds: Map[OperandKind, OperandKindInfo],
+      widths: Map[Word, Int]
   ): Either[InstructionDecodeError, DecodedOperands] =
-    Reader(opcode, words, kinds).decodeShapes(shapes, index = 0, offset = 0, Chain.empty)
+    Reader(opcode, words, kinds, widths).decodeShapes(shapes, index = 0, offset = 0, Chain.empty)
       .map(fields => DecodedOperands(Vec.from(fields.toVector.view)))
-  def decodeSwitch64(
-      opcode: NonEmpty[String],
-      words: Vec[Word]
-  ): Either[InstructionDecodeError, DecodedOperands] =
-    if (words.size < 2 || (words.size - 2) % 3 != 0)
-      Left(InstructionDecodeError.InvalidOperandCount(
-        opcode,
-        "literal/label pairs are not 64-bit aligned"
-      ))
-    else {
-      val selector = Operand(OperandKind.IdRef, Vec.nonEmpty(words(0)))
-      val default  = Operand(OperandKind.IdRef, Vec.nonEmpty(words(1)))
-      val targets  = (2 until words.size by 3).map(index =>
-        Operand(
-          OperandKind.PairLiteralIntegerIdRef,
-          words.slice(index, index + 3).unsafe
-        )
-      )
-      Right(DecodedOperands(Vec(Vec(selector), Vec(default), Vec.from(targets))))
-    }
 
   /** Decodes the operands of one instruction from its `words`. */
-  private class Reader(opcode: NonEmpty[String], words: Vec[Word], kinds: Map[OperandKind, OperandKindInfo]) {
+  private class Reader(
+      opcode: NonEmpty[String],
+      words: Vec[Word],
+      kinds: Map[OperandKind, OperandKindInfo],
+      widths: Map[Word, Int]
+  ) {
     def decodeShapes(
         shapes: Vec[OperandShape],
         index: Int,
@@ -89,12 +75,21 @@ private object OperandDecoder {
       else if (kind == OperandKind.LiteralString) decodeString(kind, offset)
       else if (kind == OperandKind.LiteralContextDependentNumber)
         Right(Operand(kind, words.drop(offset).unsafe) -> words.size)
+      else if (kind == OperandKind.PairLiteralIntegerIdRef) decodePair(kind, offset)
       else if (kind.category == OperandKind.Category.Composite)
         decodeSpan(kind, offset, offset, kind.components)
       else kinds.get(kind) match {
         case Some(info) if info.kind.category == OperandKind.Category.ValueEnum => decodeValueEnum(info, offset)
         case Some(info) if info.kind.category == OperandKind.Category.BitEnum   => decodeBitEnum(info, offset)
         case _ => Right(Operand(kind, Vec.nonEmpty(words(offset))) -> (offset + 1))
+      }
+
+    private def decodePair(kind: OperandKind, offset: Int): Either[InstructionDecodeError, (Operand, Int)] =
+      widths.get(words(0)) match {
+        case None        => Left(InstructionDecodeError.UnknownSelectorWidth(opcode, words(0).raw))
+        case Some(width) =>
+          val literal: Vec[OperandKind] = Vec.fill((width + 31) / 32)(OperandKind.LiteralInteger)
+          decodeSpan(kind, offset, offset, literal :+ OperandKind.IdRef)
       }
 
     private def decodeString(kind: OperandKind, offset: Int): Either[InstructionDecodeError, (Operand, Int)] =

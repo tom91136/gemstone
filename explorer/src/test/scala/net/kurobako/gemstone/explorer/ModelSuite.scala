@@ -99,6 +99,13 @@ class ModelSuite extends Suite {
     assertEquals(described(SPIRVModel, None, "OpStore"), Vec.empty[String])
   }
 
+  test("SPIR-V OpSwitch operands are named by the grammar") {
+    assertEquals(
+      entry(SPIRVModel, None, "OpSwitch").forms.head.operands.map(_.name),
+      Vec("selector", "default", "target")
+    )
+  }
+
   test("SPIR-V control flow is machine semantics, and declarations and no-ops come from the grammar's class") {
     def semantics(mnemonic: String): Semantics = {
       val found = entry(SPIRVModel, None, mnemonic)

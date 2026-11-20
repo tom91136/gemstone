@@ -11,7 +11,7 @@ import net.kurobako.gemstone.isa.spirv.OperandDecoder.*
 
 @Generated(Array("sbt codegen"))
 object Instruction {
-  type Decoder = RawInstruction => Either[InstructionDecodeError, Instruction]
+  type Decoder = (RawInstruction, Map[Word, Int]) => Either[InstructionDecodeError, Instruction]
 
   enum Definition(
       val opcode: NonEmpty[java.lang.String],
@@ -22,17 +22,18 @@ object Instruction {
     case Nop extends Definition(
           "OpNop",
           SPIRVOpcodeNumber(0),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Nop()),
+          definition => (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.Nop()),
           ""
         )
     case Undef extends Definition(
           "OpUndef",
           SPIRVOpcodeNumber(1),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Undef(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -41,18 +42,24 @@ object Instruction {
           "OpSourceContinued",
           SPIRVOpcodeNumber(2),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.SourceContinued(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.SourceContinued(values.required(0))
+              ),
           "LiteralString"
         )
     case Source extends Definition(
           "OpSource",
           SPIRVOpcodeNumber(3),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Source(values.required(0), values.required(1), values.optional(2), values.optional(3))
               ),
@@ -62,18 +69,24 @@ object Instruction {
           "OpSourceExtension",
           SPIRVOpcodeNumber(4),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.SourceExtension(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.SourceExtension(values.required(0))
+              ),
           "LiteralString"
         )
     case Name extends Definition(
           "OpName",
           SPIRVOpcodeNumber(5),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Name(values.required(0), values.required(1))
               ),
           "IdRef LiteralString"
@@ -82,10 +95,11 @@ object Instruction {
           "OpMemberName",
           SPIRVOpcodeNumber(6),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.MemberName(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef LiteralInteger LiteralString"
@@ -94,10 +108,11 @@ object Instruction {
           "OpString",
           SPIRVOpcodeNumber(7),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.String(values.required(0), values.required(1))
               ),
           "IdResult LiteralString"
@@ -106,10 +121,11 @@ object Instruction {
           "OpLine",
           SPIRVOpcodeNumber(8),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Line(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef LiteralInteger LiteralInteger"
@@ -118,17 +134,24 @@ object Instruction {
           "OpExtension",
           SPIRVOpcodeNumber(10),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Extension(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.Extension(values.required(0))
+              ),
           "LiteralString"
         )
     case ExtInstImport extends Definition(
           "OpExtInstImport",
           SPIRVOpcodeNumber(11),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ExtInstImport(values.required(0), values.required(1))
               ),
           "IdResult LiteralString"
@@ -137,10 +160,11 @@ object Instruction {
           "OpExtInst",
           SPIRVOpcodeNumber(12),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ExtInst(
                     resultType = values.required(0),
@@ -156,10 +180,11 @@ object Instruction {
           "OpMemoryModel",
           SPIRVOpcodeNumber(14),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.MemoryModel(values.required(0), values.required(1))
               ),
           "AddressingModel MemoryModel"
@@ -168,10 +193,11 @@ object Instruction {
           "OpEntryPoint",
           SPIRVOpcodeNumber(15),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.EntryPoint(values.required(0), values.required(1), values.required(2), values.repeated(3))
               ),
@@ -181,10 +207,11 @@ object Instruction {
           "OpExecutionMode",
           SPIRVOpcodeNumber(16),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ExecutionMode(values.required(0), values.required(1))
               ),
           "IdRef ExecutionMode"
@@ -193,31 +220,40 @@ object Instruction {
           "OpCapability",
           SPIRVOpcodeNumber(17),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Capability(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.Capability(values.required(0))
+              ),
           "Capability"
         )
     case TypeVoid extends Definition(
           "OpTypeVoid",
           SPIRVOpcodeNumber(19),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeVoid(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, values => Instruction.TypeVoid(values.required(0))),
           "IdResult"
         )
     case TypeBool extends Definition(
           "OpTypeBool",
           SPIRVOpcodeNumber(20),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeBool(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, values => Instruction.TypeBool(values.required(0))),
           "IdResult"
         )
     case TypeInt extends Definition(
           "OpTypeInt",
           SPIRVOpcodeNumber(21),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeInt(values.required(0), values.required(1), values.required(2))
               ),
           "IdResult LiteralInteger LiteralInteger"
@@ -226,10 +262,11 @@ object Instruction {
           "OpTypeFloat",
           SPIRVOpcodeNumber(22),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeFloat(values.required(0), values.required(1), values.optional(2))
               ),
           "IdResult LiteralInteger FPEncoding?"
@@ -238,10 +275,11 @@ object Instruction {
           "OpTypeVector",
           SPIRVOpcodeNumber(23),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeVector(values.required(0), values.required(1), values.required(2))
               ),
           "IdResult IdRef LiteralInteger"
@@ -250,10 +288,11 @@ object Instruction {
           "OpTypeMatrix",
           SPIRVOpcodeNumber(24),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeMatrix(values.required(0), values.required(1), values.required(2))
               ),
           "IdResult IdRef LiteralInteger"
@@ -262,10 +301,11 @@ object Instruction {
           "OpTypeImage",
           SPIRVOpcodeNumber(25),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TypeImage(
                     dest = values.required(0),
@@ -285,17 +325,24 @@ object Instruction {
           "OpTypeSampler",
           SPIRVOpcodeNumber(26),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeSampler(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeSampler(values.required(0))
+              ),
           "IdResult"
         )
     case TypeSampledImage extends Definition(
           "OpTypeSampledImage",
           SPIRVOpcodeNumber(27),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeSampledImage(values.required(0), values.required(1))
               ),
           "IdResult IdRef"
@@ -304,10 +351,11 @@ object Instruction {
           "OpTypeArray",
           SPIRVOpcodeNumber(28),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeArray(values.required(0), values.required(1), values.required(2))
               ),
           "IdResult IdRef IdRef"
@@ -316,10 +364,11 @@ object Instruction {
           "OpTypeRuntimeArray",
           SPIRVOpcodeNumber(29),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeRuntimeArray(values.required(0), values.required(1))
               ),
           "IdResult IdRef"
@@ -328,10 +377,11 @@ object Instruction {
           "OpTypeStruct",
           SPIRVOpcodeNumber(30),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeStruct(values.required(0), values.repeated(1))
               ),
           "IdResult IdRef*"
@@ -340,10 +390,11 @@ object Instruction {
           "OpTypeOpaque",
           SPIRVOpcodeNumber(31),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeOpaque(values.required(0), values.required(1))
               ),
           "IdResult LiteralString"
@@ -352,10 +403,11 @@ object Instruction {
           "OpTypePointer",
           SPIRVOpcodeNumber(32),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypePointer(values.required(0), values.required(1), values.required(2))
               ),
           "IdResult StorageClass IdRef"
@@ -364,10 +416,11 @@ object Instruction {
           "OpTypeFunction",
           SPIRVOpcodeNumber(33),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeFunction(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResult IdRef IdRef*"
@@ -376,40 +429,63 @@ object Instruction {
           "OpTypeEvent",
           SPIRVOpcodeNumber(34),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeEvent(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeEvent(values.required(0))
+              ),
           "IdResult"
         )
     case TypeDeviceEvent extends Definition(
           "OpTypeDeviceEvent",
           SPIRVOpcodeNumber(35),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.TypeDeviceEvent(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeDeviceEvent(values.required(0))
+              ),
           "IdResult"
         )
     case TypeReserveId extends Definition(
           "OpTypeReserveId",
           SPIRVOpcodeNumber(36),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.TypeReserveId(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeReserveId(values.required(0))
+              ),
           "IdResult"
         )
     case TypeQueue extends Definition(
           "OpTypeQueue",
           SPIRVOpcodeNumber(37),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.TypeQueue(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeQueue(values.required(0))
+              ),
           "IdResult"
         )
     case TypePipe extends Definition(
           "OpTypePipe",
           SPIRVOpcodeNumber(38),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypePipe(values.required(0), values.required(1))
               ),
           "IdResult AccessQualifier"
@@ -418,10 +494,11 @@ object Instruction {
           "OpTypeForwardPointer",
           SPIRVOpcodeNumber(39),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeForwardPointer(values.required(0), values.required(1))
               ),
           "IdRef StorageClass"
@@ -430,10 +507,11 @@ object Instruction {
           "OpConstantTrue",
           SPIRVOpcodeNumber(41),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantTrue(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -442,10 +520,11 @@ object Instruction {
           "OpConstantFalse",
           SPIRVOpcodeNumber(42),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantFalse(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -454,10 +533,11 @@ object Instruction {
           "OpConstant",
           SPIRVOpcodeNumber(43),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Constant(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult LiteralContextDependentNumber"
@@ -466,10 +546,11 @@ object Instruction {
           "OpConstantComposite",
           SPIRVOpcodeNumber(44),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantComposite(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResultType IdResult IdRef*"
@@ -478,10 +559,11 @@ object Instruction {
           "OpConstantSampler",
           SPIRVOpcodeNumber(45),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConstantSampler(
                     resultType = values.required(0),
@@ -497,10 +579,11 @@ object Instruction {
           "OpConstantNull",
           SPIRVOpcodeNumber(46),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantNull(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -509,10 +592,11 @@ object Instruction {
           "OpSpecConstantTrue",
           SPIRVOpcodeNumber(48),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SpecConstantTrue(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -521,10 +605,11 @@ object Instruction {
           "OpSpecConstantFalse",
           SPIRVOpcodeNumber(49),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SpecConstantFalse(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -533,10 +618,11 @@ object Instruction {
           "OpSpecConstant",
           SPIRVOpcodeNumber(50),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SpecConstant(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult LiteralContextDependentNumber"
@@ -545,10 +631,11 @@ object Instruction {
           "OpSpecConstantComposite",
           SPIRVOpcodeNumber(51),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SpecConstantComposite(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResultType IdResult IdRef*"
@@ -557,10 +644,11 @@ object Instruction {
           "OpSpecConstantOp",
           SPIRVOpcodeNumber(52),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SpecConstantOp(
                     values.required(0),
@@ -575,10 +663,11 @@ object Instruction {
           "OpFunction",
           SPIRVOpcodeNumber(54),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Function(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -588,10 +677,11 @@ object Instruction {
           "OpFunctionParameter",
           SPIRVOpcodeNumber(55),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.FunctionParameter(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -599,17 +689,19 @@ object Instruction {
     case FunctionEnd extends Definition(
           "OpFunctionEnd",
           SPIRVOpcodeNumber(56),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.FunctionEnd()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.FunctionEnd()),
           ""
         )
     case FunctionCall extends Definition(
           "OpFunctionCall",
           SPIRVOpcodeNumber(57),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FunctionCall(
                     values.required(0),
@@ -624,10 +716,11 @@ object Instruction {
           "OpVariable",
           SPIRVOpcodeNumber(59),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Variable(values.required(0), values.required(1), values.required(2), values.optional(3))
               ),
@@ -637,10 +730,11 @@ object Instruction {
           "OpImageTexelPointer",
           SPIRVOpcodeNumber(60),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageTexelPointer(
                     resultType = values.required(0),
@@ -656,10 +750,11 @@ object Instruction {
           "OpLoad",
           SPIRVOpcodeNumber(61),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Load(values.required(0), values.required(1), values.required(2), values.optional(3))
               ),
@@ -669,10 +764,11 @@ object Instruction {
           "OpStore",
           SPIRVOpcodeNumber(62),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Store(values.required(0), values.required(1), values.optional(2))
               ),
           "IdRef IdRef MemoryAccess?"
@@ -681,10 +777,11 @@ object Instruction {
           "OpCopyMemory",
           SPIRVOpcodeNumber(63),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CopyMemory(values.required(0), values.required(1), values.optional(2), values.optional(3))
               ),
@@ -694,10 +791,11 @@ object Instruction {
           "OpCopyMemorySized",
           SPIRVOpcodeNumber(64),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CopyMemorySized(
                     target = values.required(0),
@@ -713,10 +811,11 @@ object Instruction {
           "OpAccessChain",
           SPIRVOpcodeNumber(65),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AccessChain(
                     values.required(0),
@@ -731,10 +830,11 @@ object Instruction {
           "OpInBoundsAccessChain",
           SPIRVOpcodeNumber(66),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.InBoundsAccessChain(
                     values.required(0),
@@ -749,10 +849,11 @@ object Instruction {
           "OpPtrAccessChain",
           SPIRVOpcodeNumber(67),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.PtrAccessChain(
                     resultType = values.required(0),
@@ -768,10 +869,11 @@ object Instruction {
           "OpArrayLength",
           SPIRVOpcodeNumber(68),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArrayLength(
                     values.required(0),
@@ -786,10 +888,11 @@ object Instruction {
           "OpGenericPtrMemSemantics",
           SPIRVOpcodeNumber(69),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GenericPtrMemSemantics(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -798,10 +901,11 @@ object Instruction {
           "OpInBoundsPtrAccessChain",
           SPIRVOpcodeNumber(70),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.InBoundsPtrAccessChain(
                     resultType = values.required(0),
@@ -817,10 +921,11 @@ object Instruction {
           "OpDecorate",
           SPIRVOpcodeNumber(71),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Decorate(values.required(0), values.required(1))
               ),
           "IdRef Decoration"
@@ -829,10 +934,11 @@ object Instruction {
           "OpMemberDecorate",
           SPIRVOpcodeNumber(72),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.MemberDecorate(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef LiteralInteger Decoration"
@@ -841,18 +947,24 @@ object Instruction {
           "OpDecorationGroup",
           SPIRVOpcodeNumber(73),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.DecorationGroup(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.DecorationGroup(values.required(0))
+              ),
           "IdResult"
         )
     case GroupDecorate extends Definition(
           "OpGroupDecorate",
           SPIRVOpcodeNumber(74),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GroupDecorate(values.required(0), values.repeated(1))
               ),
           "IdRef IdRef*"
@@ -861,10 +973,11 @@ object Instruction {
           "OpGroupMemberDecorate",
           SPIRVOpcodeNumber(75),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GroupMemberDecorate(values.required(0), values.repeated(1))
               ),
           "IdRef PairIdRefLiteralInteger*"
@@ -873,10 +986,11 @@ object Instruction {
           "OpVectorExtractDynamic",
           SPIRVOpcodeNumber(77),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.VectorExtractDynamic(
                     values.required(0),
@@ -891,10 +1005,11 @@ object Instruction {
           "OpVectorInsertDynamic",
           SPIRVOpcodeNumber(78),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.VectorInsertDynamic(
                     resultType = values.required(0),
@@ -910,10 +1025,11 @@ object Instruction {
           "OpVectorShuffle",
           SPIRVOpcodeNumber(79),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.VectorShuffle(
                     resultType = values.required(0),
@@ -929,10 +1045,11 @@ object Instruction {
           "OpCompositeConstruct",
           SPIRVOpcodeNumber(80),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.CompositeConstruct(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResultType IdResult IdRef*"
@@ -941,10 +1058,11 @@ object Instruction {
           "OpCompositeExtract",
           SPIRVOpcodeNumber(81),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CompositeExtract(
                     values.required(0),
@@ -959,10 +1077,11 @@ object Instruction {
           "OpCompositeInsert",
           SPIRVOpcodeNumber(82),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CompositeInsert(
                     resultType = values.required(0),
@@ -978,10 +1097,11 @@ object Instruction {
           "OpCopyObject",
           SPIRVOpcodeNumber(83),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.CopyObject(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -990,10 +1110,11 @@ object Instruction {
           "OpTranspose",
           SPIRVOpcodeNumber(84),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Transpose(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1002,10 +1123,11 @@ object Instruction {
           "OpSampledImage",
           SPIRVOpcodeNumber(86),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SampledImage(
                     values.required(0),
@@ -1020,10 +1142,11 @@ object Instruction {
           "OpImageSampleImplicitLod",
           SPIRVOpcodeNumber(87),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleImplicitLod(
                     resultType = values.required(0),
@@ -1039,10 +1162,11 @@ object Instruction {
           "OpImageSampleExplicitLod",
           SPIRVOpcodeNumber(88),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleExplicitLod(
                     resultType = values.required(0),
@@ -1058,10 +1182,11 @@ object Instruction {
           "OpImageSampleDrefImplicitLod",
           SPIRVOpcodeNumber(89),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleDrefImplicitLod(
                     resultType = values.required(0),
@@ -1078,10 +1203,11 @@ object Instruction {
           "OpImageSampleDrefExplicitLod",
           SPIRVOpcodeNumber(90),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleDrefExplicitLod(
                     resultType = values.required(0),
@@ -1098,10 +1224,11 @@ object Instruction {
           "OpImageSampleProjImplicitLod",
           SPIRVOpcodeNumber(91),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleProjImplicitLod(
                     resultType = values.required(0),
@@ -1117,10 +1244,11 @@ object Instruction {
           "OpImageSampleProjExplicitLod",
           SPIRVOpcodeNumber(92),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleProjExplicitLod(
                     resultType = values.required(0),
@@ -1136,10 +1264,11 @@ object Instruction {
           "OpImageSampleProjDrefImplicitLod",
           SPIRVOpcodeNumber(93),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleProjDrefImplicitLod(
                     resultType = values.required(0),
@@ -1156,10 +1285,11 @@ object Instruction {
           "OpImageSampleProjDrefExplicitLod",
           SPIRVOpcodeNumber(94),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleProjDrefExplicitLod(
                     resultType = values.required(0),
@@ -1176,10 +1306,11 @@ object Instruction {
           "OpImageFetch",
           SPIRVOpcodeNumber(95),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageFetch(
                     resultType = values.required(0),
@@ -1195,10 +1326,11 @@ object Instruction {
           "OpImageGather",
           SPIRVOpcodeNumber(96),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageGather(
                     resultType = values.required(0),
@@ -1215,10 +1347,11 @@ object Instruction {
           "OpImageDrefGather",
           SPIRVOpcodeNumber(97),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageDrefGather(
                     resultType = values.required(0),
@@ -1235,10 +1368,11 @@ object Instruction {
           "OpImageRead",
           SPIRVOpcodeNumber(98),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageRead(
                     resultType = values.required(0),
@@ -1254,10 +1388,11 @@ object Instruction {
           "OpImageWrite",
           SPIRVOpcodeNumber(99),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageWrite(values.required(0), values.required(1), values.required(2), values.optional(3))
               ),
@@ -1267,10 +1402,11 @@ object Instruction {
           "OpImage",
           SPIRVOpcodeNumber(100),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Image(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1279,10 +1415,11 @@ object Instruction {
           "OpImageQueryFormat",
           SPIRVOpcodeNumber(101),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ImageQueryFormat(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1291,10 +1428,11 @@ object Instruction {
           "OpImageQueryOrder",
           SPIRVOpcodeNumber(102),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ImageQueryOrder(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1303,10 +1441,11 @@ object Instruction {
           "OpImageQuerySizeLod",
           SPIRVOpcodeNumber(103),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageQuerySizeLod(
                     values.required(0),
@@ -1321,10 +1460,11 @@ object Instruction {
           "OpImageQuerySize",
           SPIRVOpcodeNumber(104),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ImageQuerySize(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1333,10 +1473,11 @@ object Instruction {
           "OpImageQueryLod",
           SPIRVOpcodeNumber(105),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageQueryLod(
                     values.required(0),
@@ -1351,10 +1492,11 @@ object Instruction {
           "OpImageQueryLevels",
           SPIRVOpcodeNumber(106),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ImageQueryLevels(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1363,10 +1505,11 @@ object Instruction {
           "OpImageQuerySamples",
           SPIRVOpcodeNumber(107),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ImageQuerySamples(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1375,10 +1518,11 @@ object Instruction {
           "OpConvertFToU",
           SPIRVOpcodeNumber(109),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertFToU(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1387,10 +1531,11 @@ object Instruction {
           "OpConvertFToS",
           SPIRVOpcodeNumber(110),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertFToS(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1399,10 +1544,11 @@ object Instruction {
           "OpConvertSToF",
           SPIRVOpcodeNumber(111),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertSToF(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1411,10 +1557,11 @@ object Instruction {
           "OpConvertUToF",
           SPIRVOpcodeNumber(112),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertUToF(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1423,10 +1570,11 @@ object Instruction {
           "OpUConvert",
           SPIRVOpcodeNumber(113),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.UConvert(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1435,10 +1583,11 @@ object Instruction {
           "OpSConvert",
           SPIRVOpcodeNumber(114),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SConvert(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1447,10 +1596,11 @@ object Instruction {
           "OpFConvert",
           SPIRVOpcodeNumber(115),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.FConvert(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1459,10 +1609,11 @@ object Instruction {
           "OpQuantizeToF16",
           SPIRVOpcodeNumber(116),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.QuantizeToF16(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1471,10 +1622,11 @@ object Instruction {
           "OpConvertPtrToU",
           SPIRVOpcodeNumber(117),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertPtrToU(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1483,10 +1635,11 @@ object Instruction {
           "OpSatConvertSToU",
           SPIRVOpcodeNumber(118),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SatConvertSToU(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1495,10 +1648,11 @@ object Instruction {
           "OpSatConvertUToS",
           SPIRVOpcodeNumber(119),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SatConvertUToS(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1507,10 +1661,11 @@ object Instruction {
           "OpConvertUToPtr",
           SPIRVOpcodeNumber(120),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertUToPtr(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1519,10 +1674,11 @@ object Instruction {
           "OpPtrCastToGeneric",
           SPIRVOpcodeNumber(121),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.PtrCastToGeneric(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1531,10 +1687,11 @@ object Instruction {
           "OpGenericCastToPtr",
           SPIRVOpcodeNumber(122),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GenericCastToPtr(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1543,10 +1700,11 @@ object Instruction {
           "OpGenericCastToPtrExplicit",
           SPIRVOpcodeNumber(123),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GenericCastToPtrExplicit(
                     values.required(0),
@@ -1561,10 +1719,11 @@ object Instruction {
           "OpBitcast",
           SPIRVOpcodeNumber(124),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Bitcast(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1573,10 +1732,11 @@ object Instruction {
           "OpSNegate",
           SPIRVOpcodeNumber(126),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SNegate(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1585,10 +1745,11 @@ object Instruction {
           "OpFNegate",
           SPIRVOpcodeNumber(127),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.FNegate(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1597,10 +1758,11 @@ object Instruction {
           "OpIAdd",
           SPIRVOpcodeNumber(128),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IAdd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1610,10 +1772,11 @@ object Instruction {
           "OpFAdd",
           SPIRVOpcodeNumber(129),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FAdd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1623,10 +1786,11 @@ object Instruction {
           "OpISub",
           SPIRVOpcodeNumber(130),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ISub(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1636,10 +1800,11 @@ object Instruction {
           "OpFSub",
           SPIRVOpcodeNumber(131),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FSub(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1649,10 +1814,11 @@ object Instruction {
           "OpIMul",
           SPIRVOpcodeNumber(132),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IMul(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1662,10 +1828,11 @@ object Instruction {
           "OpFMul",
           SPIRVOpcodeNumber(133),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FMul(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1675,10 +1842,11 @@ object Instruction {
           "OpUDiv",
           SPIRVOpcodeNumber(134),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UDiv(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1688,10 +1856,11 @@ object Instruction {
           "OpSDiv",
           SPIRVOpcodeNumber(135),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SDiv(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1701,10 +1870,11 @@ object Instruction {
           "OpFDiv",
           SPIRVOpcodeNumber(136),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FDiv(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1714,10 +1884,11 @@ object Instruction {
           "OpUMod",
           SPIRVOpcodeNumber(137),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UMod(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1727,10 +1898,11 @@ object Instruction {
           "OpSRem",
           SPIRVOpcodeNumber(138),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SRem(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1740,10 +1912,11 @@ object Instruction {
           "OpSMod",
           SPIRVOpcodeNumber(139),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SMod(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1753,10 +1926,11 @@ object Instruction {
           "OpFRem",
           SPIRVOpcodeNumber(140),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FRem(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1766,10 +1940,11 @@ object Instruction {
           "OpFMod",
           SPIRVOpcodeNumber(141),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FMod(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1779,10 +1954,11 @@ object Instruction {
           "OpVectorTimesScalar",
           SPIRVOpcodeNumber(142),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.VectorTimesScalar(
                     values.required(0),
@@ -1797,10 +1973,11 @@ object Instruction {
           "OpMatrixTimesScalar",
           SPIRVOpcodeNumber(143),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.MatrixTimesScalar(
                     values.required(0),
@@ -1815,10 +1992,11 @@ object Instruction {
           "OpVectorTimesMatrix",
           SPIRVOpcodeNumber(144),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.VectorTimesMatrix(
                     values.required(0),
@@ -1833,10 +2011,11 @@ object Instruction {
           "OpMatrixTimesVector",
           SPIRVOpcodeNumber(145),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.MatrixTimesVector(
                     values.required(0),
@@ -1851,10 +2030,11 @@ object Instruction {
           "OpMatrixTimesMatrix",
           SPIRVOpcodeNumber(146),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.MatrixTimesMatrix(
                     values.required(0),
@@ -1869,10 +2049,11 @@ object Instruction {
           "OpOuterProduct",
           SPIRVOpcodeNumber(147),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.OuterProduct(
                     values.required(0),
@@ -1887,10 +2068,11 @@ object Instruction {
           "OpDot",
           SPIRVOpcodeNumber(148),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Dot(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1900,10 +2082,11 @@ object Instruction {
           "OpIAddCarry",
           SPIRVOpcodeNumber(149),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IAddCarry(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1913,10 +2096,11 @@ object Instruction {
           "OpISubBorrow",
           SPIRVOpcodeNumber(150),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ISubBorrow(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -1926,10 +2110,11 @@ object Instruction {
           "OpUMulExtended",
           SPIRVOpcodeNumber(151),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UMulExtended(
                     values.required(0),
@@ -1944,10 +2129,11 @@ object Instruction {
           "OpSMulExtended",
           SPIRVOpcodeNumber(152),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SMulExtended(
                     values.required(0),
@@ -1962,10 +2148,11 @@ object Instruction {
           "OpAny",
           SPIRVOpcodeNumber(154),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Any(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1974,10 +2161,11 @@ object Instruction {
           "OpAll",
           SPIRVOpcodeNumber(155),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.All(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1986,10 +2174,11 @@ object Instruction {
           "OpIsNan",
           SPIRVOpcodeNumber(156),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.IsNan(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -1998,10 +2187,11 @@ object Instruction {
           "OpIsInf",
           SPIRVOpcodeNumber(157),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.IsInf(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2010,10 +2200,11 @@ object Instruction {
           "OpIsFinite",
           SPIRVOpcodeNumber(158),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.IsFinite(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2022,10 +2213,11 @@ object Instruction {
           "OpIsNormal",
           SPIRVOpcodeNumber(159),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.IsNormal(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2034,10 +2226,11 @@ object Instruction {
           "OpSignBitSet",
           SPIRVOpcodeNumber(160),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SignBitSet(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2046,10 +2239,11 @@ object Instruction {
           "OpLessOrGreater",
           SPIRVOpcodeNumber(161),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.LessOrGreater(
                     values.required(0),
@@ -2064,10 +2258,11 @@ object Instruction {
           "OpOrdered",
           SPIRVOpcodeNumber(162),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Ordered(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2077,10 +2272,11 @@ object Instruction {
           "OpUnordered",
           SPIRVOpcodeNumber(163),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Unordered(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2090,10 +2286,11 @@ object Instruction {
           "OpLogicalEqual",
           SPIRVOpcodeNumber(164),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.LogicalEqual(
                     values.required(0),
@@ -2108,10 +2305,11 @@ object Instruction {
           "OpLogicalNotEqual",
           SPIRVOpcodeNumber(165),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.LogicalNotEqual(
                     values.required(0),
@@ -2126,10 +2324,11 @@ object Instruction {
           "OpLogicalOr",
           SPIRVOpcodeNumber(166),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.LogicalOr(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2139,10 +2338,11 @@ object Instruction {
           "OpLogicalAnd",
           SPIRVOpcodeNumber(167),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.LogicalAnd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2152,10 +2352,11 @@ object Instruction {
           "OpLogicalNot",
           SPIRVOpcodeNumber(168),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.LogicalNot(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2164,10 +2365,11 @@ object Instruction {
           "OpSelect",
           SPIRVOpcodeNumber(169),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Select(
                     resultType = values.required(0),
@@ -2183,10 +2385,11 @@ object Instruction {
           "OpIEqual",
           SPIRVOpcodeNumber(170),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2196,10 +2399,11 @@ object Instruction {
           "OpINotEqual",
           SPIRVOpcodeNumber(171),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.INotEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2209,10 +2413,11 @@ object Instruction {
           "OpUGreaterThan",
           SPIRVOpcodeNumber(172),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UGreaterThan(
                     values.required(0),
@@ -2227,10 +2432,11 @@ object Instruction {
           "OpSGreaterThan",
           SPIRVOpcodeNumber(173),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SGreaterThan(
                     values.required(0),
@@ -2245,10 +2451,11 @@ object Instruction {
           "OpUGreaterThanEqual",
           SPIRVOpcodeNumber(174),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UGreaterThanEqual(
                     values.required(0),
@@ -2263,10 +2470,11 @@ object Instruction {
           "OpSGreaterThanEqual",
           SPIRVOpcodeNumber(175),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SGreaterThanEqual(
                     values.required(0),
@@ -2281,10 +2489,11 @@ object Instruction {
           "OpULessThan",
           SPIRVOpcodeNumber(176),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ULessThan(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2294,10 +2503,11 @@ object Instruction {
           "OpSLessThan",
           SPIRVOpcodeNumber(177),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SLessThan(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2307,10 +2517,11 @@ object Instruction {
           "OpULessThanEqual",
           SPIRVOpcodeNumber(178),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ULessThanEqual(
                     values.required(0),
@@ -2325,10 +2536,11 @@ object Instruction {
           "OpSLessThanEqual",
           SPIRVOpcodeNumber(179),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SLessThanEqual(
                     values.required(0),
@@ -2343,10 +2555,11 @@ object Instruction {
           "OpFOrdEqual",
           SPIRVOpcodeNumber(180),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FOrdEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2356,10 +2569,11 @@ object Instruction {
           "OpFUnordEqual",
           SPIRVOpcodeNumber(181),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FUnordEqual(
                     values.required(0),
@@ -2374,10 +2588,11 @@ object Instruction {
           "OpFOrdNotEqual",
           SPIRVOpcodeNumber(182),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FOrdNotEqual(
                     values.required(0),
@@ -2392,10 +2607,11 @@ object Instruction {
           "OpFUnordNotEqual",
           SPIRVOpcodeNumber(183),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FUnordNotEqual(
                     values.required(0),
@@ -2410,10 +2626,11 @@ object Instruction {
           "OpFOrdLessThan",
           SPIRVOpcodeNumber(184),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FOrdLessThan(
                     values.required(0),
@@ -2428,10 +2645,11 @@ object Instruction {
           "OpFUnordLessThan",
           SPIRVOpcodeNumber(185),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FUnordLessThan(
                     values.required(0),
@@ -2446,10 +2664,11 @@ object Instruction {
           "OpFOrdGreaterThan",
           SPIRVOpcodeNumber(186),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FOrdGreaterThan(
                     values.required(0),
@@ -2464,10 +2683,11 @@ object Instruction {
           "OpFUnordGreaterThan",
           SPIRVOpcodeNumber(187),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FUnordGreaterThan(
                     values.required(0),
@@ -2482,10 +2702,11 @@ object Instruction {
           "OpFOrdLessThanEqual",
           SPIRVOpcodeNumber(188),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FOrdLessThanEqual(
                     values.required(0),
@@ -2500,10 +2721,11 @@ object Instruction {
           "OpFUnordLessThanEqual",
           SPIRVOpcodeNumber(189),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FUnordLessThanEqual(
                     values.required(0),
@@ -2518,10 +2740,11 @@ object Instruction {
           "OpFOrdGreaterThanEqual",
           SPIRVOpcodeNumber(190),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FOrdGreaterThanEqual(
                     values.required(0),
@@ -2536,10 +2759,11 @@ object Instruction {
           "OpFUnordGreaterThanEqual",
           SPIRVOpcodeNumber(191),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FUnordGreaterThanEqual(
                     values.required(0),
@@ -2554,10 +2778,11 @@ object Instruction {
           "OpShiftRightLogical",
           SPIRVOpcodeNumber(194),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ShiftRightLogical(
                     values.required(0),
@@ -2572,10 +2797,11 @@ object Instruction {
           "OpShiftRightArithmetic",
           SPIRVOpcodeNumber(195),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ShiftRightArithmetic(
                     values.required(0),
@@ -2590,10 +2816,11 @@ object Instruction {
           "OpShiftLeftLogical",
           SPIRVOpcodeNumber(196),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ShiftLeftLogical(
                     values.required(0),
@@ -2608,10 +2835,11 @@ object Instruction {
           "OpBitwiseOr",
           SPIRVOpcodeNumber(197),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitwiseOr(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2621,10 +2849,11 @@ object Instruction {
           "OpBitwiseXor",
           SPIRVOpcodeNumber(198),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitwiseXor(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2634,10 +2863,11 @@ object Instruction {
           "OpBitwiseAnd",
           SPIRVOpcodeNumber(199),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitwiseAnd(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -2647,10 +2877,11 @@ object Instruction {
           "OpNot",
           SPIRVOpcodeNumber(200),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Not(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2659,10 +2890,11 @@ object Instruction {
           "OpBitFieldInsert",
           SPIRVOpcodeNumber(201),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitFieldInsert(
                     resultType = values.required(0),
@@ -2679,10 +2911,11 @@ object Instruction {
           "OpBitFieldSExtract",
           SPIRVOpcodeNumber(202),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitFieldSExtract(
                     resultType = values.required(0),
@@ -2698,10 +2931,11 @@ object Instruction {
           "OpBitFieldUExtract",
           SPIRVOpcodeNumber(203),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitFieldUExtract(
                     resultType = values.required(0),
@@ -2717,10 +2951,11 @@ object Instruction {
           "OpBitReverse",
           SPIRVOpcodeNumber(204),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.BitReverse(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2729,10 +2964,11 @@ object Instruction {
           "OpBitCount",
           SPIRVOpcodeNumber(205),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.BitCount(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2741,10 +2977,11 @@ object Instruction {
           "OpDPdx",
           SPIRVOpcodeNumber(207),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DPdx(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2753,10 +2990,11 @@ object Instruction {
           "OpDPdy",
           SPIRVOpcodeNumber(208),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DPdy(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2765,10 +3003,11 @@ object Instruction {
           "OpFwidth",
           SPIRVOpcodeNumber(209),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Fwidth(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2777,10 +3016,11 @@ object Instruction {
           "OpDPdxFine",
           SPIRVOpcodeNumber(210),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DPdxFine(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2789,10 +3029,11 @@ object Instruction {
           "OpDPdyFine",
           SPIRVOpcodeNumber(211),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DPdyFine(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2801,10 +3042,11 @@ object Instruction {
           "OpFwidthFine",
           SPIRVOpcodeNumber(212),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.FwidthFine(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2813,10 +3055,11 @@ object Instruction {
           "OpDPdxCoarse",
           SPIRVOpcodeNumber(213),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DPdxCoarse(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2825,10 +3068,11 @@ object Instruction {
           "OpDPdyCoarse",
           SPIRVOpcodeNumber(214),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DPdyCoarse(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2837,10 +3081,11 @@ object Instruction {
           "OpFwidthCoarse",
           SPIRVOpcodeNumber(215),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.FwidthCoarse(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -2848,31 +3093,39 @@ object Instruction {
     case EmitVertex extends Definition(
           "OpEmitVertex",
           SPIRVOpcodeNumber(218),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.EmitVertex()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.EmitVertex()),
           ""
         )
     case EndPrimitive extends Definition(
           "OpEndPrimitive",
           SPIRVOpcodeNumber(219),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.EndPrimitive()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.EndPrimitive()),
           ""
         )
     case EmitStreamVertex extends Definition(
           "OpEmitStreamVertex",
           SPIRVOpcodeNumber(220),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.EmitStreamVertex(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.EmitStreamVertex(values.required(0))
+              ),
           "IdRef"
         )
     case EndStreamPrimitive extends Definition(
           "OpEndStreamPrimitive",
           SPIRVOpcodeNumber(221),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.EndStreamPrimitive(values.required(0))
               ),
           "IdRef"
@@ -2881,10 +3134,11 @@ object Instruction {
           "OpControlBarrier",
           SPIRVOpcodeNumber(224),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ControlBarrier(values.required(0), values.required(1), values.required(2))
               ),
           "IdScope IdScope IdMemorySemantics"
@@ -2893,10 +3147,11 @@ object Instruction {
           "OpMemoryBarrier",
           SPIRVOpcodeNumber(225),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.MemoryBarrier(values.required(0), values.required(1))
               ),
           "IdScope IdMemorySemantics"
@@ -2905,10 +3160,11 @@ object Instruction {
           "OpAtomicLoad",
           SPIRVOpcodeNumber(227),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicLoad(
                     resultType = values.required(0),
@@ -2924,10 +3180,11 @@ object Instruction {
           "OpAtomicStore",
           SPIRVOpcodeNumber(228),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicStore(
                     values.required(0),
@@ -2942,10 +3199,11 @@ object Instruction {
           "OpAtomicExchange",
           SPIRVOpcodeNumber(229),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicExchange(
                     resultType = values.required(0),
@@ -2962,10 +3220,11 @@ object Instruction {
           "OpAtomicCompareExchange",
           SPIRVOpcodeNumber(230),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicCompareExchange(
                     resultType = values.required(0),
@@ -2984,10 +3243,11 @@ object Instruction {
           "OpAtomicCompareExchangeWeak",
           SPIRVOpcodeNumber(231),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicCompareExchangeWeak(
                     resultType = values.required(0),
@@ -3006,10 +3266,11 @@ object Instruction {
           "OpAtomicIIncrement",
           SPIRVOpcodeNumber(232),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicIIncrement(
                     resultType = values.required(0),
@@ -3025,10 +3286,11 @@ object Instruction {
           "OpAtomicIDecrement",
           SPIRVOpcodeNumber(233),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicIDecrement(
                     resultType = values.required(0),
@@ -3044,10 +3306,11 @@ object Instruction {
           "OpAtomicIAdd",
           SPIRVOpcodeNumber(234),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicIAdd(
                     resultType = values.required(0),
@@ -3064,10 +3327,11 @@ object Instruction {
           "OpAtomicISub",
           SPIRVOpcodeNumber(235),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicISub(
                     resultType = values.required(0),
@@ -3084,10 +3348,11 @@ object Instruction {
           "OpAtomicSMin",
           SPIRVOpcodeNumber(236),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicSMin(
                     resultType = values.required(0),
@@ -3104,10 +3369,11 @@ object Instruction {
           "OpAtomicUMin",
           SPIRVOpcodeNumber(237),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicUMin(
                     resultType = values.required(0),
@@ -3124,10 +3390,11 @@ object Instruction {
           "OpAtomicSMax",
           SPIRVOpcodeNumber(238),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicSMax(
                     resultType = values.required(0),
@@ -3144,10 +3411,11 @@ object Instruction {
           "OpAtomicUMax",
           SPIRVOpcodeNumber(239),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicUMax(
                     resultType = values.required(0),
@@ -3164,10 +3432,11 @@ object Instruction {
           "OpAtomicAnd",
           SPIRVOpcodeNumber(240),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicAnd(
                     resultType = values.required(0),
@@ -3184,10 +3453,11 @@ object Instruction {
           "OpAtomicOr",
           SPIRVOpcodeNumber(241),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicOr(
                     resultType = values.required(0),
@@ -3204,10 +3474,11 @@ object Instruction {
           "OpAtomicXor",
           SPIRVOpcodeNumber(242),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicXor(
                     resultType = values.required(0),
@@ -3224,10 +3495,11 @@ object Instruction {
           "OpPhi",
           SPIRVOpcodeNumber(245),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Phi(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResultType IdResult PairIdRefIdRef*"
@@ -3236,10 +3508,11 @@ object Instruction {
           "OpLoopMerge",
           SPIRVOpcodeNumber(246),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.LoopMerge(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef IdRef LoopControl"
@@ -3248,10 +3521,11 @@ object Instruction {
           "OpSelectionMerge",
           SPIRVOpcodeNumber(247),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SelectionMerge(values.required(0), values.required(1))
               ),
           "IdRef SelectionControl"
@@ -3260,24 +3534,27 @@ object Instruction {
           "OpLabel",
           SPIRVOpcodeNumber(248),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Label(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, values => Instruction.Label(values.required(0))),
           "IdResult"
         )
     case Branch extends Definition(
           "OpBranch",
           SPIRVOpcodeNumber(249),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.Branch(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, values => Instruction.Branch(values.required(0))),
           "IdRef"
         )
     case BranchConditional extends Definition(
           "OpBranchConditional",
           SPIRVOpcodeNumber(250),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BranchConditional(
                     values.required(0),
@@ -3292,10 +3569,11 @@ object Instruction {
           "OpSwitch",
           SPIRVOpcodeNumber(251),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.Switch(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdRef IdRef PairLiteralIntegerIdRef*"
@@ -3303,36 +3581,45 @@ object Instruction {
     case Kill extends Definition(
           "OpKill",
           SPIRVOpcodeNumber(252),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Kill()),
+          definition => (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.Kill()),
           ""
         )
     case Return extends Definition(
           "OpReturn",
           SPIRVOpcodeNumber(253),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Return()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.Return()),
           ""
         )
     case ReturnValue extends Definition(
           "OpReturnValue",
           SPIRVOpcodeNumber(254),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.ReturnValue(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.ReturnValue(values.required(0))
+              ),
           "IdRef"
         )
     case Unreachable extends Definition(
           "OpUnreachable",
           SPIRVOpcodeNumber(255),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.Unreachable()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.Unreachable()),
           ""
         )
     case LifetimeStart extends Definition(
           "OpLifetimeStart",
           SPIRVOpcodeNumber(256),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.LifetimeStart(values.required(0), values.required(1))
               ),
           "IdRef LiteralInteger"
@@ -3341,10 +3628,11 @@ object Instruction {
           "OpLifetimeStop",
           SPIRVOpcodeNumber(257),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.LifetimeStop(values.required(0), values.required(1))
               ),
           "IdRef LiteralInteger"
@@ -3353,10 +3641,11 @@ object Instruction {
           "OpGroupAsyncCopy",
           SPIRVOpcodeNumber(259),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupAsyncCopy(
                     resultType = values.required(0),
@@ -3375,10 +3664,11 @@ object Instruction {
           "OpGroupWaitEvents",
           SPIRVOpcodeNumber(260),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GroupWaitEvents(values.required(0), values.required(1), values.required(2))
               ),
           "IdScope IdRef IdRef"
@@ -3387,10 +3677,11 @@ object Instruction {
           "OpGroupAll",
           SPIRVOpcodeNumber(261),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupAll(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -3400,10 +3691,11 @@ object Instruction {
           "OpGroupAny",
           SPIRVOpcodeNumber(262),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupAny(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -3413,10 +3705,11 @@ object Instruction {
           "OpGroupBroadcast",
           SPIRVOpcodeNumber(263),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupBroadcast(
                     resultType = values.required(0),
@@ -3432,10 +3725,11 @@ object Instruction {
           "OpGroupIAdd",
           SPIRVOpcodeNumber(264),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupIAdd(
                     resultType = values.required(0),
@@ -3451,10 +3745,11 @@ object Instruction {
           "OpGroupFAdd",
           SPIRVOpcodeNumber(265),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupFAdd(
                     resultType = values.required(0),
@@ -3470,10 +3765,11 @@ object Instruction {
           "OpGroupFMin",
           SPIRVOpcodeNumber(266),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupFMin(
                     resultType = values.required(0),
@@ -3489,10 +3785,11 @@ object Instruction {
           "OpGroupUMin",
           SPIRVOpcodeNumber(267),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupUMin(
                     resultType = values.required(0),
@@ -3508,10 +3805,11 @@ object Instruction {
           "OpGroupSMin",
           SPIRVOpcodeNumber(268),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupSMin(
                     resultType = values.required(0),
@@ -3527,10 +3825,11 @@ object Instruction {
           "OpGroupFMax",
           SPIRVOpcodeNumber(269),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupFMax(
                     resultType = values.required(0),
@@ -3546,10 +3845,11 @@ object Instruction {
           "OpGroupUMax",
           SPIRVOpcodeNumber(270),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupUMax(
                     resultType = values.required(0),
@@ -3565,10 +3865,11 @@ object Instruction {
           "OpGroupSMax",
           SPIRVOpcodeNumber(271),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupSMax(
                     resultType = values.required(0),
@@ -3584,10 +3885,11 @@ object Instruction {
           "OpReadPipe",
           SPIRVOpcodeNumber(274),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReadPipe(
                     resultType = values.required(0),
@@ -3604,10 +3906,11 @@ object Instruction {
           "OpWritePipe",
           SPIRVOpcodeNumber(275),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.WritePipe(
                     resultType = values.required(0),
@@ -3624,10 +3927,11 @@ object Instruction {
           "OpReservedReadPipe",
           SPIRVOpcodeNumber(276),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReservedReadPipe(
                     resultType = values.required(0),
@@ -3646,10 +3950,11 @@ object Instruction {
           "OpReservedWritePipe",
           SPIRVOpcodeNumber(277),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReservedWritePipe(
                     resultType = values.required(0),
@@ -3668,10 +3973,11 @@ object Instruction {
           "OpReserveReadPipePackets",
           SPIRVOpcodeNumber(278),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReserveReadPipePackets(
                     resultType = values.required(0),
@@ -3688,10 +3994,11 @@ object Instruction {
           "OpReserveWritePipePackets",
           SPIRVOpcodeNumber(279),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReserveWritePipePackets(
                     resultType = values.required(0),
@@ -3708,10 +4015,11 @@ object Instruction {
           "OpCommitReadPipe",
           SPIRVOpcodeNumber(280),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CommitReadPipe(
                     values.required(0),
@@ -3726,10 +4034,11 @@ object Instruction {
           "OpCommitWritePipe",
           SPIRVOpcodeNumber(281),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CommitWritePipe(
                     values.required(0),
@@ -3744,10 +4053,11 @@ object Instruction {
           "OpIsValidReserveId",
           SPIRVOpcodeNumber(282),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.IsValidReserveId(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -3756,10 +4066,11 @@ object Instruction {
           "OpGetNumPipePackets",
           SPIRVOpcodeNumber(283),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetNumPipePackets(
                     resultType = values.required(0),
@@ -3775,10 +4086,11 @@ object Instruction {
           "OpGetMaxPipePackets",
           SPIRVOpcodeNumber(284),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetMaxPipePackets(
                     resultType = values.required(0),
@@ -3794,10 +4106,11 @@ object Instruction {
           "OpGroupReserveReadPipePackets",
           SPIRVOpcodeNumber(285),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupReserveReadPipePackets(
                     resultType = values.required(0),
@@ -3815,10 +4128,11 @@ object Instruction {
           "OpGroupReserveWritePipePackets",
           SPIRVOpcodeNumber(286),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupReserveWritePipePackets(
                     resultType = values.required(0),
@@ -3836,10 +4150,11 @@ object Instruction {
           "OpGroupCommitReadPipe",
           SPIRVOpcodeNumber(287),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupCommitReadPipe(
                     execution = values.required(0),
@@ -3855,10 +4170,11 @@ object Instruction {
           "OpGroupCommitWritePipe",
           SPIRVOpcodeNumber(288),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupCommitWritePipe(
                     execution = values.required(0),
@@ -3874,10 +4190,11 @@ object Instruction {
           "OpEnqueueMarker",
           SPIRVOpcodeNumber(291),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.EnqueueMarker(
                     resultType = values.required(0),
@@ -3894,10 +4211,11 @@ object Instruction {
           "OpEnqueueKernel",
           SPIRVOpcodeNumber(292),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.EnqueueKernel(
                     resultType = values.required(0),
@@ -3921,10 +4239,11 @@ object Instruction {
           "OpGetKernelNDrangeSubGroupCount",
           SPIRVOpcodeNumber(293),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetKernelNDrangeSubGroupCount(
                     resultType = values.required(0),
@@ -3942,10 +4261,11 @@ object Instruction {
           "OpGetKernelNDrangeMaxSubGroupSize",
           SPIRVOpcodeNumber(294),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetKernelNDrangeMaxSubGroupSize(
                     resultType = values.required(0),
@@ -3963,10 +4283,11 @@ object Instruction {
           "OpGetKernelWorkGroupSize",
           SPIRVOpcodeNumber(295),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetKernelWorkGroupSize(
                     resultType = values.required(0),
@@ -3983,10 +4304,11 @@ object Instruction {
           "OpGetKernelPreferredWorkGroupSizeMultiple",
           SPIRVOpcodeNumber(296),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetKernelPreferredWorkGroupSizeMultiple(
                     resultType = values.required(0),
@@ -4003,25 +4325,37 @@ object Instruction {
           "OpRetainEvent",
           SPIRVOpcodeNumber(297),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, values => Instruction.RetainEvent(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.RetainEvent(values.required(0))
+              ),
           "IdRef"
         )
     case ReleaseEvent extends Definition(
           "OpReleaseEvent",
           SPIRVOpcodeNumber(298),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.ReleaseEvent(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.ReleaseEvent(values.required(0))
+              ),
           "IdRef"
         )
     case CreateUserEvent extends Definition(
           "OpCreateUserEvent",
           SPIRVOpcodeNumber(299),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.CreateUserEvent(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -4030,10 +4364,11 @@ object Instruction {
           "OpIsValidEvent",
           SPIRVOpcodeNumber(300),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.IsValidEvent(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -4042,10 +4377,11 @@ object Instruction {
           "OpSetUserEventStatus",
           SPIRVOpcodeNumber(301),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SetUserEventStatus(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -4054,10 +4390,11 @@ object Instruction {
           "OpCaptureEventProfilingInfo",
           SPIRVOpcodeNumber(302),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CaptureEventProfilingInfo(values.required(0), values.required(1), values.required(2))
               ),
@@ -4067,10 +4404,11 @@ object Instruction {
           "OpGetDefaultQueue",
           SPIRVOpcodeNumber(303),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GetDefaultQueue(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -4079,10 +4417,11 @@ object Instruction {
           "OpBuildNDRange",
           SPIRVOpcodeNumber(304),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BuildNDRange(
                     resultType = values.required(0),
@@ -4098,10 +4437,11 @@ object Instruction {
           "OpImageSparseSampleImplicitLod",
           SPIRVOpcodeNumber(305),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleImplicitLod(
                     resultType = values.required(0),
@@ -4117,10 +4457,11 @@ object Instruction {
           "OpImageSparseSampleExplicitLod",
           SPIRVOpcodeNumber(306),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleExplicitLod(
                     resultType = values.required(0),
@@ -4136,10 +4477,11 @@ object Instruction {
           "OpImageSparseSampleDrefImplicitLod",
           SPIRVOpcodeNumber(307),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleDrefImplicitLod(
                     resultType = values.required(0),
@@ -4156,10 +4498,11 @@ object Instruction {
           "OpImageSparseSampleDrefExplicitLod",
           SPIRVOpcodeNumber(308),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleDrefExplicitLod(
                     resultType = values.required(0),
@@ -4176,10 +4519,11 @@ object Instruction {
           "OpImageSparseSampleProjImplicitLod",
           SPIRVOpcodeNumber(309),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleProjImplicitLod(
                     resultType = values.required(0),
@@ -4195,10 +4539,11 @@ object Instruction {
           "OpImageSparseSampleProjExplicitLod",
           SPIRVOpcodeNumber(310),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleProjExplicitLod(
                     resultType = values.required(0),
@@ -4214,10 +4559,11 @@ object Instruction {
           "OpImageSparseSampleProjDrefImplicitLod",
           SPIRVOpcodeNumber(311),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleProjDrefImplicitLod(
                     resultType = values.required(0),
@@ -4234,10 +4580,11 @@ object Instruction {
           "OpImageSparseSampleProjDrefExplicitLod",
           SPIRVOpcodeNumber(312),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseSampleProjDrefExplicitLod(
                     resultType = values.required(0),
@@ -4254,10 +4601,11 @@ object Instruction {
           "OpImageSparseFetch",
           SPIRVOpcodeNumber(313),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseFetch(
                     resultType = values.required(0),
@@ -4273,10 +4621,11 @@ object Instruction {
           "OpImageSparseGather",
           SPIRVOpcodeNumber(314),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseGather(
                     resultType = values.required(0),
@@ -4293,10 +4642,11 @@ object Instruction {
           "OpImageSparseDrefGather",
           SPIRVOpcodeNumber(315),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseDrefGather(
                     resultType = values.required(0),
@@ -4313,10 +4663,11 @@ object Instruction {
           "OpImageSparseTexelsResident",
           SPIRVOpcodeNumber(316),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseTexelsResident(values.required(0), values.required(1), values.required(2))
               ),
@@ -4325,17 +4676,19 @@ object Instruction {
     case NoLine extends Definition(
           "OpNoLine",
           SPIRVOpcodeNumber(317),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.NoLine()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.NoLine()),
           ""
         )
     case AtomicFlagTestAndSet extends Definition(
           "OpAtomicFlagTestAndSet",
           SPIRVOpcodeNumber(318),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicFlagTestAndSet(
                     resultType = values.required(0),
@@ -4351,10 +4704,11 @@ object Instruction {
           "OpAtomicFlagClear",
           SPIRVOpcodeNumber(319),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.AtomicFlagClear(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef IdScope IdMemorySemantics"
@@ -4363,10 +4717,11 @@ object Instruction {
           "OpImageSparseRead",
           SPIRVOpcodeNumber(320),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSparseRead(
                     resultType = values.required(0),
@@ -4382,10 +4737,11 @@ object Instruction {
           "OpSizeOf",
           SPIRVOpcodeNumber(321),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SizeOf(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -4394,18 +4750,24 @@ object Instruction {
           "OpTypePipeStorage",
           SPIRVOpcodeNumber(322),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.TypePipeStorage(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypePipeStorage(values.required(0))
+              ),
           "IdResult"
         )
     case ConstantPipeStorage extends Definition(
           "OpConstantPipeStorage",
           SPIRVOpcodeNumber(323),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConstantPipeStorage(
                     resultType = values.required(0),
@@ -4421,10 +4783,11 @@ object Instruction {
           "OpCreatePipeFromPipeStorage",
           SPIRVOpcodeNumber(324),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CreatePipeFromPipeStorage(values.required(0), values.required(1), values.required(2))
               ),
@@ -4434,10 +4797,11 @@ object Instruction {
           "OpGetKernelLocalSizeForSubgroupCount",
           SPIRVOpcodeNumber(325),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetKernelLocalSizeForSubgroupCount(
                     resultType = values.required(0),
@@ -4455,10 +4819,11 @@ object Instruction {
           "OpGetKernelMaxNumSubgroups",
           SPIRVOpcodeNumber(326),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GetKernelMaxNumSubgroups(
                     resultType = values.required(0),
@@ -4475,18 +4840,24 @@ object Instruction {
           "OpTypeNamedBarrier",
           SPIRVOpcodeNumber(327),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.TypeNamedBarrier(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeNamedBarrier(values.required(0))
+              ),
           "IdResult"
         )
     case NamedBarrierInitialize extends Definition(
           "OpNamedBarrierInitialize",
           SPIRVOpcodeNumber(328),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.NamedBarrierInitialize(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -4495,10 +4866,11 @@ object Instruction {
           "OpMemoryNamedBarrier",
           SPIRVOpcodeNumber(329),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.MemoryNamedBarrier(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef IdScope IdMemorySemantics"
@@ -4507,18 +4879,24 @@ object Instruction {
           "OpModuleProcessed",
           SPIRVOpcodeNumber(330),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.ModuleProcessed(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.ModuleProcessed(values.required(0))
+              ),
           "LiteralString"
         )
     case ExecutionModeId extends Definition(
           "OpExecutionModeId",
           SPIRVOpcodeNumber(331),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ExecutionModeId(values.required(0), values.required(1))
               ),
           "IdRef ExecutionMode"
@@ -4527,10 +4905,11 @@ object Instruction {
           "OpDecorateId",
           SPIRVOpcodeNumber(332),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DecorateId(values.required(0), values.required(1))
               ),
           "IdRef Decoration"
@@ -4539,10 +4918,11 @@ object Instruction {
           "OpGroupNonUniformElect",
           SPIRVOpcodeNumber(333),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GroupNonUniformElect(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdScope"
@@ -4551,10 +4931,11 @@ object Instruction {
           "OpGroupNonUniformAll",
           SPIRVOpcodeNumber(334),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformAll(
                     values.required(0),
@@ -4569,10 +4950,11 @@ object Instruction {
           "OpGroupNonUniformAny",
           SPIRVOpcodeNumber(335),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformAny(
                     values.required(0),
@@ -4587,10 +4969,11 @@ object Instruction {
           "OpGroupNonUniformAllEqual",
           SPIRVOpcodeNumber(336),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformAllEqual(
                     values.required(0),
@@ -4605,10 +4988,11 @@ object Instruction {
           "OpGroupNonUniformBroadcast",
           SPIRVOpcodeNumber(337),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBroadcast(
                     resultType = values.required(0),
@@ -4624,10 +5008,11 @@ object Instruction {
           "OpGroupNonUniformBroadcastFirst",
           SPIRVOpcodeNumber(338),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBroadcastFirst(
                     values.required(0),
@@ -4642,10 +5027,11 @@ object Instruction {
           "OpGroupNonUniformBallot",
           SPIRVOpcodeNumber(339),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBallot(
                     values.required(0),
@@ -4660,10 +5046,11 @@ object Instruction {
           "OpGroupNonUniformInverseBallot",
           SPIRVOpcodeNumber(340),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformInverseBallot(
                     values.required(0),
@@ -4678,10 +5065,11 @@ object Instruction {
           "OpGroupNonUniformBallotBitExtract",
           SPIRVOpcodeNumber(341),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBallotBitExtract(
                     resultType = values.required(0),
@@ -4697,10 +5085,11 @@ object Instruction {
           "OpGroupNonUniformBallotBitCount",
           SPIRVOpcodeNumber(342),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBallotBitCount(
                     resultType = values.required(0),
@@ -4716,10 +5105,11 @@ object Instruction {
           "OpGroupNonUniformBallotFindLSB",
           SPIRVOpcodeNumber(343),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBallotFindLSB(
                     values.required(0),
@@ -4734,10 +5124,11 @@ object Instruction {
           "OpGroupNonUniformBallotFindMSB",
           SPIRVOpcodeNumber(344),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBallotFindMSB(
                     values.required(0),
@@ -4752,10 +5143,11 @@ object Instruction {
           "OpGroupNonUniformShuffle",
           SPIRVOpcodeNumber(345),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformShuffle(
                     resultType = values.required(0),
@@ -4771,10 +5163,11 @@ object Instruction {
           "OpGroupNonUniformShuffleXor",
           SPIRVOpcodeNumber(346),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformShuffleXor(
                     resultType = values.required(0),
@@ -4790,10 +5183,11 @@ object Instruction {
           "OpGroupNonUniformShuffleUp",
           SPIRVOpcodeNumber(347),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformShuffleUp(
                     resultType = values.required(0),
@@ -4809,10 +5203,11 @@ object Instruction {
           "OpGroupNonUniformShuffleDown",
           SPIRVOpcodeNumber(348),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformShuffleDown(
                     resultType = values.required(0),
@@ -4828,10 +5223,11 @@ object Instruction {
           "OpGroupNonUniformIAdd",
           SPIRVOpcodeNumber(349),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformIAdd(
                     resultType = values.required(0),
@@ -4848,10 +5244,11 @@ object Instruction {
           "OpGroupNonUniformFAdd",
           SPIRVOpcodeNumber(350),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformFAdd(
                     resultType = values.required(0),
@@ -4868,10 +5265,11 @@ object Instruction {
           "OpGroupNonUniformIMul",
           SPIRVOpcodeNumber(351),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformIMul(
                     resultType = values.required(0),
@@ -4888,10 +5286,11 @@ object Instruction {
           "OpGroupNonUniformFMul",
           SPIRVOpcodeNumber(352),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformFMul(
                     resultType = values.required(0),
@@ -4908,10 +5307,11 @@ object Instruction {
           "OpGroupNonUniformSMin",
           SPIRVOpcodeNumber(353),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformSMin(
                     resultType = values.required(0),
@@ -4928,10 +5328,11 @@ object Instruction {
           "OpGroupNonUniformUMin",
           SPIRVOpcodeNumber(354),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformUMin(
                     resultType = values.required(0),
@@ -4948,10 +5349,11 @@ object Instruction {
           "OpGroupNonUniformFMin",
           SPIRVOpcodeNumber(355),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformFMin(
                     resultType = values.required(0),
@@ -4968,10 +5370,11 @@ object Instruction {
           "OpGroupNonUniformSMax",
           SPIRVOpcodeNumber(356),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformSMax(
                     resultType = values.required(0),
@@ -4988,10 +5391,11 @@ object Instruction {
           "OpGroupNonUniformUMax",
           SPIRVOpcodeNumber(357),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformUMax(
                     resultType = values.required(0),
@@ -5008,10 +5412,11 @@ object Instruction {
           "OpGroupNonUniformFMax",
           SPIRVOpcodeNumber(358),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformFMax(
                     resultType = values.required(0),
@@ -5028,10 +5433,11 @@ object Instruction {
           "OpGroupNonUniformBitwiseAnd",
           SPIRVOpcodeNumber(359),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBitwiseAnd(
                     resultType = values.required(0),
@@ -5048,10 +5454,11 @@ object Instruction {
           "OpGroupNonUniformBitwiseOr",
           SPIRVOpcodeNumber(360),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBitwiseOr(
                     resultType = values.required(0),
@@ -5068,10 +5475,11 @@ object Instruction {
           "OpGroupNonUniformBitwiseXor",
           SPIRVOpcodeNumber(361),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformBitwiseXor(
                     resultType = values.required(0),
@@ -5088,10 +5496,11 @@ object Instruction {
           "OpGroupNonUniformLogicalAnd",
           SPIRVOpcodeNumber(362),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformLogicalAnd(
                     resultType = values.required(0),
@@ -5108,10 +5517,11 @@ object Instruction {
           "OpGroupNonUniformLogicalOr",
           SPIRVOpcodeNumber(363),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformLogicalOr(
                     resultType = values.required(0),
@@ -5128,10 +5538,11 @@ object Instruction {
           "OpGroupNonUniformLogicalXor",
           SPIRVOpcodeNumber(364),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformLogicalXor(
                     resultType = values.required(0),
@@ -5148,10 +5559,11 @@ object Instruction {
           "OpGroupNonUniformQuadBroadcast",
           SPIRVOpcodeNumber(365),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformQuadBroadcast(
                     resultType = values.required(0),
@@ -5167,10 +5579,11 @@ object Instruction {
           "OpGroupNonUniformQuadSwap",
           SPIRVOpcodeNumber(366),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformQuadSwap(
                     resultType = values.required(0),
@@ -5186,10 +5599,11 @@ object Instruction {
           "OpCopyLogical",
           SPIRVOpcodeNumber(400),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.CopyLogical(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -5198,10 +5612,11 @@ object Instruction {
           "OpPtrEqual",
           SPIRVOpcodeNumber(401),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.PtrEqual(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -5211,10 +5626,11 @@ object Instruction {
           "OpPtrNotEqual",
           SPIRVOpcodeNumber(402),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.PtrNotEqual(
                     values.required(0),
@@ -5229,10 +5645,11 @@ object Instruction {
           "OpPtrDiff",
           SPIRVOpcodeNumber(403),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.PtrDiff(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -5242,10 +5659,11 @@ object Instruction {
           "OpColorAttachmentReadEXT",
           SPIRVOpcodeNumber(4160),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ColorAttachmentReadEXT(
                     values.required(0),
@@ -5260,10 +5678,11 @@ object Instruction {
           "OpDepthAttachmentReadEXT",
           SPIRVOpcodeNumber(4161),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DepthAttachmentReadEXT(values.required(0), values.required(1), values.optional(2))
               ),
           "IdResultType IdResult IdRef?"
@@ -5272,10 +5691,11 @@ object Instruction {
           "OpStencilAttachmentReadEXT",
           SPIRVOpcodeNumber(4162),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.StencilAttachmentReadEXT(values.required(0), values.required(1), values.optional(2))
               ),
@@ -5285,10 +5705,11 @@ object Instruction {
           "OpTypeTensorARM",
           SPIRVOpcodeNumber(4163),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TypeTensorARM(
                     values.required(0),
@@ -5303,10 +5724,11 @@ object Instruction {
           "OpTensorReadARM",
           SPIRVOpcodeNumber(4164),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorReadARM(
                     resultType = values.required(0),
@@ -5322,10 +5744,11 @@ object Instruction {
           "OpTensorWriteARM",
           SPIRVOpcodeNumber(4165),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorWriteARM(
                     values.required(0),
@@ -5340,10 +5763,11 @@ object Instruction {
           "OpTensorQuerySizeARM",
           SPIRVOpcodeNumber(4166),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorQuerySizeARM(
                     values.required(0),
@@ -5358,10 +5782,11 @@ object Instruction {
           "OpGraphConstantARM",
           SPIRVOpcodeNumber(4181),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GraphConstantARM(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult LiteralInteger"
@@ -5370,10 +5795,11 @@ object Instruction {
           "OpGraphEntryPointARM",
           SPIRVOpcodeNumber(4182),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GraphEntryPointARM(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdRef LiteralString IdRef*"
@@ -5382,10 +5808,11 @@ object Instruction {
           "OpGraphARM",
           SPIRVOpcodeNumber(4183),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GraphARM(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -5394,10 +5821,11 @@ object Instruction {
           "OpGraphInputARM",
           SPIRVOpcodeNumber(4184),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GraphInputARM(
                     values.required(0),
@@ -5412,10 +5840,11 @@ object Instruction {
           "OpGraphSetOutputARM",
           SPIRVOpcodeNumber(4185),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.GraphSetOutputARM(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdRef IdRef IdRef*"
@@ -5423,17 +5852,19 @@ object Instruction {
     case GraphEndARM extends Definition(
           "OpGraphEndARM",
           SPIRVOpcodeNumber(4186),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.GraphEndARM()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.GraphEndARM()),
           ""
         )
     case TypeGraphARM extends Definition(
           "OpTypeGraphARM",
           SPIRVOpcodeNumber(4190),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeGraphARM(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResult LiteralInteger IdRef*"
@@ -5442,10 +5873,11 @@ object Instruction {
           "OpBitcastExtractEXT",
           SPIRVOpcodeNumber(4195),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitcastExtractEXT(
                     values.required(0),
@@ -5459,17 +5891,20 @@ object Instruction {
     case TerminateInvocation extends Definition(
           "OpTerminateInvocation",
           SPIRVOpcodeNumber(4416),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.TerminateInvocation()),
+          definition =>
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.TerminateInvocation()),
           ""
         )
     case TypeUntypedPointerKHR extends Definition(
           "OpTypeUntypedPointerKHR",
           SPIRVOpcodeNumber(4417),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeUntypedPointerKHR(values.required(0), values.required(1))
               ),
           "IdResult StorageClass"
@@ -5478,10 +5913,11 @@ object Instruction {
           "OpUntypedVariableKHR",
           SPIRVOpcodeNumber(4418),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedVariableKHR(
                     resultType = values.required(0),
@@ -5497,10 +5933,11 @@ object Instruction {
           "OpUntypedAccessChainKHR",
           SPIRVOpcodeNumber(4419),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedAccessChainKHR(
                     resultType = values.required(0),
@@ -5516,10 +5953,11 @@ object Instruction {
           "OpUntypedInBoundsAccessChainKHR",
           SPIRVOpcodeNumber(4420),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedInBoundsAccessChainKHR(
                     resultType = values.required(0),
@@ -5535,10 +5973,11 @@ object Instruction {
           "OpSubgroupBallotKHR",
           SPIRVOpcodeNumber(4421),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SubgroupBallotKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -5547,10 +5986,11 @@ object Instruction {
           "OpSubgroupFirstInvocationKHR",
           SPIRVOpcodeNumber(4422),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupFirstInvocationKHR(values.required(0), values.required(1), values.required(2))
               ),
@@ -5560,10 +6000,11 @@ object Instruction {
           "OpUntypedPtrAccessChainKHR",
           SPIRVOpcodeNumber(4423),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedPtrAccessChainKHR(
                     resultType = values.required(0),
@@ -5580,10 +6021,11 @@ object Instruction {
           "OpUntypedInBoundsPtrAccessChainKHR",
           SPIRVOpcodeNumber(4424),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedInBoundsPtrAccessChainKHR(
                     resultType = values.required(0),
@@ -5600,10 +6042,11 @@ object Instruction {
           "OpUntypedArrayLengthKHR",
           SPIRVOpcodeNumber(4425),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedArrayLengthKHR(
                     resultType = values.required(0),
@@ -5619,10 +6062,11 @@ object Instruction {
           "OpUntypedPrefetchKHR",
           SPIRVOpcodeNumber(4426),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedPrefetchKHR(
                     pointerType = values.required(0),
@@ -5638,10 +6082,11 @@ object Instruction {
           "OpFmaKHR",
           SPIRVOpcodeNumber(4427),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FmaKHR(
                     resultType = values.required(0),
@@ -5657,10 +6102,11 @@ object Instruction {
           "OpSubgroupAllKHR",
           SPIRVOpcodeNumber(4428),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SubgroupAllKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -5669,10 +6115,11 @@ object Instruction {
           "OpSubgroupAnyKHR",
           SPIRVOpcodeNumber(4429),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SubgroupAnyKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -5681,10 +6128,11 @@ object Instruction {
           "OpSubgroupAllEqualKHR",
           SPIRVOpcodeNumber(4430),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SubgroupAllEqualKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -5693,10 +6141,11 @@ object Instruction {
           "OpGroupNonUniformRotateKHR",
           SPIRVOpcodeNumber(4431),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformRotateKHR(
                     resultType = values.required(0),
@@ -5713,10 +6162,11 @@ object Instruction {
           "OpSubgroupReadInvocationKHR",
           SPIRVOpcodeNumber(4432),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupReadInvocationKHR(
                     values.required(0),
@@ -5731,10 +6181,11 @@ object Instruction {
           "OpExtInstWithForwardRefsKHR",
           SPIRVOpcodeNumber(4433),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ExtInstWithForwardRefsKHR(
                     resultType = values.required(0),
@@ -5750,10 +6201,11 @@ object Instruction {
           "OpUntypedGroupAsyncCopyKHR",
           SPIRVOpcodeNumber(4434),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedGroupAsyncCopyKHR(
                     resultType = values.required(0),
@@ -5775,10 +6227,11 @@ object Instruction {
           "OpTraceRayKHR",
           SPIRVOpcodeNumber(4445),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TraceRayKHR(
                     accel = values.required(0),
@@ -5800,10 +6253,11 @@ object Instruction {
           "OpExecuteCallableKHR",
           SPIRVOpcodeNumber(4446),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ExecuteCallableKHR(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -5812,10 +6266,11 @@ object Instruction {
           "OpConvertUToAccelerationStructureKHR",
           SPIRVOpcodeNumber(4447),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConvertUToAccelerationStructureKHR(
                     values.required(0),
@@ -5828,23 +6283,27 @@ object Instruction {
     case IgnoreIntersectionKHR extends Definition(
           "OpIgnoreIntersectionKHR",
           SPIRVOpcodeNumber(4448),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.IgnoreIntersectionKHR()),
+          definition =>
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.IgnoreIntersectionKHR()),
           ""
         )
     case TerminateRayKHR extends Definition(
           "OpTerminateRayKHR",
           SPIRVOpcodeNumber(4449),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.TerminateRayKHR()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.TerminateRayKHR()),
           ""
         )
     case SDot extends Definition(
           "OpSDot",
           SPIRVOpcodeNumber(4450),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SDot(
                     resultType = values.required(0),
@@ -5860,10 +6319,11 @@ object Instruction {
           "OpUDot",
           SPIRVOpcodeNumber(4451),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UDot(
                     resultType = values.required(0),
@@ -5879,10 +6339,11 @@ object Instruction {
           "OpSUDot",
           SPIRVOpcodeNumber(4452),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SUDot(
                     resultType = values.required(0),
@@ -5898,10 +6359,11 @@ object Instruction {
           "OpSDotAccSat",
           SPIRVOpcodeNumber(4453),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SDotAccSat(
                     resultType = values.required(0),
@@ -5918,10 +6380,11 @@ object Instruction {
           "OpUDotAccSat",
           SPIRVOpcodeNumber(4454),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UDotAccSat(
                     resultType = values.required(0),
@@ -5938,10 +6401,11 @@ object Instruction {
           "OpSUDotAccSat",
           SPIRVOpcodeNumber(4455),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SUDotAccSat(
                     resultType = values.required(0),
@@ -5958,10 +6422,11 @@ object Instruction {
           "OpTypeCooperativeMatrixKHR",
           SPIRVOpcodeNumber(4456),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TypeCooperativeMatrixKHR(
                     dest = values.required(0),
@@ -5978,10 +6443,11 @@ object Instruction {
           "OpCooperativeMatrixLoadKHR",
           SPIRVOpcodeNumber(4457),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixLoadKHR(
                     resultType = values.required(0),
@@ -5998,10 +6464,11 @@ object Instruction {
           "OpCooperativeMatrixStoreKHR",
           SPIRVOpcodeNumber(4458),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixStoreKHR(
                     pointer = values.required(0),
@@ -6017,10 +6484,11 @@ object Instruction {
           "OpCooperativeMatrixMulAddKHR",
           SPIRVOpcodeNumber(4459),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixMulAddKHR(
                     resultType = values.required(0),
@@ -6037,10 +6505,11 @@ object Instruction {
           "OpCooperativeMatrixLengthKHR",
           SPIRVOpcodeNumber(4460),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixLengthKHR(values.required(0), values.required(1), values.required(2))
               ),
@@ -6050,10 +6519,11 @@ object Instruction {
           "OpConstantCompositeReplicateEXT",
           SPIRVOpcodeNumber(4461),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConstantCompositeReplicateEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -6063,10 +6533,11 @@ object Instruction {
           "OpSpecConstantCompositeReplicateEXT",
           SPIRVOpcodeNumber(4462),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SpecConstantCompositeReplicateEXT(
                     values.required(0),
@@ -6080,10 +6551,11 @@ object Instruction {
           "OpCompositeConstructReplicateEXT",
           SPIRVOpcodeNumber(4463),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CompositeConstructReplicateEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -6093,18 +6565,24 @@ object Instruction {
           "OpTypeRayQueryKHR",
           SPIRVOpcodeNumber(4472),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.TypeRayQueryKHR(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeRayQueryKHR(values.required(0))
+              ),
           "IdResult"
         )
     case RayQueryInitializeKHR extends Definition(
           "OpRayQueryInitializeKHR",
           SPIRVOpcodeNumber(4473),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryInitializeKHR(
                     rayQuery = values.required(0),
@@ -6123,10 +6601,11 @@ object Instruction {
           "OpRayQueryTerminateKHR",
           SPIRVOpcodeNumber(4474),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RayQueryTerminateKHR(values.required(0))
               ),
           "IdRef"
@@ -6135,10 +6614,11 @@ object Instruction {
           "OpRayQueryGenerateIntersectionKHR",
           SPIRVOpcodeNumber(4475),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RayQueryGenerateIntersectionKHR(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -6147,10 +6627,11 @@ object Instruction {
           "OpRayQueryConfirmIntersectionKHR",
           SPIRVOpcodeNumber(4476),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RayQueryConfirmIntersectionKHR(values.required(0))
               ),
           "IdRef"
@@ -6159,10 +6640,11 @@ object Instruction {
           "OpRayQueryProceedKHR",
           SPIRVOpcodeNumber(4477),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RayQueryProceedKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -6171,10 +6653,11 @@ object Instruction {
           "OpRayQueryGetIntersectionTypeKHR",
           SPIRVOpcodeNumber(4479),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionTypeKHR(
                     values.required(0),
@@ -6189,10 +6672,11 @@ object Instruction {
           "OpImageSampleWeightedQCOM",
           SPIRVOpcodeNumber(4480),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleWeightedQCOM(
                     resultType = values.required(0),
@@ -6208,10 +6692,11 @@ object Instruction {
           "OpImageBoxFilterQCOM",
           SPIRVOpcodeNumber(4481),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageBoxFilterQCOM(
                     resultType = values.required(0),
@@ -6227,10 +6712,11 @@ object Instruction {
           "OpImageBlockMatchSSDQCOM",
           SPIRVOpcodeNumber(4482),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageBlockMatchSSDQCOM(
                     resultType = values.required(0),
@@ -6248,10 +6734,11 @@ object Instruction {
           "OpImageBlockMatchSADQCOM",
           SPIRVOpcodeNumber(4483),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageBlockMatchSADQCOM(
                     resultType = values.required(0),
@@ -6269,10 +6756,11 @@ object Instruction {
           "OpBitCastArrayQCOM",
           SPIRVOpcodeNumber(4497),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.BitCastArrayQCOM(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -6281,10 +6769,11 @@ object Instruction {
           "OpImageBlockMatchWindowSSDQCOM",
           SPIRVOpcodeNumber(4500),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageBlockMatchWindowSSDQCOM(
                     resultType = values.required(0),
@@ -6302,10 +6791,11 @@ object Instruction {
           "OpImageBlockMatchWindowSADQCOM",
           SPIRVOpcodeNumber(4501),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageBlockMatchWindowSADQCOM(
                     resultType = values.required(0),
@@ -6323,10 +6813,11 @@ object Instruction {
           "OpImageBlockMatchGatherSSDQCOM",
           SPIRVOpcodeNumber(4502),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageBlockMatchGatherSSDQCOM(
                     resultType = values.required(0),
@@ -6344,10 +6835,11 @@ object Instruction {
           "OpImageBlockMatchGatherSADQCOM",
           SPIRVOpcodeNumber(4503),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageBlockMatchGatherSADQCOM(
                     resultType = values.required(0),
@@ -6365,10 +6857,11 @@ object Instruction {
           "OpCompositeConstructCoopMatQCOM",
           SPIRVOpcodeNumber(4540),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CompositeConstructCoopMatQCOM(values.required(0), values.required(1), values.required(2))
               ),
@@ -6378,10 +6871,11 @@ object Instruction {
           "OpCompositeExtractCoopMatQCOM",
           SPIRVOpcodeNumber(4541),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CompositeExtractCoopMatQCOM(values.required(0), values.required(1), values.required(2))
               ),
@@ -6391,10 +6885,11 @@ object Instruction {
           "OpExtractSubArrayQCOM",
           SPIRVOpcodeNumber(4542),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ExtractSubArrayQCOM(
                     values.required(0),
@@ -6409,10 +6904,11 @@ object Instruction {
           "OpImageGatherQCOM",
           SPIRVOpcodeNumber(4545),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageGatherQCOM(
                     resultType = values.required(0),
@@ -6430,10 +6926,11 @@ object Instruction {
           "OpGroupIAddNonUniformAMD",
           SPIRVOpcodeNumber(5000),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupIAddNonUniformAMD(
                     resultType = values.required(0),
@@ -6449,10 +6946,11 @@ object Instruction {
           "OpGroupFAddNonUniformAMD",
           SPIRVOpcodeNumber(5001),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupFAddNonUniformAMD(
                     resultType = values.required(0),
@@ -6468,10 +6966,11 @@ object Instruction {
           "OpGroupFMinNonUniformAMD",
           SPIRVOpcodeNumber(5002),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupFMinNonUniformAMD(
                     resultType = values.required(0),
@@ -6487,10 +6986,11 @@ object Instruction {
           "OpGroupUMinNonUniformAMD",
           SPIRVOpcodeNumber(5003),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupUMinNonUniformAMD(
                     resultType = values.required(0),
@@ -6506,10 +7006,11 @@ object Instruction {
           "OpGroupSMinNonUniformAMD",
           SPIRVOpcodeNumber(5004),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupSMinNonUniformAMD(
                     resultType = values.required(0),
@@ -6525,10 +7026,11 @@ object Instruction {
           "OpGroupFMaxNonUniformAMD",
           SPIRVOpcodeNumber(5005),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupFMaxNonUniformAMD(
                     resultType = values.required(0),
@@ -6544,10 +7046,11 @@ object Instruction {
           "OpGroupUMaxNonUniformAMD",
           SPIRVOpcodeNumber(5006),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupUMaxNonUniformAMD(
                     resultType = values.required(0),
@@ -6563,10 +7066,11 @@ object Instruction {
           "OpGroupSMaxNonUniformAMD",
           SPIRVOpcodeNumber(5007),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupSMaxNonUniformAMD(
                     resultType = values.required(0),
@@ -6582,10 +7086,11 @@ object Instruction {
           "OpFragmentMaskFetchAMD",
           SPIRVOpcodeNumber(5011),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FragmentMaskFetchAMD(
                     values.required(0),
@@ -6600,10 +7105,11 @@ object Instruction {
           "OpFragmentFetchAMD",
           SPIRVOpcodeNumber(5012),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FragmentFetchAMD(
                     resultType = values.required(0),
@@ -6619,10 +7125,11 @@ object Instruction {
           "OpReadClockKHR",
           SPIRVOpcodeNumber(5056),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ReadClockKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdScope"
@@ -6631,10 +7138,11 @@ object Instruction {
           "OpAllocateNodePayloadsAMDX",
           SPIRVOpcodeNumber(5074),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AllocateNodePayloadsAMDX(
                     resultType = values.required(0),
@@ -6650,10 +7158,11 @@ object Instruction {
           "OpEnqueueNodePayloadsAMDX",
           SPIRVOpcodeNumber(5075),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.EnqueueNodePayloadsAMDX(values.required(0))
               ),
           "IdRef"
@@ -6662,10 +7171,11 @@ object Instruction {
           "OpTypeNodePayloadArrayAMDX",
           SPIRVOpcodeNumber(5076),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeNodePayloadArrayAMDX(values.required(0), values.required(1))
               ),
           "IdResult IdRef"
@@ -6674,10 +7184,11 @@ object Instruction {
           "OpFinishWritingNodePayloadAMDX",
           SPIRVOpcodeNumber(5078),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FinishWritingNodePayloadAMDX(values.required(0), values.required(1), values.required(2))
               ),
@@ -6687,10 +7198,11 @@ object Instruction {
           "OpNodePayloadArrayLengthAMDX",
           SPIRVOpcodeNumber(5090),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.NodePayloadArrayLengthAMDX(values.required(0), values.required(1), values.required(2))
               ),
@@ -6700,10 +7212,11 @@ object Instruction {
           "OpIsNodePayloadValidAMDX",
           SPIRVOpcodeNumber(5101),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IsNodePayloadValidAMDX(
                     values.required(0),
@@ -6718,10 +7231,11 @@ object Instruction {
           "OpConstantStringAMDX",
           SPIRVOpcodeNumber(5103),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantStringAMDX(values.required(0), values.required(1))
               ),
           "IdResult LiteralString"
@@ -6730,10 +7244,11 @@ object Instruction {
           "OpSpecConstantStringAMDX",
           SPIRVOpcodeNumber(5104),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SpecConstantStringAMDX(values.required(0), values.required(1))
               ),
           "IdResult LiteralString"
@@ -6742,10 +7257,11 @@ object Instruction {
           "OpGroupNonUniformQuadAllKHR",
           SPIRVOpcodeNumber(5110),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformQuadAllKHR(values.required(0), values.required(1), values.required(2))
               ),
@@ -6755,10 +7271,11 @@ object Instruction {
           "OpGroupNonUniformQuadAnyKHR",
           SPIRVOpcodeNumber(5111),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformQuadAnyKHR(values.required(0), values.required(1), values.required(2))
               ),
@@ -6768,10 +7285,11 @@ object Instruction {
           "OpTypeBufferEXT",
           SPIRVOpcodeNumber(5115),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeBufferEXT(values.required(0), values.required(1))
               ),
           "IdResult StorageClass"
@@ -6780,10 +7298,11 @@ object Instruction {
           "OpBufferPointerEXT",
           SPIRVOpcodeNumber(5119),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.BufferPointerEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -6792,10 +7311,11 @@ object Instruction {
           "OpAbortKHR",
           SPIRVOpcodeNumber(5121),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.AbortKHR(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -6804,10 +7324,11 @@ object Instruction {
           "OpUntypedImageTexelPointerEXT",
           SPIRVOpcodeNumber(5126),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedImageTexelPointerEXT(
                     resultType = values.required(0),
@@ -6824,10 +7345,11 @@ object Instruction {
           "OpMemberDecorateIdEXT",
           SPIRVOpcodeNumber(5127),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.MemberDecorateIdEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef LiteralInteger Decoration"
@@ -6836,10 +7358,11 @@ object Instruction {
           "OpConstantSizeOfEXT",
           SPIRVOpcodeNumber(5129),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantSizeOfEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -6848,10 +7371,11 @@ object Instruction {
           "OpConstantDataKHR",
           SPIRVOpcodeNumber(5147),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantDataKHR(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResultType IdResult LiteralInteger*"
@@ -6860,10 +7384,11 @@ object Instruction {
           "OpSpecConstantDataKHR",
           SPIRVOpcodeNumber(5148),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SpecConstantDataKHR(values.required(0), values.required(1), values.repeated(2))
               ),
           "IdResultType IdResult LiteralInteger*"
@@ -6872,10 +7397,11 @@ object Instruction {
           "OpPoisonKHR",
           SPIRVOpcodeNumber(5158),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.PoisonKHR(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -6884,10 +7410,11 @@ object Instruction {
           "OpFreezeKHR",
           SPIRVOpcodeNumber(5159),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.FreezeKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -6896,10 +7423,11 @@ object Instruction {
           "OpHitObjectRecordHitMotionNV",
           SPIRVOpcodeNumber(5249),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordHitMotionNV(
                     hitObject = values.required(0),
@@ -6924,10 +7452,11 @@ object Instruction {
           "OpHitObjectRecordHitWithIndexMotionNV",
           SPIRVOpcodeNumber(5250),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordHitWithIndexMotionNV(
                     hitObject = values.required(0),
@@ -6951,10 +7480,11 @@ object Instruction {
           "OpHitObjectRecordMissMotionNV",
           SPIRVOpcodeNumber(5251),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordMissMotionNV(
                     hitObject = values.required(0),
@@ -6972,10 +7502,11 @@ object Instruction {
           "OpHitObjectGetWorldToObjectNV",
           SPIRVOpcodeNumber(5252),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetWorldToObjectNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -6985,10 +7516,11 @@ object Instruction {
           "OpHitObjectGetObjectToWorldNV",
           SPIRVOpcodeNumber(5253),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetObjectToWorldNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -6998,10 +7530,11 @@ object Instruction {
           "OpHitObjectGetObjectRayDirectionNV",
           SPIRVOpcodeNumber(5254),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetObjectRayDirectionNV(
                     values.required(0),
@@ -7015,10 +7548,11 @@ object Instruction {
           "OpHitObjectGetObjectRayOriginNV",
           SPIRVOpcodeNumber(5255),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetObjectRayOriginNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -7028,10 +7562,11 @@ object Instruction {
           "OpHitObjectTraceRayMotionNV",
           SPIRVOpcodeNumber(5256),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectTraceRayMotionNV(
                     hitObject = values.required(0),
@@ -7055,10 +7590,11 @@ object Instruction {
           "OpHitObjectGetShaderRecordBufferHandleNV",
           SPIRVOpcodeNumber(5257),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetShaderRecordBufferHandleNV(
                     values.required(0),
@@ -7072,10 +7608,11 @@ object Instruction {
           "OpHitObjectGetShaderBindingTableRecordIndexNV",
           SPIRVOpcodeNumber(5258),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetShaderBindingTableRecordIndexNV(
                     values.required(0),
@@ -7089,10 +7626,11 @@ object Instruction {
           "OpHitObjectRecordEmptyNV",
           SPIRVOpcodeNumber(5259),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectRecordEmptyNV(values.required(0))
               ),
           "IdRef"
@@ -7101,10 +7639,11 @@ object Instruction {
           "OpHitObjectTraceRayNV",
           SPIRVOpcodeNumber(5260),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectTraceRayNV(
                     hitObject = values.required(0),
@@ -7127,10 +7666,11 @@ object Instruction {
           "OpHitObjectRecordHitNV",
           SPIRVOpcodeNumber(5261),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordHitNV(
                     hitObject = values.required(0),
@@ -7154,10 +7694,11 @@ object Instruction {
           "OpHitObjectRecordHitWithIndexNV",
           SPIRVOpcodeNumber(5262),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordHitWithIndexNV(
                     hitObject = values.required(0),
@@ -7180,10 +7721,11 @@ object Instruction {
           "OpHitObjectRecordMissNV",
           SPIRVOpcodeNumber(5263),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordMissNV(
                     hitObject = values.required(0),
@@ -7200,10 +7742,11 @@ object Instruction {
           "OpHitObjectExecuteShaderNV",
           SPIRVOpcodeNumber(5264),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectExecuteShaderNV(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -7212,10 +7755,11 @@ object Instruction {
           "OpHitObjectGetCurrentTimeNV",
           SPIRVOpcodeNumber(5265),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetCurrentTimeNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -7225,10 +7769,11 @@ object Instruction {
           "OpHitObjectGetAttributesNV",
           SPIRVOpcodeNumber(5266),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetAttributesNV(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -7237,10 +7782,11 @@ object Instruction {
           "OpHitObjectGetHitKindNV",
           SPIRVOpcodeNumber(5267),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetHitKindNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -7249,10 +7795,11 @@ object Instruction {
           "OpHitObjectGetPrimitiveIndexNV",
           SPIRVOpcodeNumber(5268),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetPrimitiveIndexNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -7262,10 +7809,11 @@ object Instruction {
           "OpHitObjectGetGeometryIndexNV",
           SPIRVOpcodeNumber(5269),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetGeometryIndexNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -7275,10 +7823,11 @@ object Instruction {
           "OpHitObjectGetInstanceIdNV",
           SPIRVOpcodeNumber(5270),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetInstanceIdNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -7288,10 +7837,11 @@ object Instruction {
           "OpHitObjectGetInstanceCustomIndexNV",
           SPIRVOpcodeNumber(5271),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetInstanceCustomIndexNV(
                     values.required(0),
@@ -7305,10 +7855,11 @@ object Instruction {
           "OpHitObjectGetWorldRayDirectionNV",
           SPIRVOpcodeNumber(5272),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetWorldRayDirectionNV(
                     values.required(0),
@@ -7322,10 +7873,11 @@ object Instruction {
           "OpHitObjectGetWorldRayOriginNV",
           SPIRVOpcodeNumber(5273),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetWorldRayOriginNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -7335,10 +7887,11 @@ object Instruction {
           "OpHitObjectGetRayTMaxNV",
           SPIRVOpcodeNumber(5274),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetRayTMaxNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -7347,10 +7900,11 @@ object Instruction {
           "OpHitObjectGetRayTMinNV",
           SPIRVOpcodeNumber(5275),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetRayTMinNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -7359,10 +7913,11 @@ object Instruction {
           "OpHitObjectIsEmptyNV",
           SPIRVOpcodeNumber(5276),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsEmptyNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -7371,10 +7926,11 @@ object Instruction {
           "OpHitObjectIsHitNV",
           SPIRVOpcodeNumber(5277),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsHitNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -7383,10 +7939,11 @@ object Instruction {
           "OpHitObjectIsMissNV",
           SPIRVOpcodeNumber(5278),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsMissNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -7395,10 +7952,11 @@ object Instruction {
           "OpReorderThreadWithHitObjectNV",
           SPIRVOpcodeNumber(5279),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReorderThreadWithHitObjectNV(values.required(0), values.optional(1), values.optional(2))
               ),
@@ -7408,10 +7966,11 @@ object Instruction {
           "OpReorderThreadWithHintNV",
           SPIRVOpcodeNumber(5280),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ReorderThreadWithHintNV(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -7420,18 +7979,24 @@ object Instruction {
           "OpTypeHitObjectNV",
           SPIRVOpcodeNumber(5281),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.TypeHitObjectNV(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeHitObjectNV(values.required(0))
+              ),
           "IdResult"
         )
     case ImageSampleFootprintNV extends Definition(
           "OpImageSampleFootprintNV",
           SPIRVOpcodeNumber(5283),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ImageSampleFootprintNV(
                     resultType = values.required(0),
@@ -7449,10 +8014,11 @@ object Instruction {
           "OpTypeVectorIdEXT",
           SPIRVOpcodeNumber(5288),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeVectorIdEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResult IdRef IdRef"
@@ -7461,10 +8027,11 @@ object Instruction {
           "OpCooperativeVectorMatrixMulNV",
           SPIRVOpcodeNumber(5289),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeVectorMatrixMulNV(
                     resultType = values.required(0),
@@ -7488,10 +8055,11 @@ object Instruction {
           "OpCooperativeVectorOuterProductAccumulateNV",
           SPIRVOpcodeNumber(5290),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeVectorOuterProductAccumulateNV(
                     pointer = values.required(0),
@@ -7509,10 +8077,11 @@ object Instruction {
           "OpCooperativeVectorReduceSumAccumulateNV",
           SPIRVOpcodeNumber(5291),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeVectorReduceSumAccumulateNV(
                     values.required(0),
@@ -7526,10 +8095,11 @@ object Instruction {
           "OpCooperativeVectorMatrixMulAddNV",
           SPIRVOpcodeNumber(5292),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeVectorMatrixMulAddNV(
                     resultType = values.required(0),
@@ -7556,10 +8126,11 @@ object Instruction {
           "OpCooperativeMatrixConvertNV",
           SPIRVOpcodeNumber(5293),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixConvertNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -7569,10 +8140,11 @@ object Instruction {
           "OpEmitMeshTasksEXT",
           SPIRVOpcodeNumber(5294),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.EmitMeshTasksEXT(
                     values.required(0),
@@ -7587,10 +8159,11 @@ object Instruction {
           "OpSetMeshOutputsEXT",
           SPIRVOpcodeNumber(5295),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SetMeshOutputsEXT(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -7599,10 +8172,11 @@ object Instruction {
           "OpGroupNonUniformPartitionEXT",
           SPIRVOpcodeNumber(5296),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupNonUniformPartitionEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -7612,10 +8186,11 @@ object Instruction {
           "OpWritePackedPrimitiveIndices4x8NV",
           SPIRVOpcodeNumber(5299),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.WritePackedPrimitiveIndices4x8NV(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -7624,10 +8199,11 @@ object Instruction {
           "OpFetchMicroTriangleVertexPositionNV",
           SPIRVOpcodeNumber(5300),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FetchMicroTriangleVertexPositionNV(
                     resultType = values.required(0),
@@ -7645,10 +8221,11 @@ object Instruction {
           "OpFetchMicroTriangleVertexBarycentricNV",
           SPIRVOpcodeNumber(5301),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FetchMicroTriangleVertexBarycentricNV(
                     resultType = values.required(0),
@@ -7666,10 +8243,11 @@ object Instruction {
           "OpCooperativeVectorLoadNV",
           SPIRVOpcodeNumber(5302),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeVectorLoadNV(
                     resultType = values.required(0),
@@ -7685,10 +8263,11 @@ object Instruction {
           "OpCooperativeVectorStoreNV",
           SPIRVOpcodeNumber(5303),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeVectorStoreNV(
                     values.required(0),
@@ -7703,10 +8282,11 @@ object Instruction {
           "OpHitObjectRecordFromQueryEXT",
           SPIRVOpcodeNumber(5304),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordFromQueryEXT(
                     hitObject = values.required(0),
@@ -7722,10 +8302,11 @@ object Instruction {
           "OpHitObjectRecordMissEXT",
           SPIRVOpcodeNumber(5305),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordMissEXT(
                     hitObject = values.required(0),
@@ -7743,10 +8324,11 @@ object Instruction {
           "OpHitObjectRecordMissMotionEXT",
           SPIRVOpcodeNumber(5306),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectRecordMissMotionEXT(
                     hitObject = values.required(0),
@@ -7765,10 +8347,11 @@ object Instruction {
           "OpHitObjectGetIntersectionTriangleVertexPositionsEXT",
           SPIRVOpcodeNumber(5307),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetIntersectionTriangleVertexPositionsEXT(
                     values.required(0),
@@ -7782,10 +8365,11 @@ object Instruction {
           "OpHitObjectGetRayFlagsEXT",
           SPIRVOpcodeNumber(5308),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetRayFlagsEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -7795,10 +8379,11 @@ object Instruction {
           "OpHitObjectSetShaderBindingTableRecordIndexEXT",
           SPIRVOpcodeNumber(5309),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectSetShaderBindingTableRecordIndexEXT(values.required(0), values.required(1))
               ),
@@ -7808,10 +8393,11 @@ object Instruction {
           "OpHitObjectReorderExecuteShaderEXT",
           SPIRVOpcodeNumber(5310),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectReorderExecuteShaderEXT(
                     values.required(0),
@@ -7826,10 +8412,11 @@ object Instruction {
           "OpHitObjectTraceReorderExecuteEXT",
           SPIRVOpcodeNumber(5311),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectTraceReorderExecuteEXT(
                     hitObject = values.required(0),
@@ -7854,10 +8441,11 @@ object Instruction {
           "OpHitObjectTraceMotionReorderExecuteEXT",
           SPIRVOpcodeNumber(5312),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectTraceMotionReorderExecuteEXT(
                     hitObject = values.required(0),
@@ -7883,18 +8471,24 @@ object Instruction {
           "OpTypeHitObjectEXT",
           SPIRVOpcodeNumber(5313),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.TypeHitObjectEXT(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.TypeHitObjectEXT(values.required(0))
+              ),
           "IdResult"
         )
     case ReorderThreadWithHintEXT extends Definition(
           "OpReorderThreadWithHintEXT",
           SPIRVOpcodeNumber(5314),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ReorderThreadWithHintEXT(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -7903,10 +8497,11 @@ object Instruction {
           "OpReorderThreadWithHitObjectEXT",
           SPIRVOpcodeNumber(5315),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReorderThreadWithHitObjectEXT(values.required(0), values.optional(1), values.optional(2))
               ),
@@ -7916,10 +8511,11 @@ object Instruction {
           "OpHitObjectTraceRayEXT",
           SPIRVOpcodeNumber(5316),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectTraceRayEXT(
                     hitObject = values.required(0),
@@ -7942,10 +8538,11 @@ object Instruction {
           "OpHitObjectTraceRayMotionEXT",
           SPIRVOpcodeNumber(5317),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectTraceRayMotionEXT(
                     hitObject = values.required(0),
@@ -7969,10 +8566,11 @@ object Instruction {
           "OpHitObjectRecordEmptyEXT",
           SPIRVOpcodeNumber(5318),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectRecordEmptyEXT(values.required(0))
               ),
           "IdRef"
@@ -7981,10 +8579,11 @@ object Instruction {
           "OpHitObjectExecuteShaderEXT",
           SPIRVOpcodeNumber(5319),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectExecuteShaderEXT(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -7993,10 +8592,11 @@ object Instruction {
           "OpHitObjectGetCurrentTimeEXT",
           SPIRVOpcodeNumber(5320),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetCurrentTimeEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8006,10 +8606,11 @@ object Instruction {
           "OpHitObjectGetAttributesEXT",
           SPIRVOpcodeNumber(5321),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetAttributesEXT(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -8018,10 +8619,11 @@ object Instruction {
           "OpHitObjectGetHitKindEXT",
           SPIRVOpcodeNumber(5322),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetHitKindEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8030,10 +8632,11 @@ object Instruction {
           "OpHitObjectGetPrimitiveIndexEXT",
           SPIRVOpcodeNumber(5323),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetPrimitiveIndexEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8043,10 +8646,11 @@ object Instruction {
           "OpHitObjectGetGeometryIndexEXT",
           SPIRVOpcodeNumber(5324),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetGeometryIndexEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8056,10 +8660,11 @@ object Instruction {
           "OpHitObjectGetInstanceIdEXT",
           SPIRVOpcodeNumber(5325),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetInstanceIdEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8069,10 +8674,11 @@ object Instruction {
           "OpHitObjectGetInstanceCustomIndexEXT",
           SPIRVOpcodeNumber(5326),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetInstanceCustomIndexEXT(
                     values.required(0),
@@ -8086,10 +8692,11 @@ object Instruction {
           "OpHitObjectGetObjectRayOriginEXT",
           SPIRVOpcodeNumber(5327),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetObjectRayOriginEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8099,10 +8706,11 @@ object Instruction {
           "OpHitObjectGetObjectRayDirectionEXT",
           SPIRVOpcodeNumber(5328),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetObjectRayDirectionEXT(
                     values.required(0),
@@ -8116,10 +8724,11 @@ object Instruction {
           "OpHitObjectGetWorldRayDirectionEXT",
           SPIRVOpcodeNumber(5329),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetWorldRayDirectionEXT(
                     values.required(0),
@@ -8133,10 +8742,11 @@ object Instruction {
           "OpHitObjectGetWorldRayOriginEXT",
           SPIRVOpcodeNumber(5330),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetWorldRayOriginEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8146,10 +8756,11 @@ object Instruction {
           "OpHitObjectGetObjectToWorldEXT",
           SPIRVOpcodeNumber(5331),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetObjectToWorldEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8159,10 +8770,11 @@ object Instruction {
           "OpHitObjectGetWorldToObjectEXT",
           SPIRVOpcodeNumber(5332),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetWorldToObjectEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -8172,10 +8784,11 @@ object Instruction {
           "OpHitObjectGetRayTMaxEXT",
           SPIRVOpcodeNumber(5333),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetRayTMaxEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8184,10 +8797,11 @@ object Instruction {
           "OpReportIntersectionKHR",
           SPIRVOpcodeNumber(5334),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReportIntersectionKHR(
                     values.required(0),
@@ -8201,23 +8815,27 @@ object Instruction {
     case IgnoreIntersectionNV extends Definition(
           "OpIgnoreIntersectionNV",
           SPIRVOpcodeNumber(5335),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.IgnoreIntersectionNV()),
+          definition =>
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.IgnoreIntersectionNV()),
           ""
         )
     case TerminateRayNV extends Definition(
           "OpTerminateRayNV",
           SPIRVOpcodeNumber(5336),
-          definition => raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.TerminateRayNV()),
+          definition =>
+            (raw, widths) => Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.TerminateRayNV()),
           ""
         )
     case TraceNV extends Definition(
           "OpTraceNV",
           SPIRVOpcodeNumber(5337),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TraceNV(
                     accel = values.required(0),
@@ -8239,10 +8857,11 @@ object Instruction {
           "OpTraceMotionNV",
           SPIRVOpcodeNumber(5338),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TraceMotionNV(
                     accel = values.required(0),
@@ -8265,10 +8884,11 @@ object Instruction {
           "OpTraceRayMotionNV",
           SPIRVOpcodeNumber(5339),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TraceRayMotionNV(
                     accel = values.required(0),
@@ -8291,10 +8911,11 @@ object Instruction {
           "OpRayQueryGetIntersectionTriangleVertexPositionsKHR",
           SPIRVOpcodeNumber(5340),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionTriangleVertexPositionsKHR(
                     values.required(0),
@@ -8309,10 +8930,11 @@ object Instruction {
           "OpTypeAccelerationStructureKHR",
           SPIRVOpcodeNumber(5341),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAccelerationStructureKHR(values.required(0))
               ),
           "IdResult"
@@ -8321,10 +8943,11 @@ object Instruction {
           "OpExecuteCallableNV",
           SPIRVOpcodeNumber(5344),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ExecuteCallableNV(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -8333,10 +8956,11 @@ object Instruction {
           "OpRayQueryGetIntersectionClusterIdNV",
           SPIRVOpcodeNumber(5345),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionClusterIdNV(
                     values.required(0),
@@ -8351,10 +8975,11 @@ object Instruction {
           "OpHitObjectGetClusterIdNV",
           SPIRVOpcodeNumber(5346),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetClusterIdNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -8364,10 +8989,11 @@ object Instruction {
           "OpHitObjectGetRayTMinEXT",
           SPIRVOpcodeNumber(5347),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetRayTMinEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8376,10 +9002,11 @@ object Instruction {
           "OpHitObjectGetShaderBindingTableRecordIndexEXT",
           SPIRVOpcodeNumber(5348),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetShaderBindingTableRecordIndexEXT(
                     values.required(0),
@@ -8393,10 +9020,11 @@ object Instruction {
           "OpHitObjectGetShaderRecordBufferHandleEXT",
           SPIRVOpcodeNumber(5349),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetShaderRecordBufferHandleEXT(
                     values.required(0),
@@ -8410,10 +9038,11 @@ object Instruction {
           "OpHitObjectIsEmptyEXT",
           SPIRVOpcodeNumber(5350),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsEmptyEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8422,10 +9051,11 @@ object Instruction {
           "OpHitObjectIsHitEXT",
           SPIRVOpcodeNumber(5351),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsHitEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8434,10 +9064,11 @@ object Instruction {
           "OpHitObjectIsMissEXT",
           SPIRVOpcodeNumber(5352),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsMissEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8446,10 +9077,11 @@ object Instruction {
           "OpTypeCooperativeMatrixNV",
           SPIRVOpcodeNumber(5358),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TypeCooperativeMatrixNV(
                     dest = values.required(0),
@@ -8465,10 +9097,11 @@ object Instruction {
           "OpCooperativeMatrixLoadNV",
           SPIRVOpcodeNumber(5359),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixLoadNV(
                     resultType = values.required(0),
@@ -8485,10 +9118,11 @@ object Instruction {
           "OpCooperativeMatrixStoreNV",
           SPIRVOpcodeNumber(5360),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixStoreNV(
                     pointer = values.required(0),
@@ -8504,10 +9138,11 @@ object Instruction {
           "OpCooperativeMatrixMulAddNV",
           SPIRVOpcodeNumber(5361),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixMulAddNV(
                     resultType = values.required(0),
@@ -8523,10 +9158,11 @@ object Instruction {
           "OpCooperativeMatrixLengthNV",
           SPIRVOpcodeNumber(5362),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixLengthNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -8536,24 +9172,27 @@ object Instruction {
           "OpBeginInvocationInterlockEXT",
           SPIRVOpcodeNumber(5364),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.BeginInvocationInterlockEXT()),
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.BeginInvocationInterlockEXT()),
           ""
         )
     case EndInvocationInterlockEXT extends Definition(
           "OpEndInvocationInterlockEXT",
           SPIRVOpcodeNumber(5365),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.EndInvocationInterlockEXT()),
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.EndInvocationInterlockEXT()),
           ""
         )
     case CooperativeMatrixReduceNV extends Definition(
           "OpCooperativeMatrixReduceNV",
           SPIRVOpcodeNumber(5366),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixReduceNV(
                     resultType = values.required(0),
@@ -8569,10 +9208,11 @@ object Instruction {
           "OpCooperativeMatrixLoadTensorNV",
           SPIRVOpcodeNumber(5367),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixLoadTensorNV(
                     resultType = values.required(0),
@@ -8590,10 +9230,11 @@ object Instruction {
           "OpCooperativeMatrixStoreTensorNV",
           SPIRVOpcodeNumber(5368),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixStoreTensorNV(
                     pointer = values.required(0),
@@ -8609,10 +9250,11 @@ object Instruction {
           "OpCooperativeMatrixPerElementOpNV",
           SPIRVOpcodeNumber(5369),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixPerElementOpNV(
                     resultType = values.required(0),
@@ -8628,10 +9270,11 @@ object Instruction {
           "OpTypeTensorLayoutNV",
           SPIRVOpcodeNumber(5370),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeTensorLayoutNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResult IdRef IdRef"
@@ -8640,10 +9283,11 @@ object Instruction {
           "OpTypeTensorViewNV",
           SPIRVOpcodeNumber(5371),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TypeTensorViewNV(
                     values.required(0),
@@ -8658,10 +9302,11 @@ object Instruction {
           "OpCreateTensorLayoutNV",
           SPIRVOpcodeNumber(5372),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.CreateTensorLayoutNV(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -8670,10 +9315,11 @@ object Instruction {
           "OpTensorLayoutSetDimensionNV",
           SPIRVOpcodeNumber(5373),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorLayoutSetDimensionNV(
                     values.required(0),
@@ -8688,10 +9334,11 @@ object Instruction {
           "OpTensorLayoutSetStrideNV",
           SPIRVOpcodeNumber(5374),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorLayoutSetStrideNV(
                     values.required(0),
@@ -8706,10 +9353,11 @@ object Instruction {
           "OpTensorLayoutSliceNV",
           SPIRVOpcodeNumber(5375),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorLayoutSliceNV(
                     values.required(0),
@@ -8724,10 +9372,11 @@ object Instruction {
           "OpTensorLayoutSetClampValueNV",
           SPIRVOpcodeNumber(5376),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorLayoutSetClampValueNV(
                     values.required(0),
@@ -8742,10 +9391,11 @@ object Instruction {
           "OpCreateTensorViewNV",
           SPIRVOpcodeNumber(5377),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.CreateTensorViewNV(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -8754,10 +9404,11 @@ object Instruction {
           "OpTensorViewSetDimensionNV",
           SPIRVOpcodeNumber(5378),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorViewSetDimensionNV(
                     values.required(0),
@@ -8772,10 +9423,11 @@ object Instruction {
           "OpTensorViewSetStrideNV",
           SPIRVOpcodeNumber(5379),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorViewSetStrideNV(
                     values.required(0),
@@ -8790,17 +9442,19 @@ object Instruction {
           "OpDemoteToHelperInvocation",
           SPIRVOpcodeNumber(5380),
           definition =>
-            raw => Instruction.decodeDefinition(definition, raw, _ => Instruction.DemoteToHelperInvocation()),
+            (raw, widths) =>
+              Instruction.decodeDefinition(definition, raw, widths, _ => Instruction.DemoteToHelperInvocation()),
           ""
         )
     case IsHelperInvocationEXT extends Definition(
           "OpIsHelperInvocationEXT",
           SPIRVOpcodeNumber(5381),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.IsHelperInvocationEXT(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -8809,10 +9463,11 @@ object Instruction {
           "OpTensorViewSetClipNV",
           SPIRVOpcodeNumber(5382),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorViewSetClipNV(
                     resultType = values.required(0),
@@ -8830,10 +9485,11 @@ object Instruction {
           "OpTensorLayoutSetBlockSizeNV",
           SPIRVOpcodeNumber(5384),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TensorLayoutSetBlockSizeNV(
                     values.required(0),
@@ -8848,10 +9504,11 @@ object Instruction {
           "OpCooperativeMatrixTransposeNV",
           SPIRVOpcodeNumber(5390),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CooperativeMatrixTransposeNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -8861,10 +9518,11 @@ object Instruction {
           "OpConvertUToImageNV",
           SPIRVOpcodeNumber(5391),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertUToImageNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8873,10 +9531,11 @@ object Instruction {
           "OpConvertUToSamplerNV",
           SPIRVOpcodeNumber(5392),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertUToSamplerNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8885,10 +9544,11 @@ object Instruction {
           "OpConvertImageToUNV",
           SPIRVOpcodeNumber(5393),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertImageToUNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8897,10 +9557,11 @@ object Instruction {
           "OpConvertSamplerToUNV",
           SPIRVOpcodeNumber(5394),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertSamplerToUNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -8909,10 +9570,11 @@ object Instruction {
           "OpConvertUToSampledImageNV",
           SPIRVOpcodeNumber(5395),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConvertUToSampledImageNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -8922,10 +9584,11 @@ object Instruction {
           "OpConvertSampledImageToUNV",
           SPIRVOpcodeNumber(5396),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConvertSampledImageToUNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -8935,10 +9598,11 @@ object Instruction {
           "OpSamplerImageAddressingModeNV",
           SPIRVOpcodeNumber(5397),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SamplerImageAddressingModeNV(values.required(0))
               ),
           "LiteralInteger"
@@ -8947,10 +9611,11 @@ object Instruction {
           "OpRawAccessChainNV",
           SPIRVOpcodeNumber(5398),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RawAccessChainNV(
                     resultType = values.required(0),
@@ -8968,10 +9633,11 @@ object Instruction {
           "OpRayQueryGetIntersectionSpherePositionNV",
           SPIRVOpcodeNumber(5427),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionSpherePositionNV(
                     values.required(0),
@@ -8986,10 +9652,11 @@ object Instruction {
           "OpRayQueryGetIntersectionSphereRadiusNV",
           SPIRVOpcodeNumber(5428),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionSphereRadiusNV(
                     values.required(0),
@@ -9004,10 +9671,11 @@ object Instruction {
           "OpRayQueryGetIntersectionLSSPositionsNV",
           SPIRVOpcodeNumber(5429),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionLSSPositionsNV(
                     values.required(0),
@@ -9022,10 +9690,11 @@ object Instruction {
           "OpRayQueryGetIntersectionLSSRadiiNV",
           SPIRVOpcodeNumber(5430),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionLSSRadiiNV(
                     values.required(0),
@@ -9040,10 +9709,11 @@ object Instruction {
           "OpRayQueryGetIntersectionLSSHitValueNV",
           SPIRVOpcodeNumber(5431),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionLSSHitValueNV(
                     values.required(0),
@@ -9058,10 +9728,11 @@ object Instruction {
           "OpHitObjectGetSpherePositionNV",
           SPIRVOpcodeNumber(5432),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetSpherePositionNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -9071,10 +9742,11 @@ object Instruction {
           "OpHitObjectGetSphereRadiusNV",
           SPIRVOpcodeNumber(5433),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetSphereRadiusNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -9084,10 +9756,11 @@ object Instruction {
           "OpHitObjectGetLSSPositionsNV",
           SPIRVOpcodeNumber(5434),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.HitObjectGetLSSPositionsNV(values.required(0), values.required(1), values.required(2))
               ),
@@ -9097,10 +9770,11 @@ object Instruction {
           "OpHitObjectGetLSSRadiiNV",
           SPIRVOpcodeNumber(5435),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectGetLSSRadiiNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -9109,10 +9783,11 @@ object Instruction {
           "OpHitObjectIsSphereHitNV",
           SPIRVOpcodeNumber(5436),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsSphereHitNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -9121,10 +9796,11 @@ object Instruction {
           "OpHitObjectIsLSSHitNV",
           SPIRVOpcodeNumber(5437),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.HitObjectIsLSSHitNV(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -9133,10 +9809,11 @@ object Instruction {
           "OpRayQueryIsSphereHitNV",
           SPIRVOpcodeNumber(5438),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryIsSphereHitNV(
                     values.required(0),
@@ -9151,10 +9828,11 @@ object Instruction {
           "OpRayQueryIsLSSHitNV",
           SPIRVOpcodeNumber(5439),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryIsLSSHitNV(
                     values.required(0),
@@ -9169,10 +9847,11 @@ object Instruction {
           "OpSubgroupShuffleINTEL",
           SPIRVOpcodeNumber(5571),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupShuffleINTEL(
                     values.required(0),
@@ -9187,10 +9866,11 @@ object Instruction {
           "OpSubgroupShuffleDownINTEL",
           SPIRVOpcodeNumber(5572),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupShuffleDownINTEL(
                     resultType = values.required(0),
@@ -9206,10 +9886,11 @@ object Instruction {
           "OpSubgroupShuffleUpINTEL",
           SPIRVOpcodeNumber(5573),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupShuffleUpINTEL(
                     resultType = values.required(0),
@@ -9225,10 +9906,11 @@ object Instruction {
           "OpSubgroupShuffleXorINTEL",
           SPIRVOpcodeNumber(5574),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupShuffleXorINTEL(
                     values.required(0),
@@ -9243,10 +9925,11 @@ object Instruction {
           "OpSubgroupBlockReadINTEL",
           SPIRVOpcodeNumber(5575),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SubgroupBlockReadINTEL(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -9255,10 +9938,11 @@ object Instruction {
           "OpSubgroupBlockWriteINTEL",
           SPIRVOpcodeNumber(5576),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SubgroupBlockWriteINTEL(values.required(0), values.required(1))
               ),
           "IdRef IdRef"
@@ -9267,10 +9951,11 @@ object Instruction {
           "OpSubgroupImageBlockReadINTEL",
           SPIRVOpcodeNumber(5577),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupImageBlockReadINTEL(
                     values.required(0),
@@ -9285,10 +9970,11 @@ object Instruction {
           "OpSubgroupImageBlockWriteINTEL",
           SPIRVOpcodeNumber(5578),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupImageBlockWriteINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -9298,10 +9984,11 @@ object Instruction {
           "OpSubgroupImageMediaBlockReadINTEL",
           SPIRVOpcodeNumber(5580),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupImageMediaBlockReadINTEL(
                     resultType = values.required(0),
@@ -9318,10 +10005,11 @@ object Instruction {
           "OpSubgroupImageMediaBlockWriteINTEL",
           SPIRVOpcodeNumber(5581),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupImageMediaBlockWriteINTEL(
                     image = values.required(0),
@@ -9337,10 +10025,11 @@ object Instruction {
           "OpUCountLeadingZerosINTEL",
           SPIRVOpcodeNumber(5585),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UCountLeadingZerosINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -9350,10 +10039,11 @@ object Instruction {
           "OpUCountTrailingZerosINTEL",
           SPIRVOpcodeNumber(5586),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UCountTrailingZerosINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -9363,10 +10053,11 @@ object Instruction {
           "OpAbsISubINTEL",
           SPIRVOpcodeNumber(5587),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AbsISubINTEL(
                     values.required(0),
@@ -9381,10 +10072,11 @@ object Instruction {
           "OpAbsUSubINTEL",
           SPIRVOpcodeNumber(5588),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AbsUSubINTEL(
                     values.required(0),
@@ -9399,10 +10091,11 @@ object Instruction {
           "OpIAddSatINTEL",
           SPIRVOpcodeNumber(5589),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IAddSatINTEL(
                     values.required(0),
@@ -9417,10 +10110,11 @@ object Instruction {
           "OpUAddSatINTEL",
           SPIRVOpcodeNumber(5590),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UAddSatINTEL(
                     values.required(0),
@@ -9435,10 +10129,11 @@ object Instruction {
           "OpIAverageINTEL",
           SPIRVOpcodeNumber(5591),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IAverageINTEL(
                     values.required(0),
@@ -9453,10 +10148,11 @@ object Instruction {
           "OpUAverageINTEL",
           SPIRVOpcodeNumber(5592),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UAverageINTEL(
                     values.required(0),
@@ -9471,10 +10167,11 @@ object Instruction {
           "OpIAverageRoundedINTEL",
           SPIRVOpcodeNumber(5593),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IAverageRoundedINTEL(
                     values.required(0),
@@ -9489,10 +10186,11 @@ object Instruction {
           "OpUAverageRoundedINTEL",
           SPIRVOpcodeNumber(5594),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UAverageRoundedINTEL(
                     values.required(0),
@@ -9507,10 +10205,11 @@ object Instruction {
           "OpISubSatINTEL",
           SPIRVOpcodeNumber(5595),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ISubSatINTEL(
                     values.required(0),
@@ -9525,10 +10224,11 @@ object Instruction {
           "OpUSubSatINTEL",
           SPIRVOpcodeNumber(5596),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.USubSatINTEL(
                     values.required(0),
@@ -9543,10 +10243,11 @@ object Instruction {
           "OpIMul32x16INTEL",
           SPIRVOpcodeNumber(5597),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.IMul32x16INTEL(
                     values.required(0),
@@ -9561,10 +10262,11 @@ object Instruction {
           "OpUMul32x16INTEL",
           SPIRVOpcodeNumber(5598),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UMul32x16INTEL(
                     values.required(0),
@@ -9579,10 +10281,11 @@ object Instruction {
           "OpConstantFunctionPointerINTEL",
           SPIRVOpcodeNumber(5600),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConstantFunctionPointerINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -9592,10 +10295,11 @@ object Instruction {
           "OpFunctionPointerCallINTEL",
           SPIRVOpcodeNumber(5601),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FunctionPointerCallINTEL(values.required(0), values.required(1), values.repeated(2))
               ),
@@ -9605,10 +10309,11 @@ object Instruction {
           "OpAsmTargetINTEL",
           SPIRVOpcodeNumber(5609),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.AsmTargetINTEL(values.required(0), values.required(1))
               ),
           "IdResult LiteralString"
@@ -9617,10 +10322,11 @@ object Instruction {
           "OpAsmINTEL",
           SPIRVOpcodeNumber(5610),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AsmINTEL(
                     resultType = values.required(0),
@@ -9637,10 +10343,11 @@ object Instruction {
           "OpAsmCallINTEL",
           SPIRVOpcodeNumber(5611),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AsmCallINTEL(
                     values.required(0),
@@ -9655,10 +10362,11 @@ object Instruction {
           "OpAtomicFMinEXT",
           SPIRVOpcodeNumber(5614),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicFMinEXT(
                     resultType = values.required(0),
@@ -9675,10 +10383,11 @@ object Instruction {
           "OpAtomicFMaxEXT",
           SPIRVOpcodeNumber(5615),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicFMaxEXT(
                     resultType = values.required(0),
@@ -9695,18 +10404,24 @@ object Instruction {
           "OpAssumeTrueKHR",
           SPIRVOpcodeNumber(5630),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.AssumeTrueKHR(values.required(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.AssumeTrueKHR(values.required(0))
+              ),
           "IdRef"
         )
     case ExpectKHR extends Definition(
           "OpExpectKHR",
           SPIRVOpcodeNumber(5631),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ExpectKHR(values.required(0), values.required(1), values.required(2), values.required(3))
               ),
@@ -9716,10 +10431,11 @@ object Instruction {
           "OpDecorateString",
           SPIRVOpcodeNumber(5632),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.DecorateString(values.required(0), values.required(1))
               ),
           "IdRef Decoration"
@@ -9728,10 +10444,11 @@ object Instruction {
           "OpMemberDecorateString",
           SPIRVOpcodeNumber(5633),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.MemberDecorateString(values.required(0), values.required(1), values.required(2))
               ),
           "IdRef LiteralInteger Decoration"
@@ -9740,10 +10457,11 @@ object Instruction {
           "OpVmeImageINTEL",
           SPIRVOpcodeNumber(5699),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.VmeImageINTEL(
                     values.required(0),
@@ -9758,10 +10476,11 @@ object Instruction {
           "OpTypeVmeImageINTEL",
           SPIRVOpcodeNumber(5700),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeVmeImageINTEL(values.required(0), values.required(1))
               ),
           "IdResult IdRef"
@@ -9770,10 +10489,11 @@ object Instruction {
           "OpTypeAvcImePayloadINTEL",
           SPIRVOpcodeNumber(5701),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcImePayloadINTEL(values.required(0))
               ),
           "IdResult"
@@ -9782,10 +10502,11 @@ object Instruction {
           "OpTypeAvcRefPayloadINTEL",
           SPIRVOpcodeNumber(5702),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcRefPayloadINTEL(values.required(0))
               ),
           "IdResult"
@@ -9794,10 +10515,11 @@ object Instruction {
           "OpTypeAvcSicPayloadINTEL",
           SPIRVOpcodeNumber(5703),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcSicPayloadINTEL(values.required(0))
               ),
           "IdResult"
@@ -9806,10 +10528,11 @@ object Instruction {
           "OpTypeAvcMcePayloadINTEL",
           SPIRVOpcodeNumber(5704),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcMcePayloadINTEL(values.required(0))
               ),
           "IdResult"
@@ -9818,10 +10541,11 @@ object Instruction {
           "OpTypeAvcMceResultINTEL",
           SPIRVOpcodeNumber(5705),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcMceResultINTEL(values.required(0))
               ),
           "IdResult"
@@ -9830,10 +10554,11 @@ object Instruction {
           "OpTypeAvcImeResultINTEL",
           SPIRVOpcodeNumber(5706),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcImeResultINTEL(values.required(0))
               ),
           "IdResult"
@@ -9842,10 +10567,11 @@ object Instruction {
           "OpTypeAvcImeResultSingleReferenceStreamoutINTEL",
           SPIRVOpcodeNumber(5707),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcImeResultSingleReferenceStreamoutINTEL(values.required(0))
               ),
           "IdResult"
@@ -9854,10 +10580,11 @@ object Instruction {
           "OpTypeAvcImeResultDualReferenceStreamoutINTEL",
           SPIRVOpcodeNumber(5708),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcImeResultDualReferenceStreamoutINTEL(values.required(0))
               ),
           "IdResult"
@@ -9866,10 +10593,11 @@ object Instruction {
           "OpTypeAvcImeSingleReferenceStreaminINTEL",
           SPIRVOpcodeNumber(5709),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcImeSingleReferenceStreaminINTEL(values.required(0))
               ),
           "IdResult"
@@ -9878,10 +10606,11 @@ object Instruction {
           "OpTypeAvcImeDualReferenceStreaminINTEL",
           SPIRVOpcodeNumber(5710),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcImeDualReferenceStreaminINTEL(values.required(0))
               ),
           "IdResult"
@@ -9890,10 +10619,11 @@ object Instruction {
           "OpTypeAvcRefResultINTEL",
           SPIRVOpcodeNumber(5711),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcRefResultINTEL(values.required(0))
               ),
           "IdResult"
@@ -9902,10 +10632,11 @@ object Instruction {
           "OpTypeAvcSicResultINTEL",
           SPIRVOpcodeNumber(5712),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeAvcSicResultINTEL(values.required(0))
               ),
           "IdResult"
@@ -9914,10 +10645,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultInterBaseMultiReferencePenaltyINTEL",
           SPIRVOpcodeNumber(5713),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultInterBaseMultiReferencePenaltyINTEL(
                     values.required(0),
@@ -9932,10 +10664,11 @@ object Instruction {
           "OpSubgroupAvcMceSetInterBaseMultiReferencePenaltyINTEL",
           SPIRVOpcodeNumber(5714),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetInterBaseMultiReferencePenaltyINTEL(
                     values.required(0),
@@ -9950,10 +10683,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultInterShapePenaltyINTEL",
           SPIRVOpcodeNumber(5715),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultInterShapePenaltyINTEL(
                     values.required(0),
@@ -9968,10 +10702,11 @@ object Instruction {
           "OpSubgroupAvcMceSetInterShapePenaltyINTEL",
           SPIRVOpcodeNumber(5716),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetInterShapePenaltyINTEL(
                     values.required(0),
@@ -9986,10 +10721,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultInterDirectionPenaltyINTEL",
           SPIRVOpcodeNumber(5717),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultInterDirectionPenaltyINTEL(
                     values.required(0),
@@ -10004,10 +10740,11 @@ object Instruction {
           "OpSubgroupAvcMceSetInterDirectionPenaltyINTEL",
           SPIRVOpcodeNumber(5718),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetInterDirectionPenaltyINTEL(
                     values.required(0),
@@ -10022,10 +10759,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultIntraLumaShapePenaltyINTEL",
           SPIRVOpcodeNumber(5719),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultIntraLumaShapePenaltyINTEL(
                     values.required(0),
@@ -10040,10 +10778,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultInterMotionVectorCostTableINTEL",
           SPIRVOpcodeNumber(5720),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultInterMotionVectorCostTableINTEL(
                     values.required(0),
@@ -10058,10 +10797,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultHighPenaltyCostTableINTEL",
           SPIRVOpcodeNumber(5721),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultHighPenaltyCostTableINTEL(values.required(0), values.required(1))
               ),
@@ -10071,10 +10811,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultMediumPenaltyCostTableINTEL",
           SPIRVOpcodeNumber(5722),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultMediumPenaltyCostTableINTEL(
                     values.required(0),
@@ -10087,10 +10828,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultLowPenaltyCostTableINTEL",
           SPIRVOpcodeNumber(5723),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultLowPenaltyCostTableINTEL(values.required(0), values.required(1))
               ),
@@ -10100,10 +10842,11 @@ object Instruction {
           "OpSubgroupAvcMceSetMotionVectorCostFunctionINTEL",
           SPIRVOpcodeNumber(5724),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetMotionVectorCostFunctionINTEL(
                     resultType = values.required(0),
@@ -10120,10 +10863,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultIntraLumaModePenaltyINTEL",
           SPIRVOpcodeNumber(5725),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultIntraLumaModePenaltyINTEL(
                     values.required(0),
@@ -10138,10 +10882,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultNonDcLumaIntraPenaltyINTEL",
           SPIRVOpcodeNumber(5726),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultNonDcLumaIntraPenaltyINTEL(values.required(0), values.required(1))
               ),
@@ -10151,10 +10896,11 @@ object Instruction {
           "OpSubgroupAvcMceGetDefaultIntraChromaModeBasePenaltyINTEL",
           SPIRVOpcodeNumber(5727),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetDefaultIntraChromaModeBasePenaltyINTEL(
                     values.required(0),
@@ -10167,10 +10913,11 @@ object Instruction {
           "OpSubgroupAvcMceSetAcOnlyHaarINTEL",
           SPIRVOpcodeNumber(5728),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetAcOnlyHaarINTEL(
                     values.required(0),
@@ -10184,10 +10931,11 @@ object Instruction {
           "OpSubgroupAvcMceSetSourceInterlacedFieldPolarityINTEL",
           SPIRVOpcodeNumber(5729),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetSourceInterlacedFieldPolarityINTEL(
                     values.required(0),
@@ -10202,10 +10950,11 @@ object Instruction {
           "OpSubgroupAvcMceSetSingleReferenceInterlacedFieldPolarityINTEL",
           SPIRVOpcodeNumber(5730),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetSingleReferenceInterlacedFieldPolarityINTEL(
                     values.required(0),
@@ -10220,10 +10969,11 @@ object Instruction {
           "OpSubgroupAvcMceSetDualReferenceInterlacedFieldPolaritiesINTEL",
           SPIRVOpcodeNumber(5731),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceSetDualReferenceInterlacedFieldPolaritiesINTEL(
                     resultType = values.required(0),
@@ -10239,10 +10989,11 @@ object Instruction {
           "OpSubgroupAvcMceConvertToImePayloadINTEL",
           SPIRVOpcodeNumber(5732),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceConvertToImePayloadINTEL(
                     values.required(0),
@@ -10256,10 +11007,11 @@ object Instruction {
           "OpSubgroupAvcMceConvertToImeResultINTEL",
           SPIRVOpcodeNumber(5733),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceConvertToImeResultINTEL(
                     values.required(0),
@@ -10273,10 +11025,11 @@ object Instruction {
           "OpSubgroupAvcMceConvertToRefPayloadINTEL",
           SPIRVOpcodeNumber(5734),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceConvertToRefPayloadINTEL(
                     values.required(0),
@@ -10290,10 +11043,11 @@ object Instruction {
           "OpSubgroupAvcMceConvertToRefResultINTEL",
           SPIRVOpcodeNumber(5735),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceConvertToRefResultINTEL(
                     values.required(0),
@@ -10307,10 +11061,11 @@ object Instruction {
           "OpSubgroupAvcMceConvertToSicPayloadINTEL",
           SPIRVOpcodeNumber(5736),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceConvertToSicPayloadINTEL(
                     values.required(0),
@@ -10324,10 +11079,11 @@ object Instruction {
           "OpSubgroupAvcMceConvertToSicResultINTEL",
           SPIRVOpcodeNumber(5737),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceConvertToSicResultINTEL(
                     values.required(0),
@@ -10341,10 +11097,11 @@ object Instruction {
           "OpSubgroupAvcMceGetMotionVectorsINTEL",
           SPIRVOpcodeNumber(5738),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetMotionVectorsINTEL(
                     values.required(0),
@@ -10358,10 +11115,11 @@ object Instruction {
           "OpSubgroupAvcMceGetInterDistortionsINTEL",
           SPIRVOpcodeNumber(5739),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetInterDistortionsINTEL(
                     values.required(0),
@@ -10375,10 +11133,11 @@ object Instruction {
           "OpSubgroupAvcMceGetBestInterDistortionsINTEL",
           SPIRVOpcodeNumber(5740),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetBestInterDistortionsINTEL(
                     values.required(0),
@@ -10392,10 +11151,11 @@ object Instruction {
           "OpSubgroupAvcMceGetInterMajorShapeINTEL",
           SPIRVOpcodeNumber(5741),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetInterMajorShapeINTEL(
                     values.required(0),
@@ -10409,10 +11169,11 @@ object Instruction {
           "OpSubgroupAvcMceGetInterMinorShapeINTEL",
           SPIRVOpcodeNumber(5742),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetInterMinorShapeINTEL(
                     values.required(0),
@@ -10426,10 +11187,11 @@ object Instruction {
           "OpSubgroupAvcMceGetInterDirectionsINTEL",
           SPIRVOpcodeNumber(5743),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetInterDirectionsINTEL(
                     values.required(0),
@@ -10443,10 +11205,11 @@ object Instruction {
           "OpSubgroupAvcMceGetInterMotionVectorCountINTEL",
           SPIRVOpcodeNumber(5744),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetInterMotionVectorCountINTEL(
                     values.required(0),
@@ -10460,10 +11223,11 @@ object Instruction {
           "OpSubgroupAvcMceGetInterReferenceIdsINTEL",
           SPIRVOpcodeNumber(5745),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetInterReferenceIdsINTEL(
                     values.required(0),
@@ -10477,10 +11241,11 @@ object Instruction {
           "OpSubgroupAvcMceGetInterReferenceInterlacedFieldPolaritiesINTEL",
           SPIRVOpcodeNumber(5746),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcMceGetInterReferenceInterlacedFieldPolaritiesINTEL(
                     resultType = values.required(0),
@@ -10496,10 +11261,11 @@ object Instruction {
           "OpSubgroupAvcImeInitializeINTEL",
           SPIRVOpcodeNumber(5747),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeInitializeINTEL(
                     resultType = values.required(0),
@@ -10515,10 +11281,11 @@ object Instruction {
           "OpSubgroupAvcImeSetSingleReferenceINTEL",
           SPIRVOpcodeNumber(5748),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeSetSingleReferenceINTEL(
                     resultType = values.required(0),
@@ -10534,10 +11301,11 @@ object Instruction {
           "OpSubgroupAvcImeSetDualReferenceINTEL",
           SPIRVOpcodeNumber(5749),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeSetDualReferenceINTEL(
                     resultType = values.required(0),
@@ -10554,10 +11322,11 @@ object Instruction {
           "OpSubgroupAvcImeRefWindowSizeINTEL",
           SPIRVOpcodeNumber(5750),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeRefWindowSizeINTEL(
                     values.required(0),
@@ -10572,10 +11341,11 @@ object Instruction {
           "OpSubgroupAvcImeAdjustRefOffsetINTEL",
           SPIRVOpcodeNumber(5751),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeAdjustRefOffsetINTEL(
                     resultType = values.required(0),
@@ -10592,10 +11362,11 @@ object Instruction {
           "OpSubgroupAvcImeConvertToMcePayloadINTEL",
           SPIRVOpcodeNumber(5752),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeConvertToMcePayloadINTEL(
                     values.required(0),
@@ -10609,10 +11380,11 @@ object Instruction {
           "OpSubgroupAvcImeSetMaxMotionVectorCountINTEL",
           SPIRVOpcodeNumber(5753),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeSetMaxMotionVectorCountINTEL(
                     values.required(0),
@@ -10627,10 +11399,11 @@ object Instruction {
           "OpSubgroupAvcImeSetUnidirectionalMixDisableINTEL",
           SPIRVOpcodeNumber(5754),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeSetUnidirectionalMixDisableINTEL(
                     values.required(0),
@@ -10644,10 +11417,11 @@ object Instruction {
           "OpSubgroupAvcImeSetEarlySearchTerminationThresholdINTEL",
           SPIRVOpcodeNumber(5755),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeSetEarlySearchTerminationThresholdINTEL(
                     values.required(0),
@@ -10662,10 +11436,11 @@ object Instruction {
           "OpSubgroupAvcImeSetWeightedSadINTEL",
           SPIRVOpcodeNumber(5756),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeSetWeightedSadINTEL(
                     values.required(0),
@@ -10680,10 +11455,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithSingleReferenceINTEL",
           SPIRVOpcodeNumber(5757),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceINTEL(
                     resultType = values.required(0),
@@ -10699,10 +11475,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithDualReferenceINTEL",
           SPIRVOpcodeNumber(5758),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceINTEL(
                     resultType = values.required(0),
@@ -10719,10 +11496,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithSingleReferenceStreaminINTEL",
           SPIRVOpcodeNumber(5759),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceStreaminINTEL(
                     resultType = values.required(0),
@@ -10739,10 +11517,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithDualReferenceStreaminINTEL",
           SPIRVOpcodeNumber(5760),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceStreaminINTEL(
                     resultType = values.required(0),
@@ -10760,10 +11539,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithSingleReferenceStreamoutINTEL",
           SPIRVOpcodeNumber(5761),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceStreamoutINTEL(
                     resultType = values.required(0),
@@ -10779,10 +11559,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithDualReferenceStreamoutINTEL",
           SPIRVOpcodeNumber(5762),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceStreamoutINTEL(
                     resultType = values.required(0),
@@ -10799,10 +11580,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithSingleReferenceStreaminoutINTEL",
           SPIRVOpcodeNumber(5763),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithSingleReferenceStreaminoutINTEL(
                     resultType = values.required(0),
@@ -10819,10 +11601,11 @@ object Instruction {
           "OpSubgroupAvcImeEvaluateWithDualReferenceStreaminoutINTEL",
           SPIRVOpcodeNumber(5764),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeEvaluateWithDualReferenceStreaminoutINTEL(
                     resultType = values.required(0),
@@ -10840,10 +11623,11 @@ object Instruction {
           "OpSubgroupAvcImeConvertToMceResultINTEL",
           SPIRVOpcodeNumber(5765),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeConvertToMceResultINTEL(
                     values.required(0),
@@ -10857,10 +11641,11 @@ object Instruction {
           "OpSubgroupAvcImeGetSingleReferenceStreaminINTEL",
           SPIRVOpcodeNumber(5766),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetSingleReferenceStreaminINTEL(
                     values.required(0),
@@ -10874,10 +11659,11 @@ object Instruction {
           "OpSubgroupAvcImeGetDualReferenceStreaminINTEL",
           SPIRVOpcodeNumber(5767),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetDualReferenceStreaminINTEL(
                     values.required(0),
@@ -10891,10 +11677,11 @@ object Instruction {
           "OpSubgroupAvcImeStripSingleReferenceStreamoutINTEL",
           SPIRVOpcodeNumber(5768),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeStripSingleReferenceStreamoutINTEL(
                     values.required(0),
@@ -10908,10 +11695,11 @@ object Instruction {
           "OpSubgroupAvcImeStripDualReferenceStreamoutINTEL",
           SPIRVOpcodeNumber(5769),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeStripDualReferenceStreamoutINTEL(
                     values.required(0),
@@ -10925,10 +11713,11 @@ object Instruction {
           "OpSubgroupAvcImeGetStreamoutSingleReferenceMajorShapeMotionVectorsINTEL",
           SPIRVOpcodeNumber(5770),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutSingleReferenceMajorShapeMotionVectorsINTEL(
                     values.required(0),
@@ -10943,10 +11732,11 @@ object Instruction {
           "OpSubgroupAvcImeGetStreamoutSingleReferenceMajorShapeDistortionsINTEL",
           SPIRVOpcodeNumber(5771),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutSingleReferenceMajorShapeDistortionsINTEL(
                     values.required(0),
@@ -10961,10 +11751,11 @@ object Instruction {
           "OpSubgroupAvcImeGetStreamoutSingleReferenceMajorShapeReferenceIdsINTEL",
           SPIRVOpcodeNumber(5772),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutSingleReferenceMajorShapeReferenceIdsINTEL(
                     values.required(0),
@@ -10979,10 +11770,11 @@ object Instruction {
           "OpSubgroupAvcImeGetStreamoutDualReferenceMajorShapeMotionVectorsINTEL",
           SPIRVOpcodeNumber(5773),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutDualReferenceMajorShapeMotionVectorsINTEL(
                     resultType = values.required(0),
@@ -10998,10 +11790,11 @@ object Instruction {
           "OpSubgroupAvcImeGetStreamoutDualReferenceMajorShapeDistortionsINTEL",
           SPIRVOpcodeNumber(5774),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutDualReferenceMajorShapeDistortionsINTEL(
                     resultType = values.required(0),
@@ -11017,10 +11810,11 @@ object Instruction {
           "OpSubgroupAvcImeGetStreamoutDualReferenceMajorShapeReferenceIdsINTEL",
           SPIRVOpcodeNumber(5775),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetStreamoutDualReferenceMajorShapeReferenceIdsINTEL(
                     resultType = values.required(0),
@@ -11036,10 +11830,11 @@ object Instruction {
           "OpSubgroupAvcImeGetBorderReachedINTEL",
           SPIRVOpcodeNumber(5776),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetBorderReachedINTEL(
                     values.required(0),
@@ -11054,10 +11849,11 @@ object Instruction {
           "OpSubgroupAvcImeGetTruncatedSearchIndicationINTEL",
           SPIRVOpcodeNumber(5777),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetTruncatedSearchIndicationINTEL(
                     values.required(0),
@@ -11071,10 +11867,11 @@ object Instruction {
           "OpSubgroupAvcImeGetUnidirectionalEarlySearchTerminationINTEL",
           SPIRVOpcodeNumber(5778),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetUnidirectionalEarlySearchTerminationINTEL(
                     values.required(0),
@@ -11088,10 +11885,11 @@ object Instruction {
           "OpSubgroupAvcImeGetWeightingPatternMinimumMotionVectorINTEL",
           SPIRVOpcodeNumber(5779),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetWeightingPatternMinimumMotionVectorINTEL(
                     values.required(0),
@@ -11105,10 +11903,11 @@ object Instruction {
           "OpSubgroupAvcImeGetWeightingPatternMinimumDistortionINTEL",
           SPIRVOpcodeNumber(5780),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcImeGetWeightingPatternMinimumDistortionINTEL(
                     values.required(0),
@@ -11122,10 +11921,11 @@ object Instruction {
           "OpSubgroupAvcFmeInitializeINTEL",
           SPIRVOpcodeNumber(5781),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcFmeInitializeINTEL(
                     resultType = values.required(0),
@@ -11145,10 +11945,11 @@ object Instruction {
           "OpSubgroupAvcBmeInitializeINTEL",
           SPIRVOpcodeNumber(5782),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcBmeInitializeINTEL(
                     resultType = values.required(0),
@@ -11169,10 +11970,11 @@ object Instruction {
           "OpSubgroupAvcRefConvertToMcePayloadINTEL",
           SPIRVOpcodeNumber(5783),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefConvertToMcePayloadINTEL(
                     values.required(0),
@@ -11186,10 +11988,11 @@ object Instruction {
           "OpSubgroupAvcRefSetBidirectionalMixDisableINTEL",
           SPIRVOpcodeNumber(5784),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefSetBidirectionalMixDisableINTEL(
                     values.required(0),
@@ -11203,10 +12006,11 @@ object Instruction {
           "OpSubgroupAvcRefSetBilinearFilterEnableINTEL",
           SPIRVOpcodeNumber(5785),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefSetBilinearFilterEnableINTEL(
                     values.required(0),
@@ -11220,10 +12024,11 @@ object Instruction {
           "OpSubgroupAvcRefEvaluateWithSingleReferenceINTEL",
           SPIRVOpcodeNumber(5786),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithSingleReferenceINTEL(
                     resultType = values.required(0),
@@ -11239,10 +12044,11 @@ object Instruction {
           "OpSubgroupAvcRefEvaluateWithDualReferenceINTEL",
           SPIRVOpcodeNumber(5787),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithDualReferenceINTEL(
                     resultType = values.required(0),
@@ -11259,10 +12065,11 @@ object Instruction {
           "OpSubgroupAvcRefEvaluateWithMultiReferenceINTEL",
           SPIRVOpcodeNumber(5788),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithMultiReferenceINTEL(
                     resultType = values.required(0),
@@ -11278,10 +12085,11 @@ object Instruction {
           "OpSubgroupAvcRefEvaluateWithMultiReferenceInterlacedINTEL",
           SPIRVOpcodeNumber(5789),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefEvaluateWithMultiReferenceInterlacedINTEL(
                     resultType = values.required(0),
@@ -11298,10 +12106,11 @@ object Instruction {
           "OpSubgroupAvcRefConvertToMceResultINTEL",
           SPIRVOpcodeNumber(5790),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcRefConvertToMceResultINTEL(
                     values.required(0),
@@ -11315,10 +12124,11 @@ object Instruction {
           "OpSubgroupAvcSicInitializeINTEL",
           SPIRVOpcodeNumber(5791),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicInitializeINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -11328,10 +12138,11 @@ object Instruction {
           "OpSubgroupAvcSicConfigureSkcINTEL",
           SPIRVOpcodeNumber(5792),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicConfigureSkcINTEL(
                     resultType = values.required(0),
@@ -11350,10 +12161,11 @@ object Instruction {
           "OpSubgroupAvcSicConfigureIpeLumaINTEL",
           SPIRVOpcodeNumber(5793),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicConfigureIpeLumaINTEL(
                     resultType = values.required(0),
@@ -11374,10 +12186,11 @@ object Instruction {
           "OpSubgroupAvcSicConfigureIpeLumaChromaINTEL",
           SPIRVOpcodeNumber(5794),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicConfigureIpeLumaChromaINTEL(
                     resultType = values.required(0),
@@ -11401,10 +12214,11 @@ object Instruction {
           "OpSubgroupAvcSicGetMotionVectorMaskINTEL",
           SPIRVOpcodeNumber(5795),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetMotionVectorMaskINTEL(
                     values.required(0),
@@ -11419,10 +12233,11 @@ object Instruction {
           "OpSubgroupAvcSicConvertToMcePayloadINTEL",
           SPIRVOpcodeNumber(5796),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicConvertToMcePayloadINTEL(
                     values.required(0),
@@ -11436,10 +12251,11 @@ object Instruction {
           "OpSubgroupAvcSicSetIntraLumaShapePenaltyINTEL",
           SPIRVOpcodeNumber(5797),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicSetIntraLumaShapePenaltyINTEL(
                     values.required(0),
@@ -11454,10 +12270,11 @@ object Instruction {
           "OpSubgroupAvcSicSetIntraLumaModeCostFunctionINTEL",
           SPIRVOpcodeNumber(5798),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicSetIntraLumaModeCostFunctionINTEL(
                     resultType = values.required(0),
@@ -11474,10 +12291,11 @@ object Instruction {
           "OpSubgroupAvcSicSetIntraChromaModeCostFunctionINTEL",
           SPIRVOpcodeNumber(5799),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicSetIntraChromaModeCostFunctionINTEL(
                     values.required(0),
@@ -11492,10 +12310,11 @@ object Instruction {
           "OpSubgroupAvcSicSetBilinearFilterEnableINTEL",
           SPIRVOpcodeNumber(5800),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicSetBilinearFilterEnableINTEL(
                     values.required(0),
@@ -11509,10 +12328,11 @@ object Instruction {
           "OpSubgroupAvcSicSetSkcForwardTransformEnableINTEL",
           SPIRVOpcodeNumber(5801),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicSetSkcForwardTransformEnableINTEL(
                     values.required(0),
@@ -11527,10 +12347,11 @@ object Instruction {
           "OpSubgroupAvcSicSetBlockBasedRawSkipSadINTEL",
           SPIRVOpcodeNumber(5802),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicSetBlockBasedRawSkipSadINTEL(
                     values.required(0),
@@ -11545,10 +12366,11 @@ object Instruction {
           "OpSubgroupAvcSicEvaluateIpeINTEL",
           SPIRVOpcodeNumber(5803),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateIpeINTEL(
                     values.required(0),
@@ -11563,10 +12385,11 @@ object Instruction {
           "OpSubgroupAvcSicEvaluateWithSingleReferenceINTEL",
           SPIRVOpcodeNumber(5804),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithSingleReferenceINTEL(
                     resultType = values.required(0),
@@ -11582,10 +12405,11 @@ object Instruction {
           "OpSubgroupAvcSicEvaluateWithDualReferenceINTEL",
           SPIRVOpcodeNumber(5805),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithDualReferenceINTEL(
                     resultType = values.required(0),
@@ -11602,10 +12426,11 @@ object Instruction {
           "OpSubgroupAvcSicEvaluateWithMultiReferenceINTEL",
           SPIRVOpcodeNumber(5806),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithMultiReferenceINTEL(
                     resultType = values.required(0),
@@ -11621,10 +12446,11 @@ object Instruction {
           "OpSubgroupAvcSicEvaluateWithMultiReferenceInterlacedINTEL",
           SPIRVOpcodeNumber(5807),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicEvaluateWithMultiReferenceInterlacedINTEL(
                     resultType = values.required(0),
@@ -11641,10 +12467,11 @@ object Instruction {
           "OpSubgroupAvcSicConvertToMceResultINTEL",
           SPIRVOpcodeNumber(5808),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicConvertToMceResultINTEL(
                     values.required(0),
@@ -11658,10 +12485,11 @@ object Instruction {
           "OpSubgroupAvcSicGetIpeLumaShapeINTEL",
           SPIRVOpcodeNumber(5809),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetIpeLumaShapeINTEL(
                     values.required(0),
@@ -11675,10 +12503,11 @@ object Instruction {
           "OpSubgroupAvcSicGetBestIpeLumaDistortionINTEL",
           SPIRVOpcodeNumber(5810),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetBestIpeLumaDistortionINTEL(
                     values.required(0),
@@ -11692,10 +12521,11 @@ object Instruction {
           "OpSubgroupAvcSicGetBestIpeChromaDistortionINTEL",
           SPIRVOpcodeNumber(5811),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetBestIpeChromaDistortionINTEL(
                     values.required(0),
@@ -11709,10 +12539,11 @@ object Instruction {
           "OpSubgroupAvcSicGetPackedIpeLumaModesINTEL",
           SPIRVOpcodeNumber(5812),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetPackedIpeLumaModesINTEL(
                     values.required(0),
@@ -11726,10 +12557,11 @@ object Instruction {
           "OpSubgroupAvcSicGetIpeChromaModeINTEL",
           SPIRVOpcodeNumber(5813),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetIpeChromaModeINTEL(
                     values.required(0),
@@ -11743,10 +12575,11 @@ object Instruction {
           "OpSubgroupAvcSicGetPackedSkcLumaCountThresholdINTEL",
           SPIRVOpcodeNumber(5814),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetPackedSkcLumaCountThresholdINTEL(
                     values.required(0),
@@ -11760,10 +12593,11 @@ object Instruction {
           "OpSubgroupAvcSicGetPackedSkcLumaSumThresholdINTEL",
           SPIRVOpcodeNumber(5815),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetPackedSkcLumaSumThresholdINTEL(
                     values.required(0),
@@ -11777,10 +12611,11 @@ object Instruction {
           "OpSubgroupAvcSicGetInterRawSadsINTEL",
           SPIRVOpcodeNumber(5816),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupAvcSicGetInterRawSadsINTEL(
                     values.required(0),
@@ -11794,10 +12629,11 @@ object Instruction {
           "OpVariableLengthArrayINTEL",
           SPIRVOpcodeNumber(5818),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.VariableLengthArrayINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -11807,10 +12643,11 @@ object Instruction {
           "OpSaveMemoryINTEL",
           SPIRVOpcodeNumber(5819),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SaveMemoryINTEL(values.required(0), values.required(1))
               ),
           "IdResultType IdResult"
@@ -11819,10 +12656,11 @@ object Instruction {
           "OpRestoreMemoryINTEL",
           SPIRVOpcodeNumber(5820),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RestoreMemoryINTEL(values.required(0))
               ),
           "IdRef"
@@ -11831,10 +12669,11 @@ object Instruction {
           "OpArbitraryFloatSinCosPiALTERA",
           SPIRVOpcodeNumber(5840),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatSinCosPiALTERA(
                     resultType = values.required(0),
@@ -11853,10 +12692,11 @@ object Instruction {
           "OpArbitraryFloatCastALTERA",
           SPIRVOpcodeNumber(5841),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatCastALTERA(
                     resultType = values.required(0),
@@ -11875,10 +12715,11 @@ object Instruction {
           "OpArbitraryFloatCastFromIntALTERA",
           SPIRVOpcodeNumber(5842),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatCastFromIntALTERA(
                     resultType = values.required(0),
@@ -11897,10 +12738,11 @@ object Instruction {
           "OpArbitraryFloatCastToIntALTERA",
           SPIRVOpcodeNumber(5843),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatCastToIntALTERA(
                     resultType = values.required(0),
@@ -11919,10 +12761,11 @@ object Instruction {
           "OpArbitraryFloatAddALTERA",
           SPIRVOpcodeNumber(5846),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatAddALTERA(
                     resultType = values.required(0),
@@ -11943,10 +12786,11 @@ object Instruction {
           "OpArbitraryFloatSubALTERA",
           SPIRVOpcodeNumber(5847),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatSubALTERA(
                     resultType = values.required(0),
@@ -11967,10 +12811,11 @@ object Instruction {
           "OpArbitraryFloatMulALTERA",
           SPIRVOpcodeNumber(5848),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatMulALTERA(
                     resultType = values.required(0),
@@ -11991,10 +12836,11 @@ object Instruction {
           "OpArbitraryFloatDivALTERA",
           SPIRVOpcodeNumber(5849),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatDivALTERA(
                     resultType = values.required(0),
@@ -12015,10 +12861,11 @@ object Instruction {
           "OpArbitraryFloatGTALTERA",
           SPIRVOpcodeNumber(5850),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatGTALTERA(
                     resultType = values.required(0),
@@ -12035,10 +12882,11 @@ object Instruction {
           "OpArbitraryFloatGEALTERA",
           SPIRVOpcodeNumber(5851),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatGEALTERA(
                     resultType = values.required(0),
@@ -12055,10 +12903,11 @@ object Instruction {
           "OpArbitraryFloatLTALTERA",
           SPIRVOpcodeNumber(5852),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatLTALTERA(
                     resultType = values.required(0),
@@ -12075,10 +12924,11 @@ object Instruction {
           "OpArbitraryFloatLEALTERA",
           SPIRVOpcodeNumber(5853),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatLEALTERA(
                     resultType = values.required(0),
@@ -12095,10 +12945,11 @@ object Instruction {
           "OpArbitraryFloatEQALTERA",
           SPIRVOpcodeNumber(5854),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatEQALTERA(
                     resultType = values.required(0),
@@ -12115,10 +12966,11 @@ object Instruction {
           "OpArbitraryFloatRecipALTERA",
           SPIRVOpcodeNumber(5855),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatRecipALTERA(
                     resultType = values.required(0),
@@ -12137,10 +12989,11 @@ object Instruction {
           "OpArbitraryFloatRSqrtALTERA",
           SPIRVOpcodeNumber(5856),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatRSqrtALTERA(
                     resultType = values.required(0),
@@ -12159,10 +13012,11 @@ object Instruction {
           "OpArbitraryFloatCbrtALTERA",
           SPIRVOpcodeNumber(5857),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatCbrtALTERA(
                     resultType = values.required(0),
@@ -12181,10 +13035,11 @@ object Instruction {
           "OpArbitraryFloatHypotALTERA",
           SPIRVOpcodeNumber(5858),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatHypotALTERA(
                     resultType = values.required(0),
@@ -12205,10 +13060,11 @@ object Instruction {
           "OpArbitraryFloatSqrtALTERA",
           SPIRVOpcodeNumber(5859),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatSqrtALTERA(
                     resultType = values.required(0),
@@ -12227,10 +13083,11 @@ object Instruction {
           "OpArbitraryFloatLogINTEL",
           SPIRVOpcodeNumber(5860),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatLogINTEL(
                     resultType = values.required(0),
@@ -12249,10 +13106,11 @@ object Instruction {
           "OpArbitraryFloatLog2INTEL",
           SPIRVOpcodeNumber(5861),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatLog2INTEL(
                     resultType = values.required(0),
@@ -12271,10 +13129,11 @@ object Instruction {
           "OpArbitraryFloatLog10INTEL",
           SPIRVOpcodeNumber(5862),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatLog10INTEL(
                     resultType = values.required(0),
@@ -12293,10 +13152,11 @@ object Instruction {
           "OpArbitraryFloatLog1pINTEL",
           SPIRVOpcodeNumber(5863),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatLog1pINTEL(
                     resultType = values.required(0),
@@ -12315,10 +13175,11 @@ object Instruction {
           "OpArbitraryFloatExpINTEL",
           SPIRVOpcodeNumber(5864),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatExpINTEL(
                     resultType = values.required(0),
@@ -12337,10 +13198,11 @@ object Instruction {
           "OpArbitraryFloatExp2INTEL",
           SPIRVOpcodeNumber(5865),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatExp2INTEL(
                     resultType = values.required(0),
@@ -12359,10 +13221,11 @@ object Instruction {
           "OpArbitraryFloatExp10INTEL",
           SPIRVOpcodeNumber(5866),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatExp10INTEL(
                     resultType = values.required(0),
@@ -12381,10 +13244,11 @@ object Instruction {
           "OpArbitraryFloatExpm1INTEL",
           SPIRVOpcodeNumber(5867),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatExpm1INTEL(
                     resultType = values.required(0),
@@ -12403,10 +13267,11 @@ object Instruction {
           "OpArbitraryFloatSinINTEL",
           SPIRVOpcodeNumber(5868),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatSinINTEL(
                     resultType = values.required(0),
@@ -12425,10 +13290,11 @@ object Instruction {
           "OpArbitraryFloatCosINTEL",
           SPIRVOpcodeNumber(5869),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatCosINTEL(
                     resultType = values.required(0),
@@ -12447,10 +13313,11 @@ object Instruction {
           "OpArbitraryFloatSinCosINTEL",
           SPIRVOpcodeNumber(5870),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatSinCosINTEL(
                     resultType = values.required(0),
@@ -12469,10 +13336,11 @@ object Instruction {
           "OpArbitraryFloatSinPiINTEL",
           SPIRVOpcodeNumber(5871),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatSinPiINTEL(
                     resultType = values.required(0),
@@ -12491,10 +13359,11 @@ object Instruction {
           "OpArbitraryFloatCosPiINTEL",
           SPIRVOpcodeNumber(5872),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatCosPiINTEL(
                     resultType = values.required(0),
@@ -12513,10 +13382,11 @@ object Instruction {
           "OpArbitraryFloatASinINTEL",
           SPIRVOpcodeNumber(5873),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatASinINTEL(
                     resultType = values.required(0),
@@ -12535,10 +13405,11 @@ object Instruction {
           "OpArbitraryFloatASinPiINTEL",
           SPIRVOpcodeNumber(5874),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatASinPiINTEL(
                     resultType = values.required(0),
@@ -12557,10 +13428,11 @@ object Instruction {
           "OpArbitraryFloatACosINTEL",
           SPIRVOpcodeNumber(5875),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatACosINTEL(
                     resultType = values.required(0),
@@ -12579,10 +13451,11 @@ object Instruction {
           "OpArbitraryFloatACosPiINTEL",
           SPIRVOpcodeNumber(5876),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatACosPiINTEL(
                     resultType = values.required(0),
@@ -12601,10 +13474,11 @@ object Instruction {
           "OpArbitraryFloatATanINTEL",
           SPIRVOpcodeNumber(5877),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatATanINTEL(
                     resultType = values.required(0),
@@ -12623,10 +13497,11 @@ object Instruction {
           "OpArbitraryFloatATanPiINTEL",
           SPIRVOpcodeNumber(5878),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatATanPiINTEL(
                     resultType = values.required(0),
@@ -12645,10 +13520,11 @@ object Instruction {
           "OpArbitraryFloatATan2INTEL",
           SPIRVOpcodeNumber(5879),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatATan2INTEL(
                     resultType = values.required(0),
@@ -12669,10 +13545,11 @@ object Instruction {
           "OpArbitraryFloatPowINTEL",
           SPIRVOpcodeNumber(5880),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatPowINTEL(
                     resultType = values.required(0),
@@ -12693,10 +13570,11 @@ object Instruction {
           "OpArbitraryFloatPowRINTEL",
           SPIRVOpcodeNumber(5881),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatPowRINTEL(
                     resultType = values.required(0),
@@ -12717,10 +13595,11 @@ object Instruction {
           "OpArbitraryFloatPowNINTEL",
           SPIRVOpcodeNumber(5882),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ArbitraryFloatPowNINTEL(
                     resultType = values.required(0),
@@ -12741,18 +13620,24 @@ object Instruction {
           "OpLoopControlINTEL",
           SPIRVOpcodeNumber(5887),
           definition =>
-            raw =>
-              Instruction.decodeDefinition(definition, raw, values => Instruction.LoopControlINTEL(values.repeated(0))),
+            (raw, widths) =>
+              Instruction.decodeDefinition(
+                definition,
+                raw,
+                widths,
+                values => Instruction.LoopControlINTEL(values.repeated(0))
+              ),
           "LiteralInteger*"
         )
     case AliasDomainDeclINTEL extends Definition(
           "OpAliasDomainDeclINTEL",
           SPIRVOpcodeNumber(5911),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.AliasDomainDeclINTEL(values.required(0), values.optional(1))
               ),
           "IdResult IdRef?"
@@ -12761,10 +13646,11 @@ object Instruction {
           "OpAliasScopeDeclINTEL",
           SPIRVOpcodeNumber(5912),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.AliasScopeDeclINTEL(values.required(0), values.required(1), values.optional(2))
               ),
           "IdResult IdRef IdRef?"
@@ -12773,10 +13659,11 @@ object Instruction {
           "OpAliasScopeListDeclINTEL",
           SPIRVOpcodeNumber(5913),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.AliasScopeListDeclINTEL(values.required(0), values.repeated(1))
               ),
           "IdResult IdRef*"
@@ -12785,10 +13672,11 @@ object Instruction {
           "OpFixedSqrtALTERA",
           SPIRVOpcodeNumber(5923),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedSqrtALTERA(
                     resultType = values.required(0),
@@ -12807,10 +13695,11 @@ object Instruction {
           "OpFixedRecipALTERA",
           SPIRVOpcodeNumber(5924),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedRecipALTERA(
                     resultType = values.required(0),
@@ -12829,10 +13718,11 @@ object Instruction {
           "OpFixedRsqrtALTERA",
           SPIRVOpcodeNumber(5925),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedRsqrtALTERA(
                     resultType = values.required(0),
@@ -12851,10 +13741,11 @@ object Instruction {
           "OpFixedSinALTERA",
           SPIRVOpcodeNumber(5926),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedSinALTERA(
                     resultType = values.required(0),
@@ -12873,10 +13764,11 @@ object Instruction {
           "OpFixedCosALTERA",
           SPIRVOpcodeNumber(5927),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedCosALTERA(
                     resultType = values.required(0),
@@ -12895,10 +13787,11 @@ object Instruction {
           "OpFixedSinCosALTERA",
           SPIRVOpcodeNumber(5928),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedSinCosALTERA(
                     resultType = values.required(0),
@@ -12917,10 +13810,11 @@ object Instruction {
           "OpFixedSinPiALTERA",
           SPIRVOpcodeNumber(5929),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedSinPiALTERA(
                     resultType = values.required(0),
@@ -12939,10 +13833,11 @@ object Instruction {
           "OpFixedCosPiALTERA",
           SPIRVOpcodeNumber(5930),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedCosPiALTERA(
                     resultType = values.required(0),
@@ -12961,10 +13856,11 @@ object Instruction {
           "OpFixedSinCosPiALTERA",
           SPIRVOpcodeNumber(5931),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedSinCosPiALTERA(
                     resultType = values.required(0),
@@ -12983,10 +13879,11 @@ object Instruction {
           "OpFixedLogALTERA",
           SPIRVOpcodeNumber(5932),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedLogALTERA(
                     resultType = values.required(0),
@@ -13005,10 +13902,11 @@ object Instruction {
           "OpFixedExpALTERA",
           SPIRVOpcodeNumber(5933),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FixedExpALTERA(
                     resultType = values.required(0),
@@ -13027,10 +13925,11 @@ object Instruction {
           "OpPtrCastToCrossWorkgroupALTERA",
           SPIRVOpcodeNumber(5934),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.PtrCastToCrossWorkgroupALTERA(values.required(0), values.required(1), values.required(2))
               ),
@@ -13040,10 +13939,11 @@ object Instruction {
           "OpCrossWorkgroupCastToPtrALTERA",
           SPIRVOpcodeNumber(5938),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.CrossWorkgroupCastToPtrALTERA(values.required(0), values.required(1), values.required(2))
               ),
@@ -13053,10 +13953,11 @@ object Instruction {
           "OpReadPipeBlockingALTERA",
           SPIRVOpcodeNumber(5946),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ReadPipeBlockingALTERA(
                     values.required(0),
@@ -13071,10 +13972,11 @@ object Instruction {
           "OpWritePipeBlockingALTERA",
           SPIRVOpcodeNumber(5947),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.WritePipeBlockingALTERA(
                     values.required(0),
@@ -13089,10 +13991,11 @@ object Instruction {
           "OpFPGARegALTERA",
           SPIRVOpcodeNumber(5949),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.FPGARegALTERA(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -13101,10 +14004,11 @@ object Instruction {
           "OpRayQueryGetRayTMinKHR",
           SPIRVOpcodeNumber(6016),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RayQueryGetRayTMinKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -13113,10 +14017,11 @@ object Instruction {
           "OpRayQueryGetRayFlagsKHR",
           SPIRVOpcodeNumber(6017),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RayQueryGetRayFlagsKHR(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -13125,10 +14030,11 @@ object Instruction {
           "OpRayQueryGetIntersectionTKHR",
           SPIRVOpcodeNumber(6018),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionTKHR(
                     values.required(0),
@@ -13143,10 +14049,11 @@ object Instruction {
           "OpRayQueryGetIntersectionInstanceCustomIndexKHR",
           SPIRVOpcodeNumber(6019),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionInstanceCustomIndexKHR(
                     values.required(0),
@@ -13161,10 +14068,11 @@ object Instruction {
           "OpRayQueryGetIntersectionInstanceIdKHR",
           SPIRVOpcodeNumber(6020),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionInstanceIdKHR(
                     values.required(0),
@@ -13179,10 +14087,11 @@ object Instruction {
           "OpRayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR",
           SPIRVOpcodeNumber(6021),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionInstanceShaderBindingTableRecordOffsetKHR(
                     values.required(0),
@@ -13197,10 +14106,11 @@ object Instruction {
           "OpRayQueryGetIntersectionGeometryIndexKHR",
           SPIRVOpcodeNumber(6022),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionGeometryIndexKHR(
                     values.required(0),
@@ -13215,10 +14125,11 @@ object Instruction {
           "OpRayQueryGetIntersectionPrimitiveIndexKHR",
           SPIRVOpcodeNumber(6023),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionPrimitiveIndexKHR(
                     values.required(0),
@@ -13233,10 +14144,11 @@ object Instruction {
           "OpRayQueryGetIntersectionBarycentricsKHR",
           SPIRVOpcodeNumber(6024),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionBarycentricsKHR(
                     values.required(0),
@@ -13251,10 +14163,11 @@ object Instruction {
           "OpRayQueryGetIntersectionFrontFaceKHR",
           SPIRVOpcodeNumber(6025),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionFrontFaceKHR(
                     values.required(0),
@@ -13269,10 +14182,11 @@ object Instruction {
           "OpRayQueryGetIntersectionCandidateAABBOpaqueKHR",
           SPIRVOpcodeNumber(6026),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionCandidateAABBOpaqueKHR(
                     values.required(0),
@@ -13286,10 +14200,11 @@ object Instruction {
           "OpRayQueryGetIntersectionObjectRayDirectionKHR",
           SPIRVOpcodeNumber(6027),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionObjectRayDirectionKHR(
                     values.required(0),
@@ -13304,10 +14219,11 @@ object Instruction {
           "OpRayQueryGetIntersectionObjectRayOriginKHR",
           SPIRVOpcodeNumber(6028),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionObjectRayOriginKHR(
                     values.required(0),
@@ -13322,10 +14238,11 @@ object Instruction {
           "OpRayQueryGetWorldRayDirectionKHR",
           SPIRVOpcodeNumber(6029),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetWorldRayDirectionKHR(
                     values.required(0),
@@ -13339,10 +14256,11 @@ object Instruction {
           "OpRayQueryGetWorldRayOriginKHR",
           SPIRVOpcodeNumber(6030),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetWorldRayOriginKHR(values.required(0), values.required(1), values.required(2))
               ),
@@ -13352,10 +14270,11 @@ object Instruction {
           "OpRayQueryGetIntersectionObjectToWorldKHR",
           SPIRVOpcodeNumber(6031),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionObjectToWorldKHR(
                     values.required(0),
@@ -13370,10 +14289,11 @@ object Instruction {
           "OpRayQueryGetIntersectionWorldToObjectKHR",
           SPIRVOpcodeNumber(6032),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.RayQueryGetIntersectionWorldToObjectKHR(
                     values.required(0),
@@ -13388,10 +14308,11 @@ object Instruction {
           "OpAtomicFAddEXT",
           SPIRVOpcodeNumber(6035),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.AtomicFAddEXT(
                     resultType = values.required(0),
@@ -13408,10 +14329,11 @@ object Instruction {
           "OpTypeBufferSurfaceINTEL",
           SPIRVOpcodeNumber(6086),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeBufferSurfaceINTEL(values.required(0), values.required(1))
               ),
           "IdResult AccessQualifier"
@@ -13420,10 +14342,11 @@ object Instruction {
           "OpTypeStructContinuedINTEL",
           SPIRVOpcodeNumber(6090),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeStructContinuedINTEL(values.repeated(0))
               ),
           "IdRef*"
@@ -13432,10 +14355,11 @@ object Instruction {
           "OpConstantCompositeContinuedINTEL",
           SPIRVOpcodeNumber(6091),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConstantCompositeContinuedINTEL(values.repeated(0))
               ),
           "IdRef*"
@@ -13444,10 +14368,11 @@ object Instruction {
           "OpSpecConstantCompositeContinuedINTEL",
           SPIRVOpcodeNumber(6092),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.SpecConstantCompositeContinuedINTEL(values.repeated(0))
               ),
           "IdRef*"
@@ -13456,10 +14381,11 @@ object Instruction {
           "OpCompositeConstructContinuedINTEL",
           SPIRVOpcodeNumber(6096),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.CompositeConstructContinuedINTEL(values.repeated(0))
               ),
           "IdRef*"
@@ -13468,10 +14394,11 @@ object Instruction {
           "OpConvertFToBF16INTEL",
           SPIRVOpcodeNumber(6116),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertFToBF16INTEL(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -13480,10 +14407,11 @@ object Instruction {
           "OpConvertBF16ToFINTEL",
           SPIRVOpcodeNumber(6117),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConvertBF16ToFINTEL(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -13492,10 +14420,11 @@ object Instruction {
           "OpControlBarrierArriveEXT",
           SPIRVOpcodeNumber(6142),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ControlBarrierArriveEXT(values.required(0), values.required(1), values.required(2))
               ),
@@ -13505,10 +14434,11 @@ object Instruction {
           "OpControlBarrierWaitEXT",
           SPIRVOpcodeNumber(6143),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ControlBarrierWaitEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdScope IdScope IdMemorySemantics"
@@ -13517,10 +14447,11 @@ object Instruction {
           "OpArithmeticFenceEXT",
           SPIRVOpcodeNumber(6145),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ArithmeticFenceEXT(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -13529,10 +14460,11 @@ object Instruction {
           "OpTaskSequenceCreateALTERA",
           SPIRVOpcodeNumber(6163),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.TaskSequenceCreateALTERA(
                     resultType = values.required(0),
@@ -13550,10 +14482,11 @@ object Instruction {
           "OpTaskSequenceAsyncALTERA",
           SPIRVOpcodeNumber(6164),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TaskSequenceAsyncALTERA(values.required(0), values.repeated(1))
               ),
           "IdRef IdRef*"
@@ -13562,10 +14495,11 @@ object Instruction {
           "OpTaskSequenceGetALTERA",
           SPIRVOpcodeNumber(6165),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TaskSequenceGetALTERA(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -13574,10 +14508,11 @@ object Instruction {
           "OpTaskSequenceReleaseALTERA",
           SPIRVOpcodeNumber(6166),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TaskSequenceReleaseALTERA(values.required(0))
               ),
           "IdRef"
@@ -13586,10 +14521,11 @@ object Instruction {
           "OpTypeTaskSequenceALTERA",
           SPIRVOpcodeNumber(6199),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.TypeTaskSequenceALTERA(values.required(0))
               ),
           "IdResult"
@@ -13598,10 +14534,11 @@ object Instruction {
           "OpSubgroupBlockPrefetchINTEL",
           SPIRVOpcodeNumber(6221),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupBlockPrefetchINTEL(values.required(0), values.required(1), values.optional(2))
               ),
@@ -13611,10 +14548,11 @@ object Instruction {
           "OpSubgroup2DBlockLoadINTEL",
           SPIRVOpcodeNumber(6231),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Subgroup2DBlockLoadINTEL(
                     elementSize = values.required(0),
@@ -13635,10 +14573,11 @@ object Instruction {
           "OpSubgroup2DBlockLoadTransformINTEL",
           SPIRVOpcodeNumber(6232),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Subgroup2DBlockLoadTransformINTEL(
                     elementSize = values.required(0),
@@ -13659,10 +14598,11 @@ object Instruction {
           "OpSubgroup2DBlockLoadTransposeINTEL",
           SPIRVOpcodeNumber(6233),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Subgroup2DBlockLoadTransposeINTEL(
                     elementSize = values.required(0),
@@ -13683,10 +14623,11 @@ object Instruction {
           "OpSubgroup2DBlockPrefetchINTEL",
           SPIRVOpcodeNumber(6234),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Subgroup2DBlockPrefetchINTEL(
                     elementSize = values.required(0),
@@ -13706,10 +14647,11 @@ object Instruction {
           "OpSubgroup2DBlockStoreINTEL",
           SPIRVOpcodeNumber(6235),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.Subgroup2DBlockStoreINTEL(
                     elementSize = values.required(0),
@@ -13730,10 +14672,11 @@ object Instruction {
           "OpSubgroupMatrixMultiplyAccumulateINTEL",
           SPIRVOpcodeNumber(6237),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SubgroupMatrixMultiplyAccumulateINTEL(
                     resultType = values.required(0),
@@ -13751,10 +14694,11 @@ object Instruction {
           "OpBitwiseFunctionINTEL",
           SPIRVOpcodeNumber(6242),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.BitwiseFunctionINTEL(
                     resultType = values.required(0),
@@ -13771,10 +14715,11 @@ object Instruction {
           "OpUntypedVariableLengthArrayINTEL",
           SPIRVOpcodeNumber(6244),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.UntypedVariableLengthArrayINTEL(
                     values.required(0),
@@ -13789,10 +14734,11 @@ object Instruction {
           "OpConditionalExtensionINTEL",
           SPIRVOpcodeNumber(6248),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConditionalExtensionINTEL(values.required(0), values.required(1))
               ),
           "IdRef LiteralString"
@@ -13801,10 +14747,11 @@ object Instruction {
           "OpConditionalEntryPointINTEL",
           SPIRVOpcodeNumber(6249),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConditionalEntryPointINTEL(
                     pred = values.required(0),
@@ -13820,10 +14767,11 @@ object Instruction {
           "OpConditionalCapabilityINTEL",
           SPIRVOpcodeNumber(6250),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.ConditionalCapabilityINTEL(values.required(0), values.required(1))
               ),
           "IdRef Capability"
@@ -13832,10 +14780,11 @@ object Instruction {
           "OpSpecConstantTargetINTEL",
           SPIRVOpcodeNumber(6251),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SpecConstantTargetINTEL(
                     values.required(0),
@@ -13850,10 +14799,11 @@ object Instruction {
           "OpSpecConstantArchitectureINTEL",
           SPIRVOpcodeNumber(6252),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SpecConstantArchitectureINTEL(
                     resultType = values.required(0),
@@ -13870,10 +14820,11 @@ object Instruction {
           "OpSpecConstantCapabilitiesINTEL",
           SPIRVOpcodeNumber(6253),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.SpecConstantCapabilitiesINTEL(values.required(0), values.required(1), values.repeated(2))
               ),
@@ -13883,10 +14834,11 @@ object Instruction {
           "OpConditionalCopyObjectINTEL",
           SPIRVOpcodeNumber(6254),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConditionalCopyObjectINTEL(values.required(0), values.required(1), values.repeated(2))
               ),
@@ -13896,10 +14848,11 @@ object Instruction {
           "OpPredicatedLoadINTEL",
           SPIRVOpcodeNumber(6258),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.PredicatedLoadINTEL(
                     resultType = values.required(0),
@@ -13916,10 +14869,11 @@ object Instruction {
           "OpPredicatedStoreINTEL",
           SPIRVOpcodeNumber(6259),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.PredicatedStoreINTEL(
                     values.required(0),
@@ -13934,10 +14888,11 @@ object Instruction {
           "OpGroupIMulKHR",
           SPIRVOpcodeNumber(6401),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupIMulKHR(
                     resultType = values.required(0),
@@ -13953,10 +14908,11 @@ object Instruction {
           "OpGroupFMulKHR",
           SPIRVOpcodeNumber(6402),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupFMulKHR(
                     resultType = values.required(0),
@@ -13972,10 +14928,11 @@ object Instruction {
           "OpGroupBitwiseAndKHR",
           SPIRVOpcodeNumber(6403),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupBitwiseAndKHR(
                     resultType = values.required(0),
@@ -13991,10 +14948,11 @@ object Instruction {
           "OpGroupBitwiseOrKHR",
           SPIRVOpcodeNumber(6404),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupBitwiseOrKHR(
                     resultType = values.required(0),
@@ -14010,10 +14968,11 @@ object Instruction {
           "OpGroupBitwiseXorKHR",
           SPIRVOpcodeNumber(6405),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupBitwiseXorKHR(
                     resultType = values.required(0),
@@ -14029,10 +14988,11 @@ object Instruction {
           "OpGroupLogicalAndKHR",
           SPIRVOpcodeNumber(6406),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupLogicalAndKHR(
                     resultType = values.required(0),
@@ -14048,10 +15008,11 @@ object Instruction {
           "OpGroupLogicalOrKHR",
           SPIRVOpcodeNumber(6407),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupLogicalOrKHR(
                     resultType = values.required(0),
@@ -14067,10 +15028,11 @@ object Instruction {
           "OpGroupLogicalXorKHR",
           SPIRVOpcodeNumber(6408),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.GroupLogicalXorKHR(
                     resultType = values.required(0),
@@ -14086,10 +15048,11 @@ object Instruction {
           "OpRoundFToTF32INTEL",
           SPIRVOpcodeNumber(6426),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values => Instruction.RoundFToTF32INTEL(values.required(0), values.required(1), values.required(2))
               ),
           "IdResultType IdResult IdRef"
@@ -14098,10 +15061,11 @@ object Instruction {
           "OpMaskedGatherINTEL",
           SPIRVOpcodeNumber(6428),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.MaskedGatherINTEL(
                     resultType = values.required(0),
@@ -14118,10 +15082,11 @@ object Instruction {
           "OpMaskedScatterINTEL",
           SPIRVOpcodeNumber(6429),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.MaskedScatterINTEL(
                     values.required(0),
@@ -14136,10 +15101,11 @@ object Instruction {
           "OpConvertHandleToImageINTEL",
           SPIRVOpcodeNumber(6529),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConvertHandleToImageINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -14149,10 +15115,11 @@ object Instruction {
           "OpConvertHandleToSamplerINTEL",
           SPIRVOpcodeNumber(6530),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConvertHandleToSamplerINTEL(values.required(0), values.required(1), values.required(2))
               ),
@@ -14162,10 +15129,11 @@ object Instruction {
           "OpConvertHandleToSampledImageINTEL",
           SPIRVOpcodeNumber(6531),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.ConvertHandleToSampledImageINTEL(
                     values.required(0),
@@ -14179,10 +15147,11 @@ object Instruction {
           "OpFDot2MixAcc32VALVE",
           SPIRVOpcodeNumber(6916),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FDot2MixAcc32VALVE(
                     resultType = values.required(0),
@@ -14198,10 +15167,11 @@ object Instruction {
           "OpFDot2MixAcc16VALVE",
           SPIRVOpcodeNumber(6917),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FDot2MixAcc16VALVE(
                     resultType = values.required(0),
@@ -14217,10 +15187,11 @@ object Instruction {
           "OpFDot4MixAcc32VALVE",
           SPIRVOpcodeNumber(6918),
           definition =>
-            raw =>
+            (raw, widths) =>
               Instruction.decodeDefinition(
                 definition,
                 raw,
+                widths,
                 values =>
                   Instruction.FDot4MixAcc32VALVE(
                     resultType = values.required(0),
@@ -14319,14 +15290,14 @@ object Instruction {
   def definitionsFor(opcode: NonEmpty[java.lang.String]): Vec[Definition] =
     byOpcode.getOrElse(opcode, aliases.get(opcode).toVec)
 
-  def decode(raw: RawInstruction): Either[InstructionDecodeError, Instruction] = {
+  def decode(raw: RawInstruction, widths: Map[Word, Int]): Either[InstructionDecodeError, Instruction] = {
     val candidates = definitionsFor(raw.opcodeNumber)
     candidates match {
       case Vec() => Left(InstructionDecodeError.UnknownOpcode(raw.opcodeNumber))
-      case Vec(definition) => definition.decoder(raw)
+      case Vec(definition) => definition.decoder(raw, widths)
       case _ =>
         val matches = candidates.flatMap(definition =>
-          definition.decoder(raw).toOption.map(instruction => definition -> instruction)
+          definition.decoder(raw, widths).toOption.map(instruction => definition -> instruction)
         )
         matches match {
           case Vec((_, instruction)) => Right(instruction)
@@ -14350,18 +15321,15 @@ object Instruction {
   private def decodeDefinition(
       definition: Definition,
       raw: RawInstruction,
+      widths: Map[Word, Int],
       construct: DecodedOperands => Instruction
   ): Either[InstructionDecodeError, Instruction] =
     if (raw.opcodeNumber != definition.opcodeNumber)
       Left(InstructionDecodeError.DecoderOpcodeMismatch(definition.opcodeNumber, raw.opcodeNumber))
-    else {
-      val decoded = OperandDecoder.decode(definition.opcode, raw.operandWords, definition.shapes, operandKinds)
-      // The grammar uses 32-bit switch literals; retain 64-bit cases until the selector type is resolved.
-      val operands = if (definition == Definition.Switch)
-        decoded.orElse(OperandDecoder.decodeSwitch64(definition.opcode, raw.operandWords).orElse(decoded))
-      else decoded
-      operands.map(construct)
-    }
+    else
+      OperandDecoder
+        .decode(definition.opcode, raw.operandWords, definition.shapes, operandKinds, widths)
+        .map(construct)
 }
 
 @Generated(Array("sbt codegen"))

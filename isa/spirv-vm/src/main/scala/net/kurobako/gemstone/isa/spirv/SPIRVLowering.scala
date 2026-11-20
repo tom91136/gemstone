@@ -47,7 +47,8 @@ object SPIRVLowering {
       if (operand.kind.category == OperandKind.Category.Id) operand.words.map(word => Word(word.raw + offset))
       else operand.words
     )
-    instruction.definition.decoder(RawInstruction(instruction.opcodeNumber, words)).toOption.exists { moved =>
+    val raw = RawInstruction(instruction.opcodeNumber, words)
+    instruction.definition.decoder(raw, Map.empty).toOption.exists { moved =>
       val at     = module.instructions.indexWhere(_.definition == Instruction.Definition.Function)
       val result = moved.definition.shapes.indexWhere(_.kind == OperandKind.IdResult)
       val probe  = module.copy(

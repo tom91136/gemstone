@@ -25,6 +25,7 @@ object Parser {
   private class Reader(tokens: Vector[Token], comments: Vector[Token]) {
     private var position      = 0
     private var injected      = false
+    private var widths        = Map.empty[Word, Int]
     private var nextId        = 1L
     private val usedIds       = mutable.Set.empty[Int]
     private val ids           = mutable.Map.empty[String, Word]
@@ -176,9 +177,10 @@ object Parser {
         }
         if (injected) while (!boundary) words ++= raw()
         if (!boundary) fail(tokens(position), "unexpected trailing operand")
-        val instruction = definition.decoder(RawInstruction(definition.opcodeNumber, Vec.from(words)))
+        val instruction = definition.decoder(RawInstruction(definition.opcodeNumber, Vec.from(words)), widths)
           .fold(error => fail(opcode, error.message), identity)
         instructions += instruction
+        widths = ISA.recordWidths(widths, instruction)
         if (definition.shapes.headOption.exists(_.kind == OperandKind.IdResultType))
           result.foreach(resultTypes(_) = words.head)
         instruction match {

@@ -611,7 +611,8 @@ object SPIRVInstances {
     // each shape takes the next ids or literal words: the next id and the remaining literals
     take(0, ResultId + 1, signature.literals)
     val words = taken.result()
-    definition.decoder(RawInstruction(definition.opcodeNumber, words.map(Word(_)))).toOption.map { instruction =>
+    val raw   = RawInstruction(definition.opcodeNumber, words.map(Word(_)))
+    definition.decoder(raw, Map.empty).toOption.map { instruction =>
       val values =
         SPIRVStaged.operandIds(instruction, if (definition == Instruction.Definition.ExtInst) 4 else 2)
           .operands.take(operands.size)
