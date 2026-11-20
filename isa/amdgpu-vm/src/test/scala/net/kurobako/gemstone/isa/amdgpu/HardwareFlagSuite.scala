@@ -137,7 +137,7 @@ class HardwareFlagSuite extends Suite {
 
   private val sentinel = 0xdeadbeefL
 
-  private val cmpxResults: Vec[VectorRegisterIndex] = Vec(10, 11, 12, 13, 14)
+  private val cmpxResults: Vec[VectorRegisterIndex] = Vec(10, 11, 12, 13, 14, 15, 16)
 
   private def cmpxOperations(mask: Long, code: Vec[Int]): Vec[Instruction] = {
     import InstructionSource.*
@@ -145,6 +145,8 @@ class HardwareFlagSuite extends Suite {
       Instruction.VMove(10, Constant(sentinel)),
       Instruction.SMove(14, Constant(sentinel)),
       Instruction.SMove(15, Constant(sentinel)),
+      Instruction.SMove(Fixed.VccLo, Constant(sentinel)),
+      Instruction.SMove(Fixed.VccHi, Constant(sentinel)),
       Instruction.SMove64(Fixed.ExecLo, Constant(mask))
     ) ++ program(gfx1036, octets(code*)) ++ Vec(
       Instruction.SMove(20, Scalar(Fixed.ExecLo)),
@@ -154,12 +156,15 @@ class HardwareFlagSuite extends Suite {
       Instruction.VMove(11, Scalar(14)),
       Instruction.VMove(12, Scalar(15)),
       Instruction.VMove(13, Scalar(20)),
-      Instruction.VMove(14, Scalar(21))
+      Instruction.VMove(14, Scalar(21)),
+      Instruction.VMove(15, Scalar(Fixed.VccLo)),
+      Instruction.VMove(16, Scalar(Fixed.VccHi))
     )
   }
 
   private def cmpxCheck(form: cmpxFlagTables.CmpxForm, code: Vec[Int])(using munit.Location): Unit = {
     val exec = words(form.execs)
+    val vcc  = words(form.vccs)
     report(Vec.tabulate(masks.size) { row =>
       val (mask, rot) = masks(row)
       val lanes       = laneWords(
@@ -176,8 +181,8 @@ class HardwareFlagSuite extends Suite {
       val marks = (0 until 32).foldLeft(0L)((acc, lane) => if (lanes(lane)(0) == 1L) acc | (1L << lane) else acc)
       (
         Vec(mask, rot),
-        Vec(sentinel, sentinel, exec(row), 0L, exec(row)),
-        Vec(lanes(0)(1), lanes(0)(2), lanes(0)(3), lanes(0)(4), marks)
+        Vec(sentinel, sentinel, exec(row), 0L, vcc(row), sentinel, exec(row)),
+        Vec(lanes(0)(1), lanes(0)(2), lanes(0)(3), lanes(0)(4), lanes(0)(5), lanes(0)(6), marks)
       )
     })
   }
