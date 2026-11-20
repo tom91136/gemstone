@@ -456,6 +456,35 @@ class ConstantSuite extends Suite {
     )
   }
 
+  test("function descriptors in initialised globals resolve to no data relocation") {
+    val base        = Harness.module(89, Vec(Entry("k", 0x160, Vec(8), registers = 8)))
+    val names       = Vec.from("\u0000table\u0000callee\u0000".getBytes(StandardCharsets.UTF_8))
+    val strings     = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
+    val global      = Cubin.Section(strings.index + 1, ".nv.global.init", 1, 0, 8, 0, 0, Vec.fill(8)(0.toByte))
+    val symbolBytes = ByteBuffer.allocate(72).order(ByteOrder.LITTLE_ENDIAN)
+    symbolBytes.putInt(24, 1).put(28, 1.toByte).putShort(30, global.index.toShort).putLong(40, 8L)
+    symbolBytes.putInt(48, 7).put(52, 0x12.toByte).putShort(54, 1.toShort)
+    val symbols =
+      Cubin.Section(global.index + 1, ".symtab", 2, 0, 72, strings.index, 0, Vec.from(symbolBytes.array()))
+    val relocation = Cubin.Section(
+      symbols.index + 1,
+      ".rel.nv.global.init",
+      9,
+      0,
+      16,
+      symbols.index,
+      global.index,
+      LittleEndian.toVec(0L, 8) ++ LittleEndian.toVec((2L << 32) | 35L, 8)
+    )
+    val module = base.copy(
+      sections = base.sections ++ Vec(strings, global, symbols, relocation),
+      globals = Vec(Cubin.Global("table", Vec.fill(8)(0.toByte), offset = 0, section = global.index))
+    )
+    assertEquals(Cubin.globalRelocations(module), Right(Vec.empty[Cubin.GlobalRelocation]))
+    val functions = Vec(Listing.program("EXIT", "k").value)
+    assert(lowerStatements(module, module.kernels.head, functions).isRight)
+  }
+
   test("unapplied constant-bank relocations fail explicitly") {
     val saxpy      = load(86, Fixture.listing("saxpySm86"), "saxpy")
     val module     = saxpy.module(Vec(8, 8, 4, 4))

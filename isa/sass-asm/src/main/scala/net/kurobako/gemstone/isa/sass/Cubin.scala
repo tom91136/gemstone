@@ -62,6 +62,7 @@ object Cubin {
   private object RelocationKind {
     val Address64             = 2L
     val GenericAddress64      = 4L
+    val FunctionDescriptor64  = 0x23L
     val KeplerImmediateLow32  = 0x0dL
     val KeplerImmediateHigh32 = 0x0eL
     val VoltaImmediateLow32   = 0x38L
@@ -348,24 +349,28 @@ object Cubin {
   def globalRelocations(module: Module): Either[NonEmpty[String], Vec[GlobalRelocation]] =
     module.sections.filter(initialisedGlobalTable(module, _)).flatTraverse { table =>
       resolvedRelocations(module, table) { (entry, globals) =>
-        for {
-          _ <- check(
-            entry.kind.raw == RelocationKind.Address64 || entry.kind.raw == RelocationKind.GenericAddress64,
-            "unsupported global relocation kind"
+        if (entry.kind.raw == RelocationKind.FunctionDescriptor64) Right(Option.empty[GlobalRelocation])
+        else
+          for {
+            _ <- check(
+              entry.kind.raw == RelocationKind.Address64 || entry.kind.raw == RelocationKind.GenericAddress64,
+              "unsupported global relocation kind"
+            )
+            offset <-
+              entry.offset.toInt.refine[Int >= 0].left.map(_ => "invalid global relocation offset": NonEmpty[String])
+            destination <- module.globals.find(global =>
+              global.section.raw == table.info && global.offset.raw <= offset.raw &&
+                offset.raw + 8L <= global.offset.raw.toLong + global.bytes.size
+            ).toRight[NonEmpty[String]]("global relocation lies outside every global")
+            target <- globals(entry.symbol)
+            within = (offset.raw - destination.offset.raw).unsafe[Int >= 0]
+            base   = entry.addend.getOrElse(LittleEndian.decodeInt64(destination.bytes, within))
+          } yield Some(
+            target.constantSection.fold(GlobalRelocation(destination.name, within, target.name, base))(section =>
+              GlobalRelocation(destination.name, within, constantSymbol(section), base + target.offset.raw)
+            )
           )
-          offset <-
-            entry.offset.toInt.refine[Int >= 0].left.map(_ => "invalid global relocation offset": NonEmpty[String])
-          destination <- module.globals.find(global =>
-            global.section.raw == table.info && global.offset.raw <= offset.raw &&
-              offset.raw + 8L <= global.offset.raw.toLong + global.bytes.size
-          ).toRight[NonEmpty[String]]("global relocation lies outside every global")
-          target <- globals(entry.symbol)
-          within = (offset.raw - destination.offset.raw).unsafe[Int >= 0]
-          base   = entry.addend.getOrElse(LittleEndian.decodeInt64(destination.bytes, within))
-        } yield target.constantSection.fold(GlobalRelocation(destination.name, within, target.name, base))(section =>
-          GlobalRelocation(destination.name, within, constantSymbol(section), base + target.offset.raw)
-        )
-      }
+      }.map(_.flatten)
     }
 
   def relocateConstants(
