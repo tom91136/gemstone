@@ -6,6 +6,7 @@ import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
 import scala.collection.concurrent.TrieMap
 import scala.util.Random
@@ -173,6 +174,9 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
   }
 
   def state(harness: NvidiaHarness): Map[Long, Byte] = harness.globalBytes.writes
+
+  override def seed(harness: NvidiaHarness, space: Space, bytes: Map[Long, Byte]): Unit =
+    if (space == Space.Global) harness.globalBytes.seed(bytes)
 
   override def loads(harness: NvidiaHarness): Set[Long] = harness.globalBytes.loads
 }

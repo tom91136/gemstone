@@ -307,11 +307,11 @@ object Proof {
           filtered
         )
       case None =>
-        Equivalence.replay(reference, executor, left, right, liveOut, inputs) match {
+        Equivalence.replay(reference, executor, left, right, liveOut, inputs, SmtBackend.seeds(model)) match {
           case Verdict.Rejected(found)          => Result.Rejected(found, Source.Solver)
           case Verdict.NotRejected(_) if memory =>
             Result.Undecided(
-              "the solver's model rests on the initial memory the sequences read or on the width of an access",
+              "the solver's model shows no difference on replay with its memory, so it rests on the width of an access",
               filtered
             )
           case Verdict.NotRejected(_)    => Result.Disagreement(Vec.from(inputs.toSeq.sortBy(_._1)), filtered)

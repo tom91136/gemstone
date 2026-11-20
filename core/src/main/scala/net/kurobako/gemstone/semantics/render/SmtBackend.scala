@@ -2,6 +2,7 @@ package net.kurobako.gemstone.semantics.render
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.semantics.Space
 import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.reflect.ClassTag
@@ -47,6 +48,7 @@ object SmtBackend extends Backend {
       accessed: Set[String],
       stored: Map[String, String],
       touched: Map[String, String],
+      accesses: List[(space: String, address: String, width: Int)],
       floating: Boolean
   )
 
@@ -62,6 +64,7 @@ object SmtBackend extends Backend {
 
   /** The constant banks, which nothing stores to: one memory of every bank's bytes, a bank above its offsets. */
   private val Constants    = "Constants"
+  private val Seeded       = raw"seed_([A-Za-z]+)_(\d+)_(a|\d+)".r
   private val Converted    = raw"\.to\[(UInt|SInt)\[(\d+)\]\]".r
   private val Constructed  = raw"(UInt|SInt)\[(\d+)\]".r
   private val FromFloating = raw"(?:FloatingPoint|Float)\[(\d+)\]".r
@@ -106,6 +109,7 @@ object SmtBackend extends Backend {
     pairs      <- pairResults(l.results, r.results)
     footprints = (l.touched.keys ++ r.touched.keys).toList.distinct
     header <- declarations(parameters, (l.accessed ++ r.accessed).toList, footprints)
+    seeds = seeding(l, r)
   } yield {
     val differences = pairs.map((a, b) => s"(distinct $a $b)") ++
       (if (memory) (l.stored.keys ++ r.stored.keys).toList.distinct else Nil).map(space =>
@@ -119,7 +123,39 @@ object SmtBackend extends Backend {
     (List(logic, "(set-option :produce-models true)") ++
       header ++ l.lines ++ r.lines ++
       List(assertion(differences), "(check-sat)") ++
-      (if (values.isEmpty) Nil else List(s"(get-value (${values.mkString(" ")}))"))).mkString("\n")
+      (if (values.isEmpty) Nil else List(s"(get-value (${values.mkString(" ")}))")) ++
+      (if (seeds.isEmpty) Nil else seeds.map(_.definition) :+ s"(get-value (${seeds.map(_.name).mkString(" ")}))"))
+      .mkString("\n")
+  }
+
+  private case class Seed(name: String, definition: String)
+
+  /** The address of each access either side makes and the byte its initial memory holds at each address it reaches, so
+    * that a model tells what the memory held where the sequences touched it.
+    */
+  private def seeding(l: Encoding, r: Encoding): List[Seed] = {
+    val spaces = l.accessed ++ r.accessed
+    (l.accesses ++ r.accesses).distinct.filter(access => spaces(access.space)).zipWithIndex.flatMap {
+      case ((space, address, width), index) =>
+        val name = s"seed_${spaceName(space)}_$index"
+        Seed(s"${name}_a", s"(define-fun ${name}_a () (_ BitVec 64) $address)") ::
+          (0 until width / 8).toList.map(byte =>
+            Seed(
+              s"${name}_$byte",
+              s"(define-fun ${name}_$byte () (_ BitVec 8) (select ${initial(space)} ${offset(address, byte)}))"
+            )
+          )
+    }
+  }
+
+  /** The bytes of each space's initial memory that a solver model of [[equivalence]] holds, by address. */
+  def seeds(model: Map[String, Long]): Map[Space, Map[Long, Byte]] = {
+    val parts     = model.toList.collect { case (Seeded(space, access, part), value) => (space, access, part, value) }
+    val addresses = parts.collect { case (space, access, "a", address) => (space, access) -> address }.toMap
+    parts.collect {
+      case (space, access, byte, value) if byte != "a" && addresses.contains((space, access)) =>
+        (space, addresses((space, access)) + byte.toLong -> value.toByte)
+    }.groupMap(_._1)(_._2).flatMap((space, bytes) => Space.values.find(_.toString == space).map(_ -> bytes.toMap))
   }
 
   private def encode(definition: Definition, prefix: String): Either[String, Encoding] =
@@ -134,6 +170,7 @@ object SmtBackend extends Backend {
     private val accessed = mutable.LinkedHashSet.empty[String]
     private val stored   = mutable.LinkedHashMap.empty[String, String]
     private val touched  = mutable.LinkedHashMap.empty[String, String]
+    private val accesses = mutable.ArrayBuffer.empty[(space: String, address: String, width: Int)]
     private val guards   = mutable.ArrayDeque.empty[String]
     private val formats  = mutable.HashSet.empty[FpFormat]
     private val counter  = Iterator.from(0)
@@ -143,7 +180,15 @@ object SmtBackend extends Backend {
       _       <- collect(definition.body)(step => statement(step.target, step.term, None))
       _       <- collect(definition.requirements)(requirement(_))
       results <- collect(definition.results)(output(_))
-    } yield Encoding(lines.toList, results.toList, accessed.toSet, stored.toMap, touched.toMap, formats.nonEmpty)
+    } yield Encoding(
+      lines.toList,
+      results.toList,
+      accessed.toSet,
+      stored.toMap,
+      touched.toMap,
+      accesses.toList,
+      formats.nonEmpty
+    )
 
     private def emit(line: String): Unit = lines.append(line)
 
@@ -203,6 +248,7 @@ object SmtBackend extends Backend {
 
     /** Marks a load or store of `width` bits at `address` of `space`, where `guard` holds. */
     private def touch(direction: String, space: String, address: String, width: Int, guard: Option[String]): Unit = {
+      accesses += ((space, address, width))
       val footprint = s"${direction}_${spaceName(space)}"
       val previous  = touched.getOrElse(footprint, symbol(footprint))
       val marked    =

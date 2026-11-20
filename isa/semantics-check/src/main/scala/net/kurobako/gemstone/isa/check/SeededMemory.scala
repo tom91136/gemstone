@@ -23,6 +23,12 @@ object SeededMemory {
 class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, mask: Long = -1L) {
   private val written = mutable.LongMap.empty[Byte]
   private val loaded  = mutable.Set.empty[Long]
+  private val seeded  = mutable.LongMap.empty[Byte]
+
+  private def initially(address: Long): Byte = seeded.getOrElse(address, initial(address))
+
+  /** Sets the bytes the cells hold before they are written. */
+  def seed(bytes: Map[Long, Byte]): Unit = bytes.foreach((address, value) => seeded(address & mask) = value)
 
   /** Every address loaded from. */
   def loads: Set[Long] = loaded.toSet
@@ -32,14 +38,14 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
 
   /** The bytes written to a value other than the one they held, by address. */
   def changes: Vec[(Long, Byte)] =
-    Vec.from(written.toSeq.filter((address, value) => value != initial(address)).sortBy(_._1))
+    Vec.from(written.toSeq.filter((address, value) => value != initially(address)).sortBy(_._1))
 
   def load(address: Long, size: Int): Long = (0 until size).foldLeft(0L) { (value, index) =>
     val at = (address + index) & mask
     if (at >= limit) value
     else {
       loaded += at
-      value | ((written.getOrElse(at, initial(at)) & 0xffL) << (index * 8))
+      value | ((written.getOrElse(at, initially(at)) & 0xffL) << (index * 8))
     }
   }
 

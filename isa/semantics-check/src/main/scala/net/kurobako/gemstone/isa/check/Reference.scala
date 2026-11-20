@@ -1,6 +1,7 @@
 package net.kurobako.gemstone.isa.check
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
 import scala.annotation.unused
 import scala.util.Random
@@ -32,6 +33,9 @@ trait Reference[H, L <: Lookup] {
     * execution on them, since it describes one lane and execution may load for the others of its wave.
     */
   def loads(@unused harness: H): Set[Long] = Set.empty
+
+  /** Sets the bytes of `space` that `harness` holds before any write, by address, where the ISA can. */
+  def seed(@unused harness: H, @unused space: Space, @unused bytes: Map[Long, Byte]): Unit = ()
 
   /** Whether `state` reflects memory writes, so a memory live-out is comparable. */
   def observesMemory: Boolean = true

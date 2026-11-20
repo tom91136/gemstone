@@ -8,6 +8,7 @@ import net.kurobako.gemstone.isa.check.Equivalence.*
 import net.kurobako.gemstone.isa.check.Proof.Result
 import net.kurobako.gemstone.isa.check.Proof.Source
 import net.kurobako.gemstone.isa.sass
+import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.testing.*
 import scala.reflect.ClassTag
@@ -56,6 +57,11 @@ class MemoryProofSuite extends Suite {
   private def rejected(result: Result): Unit = result match {
     case Result.Rejected(_, _) => ()
     case other                 => fail(s"expected a refutation, got $other")
+  }
+
+  private def bySolver(result: Result): Unit = result match {
+    case Result.Rejected(_, Source.Solver) => ()
+    case other                             => fail(s"expected a refutation by the solver, got $other")
   }
 
   private def byFilter(result: Result): Unit = result match {
@@ -115,6 +121,39 @@ class MemoryProofSuite extends Suite {
         assert(filtered > 0)
       case other => fail(s"expected undecided, got $other")
     }
+  }
+
+  test("an AMDGPU replay starts from the memory it is given") {
+    val load   = "global_load_dword v6, v[2:3], off"
+    val left   = amd(load, "v_mov_b32 v7, v6")
+    val right  = amd(load, "v_cmp_eq_u32 vcc, 7, v6", "v_cndmask_b32 v7, v6, v8, vcc")
+    val inputs = Map("v2" -> 0x1000L, "v8" -> 9L)
+    val word   =
+      Map(Space.Global -> Map(0x1000L -> 7.toByte, 0x1001L -> 0.toByte, 0x1002L -> 0.toByte, 0x1003L -> 0.toByte))
+    def replay(memory: Map[Space, Map[Long, Byte]]) = Equivalence.replay(
+      AMDGPUReference,
+      Equivalence.vm(AMDGPUReference),
+      left,
+      right,
+      LiveOut(Vec("v7"), memory = true),
+      inputs,
+      memory
+    )
+    replay(Map.empty) match {
+      case Equivalence.Verdict.NotRejected(_) => ()
+      case other                              => fail(s"expected the sequences to agree on zeroed memory, got $other")
+    }
+    replay(word) match {
+      case Equivalence.Verdict.Rejected(_) => ()
+      case other                           => fail(s"expected the seeded memory to tell them apart, got $other")
+    }
+  }
+
+  test("SASS sequences that differ only where memory holds one value are told apart by the solver's memory") {
+    installed()
+    val load = "LDG.E R7, [R2.64]"
+    val pick = nvidia(load, "ISETP.EQ.U32.AND P0, PT, R7, 0xdeadbeef, PT", "SEL R8, R9, R7, P0")
+    bySolver(prove(SASSReference, nvidia(load, "MOV R8, R7"), pick, "R8"))
   }
 
   test("a load whose result is dead is not deleted: it reads bytes the other sequence does not") {

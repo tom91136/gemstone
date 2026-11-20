@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.check
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.amdgpu.LaneMasks
+import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.testing.Edges
 import scala.annotation.tailrec
@@ -88,17 +89,20 @@ object Equivalence {
       }
   }
 
-  /** The sequences on `inputs`, locations not named holding zero, as the filter runs them. */
+  /** The sequences on `inputs`, locations not named holding zero, and `memory` where it is set, as the filter runs
+    * them.
+    */
   def replay[H, L <: Lookup](
       reference: Reference[H, L],
       executor: (Case, Vec[Long], H) => Either[String, Vec[Long]],
       left: Vec[Step],
       right: Vec[Step],
       liveOut: LiveOut,
-      inputs: Map[String, Long]
+      inputs: Map[String, Long],
+      memory: Map[Space, Map[Long, Byte]] = Map.empty
   ): Verdict = typed(reference, left, right, liveOut).map { types =>
     val sampled = types.keys.toVec.sorted.map(name => (name, inputs.getOrElse(name, 0L)))
-    compare(reference, executor, left, right, liveOut, types, sampled, 0) match {
+    compare(reference, executor, left, right, liveOut, types, sampled, 0, memory) match {
       case Outcome.Skipped                  => Verdict.Undecided("the inputs do not run on both sequences")
       case Outcome.Agreed                   => Verdict.NotRejected(1)
       case Outcome.Differed(counterexample) => Verdict.Rejected(counterexample)
@@ -124,11 +128,16 @@ object Equivalence {
       liveOut: LiveOut,
       types: Map[String, Type],
       sampled: Vec[(String, Long)],
-      seed: Int
+      seed: Int,
+      memory: Map[Space, Map[Long, Byte]] = Map.empty
   ): Outcome = {
     val initial      = sampled.toMap
     val leftHarness  = reference.harness(seed.toLong)
     val rightHarness = reference.harness(seed.toLong)
+    memory.foreach { (space, bytes) =>
+      reference.seed(leftHarness, space, bytes)
+      reference.seed(rightHarness, space, bytes)
+    }
     (run(left, leftHarness, initial, types, executor), run(right, rightHarness, initial, types, executor)) match {
       case (Left(_), Left(_))       => Outcome.Skipped
       case (Left(reason), Right(_)) =>
