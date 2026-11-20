@@ -82,6 +82,21 @@ class PipelineSimulatorSuite extends Suite {
     assertEquals(block.entries(2).stalls, Map(Stall.Scheduled -> 2L, Stall.Dependency -> 1L))
   }
 
+  test("an sm_89 back-edge costs the redirect after its issue whatever its own stall") {
+    def loop(held: Int, edge: Int) = Vec.fill(3)(op(pipe = Some(Pipe.Fma), stall = Some(1))) ++
+      Vec(op(pipe = Some(Pipe.Fma), stall = Some(held)), op(stall = Some(edge)).copy(backEdge = true))
+    assertEqualsDouble(run(loop(1, 1), 1).cyclesPerIteration, 14.0, 1e-9)
+    assertEqualsDouble(run(loop(1, 5), 1).cyclesPerIteration, 14.0, 1e-9)
+    assertEqualsDouble(run(loop(1, 15), 1).cyclesPerIteration, 14.0, 1e-9)
+  }
+
+  test("an sm_89 loop adds the holds of its body to the redirect") {
+    def loop(held: Int) = Vec.fill(11)(op(pipe = Some(Pipe.Fma), stall = Some(1))) ++
+      Vec(op(pipe = Some(Pipe.Fma), stall = Some(held)), op(stall = Some(5)).copy(backEdge = true))
+    assertEqualsDouble(run(loop(1), 1).cyclesPerIteration, 22.0, 1e-9)
+    assertEqualsDouble(run(loop(8), 1).cyclesPerIteration, 29.0, 1e-9)
+  }
+
   test("pipe-bound stream runs at the pipe rate") {
     val block = run(Vec(op(pipe = Some(Pipe.Mufu)), op(pipe = Some(Pipe.Mufu))), subgroups = 48)
     assert(block.steady)

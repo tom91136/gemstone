@@ -278,7 +278,7 @@ object PipelineSimulator {
                 timeline += Entry(index, iteration, opIndex, warp.dispatch, t, begin + latency, warp.stalls)
                 warp.position += 1
                 val hold = math.max(1, op.stall.fold(1)(_.value))
-                warp.next = t + taken.fold(hold)(redirect => math.max(hold, redirect.value)).toLong
+                warp.next = t + taken.fold(hold)(_.value).toLong
                 if (op.backEdge) {
                   if (count == 1)
                     warp.restarts.foreach { (binding, gate) =>

@@ -600,7 +600,9 @@ object Architecture {
 
   private val adaRedirect = Source.Probed(
     "FFMA loop sweep timed with clock64: 17.02 cycles per trip beyond the FFMA issues, of which 7 are " +
-      "loop-control holds, leaving 10 for the taken back-edge (2026-11-10)",
+      "loop-control holds, leaving 10 for the taken back-edge (2026-11-10); " +
+      "cubin stall patching confirms the 10 cycles run from the branch's issue: its own stall of 1, 5 or 15 changes " +
+      "nothing and a body stall raised by s adds s (2026-11-20)",
     "RTX 4060 Ti, sm_89, 34 SMs",
     "NVIDIA 620.70.06",
     "CUDA 13.3"

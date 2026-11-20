@@ -25,8 +25,11 @@ import net.kurobako.gemstone.vm.*
   * The 2026-11-13 probe rows were measured with 201 launches after 5 warm-ups: 4096 iterations per launch on sm_89 at
   * host load average 30 to 36, and 1024 to 4096 iterations on gfx1036 at host load average 21 to 31. Those gfx1036 rows
   * hold one workgroup per launch and divide by the warps listed, not the two workgroups the earlier gfx1036 rows hold.
-  * Placements follow slot mod 4 on sm_89 and `hw_id1` bits 9-8 on gfx1036; `same SMSP` and `same SIMD` put every warp
-  * on one partition.
+  * The 2026-11-20 `layout_f*` rows on sm_89 time one warp, 4096 iterations per launch, median of 201 launches after 5
+  * warm-ups, with the loop top moved in 16-byte steps by `bar.warp.sync` padding; `layout_f12_hold8` and
+  * `layout_f12_bra1` are the same cubin with control words patched (last FFMA stall 8, branch stall 1). Placements
+  * follow slot mod 4 on sm_89 and `hw_id1` bits 9-8 on gfx1036; `same SMSP` and `same SIMD` put every warp on one
+  * partition.
   *
   * The 2026-11-15 `ctl_*` rows time one wave in one workgroup on the same gfx1036 under Linux 7.3.3 amdgpu and ROCm 7.2
   * hipcc (HIP 7.2.53211, clang 22), 201 launches after 5 warm-ups of 1024 iterations, at host load average 7.4 to 11.9
@@ -150,6 +153,13 @@ class HardwareValidationSuite extends Suite {
     Measured("stream_dfma_reg_2", 1, 81.01, Some(Binding.Path)),
     Measured("stream_dfma_reg_4", 1, 113.01, Some(Binding.Path)),
     Measured("loop_control", 1, 27.01, Some(Binding.Path)),
+    Measured("layout_f12_o40", 1, 27.03, Some(Binding.Path)),
+    Measured("layout_f12_o70", 1, 29.03, Some(Binding.Path)),
+    Measured("layout_f12_hold8", 1, 34.03, Some(Binding.Path)),
+    Measured("layout_f12_bra1", 1, 27.03, Some(Binding.Path)),
+    Measured("layout_f1_o70", 1, 29.02, Some(Binding.Path)),
+    Measured("layout_f1_o00", 1, 27.03, Some(Binding.Path)),
+    Measured("layout_f8_o60", 1, 28.03, Some(Binding.Path)),
     Measured("chain_ffma_8", 1, 39.01, Some(Binding.Path)),
     Measured("chain_ffma_8", 4, 11.88, Some(Binding.Issue), Some(same4)),
     Measured("chain_ffma_8", 8, 11.08, Some(Binding.Issue), Some(same8)),
