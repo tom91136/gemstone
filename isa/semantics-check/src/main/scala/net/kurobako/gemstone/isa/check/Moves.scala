@@ -25,8 +25,8 @@ private[check] object Moves {
   }
 
   def each[A, B](values: Vec[A])(f: A => Option[B]): Option[Vec[B]] = {
-    val mapped = values.map(f)
-    Option.when(mapped.forall(_.isDefined))(mapped.flatten)
+    val mapped = values.iterator.map(f).takeWhile(_.isDefined).toVec
+    Option.when(mapped.size == values.size)(mapped.flatten)
   }
 
   def unitsOf(use: RegisterUse, names: Vec[String]): Set[String] =
