@@ -192,4 +192,13 @@ class ControlWordsSuite extends Suite {
     val block = compiled("fp_atomic_window", "gfx1100")
     assertEquals(nopImmediates(block.target, block.statements), Vector.empty[BigInt], block.name)
   }
+
+  test("a returning FP atomic printed without its destination has no encoding") {
+    val gfx1036 = Target("gfx1036")
+    assert(ControlWords.regenerate(program("global_atomic_fmin v4, v[0:1], v2, off glc"), gfx1036).isRight)
+    assertEquals(
+      ControlWords.regenerate(program("global_atomic_fmin v[0:1], v2, off glc"), gfx1036).left.toOption,
+      Some("global_atomic_fmin has no encoding for gfx1036")
+    )
+  }
 }

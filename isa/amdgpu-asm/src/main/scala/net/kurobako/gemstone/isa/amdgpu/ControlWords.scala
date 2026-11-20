@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.amdgpu
 import cats.syntax.all.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.isa.amdgpu.asm.Instruction
+import net.kurobako.gemstone.isa.amdgpu.asm.InstructionCodec
 import net.kurobako.gemstone.isa.amdgpu.asm.Operand
 import net.kurobako.gemstone.isa.amdgpu.asm.Program
 import net.kurobako.gemstone.isa.amdgpu.asm.RegisterFile
@@ -223,15 +224,13 @@ object ControlWords {
     case Program.Statement.InstructionPair(_, _) =>
       Left("a dual-issue pair has no scheduling record in the generated model")
     case Program.Statement.Instruction(instruction) =>
-      val printed   = instruction.operands.size
-      val encodings = instruction.definition.encodings(target).map { encoding =>
-        val spelled   = encoding.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC)
+      val printed = instruction.operands.size
+      val shapes  = instruction.definition.encodings(target).flatMap { encoding =>
+        val schema = InstructionCodec.operandSchema(instruction, target, encoding).getOrElse(
+          encoding.operands.filterNot(info => info.implicitOperand || info.kind == OperandKind.EXEC)
+        )
         val unspelled = encoding.operands.filter(info => info.implicitOperand || info.kind == OperandKind.EXEC)
-        (encoding, spelled, unspelled)
-      }
-      val shapes = encodings.filter(_._2.size == printed) ++ encodings.collect {
-        case (encoding, schema, unspelled) if schema.size != printed && schema.count(!_.output) == printed =>
-          (encoding, schema.filterNot(_.output), unspelled)
+        Option.when(schema.size == printed)((encoding, schema, unspelled))
       }
       val fitted = shapes.filter((_, schema, _) =>
         schema.zip(instruction.operands).forall((info, operand) => fits(info.kind, operand))

@@ -13,7 +13,7 @@ import net.kurobako.gemstone.string.*
 import scala.reflect.ClassTag
 
 /** Maps instruction operands and modifiers to the generated machine layouts. */
-private object InstructionCodec {
+private[amdgpu] object InstructionCodec {
   private val InterpolationParameters = Vector("p10", "p20", "p0")
 
   private val Supported = Set(
@@ -235,6 +235,13 @@ private object InstructionCodec {
     else InstructionLayout.Catalogue.forFormat(value.isa, value.format).filter(supportsLayout(_))
 
   def supports(value: Metadata.Encoding): Boolean = layout(value).nonEmpty
+
+  def operandSchema(instruction: Instruction, target: Target, value: Metadata.Encoding): Option[Vec[OperandInfo]] =
+    layout(value).flatMap { layout =>
+      modifiers(instruction, layout, value.operands.filterNot(_.implicitOperand)).map { fields =>
+        schema(value, instruction.opcode.raw, fields, TargetMode(target), Some(instruction.operands.size))
+      }
+    }
 
   def encode(instruction: Instruction, mode: TargetMode): Either[CodecError, Vec[Byte]] = {
     val target     = mode.target
