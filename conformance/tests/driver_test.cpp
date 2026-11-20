@@ -1167,6 +1167,7 @@ TEST_CASE("interpreter directory is forwarded to cases as a suite setting", "[dr
   prepareRuntimeEnvironment(env, scratch.path / "artifact", scratch.path / "support", {}, "cuda");
   CHECK(env.at(conformance::environment::InterpreterDirectory) == "/work/interpreters");
   CHECK_FALSE(conformance::invalidSuiteSetting(conformance::environment::InterpreterDirectory, "/work/interpreters").has_value());
+  CHECK(conformance::reservedEnvironmentKey(conformance::environment::InterpreterDirectory));
 }
 
 TEST_CASE("PTX-only artifacts warm every program's JIT cache unless an isolated launcher runs them", "[driver][jit]") {

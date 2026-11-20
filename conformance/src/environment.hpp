@@ -25,6 +25,8 @@ inline bool selectionEnvironmentKey(std::string_view key) {
 }
 inline bool reservedEnvironmentKey(std::string_view key) {
   using namespace aspartame;
+  // the interpreter build reads the invoking environment only, so a profile value would go unseen
+  if (key == environment::InterpreterDirectory) return true;
   if (driver::suiteEnvironmentKey(key)) return false;
   // CUDA code selection is an explicit machine-route setting, like suite-level
   // knobs, and is consumed by the independent unified fixtures as well as the

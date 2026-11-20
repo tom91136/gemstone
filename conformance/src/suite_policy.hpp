@@ -53,7 +53,7 @@ inline void applySuiteIsolatedEnvironment(std::map<std::string, std::string> &en
   environment.try_emplace(environment::OpenclCtsTimeoutSeconds, CONFORMANCE_OPENCL_ISOLATED_TIMEOUT_SECONDS);
 }
 
-// Suite knobs a machine profile or the invoking environment may set.
+// Suite knobs forwarded to cases. A machine profile may set all of them but the interpreter directory.
 inline constexpr auto SuiteEnvironmentKeys = std::to_array<std::string_view>(
     {environment::DeviceCount, environment::VulkanCtsTimeoutSeconds, environment::OpenclCtsElementCount,
      environment::OpenclCtsTimeoutSeconds, environment::OpenclCtsWimpyOn, environment::OpenclCtsAtomicIterationCount,

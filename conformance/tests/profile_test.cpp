@@ -94,6 +94,26 @@ architecture = "sm_90"
   CHECK(targets[1].architecture == "sm_90");
 }
 
+TEST_CASE("machine profiles cannot set the interpreter directory", "[profile]") {
+  TemporaryDirectory const directory;
+  std::ofstream(directory.path / "global-directory.toml") << R"(
+environment = { CONFORMANCE_INTERPRETER_DIRECTORY = "/work/interpreters" }
+
+[[targets]]
+name = "only"
+backend = "opencl"
+)";
+  CHECK_THROWS_AS(conformance::profile::resolveProfile(directory.path, "global-directory"), std::invalid_argument);
+
+  std::ofstream(directory.path / "target-directory.toml") << R"(
+[[targets]]
+name = "only"
+backend = "opencl"
+environment = { CONFORMANCE_INTERPRETER_DIRECTORY = "/work/interpreters" }
+)";
+  CHECK_THROWS_AS(conformance::profile::resolveProfile(directory.path, "target-directory"), std::invalid_argument);
+}
+
 TEST_CASE("all shipped machine profiles are valid", "[profile]") {
   REQUIRE_NOTHROW(conformance::profile::validateAll(std::filesystem::path(CONFORMANCE_PROFILE_DIRECTORY)));
 }

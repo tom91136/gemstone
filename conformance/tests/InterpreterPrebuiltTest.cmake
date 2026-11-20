@@ -15,13 +15,17 @@ conformance_interpreter_environment_key(julia-amdgpu current)
 
 set(amdgpu_programs "julia_babelstream_amdgpu\t900\tcases\njulia_tests_amdgpu\t450\tcases\n")
 
+conformance_interpreter_environment_key(julia-cuda cuda)
+
 file(MAKE_DIRECTORY "${directory}/current/hip/amdgpu" "${directory}/stale/hip/amdgpu"
-  "${directory}/unrecorded/hip/amdgpu" "${directory}/plain/hip/amdgpu")
+  "${directory}/unrecorded/hip/amdgpu" "${directory}/partial/hip/amdgpu" "${directory}/plain/hip/amdgpu")
 file(WRITE "${directory}/current/hip/amdgpu/interpreter-keys.txt" "julia-amdgpu\t${current}\n")
 file(WRITE "${directory}/current/hip/amdgpu/test-programs.txt" "${amdgpu_programs}")
 file(WRITE "${directory}/stale/hip/amdgpu/interpreter-keys.txt" "julia-amdgpu\t0123456789abcdef\n")
 file(WRITE "${directory}/stale/hip/amdgpu/test-programs.txt" "${amdgpu_programs}")
 file(WRITE "${directory}/unrecorded/hip/amdgpu/test-programs.txt" "${amdgpu_programs}")
+file(WRITE "${directory}/partial/hip/amdgpu/interpreter-keys.txt" "julia-cuda\t${cuda}\n")
+file(WRITE "${directory}/partial/hip/amdgpu/test-programs.txt" "${amdgpu_programs}")
 file(WRITE "${directory}/plain/hip/amdgpu/test-programs.txt" "hecbench_demo\t2\thecbench\n")
 
 function(run_prebuilt artifacts output status)
@@ -63,6 +67,14 @@ if(status EQUAL 0)
 endif()
 if(NOT output MATCHES "${directory}/unrecorded" OR NOT output MATCHES "interpreter-keys.txt" OR NOT output MATCHES "rebuild")
   fail("Unrecorded prebuilt tree does not name the missing record and ask for a rebuild: ${output}")
+endif()
+
+run_prebuilt("${directory}/partial" output status)
+if(status EQUAL 0)
+  fail("Prebuilt tree whose record omits a package used by its programs was accepted")
+endif()
+if(NOT output MATCHES "julia-amdgpu" OR NOT output MATCHES "${directory}/partial")
+  fail("Partial prebuilt record does not name the unrecorded package and tree: ${output}")
 endif()
 
 run_prebuilt("${directory}/plain" output status)
