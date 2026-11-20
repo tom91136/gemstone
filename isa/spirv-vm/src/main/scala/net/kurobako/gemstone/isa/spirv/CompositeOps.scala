@@ -93,9 +93,9 @@ private object CompositeOps {
     val program = site.program
     val kinds   = constituents.map(typed(site, _))
     kinds.collectFirst {
-      case Typed.Undefined(value) => Fail(undefined(value))
-      case Typed.Opaque(value, _) =>
-        Fail(Fault.InvalidRequest(s"OpCompositeConstruct constituent %$value is a pointer"))
+      case Typed.Undefined(value)                                                        => Fail(undefined(value))
+      case Typed.Opaque(value, typeId) if !program.runtimeType(typeId).exists(isPointer) =>
+        Fail(Fault.InvalidRequest(s"OpCompositeConstruct constituent %$value is not data"))
     }.getOrElse {
       val counts =
         constituents.map(constituent => program.scalarLeafCount(program.valueType(constituent)).fold(_ => -1, _.raw))

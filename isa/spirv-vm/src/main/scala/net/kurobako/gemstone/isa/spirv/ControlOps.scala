@@ -119,20 +119,29 @@ private object ControlOps {
       ControlSemantics.switch(InvocationMachine(execution))(selector, cases)
   }
 
+  // the grammar reads one-word literals, so 64-bit pairs reach here misaligned; the selector's width regroups the words
+  private def regrouped(targets: Vec[Operand], literalWords: Int): Option[Vec[Operand]] = {
+    val words  = targets.flatMap(_.words)
+    val stride = literalWords + 1
+    Option.when(words.length % stride == 0)(Vec.from((0 until words.length by stride).map { index =>
+      Operand(OperandKind.PairLiteralIntegerIdRef, words.slice(index, index + stride).unsafe)
+    }))
+  }
+
   private def switch(site: Site, selector: Operand, default: Operand, targets: Vec[Operand]): Op = {
-    val malformed = targets.find(pair => pair.words.length != 2 && pair.words.length != 3)
-    val wrongKind = targets.find(_.kind != OperandKind.PairLiteralIntegerIdRef)
-    (malformed, wrongKind) match {
-      case (Some(_), _) => Fail(Fault.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
-      case (_, Some(_)) => Fail(Fault.InvalidRequest("OpSwitch target is not a literal/label pair"))
-      case _            =>
-        val selectorType = site.program.valueType(id(selector))
+    val selectorType = site.program.valueType(id(selector))
+    val width        = site.program.scalarWidth(selectorType)
+    val wrongKind    = targets.find(_.kind != OperandKind.PairLiteralIntegerIdRef)
+    (wrongKind, regrouped(targets, if (width.raw > 32) 2 else 1)) match {
+      case (Some(_), _)     => Fail(Fault.InvalidRequest("OpSwitch target is not a literal/label pair"))
+      case (_, None)        => Fail(Fault.InvalidRequest("OpSwitch has an incomplete literal/label pair"))
+      case (_, Some(pairs)) =>
         Switch(
           id(selector),
           Cases(
-            mask(site.program.scalarWidth(selectorType)),
-            ControlSemantics.literals(targets),
-            targets.map(pair => block(site, Operand(OperandKind.IdRef, Vec.nonEmpty(pair.words.last)))).toArray,
+            mask(width),
+            ControlSemantics.literals(pairs),
+            pairs.map(pair => block(site, Operand(OperandKind.IdRef, Vec.nonEmpty(pair.words.last)))).toArray,
             block(site, default)
           )
         )

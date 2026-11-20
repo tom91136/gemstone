@@ -84,6 +84,48 @@ class ExecutionControlFlowSuite extends Suite {
     }
   }
 
+  for (cases <- 1 to 4) test(s"OpSwitch decodes $cases 64-bit literal/label pairs from the binary") {
+    val arms   = (1 to cases).map(index => s"$index %case$index").mkString(" ")
+    val bodies = (1 to cases).map { index =>
+      s"""%case$index = OpLabel
+         |OpStore %out %value$index
+         |OpReturn""".stripMargin
+    }.mkString("\n")
+    val values = (1 to cases).map(index => s"%value$index = OpConstant %uint ${index * 10}").mkString("\n")
+    val module = spv"""
+      $openCL
+      OpEntryPoint Kernel %main "switch"
+      %void = OpTypeVoid
+      %ulong = OpTypeInt 64 0
+      %uint = OpTypeInt 32 0
+      %out_ptr = OpTypePointer CrossWorkgroup %uint
+      %fn = OpTypeFunction %void %out_ptr %ulong
+      %unmatched = OpConstant %uint 0
+      $values
+      %main = OpFunction %void None %fn
+      %out = OpFunctionParameter %out_ptr
+      %selector = OpFunctionParameter %ulong
+      %entry = OpLabel
+      OpSwitch %selector %default $arms
+      %default = OpLabel
+      OpStore %out %unmatched
+      OpReturn
+      $bodies
+      OpFunctionEnd
+    """
+    val decoded = ISA.encode(module).flatMap(ISA.decode(_))
+    assertEquals(decoded, Right(module))
+    for (selector <- 0 to cases) {
+      val memory = RegionMemory()
+      val out    = memory.allocate(4L)
+      assertEquals(
+        run(decoded.value, "switch", memory, Vec(buffer(out), scalar(selector.toLong, 8))),
+        Right(())
+      )
+      assertEquals(word(memory, out, 0), selector * 10L)
+    }
+  }
+
   test("indirect function call rejects a pointer from another program") {
     val module = spv"""
       $openCL

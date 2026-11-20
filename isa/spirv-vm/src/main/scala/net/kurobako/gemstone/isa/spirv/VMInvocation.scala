@@ -46,7 +46,12 @@ private object VMInvocation {
       else objects(key) = value
 
     def updateScalar(key: Int, typeId: Int, bits: Long): Unit =
-      if (program.scalarSlot(key)) scalars(key) = bits else objects(key) = VMValue.Bits(typeId, Array(bits))
+      if (program.scalarSlot(key)) scalars(key) = bits
+      else objects(key) = program.runtimeType(typeId) match {
+        case Some(RuntimeType.Pointer(storageClass, pointee)) =>
+          VMValue.Address(typeId, Pointer(bits, pointee, storageClass))
+        case _ => VMValue.Bits(typeId, Array(bits))
+      }
 
     /** The scalar lanes of a numeric value, or null when the value is absent or a pointer. */
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -55,6 +60,16 @@ private object VMInvocation {
       else objects(key) match {
         case VMValue.Bits(_, lanes) => lanes
         case _                      => null
+      }
+
+    /** The leaves of a composite operand. A pointer is the one leaf of its address, as it is inside a composite. */
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+    def leafLanes(key: Int): Array[Long] | Null =
+      if (program.scalarSlot(key)) Array(scalars(key))
+      else objects(key) match {
+        case VMValue.Bits(_, lanes)      => lanes
+        case VMValue.Address(_, pointer) => Array(pointer.address)
+        case _                           => null
       }
 
     private def leafCount(key: Int): Int =

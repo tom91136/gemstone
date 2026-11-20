@@ -892,7 +892,7 @@ private object InvocationMachine {
       if (values.program.scalarSlot(part)) {
         result(cursor) = values.scalars(part)
         cursor += 1
-      } else values.lanes(part) match {
+      } else values.leafLanes(part) match {
         case null  => absent = part
         case lanes =>
           Array.copy(lanes, 0, result, cursor, lanes.length)
@@ -915,7 +915,7 @@ private object InvocationMachine {
       typeId: Int
   )(inline next: => Flow[Unit]): Flow[Unit] = {
     val values   = execution.values
-    val inserted = values.lanes(source)
+    val inserted = values.leafLanes(source)
     val lanes    = values.lanes(composite)
     if (inserted == null || lanes == null) Left(Fault.Unsupported("composite insertion requires scalar data"))
     else if (inserted.length == count && offset + count <= lanes.length) {
