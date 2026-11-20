@@ -328,6 +328,79 @@ class ConstantSuite extends Suite {
     }
   }
 
+  test("a dynamic index into a relocated bank loads from its binding") {
+    val base = Harness.module(
+      89,
+      Vec(Entry("driver_call", 0x160, Vec(8), registers = 12)),
+      constants = Vec(".nv.constant4" -> Vec.fill(8)(0.toByte))
+    )
+    val bank        = base.sections.find(_.name == ".nv.constant4").get
+    val names       = Vec.from("\u0000malloc\u0000".getBytes(StandardCharsets.UTF_8))
+    val strings     = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
+    val symbolBytes = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
+    symbolBytes.putInt(24, 1).put(28, 0x12.toByte)
+    val symbols =
+      Cubin.Section(strings.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(symbolBytes.array()))
+    val relocation = Cubin.Section(
+      symbols.index + 1,
+      ".rel.nv.constant4",
+      9,
+      0,
+      16,
+      symbols.index,
+      bank.index,
+      LittleEndian.toVec(0L, 8) ++ LittleEndian.toVec((1L << 32) | 2L, 8)
+    )
+    val module    = base.copy(sections = base.sections ++ Vec(strings, symbols, relocation))
+    val functions = Vec(Listing.program(
+      "MOV R3, RZ; LDC.64 R2, c[0x4][R3]; MOV R4, 0x10; MOV R5, RZ; CALL.ABS.NOINC R2; EXIT",
+      "driver_call"
+    ).value)
+    def loadsBank(bound: Map[NonEmpty[String], GuestAddress]): Either[NonEmpty[String], Boolean] =
+      lowerStatements(module, module.kernels.head, functions, bound).map(_.exists(_.toString.contains("4096")))
+    assertEquals(loadsBank(Map.empty), Right(false))
+    assertEquals(loadsBank(Map(Cubin.constantSymbol(bank.index) -> GuestAddress(0x1000L))), Right(true))
+  }
+
+  // cvta.const of a .const global as ptxas 11.6 (sm_70 to sm_86) and 13.3 (sm_75 to sm_89) emit it
+  for (
+    (sm, window) <- Vec(
+      70 -> "MOV R4, c[0x0][0x50]; IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]",
+      75 -> "ULDC.64 UR4, c[0x0][0x50]; MOV R4, UR4; MOV R5, UR5",
+      80 -> "IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]; MOV R4, c[0x0][0x50]",
+      86 -> "IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]; MOV R4, c[0x0][0x50]",
+      89 -> "IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]; MOV R4, c[0x0][0x50]"
+    )
+  ) test(s"sm_$sm c[0x0][0x50] holds the generic address of constant bank 3") {
+    val module = Harness.module(
+      sm,
+      Vec(Entry("window", 0x160, Vec(8), registers = 8)),
+      constants = Vec(".nv.constant3" -> LittleEndian.toVec(77L, 8))
+    )
+    val bank      = module.sections.find(_.name == ".nv.constant3").get
+    val functions = Vec(Listing.program(
+      s"$window; LD.E R6, [R4.64]; LDC.64 R8, c[0x0][0x160]; STG.E [R8.64], R6; EXIT",
+      "window"
+    ).value)
+    session { (service, fixtures) =>
+      val program = service.load(ProgramEncoding.CUDACubin, fixtures.image(Image(module, functions)))
+        .fold(e => fail(e.message), identity)
+      val storage = service.registerAllocation(8).toOption.get
+      val output  = service.registerAllocation(4).toOption.get
+      assert(service.write(storage, 0L, LittleEndian.toVec(77L, 8)).isRight)
+      assert(service.bindGlobal(program, s"__sass_const${bank.index}", storage, 0L).isRight)
+      val task = KernelTask.validated(
+        "window": NonEmpty[String],
+        LaunchGeometry.Dimensions.One,
+        LaunchGeometry.Dimensions.One,
+        Vec(KernelTask.Argument.Memory(output, 0L))
+      ).toOption.get
+      val completion = service.launch(program, task).fold(e => fail(e.message), identity)
+      assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
+      assertEquals(service.read(AllocationRange(output, 0L, 4)), Right(LittleEndian.toVec(77L, 4)))
+    }
+  }
+
   for {
     destinationFirst <- Flags
     dynamic          <- Flags

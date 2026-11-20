@@ -26,6 +26,9 @@ private object VMConstantBank {
   /** The driver's cluster table SR_CgaSize selects; the VM keeps one, at the table's own offsets. */
   val ClusterTable: Long = 0L
 
+  // the architectures whose ptxas reads the constant bank 3 window from c0[0x50:0x58]
+  private val ConstantWindowTargets = Set(70, 75, 80, 86, 89)
+
   /** The base of a thread's local window, which generic local addresses reach at the local offsets the stack pointer
     * counts down from the stack origin, so they end at 4 GiB. A legacy window spans the 16 MiB its top byte tags. The
     * base is non-zero, as the null address is global.
@@ -93,8 +96,8 @@ private object VMConstantBank {
     if (offset.index.nonEmpty || offset.mode.nonEmpty || offset.scale != 1 || offset.descriptor.nonEmpty)
       unsupported("unsupported dynamic constant offset")
     // ptxas indexes the relocated function table of bank 4 only on paths to driver helpers the VM does not provide,
-    // such as sm_120 copies into another cluster CTA.
-    if (relocated) {
+    // such as sm_120 copies into another cluster CTA. Without a binding the table has no storage to index.
+    if (relocated && !boundSymbols.contains(Cubin.constantSymbol(bankSection.index))) {
       emit(Trap)
       Value.Immediate(0L)
     } else if (bank == 0 && sm >= 100 && offset.index.isEmpty && offset.displacement < kernel.parameterBase.raw) {
@@ -152,6 +155,8 @@ private object VMConstantBank {
     def apertureBase(from: Int, older: Int, newer: Int, offset: Int): Boolean =
       c0 && sm >= from && offset == (if (sm >= 100) newer else older) &&
         PartialFunction.cond(bits.raw) { case 32 | 64 => true }
+    def constantWindow: Option[Long] =
+      section(3).flatMap(bank => boundSymbols.get(Cubin.constantSymbol(bank.index))).map(_.raw)
     def isDimension(at: Int): Boolean =
       c0 &&
         (at - launch) % 4 == 0 &&
@@ -194,6 +199,14 @@ private object VMConstantBank {
     else if (apertureBase(from = 70, older = 0x20, newer = 0x2f8, offset))
       constant(localWindow(sm), bits)
     else if (c0 && sm >= 70 && offset == (if (sm >= 100) 0x2fc else 0x24) && bits == 32) constant(0L)
+    // cvta.const adds the generic address of constant bank 3 to an offset within it.
+    else if (
+      c0 && ConstantWindowTargets(sm) && offset == 0x50 && PartialFunction.cond(bits.raw) { case 32 | 64 => true } &&
+      constantWindow.isDefined
+    )
+      constant(if (bits == 64) constantWindow.get else constantWindow.get & 0xffffffffL, bits)
+    else if (c0 && ConstantWindowTargets(sm) && offset == 0x54 && bits == 32 && constantWindow.isDefined)
+      constant(constantWindow.get >>> 32)
     // The generic address of the parameter block, from which ptxas addresses __grid_constant__ tensor maps.
     else if (apertureBase(from = 90, older = 0x198, newer = 0x348, offset))
       constant(VMAddressSpace.ParameterBase, bits)
