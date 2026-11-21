@@ -241,7 +241,7 @@ jobs:
           echo "lint=[$backends]" | tee -a "$GITHUB_OUTPUT"
           isas=$({
             sed -n 's/^lazy val semanticsCheck[A-Za-z]* *= semanticsCheckOf("\([A-Za-z]*\)").*/\1/p' build.sbt
-            sed -n 's/^sm_\([0-9]*\)$/SASS\1/p' isa/semantics-check/src/main/resources/net/kurobako/gemstone/isa/check/sass-architectures.txt
+            awk '/^sm_/ { sm = substr($1, 4); n = ($2 == "" ? 1 : $2); if (n == 1) print "SASS" sm; else for (i = 0; i < n; i++) print "SASS" sm "s" i }' isa/semantics-check/src/main/resources/net/kurobako/gemstone/isa/check/sass-architectures.txt
           } | sed 's/.*/"&"/' | paste -sd ,)
           echo "semantics=[$isas]" | tee -a "$GITHUB_OUTPUT"
 

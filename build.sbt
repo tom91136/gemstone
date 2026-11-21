@@ -627,7 +627,8 @@ def semanticsCheckOf(isa: String): Project =
 
 lazy val semanticsCheckPTX = semanticsCheckOf("PTX")
 
-/** The SASS definitions, one project for each architecture of `sass-architectures.txt`: together they outgrow the heap.
+/** The SASS definitions, one project for each shard of the architectures of `sass-architectures.txt`: together they
+  * outgrow the heap.
   */
 lazy val semanticsCheckSASS = SassArchitecture.all(file(".")).foldLeft(
   projectMatrix.in(file("isa/semantics-check/generated/sass"))
@@ -635,7 +636,7 @@ lazy val semanticsCheckSASS = SassArchitecture.all(file(".")).foldLeft(
   matrix.customRow(
     scalaVersions = Seq(scala3Version),
     axisValues = Seq(architecture, VirtualAxis.jvm),
-    process = semanticsChecked(s"SASS${architecture.sm}")(_)
+    process = semanticsChecked(s"SASS${architecture.id}")(_)
   )
 )
 

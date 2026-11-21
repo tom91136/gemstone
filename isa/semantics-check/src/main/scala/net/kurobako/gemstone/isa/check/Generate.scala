@@ -17,7 +17,11 @@ object Generate {
       "AMDGPUMatrix"   -> AMDGPUGenerator.matrix,
       "AMDGPUResource" -> AMDGPUGenerator.resource,
       "SPIRV"          -> SPIRVGenerator
-    ) ++ SASSGenerator.architectures.map(target => s"SASS${target.stripPrefix("sm_")}" -> SASSGenerator.of(target))
+    ) ++ SASSGenerator.architectures.flatMap((target, shards) =>
+      (0 until shards).map(shard =>
+        SASSGenerator.name(target, shard, shards) -> SASSGenerator.of(target, shard, shards)
+      )
+    )
 
   def main(arguments: Array[String]): Unit = {
     val output = Paths.get(arguments(0))

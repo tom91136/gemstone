@@ -78,15 +78,31 @@ object SASSGenerator {
       forms.map(_._1).distinct.flatMap(form => guards.flatMap(guarded(target, grouped(form), _)))
   }
 
-  /** The architectures checked, one project each, in the file the build derives those projects from. */
-  lazy val architectures: Vec[String] =
+  /** The architectures checked and the number of shards each splits into, as the file the build derives its projects
+    * from names them.
+    */
+  lazy val architectures: Vec[(target: String, shards: Int)] =
     Using.resource(getClass.getResourceAsStream("sass-architectures.txt"))(stream =>
-      Vec.from(String(stream.readAllBytes(), StandardCharsets.UTF_8).linesIterator.map(_.trim).filter(_.nonEmpty))
+      Vec.from(String(stream.readAllBytes(), StandardCharsets.UTF_8).linesIterator.map(_.trim).filter(_.nonEmpty)).map {
+        line =>
+          val fields = line.split("\\s+")
+          (fields(0), fields.drop(1).headOption.fold(1)(_.toInt))
+      }
     )
 
-  /** The cases of `target`, compiled on their own as every architecture's together outgrow the build's heap. */
-  def of(target: String): Generator = new Generator {
+  /** The name the project of `shard` of `shards` of `target` is known by, as the build spells it. */
+  def name(target: String, shard: Int, shards: Int): String =
+    s"SASS${target.stripPrefix("sm_")}${if (shards == 1) "" else s"s$shard"}"
+
+  /** The cases of the mnemonics of `shard` of `shards` of `target`, each shard compiled on its own as together they
+    * outgrow the build's heap.
+    */
+  def of(target: String, shard: Int, shards: Int): Generator = new Generator {
     def sources: Vec[(name: String, source: String)] =
-      NvidiaCases.sources(s"SASS${target.stripPrefix("sm_")}x", "SASSSuite", describe(target))
+      NvidiaCases.sources(
+        s"${name(target, shard, shards)}x",
+        "SASSSuite",
+        describe(target, mnemonic => Math.floorMod(mnemonic.hashCode, shards) == shard)
+      )
   }
 }
