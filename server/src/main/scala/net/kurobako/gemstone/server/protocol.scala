@@ -181,7 +181,7 @@ object protocol {
     val Finish: Int         = 4
     val ResponseMagic: Int  = 0x474d5331
 
-    private val TimeoutMillis: Int > 0 = 5000
+    private val TimeoutMillis: Int > 0 = (environment.RpcTimeoutSecondsDefault * 1000L).toIntExact
 
     def register(endpoint: Endpoint, timeoutMillis: Int > 0 = TimeoutMillis): ClientId =
       exchange(endpoint, timeoutMillis, RegisterClient, None) { input =>
