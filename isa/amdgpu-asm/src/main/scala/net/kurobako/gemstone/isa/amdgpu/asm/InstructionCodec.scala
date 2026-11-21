@@ -391,6 +391,9 @@ private[amdgpu] object InstructionCodec {
         case (info, operand) =>
           encodeOperand(operand, info, target, layout, mods).map(_._1)
       }.getOrElse(Map.empty[EncodingField, BigInt])
+      literalSlot = Vec(EncodingField.SRC0, EncodingField.SRC1, EncodingField.SRC2).find(field =>
+        !operands.exists(_.field.contains(field))
+      )
       fields <- if (ExportOperands.supports(layout))
         ExportOperands.encode(instruction, mods.get(EncodingField.COMPR).contains(BigInt(1))).map(value =>
           Vec((value, Option.empty[OperandCodec.Literal]))
@@ -398,7 +401,11 @@ private[amdgpu] object InstructionCodec {
       else if (ImageOperands.supports(layout))
         ImageOperands.encode(instruction, layout, mods).map(value => Vec((value, Option.empty[OperandCodec.Literal])))
       else traverseOption(operands.zip(instruction.operands)) { case (info, operand) =>
-        encodeOperand(operand, info, target, layout, mods ++ address, MixedPrecision(instruction.definition))
+        encodeOperand(operand, info, target, layout, mods ++ address, MixedPrecision(instruction.definition)).map {
+          case (values, literal) if info.field.contains(EncodingField.LITERAL) && info.kind == OperandKind.SRC =>
+            (values ++ literalSlot.map(_ -> BigInt(Source.LITERAL_CONST)), literal)
+          case encoded => encoded
+        }
       }
       literals = fields.flatMap(_._2).distinct
       if !layout.byName.contains(EncodingField.LITERAL) || literals.forall(literal =>
@@ -1098,7 +1105,7 @@ private[amdgpu] object InstructionCodec {
             Some(Operand.IntegerLiteral(smemImmediate(target, layout.get(word, EncodingField.OFFSET)), 10))
           else if (off) Some(Operand.Identifier("off"))
           else if (
-            info.bits == 16 && !layout.byName.contains(EncodingField.OP_SEL) &&
+            info.bits == 16 && !layout.byName.contains(EncodingField.OP_SEL) && target.isa.isGFX11OrLater &&
             (info.kind.isVector || (SourceFields(field) && number >= 256))
           )
             Some(Operand.Half(

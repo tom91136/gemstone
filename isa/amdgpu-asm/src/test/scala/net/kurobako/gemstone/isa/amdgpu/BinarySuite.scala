@@ -529,6 +529,22 @@ class BinarySuite extends Suite {
     assert(Binary.decode(hex("fa 02 00 7e 01 61 01 ff"), TargetMode(Target("gfx90a"))).isLeft)
   }
 
+  test("v_fmaak and v_fmamk with a literal print it and round-trip on gfx1036") {
+    val target = Target("gfx1036")
+    val cases  = Vec(
+      "v_fmaak_f32 v7, s0, v6, 0x3c0881c4" -> hex("00 0c 0e 5a c4 81 08 3c"),
+      "v_fmamk_f32 v7, s0, 0x3c0881c4, v6" -> hex("00 0c 0e 58 c4 81 08 3c"),
+      "v_fmaak_f16 v7, s0, v6, 0x3c08"     -> hex("00 0c 0e 70 08 3c 00 00"),
+      "v_fmamk_f16 v7, s0, 0x3c08, v6"     -> hex("00 0c 0e 6e 08 3c 00 00")
+    )
+    cases.foreach { case (source, bytes) =>
+      assertEquals(Binary.encode(parse(source), TargetMode(target)), Right(bytes), source)
+      val printed = Printer.render(disassembled(bytes, target))
+      assertEquals(printed, source)
+      assertEquals(encoded(parse(printed), target), bytes, printed)
+    }
+  }
+
   test("codes outside an operand domain are decode errors naming the field, code, family and domain") {
     // buffer_load_dword v1, v2, s[4:7], s125 offen: GFX9 and CDNA2 have no null register at s125
     val bufferLoad = Vec(0x00, 0x10, 0x00, 0xe0, 0x02, 0x01, 0x01, 0x7d).map(_.toByte)
