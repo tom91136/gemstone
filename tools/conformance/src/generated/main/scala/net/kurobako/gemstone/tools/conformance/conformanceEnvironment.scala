@@ -21,6 +21,7 @@ object conformanceEnvironment {
   val OpenclCtsWimpyOn: String = "CONFORMANCE_OPENCL_CTS_WIMPY_ON"
   val OpenclDeviceIndex: String = "CONFORMANCE_OPENCL_DEVICE_INDEX"
   val PhysicalDeviceName: String = "CONFORMANCE_PHYSICAL_DEVICE_NAME"
+  val Program: String = "CONFORMANCE_PROGRAM"
   val ReportDir: String = "CONFORMANCE_REPORT_DIR"
   val RuntimeInputDir: String = "CONFORMANCE_RUNTIME_INPUT_DIR"
   val ShardRouteList: String = "CONFORMANCE_SHARD_ROUTE_LIST"

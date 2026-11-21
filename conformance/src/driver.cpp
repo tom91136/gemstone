@@ -971,6 +971,7 @@ CaseResult executeCase(const ExecutionConfig &config, const ScheduledCase &test)
     arguments.insert(arguments.begin(), program.string());
   }
   environment[environment::TestName] = test.identity;
+  environment[environment::Program] = test.program;
   environment[environment::ReportDir] = report.string();
   const auto workingDirectory = config.programDirectories ^ get_maybe(test.program)
                                 ^ map([](const auto &directory) { return fs::path(directory); })
@@ -1158,6 +1159,7 @@ static std::optional<size_t> runBatchRound(const ExecutionConfig &config, std::s
   }
   auto environment = config.environment;
   environment[environment::TestName] = first.identity;
+  environment[environment::Program] = first.program;
   environment[environment::ReportDir] = report.string();
   const auto workingDirectory = config.programDirectories ^ get_maybe(first.program)
                                 ^ map([](const auto &directory) { return fs::path(directory); }) ^ get_or_else(report);

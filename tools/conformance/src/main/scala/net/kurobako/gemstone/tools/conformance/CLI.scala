@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.*
+import net.kurobako.gemstone.profile.DevicePreset
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
 import scala.sys.process.Process
@@ -168,7 +169,28 @@ object CLI {
 
   private def quoted(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
 
-  private def launcher(client: Vector[String], variables: Map[String, String]): String = {
+  // HeCBench is judged against a physical card, so its cases report the preset of the route's target; every other
+  // workload keeps the emulator's four-multiprocessor default.
+  private def deviceRouting: String = {
+    val presets = DevicePreset.all
+      .map(preset => s"    ${preset.target}) printf '%s' ${quoted(preset.name)} ;;")
+      .mkString("\n")
+    s"""preset_for_target() {
+       |  case "$$1" in
+       |$presets
+       |  esac
+       |}
+       |if [ "$$${conformanceEnvironment.TargetBackendName}" = cuda ] && [ -n "$$${conformanceEnvironment.Program}" ]; then
+       |  case "$$${conformanceEnvironment.Program}" in
+       |    hecbench_*)
+       |      preset=$$(preset_for_target "$$${environment.TargetArch}")
+       |      if [ -n "$$preset" ]; then set -- --device "$$preset" "$$@"; fi ;;
+       |  esac
+       |fi
+       |""".stripMargin
+  }
+
+  private[conformance] def launcher(client: Vector[String], variables: Map[String, String]): String = {
     val inherited = sys.env.filter((key, _) => key.startsWith("GEMSTONE_"))
     val exports   = (inherited ++ variables).toVector.sortBy(_._1).map((key, value) => s"export $key=${quoted(value)}")
     val routing   =
@@ -205,7 +227,8 @@ object CLI {
          |  fi
          |done
          |""".stripMargin
-    (exports :+ routing :+ s"exec ${client.map(quoted(_)).mkString(" ")} \"$$@\"").mkString("\n") + "\n"
+    (exports :+ routing :+ deviceRouting :+ s"exec ${client.map(quoted(_)).mkString(" ")} \"$$@\"").mkString("\n") +
+      "\n"
   }
 
   private def endpoint(file: Path, server: Process): String = {

@@ -15,9 +15,17 @@
 
 #include <conformance/environment_keys.hpp>
 
+namespace {
+std::string executableName;
+}
+
 TEST_CASE("a comma, bracket[quoted] star* backslash\\ semi; quote\" unicode-π", "[fixture][pass]") {
-  if (const auto *report = std::getenv(conformance::environment::ReportDir))
+  if (const auto *report = std::getenv(conformance::environment::ReportDir)) {
     std::ofstream(std::filesystem::path(report) / "result.txt") << "pass\n";
+    const auto *program = std::getenv(conformance::environment::Program);
+    REQUIRE(program);
+    REQUIRE(std::string_view(program) == executableName);
+  }
   const auto *expected = std::getenv("EXPECTED_ENVIRONMENT");
   if (expected) {
     const auto *value = std::getenv("PROPAGATED_ENVIRONMENT");
@@ -60,6 +68,7 @@ TEST_CASE("hung case", "[hang]") {
 }
 
 int main(int argc, char **argv) {
+  executableName = std::filesystem::path(argv[0]).stem().string();
   if (argc > 2 && std::string_view(argv[1]).starts_with("--deqp-case=")) {
     const auto identity = std::string(argv[1]).substr(std::string_view("--deqp-case=").size());
     const auto log = std::string(argv[2]).substr(std::string_view("--deqp-log-filename=").size());

@@ -140,9 +140,12 @@ one invocation only. Omit `--machine` to use the profile named after the local h
 Machine profiles select backends, architectures, devices, environment, and skips. `--direct --workloads workloads`
 replaces profiles with explicit `backend[/architecture[/compiler]]` routes and uses no profile environment or skips.
 `--isolated-launcher --launcher -- <command>` runs each case through a launcher that owns its device, deduplicating
-identical routes. `CONFORMANCE_JOB_COUNT` sets case parallelism (default: the thread count). Each case writes `output.log`
-to its report directory; failures print the exit status or timeout and the log path. Each run writes `junit.xml`, the
-resolved workload as `<workload>.toml`, and every target's effective `environment.txt` to its report directory.
+identical routes. Under `sbt conformance/emulate`, a HeCBench case reports the device preset whose target matches its
+route (`sm_89` reports a GeForce RTX 4060 Ti), because those programs check their results against a physical card; every
+other program keeps the emulator's four-multiprocessor device. `CONFORMANCE_JOB_COUNT` sets case parallelism (default:
+the thread count). Each case writes `output.log` to its report directory; failures print the exit status or timeout and
+the log path. Each run writes `junit.xml`, the resolved workload as `<workload>.toml`, and every target's effective
+`environment.txt` to its report directory.
 
 Timeouts suit a 32-thread host. Isolated launchers stretch them up to fourfold on hosts with fewer threads, and
 `CONFORMANCE_TIMEOUT_SCALE` (default 1, up to three decimals such as `1.5`) multiplies every timeout.

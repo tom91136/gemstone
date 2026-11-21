@@ -26,6 +26,7 @@ inline constexpr char OpenclCtsTimeoutSeconds[] = "CONFORMANCE_OPENCL_CTS_TIMEOU
 inline constexpr char OpenclCtsWimpyOn[] = "CONFORMANCE_OPENCL_CTS_WIMPY_ON";
 inline constexpr char OpenclDeviceIndex[] = "CONFORMANCE_OPENCL_DEVICE_INDEX";
 inline constexpr char PhysicalDeviceName[] = "CONFORMANCE_PHYSICAL_DEVICE_NAME";
+inline constexpr char Program[] = "CONFORMANCE_PROGRAM";
 inline constexpr char ReportDir[] = "CONFORMANCE_REPORT_DIR";
 inline constexpr char RuntimeInputDir[] = "CONFORMANCE_RUNTIME_INPUT_DIR";
 inline constexpr char SupportDir[] = "CONFORMANCE_SUPPORT_DIR";
