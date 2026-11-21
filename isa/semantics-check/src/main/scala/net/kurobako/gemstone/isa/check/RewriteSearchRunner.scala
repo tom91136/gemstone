@@ -39,10 +39,12 @@ object RewriteSearchRunner {
       options.get("--placement").map(text => PipelineSimulator.Placement(Vec.from(text.split(',').map(_.toInt))))
     val arguments = options.get("--arguments").map(text => Vec.from(text.split(',').map(_.toLong)))
     for {
-      named  <- target.refine[Target].left.map(_.raw)
-      lanes  <- options.get("--lanes").fold(TargetDefaults.waveSize(named).raw)(_.toInt).refine[Int > 0].left.map(_.raw)
+      fallback <- if (sass(target)) Right(SASSLanes)
+      else target.refine[Target].left.map(_.raw).map(TargetDefaults.waveSize(_).raw)
+      lanes  <- options.get("--lanes").fold(fallback)(_.toInt).refine[Int > 0].left.map(_.raw)
       stated <- options.get("--record") match {
-        case None =>
+        case Some(_) if sass(target) => Left("--record is not supported for SASS")
+        case None                    =>
           for {
             _      <- Either.cond(arguments.isEmpty, (), "--arguments needs --record")
             shared <- options.get("--shared").fold(0L)(_.toLong).refine[Long >= 0].left.map(_.raw)
@@ -56,6 +58,10 @@ object RewriteSearchRunner {
       }
     } yield stated
   }
+
+  private val SASSLanes = 32
+
+  private def sass(target: String): Boolean = target.startsWith("sm_")
 
   def main(arguments: Array[String]): Unit = {
     if (arguments.length < 3) throw IllegalArgumentException(usage)
@@ -77,14 +83,20 @@ object RewriteSearchRunner {
     val file    = Path.of(path)
     val image   = Vec.unsafeWrapArray(Files.readAllBytes(file))
     val label   = file.getFileName.toString.takeWhile(_ != '.')
-    val windows = options.get("--window").fold(AMDGPUWindows.of(image, kernel, target))(size =>
-      AMDGPUWindows.of(image, kernel, target, size.toInt)
-    )
+    val windows =
+      if (sass(target)) options.get("--window").fold(SASSWindows.of(image, kernel, target))(size =>
+        SASSWindows.of(image, kernel, target, size.toInt)
+      )
+      else options.get("--window").fold(AMDGPUWindows.of(image, kernel, target))(size =>
+        AMDGPUWindows.of(image, kernel, target, size.toInt)
+      )
     launch(image, kernel, target, options).flatMap(stated => windows.map(_ -> stated)) match {
       case Left(reason)           => throw IllegalArgumentException(reason)
       case Right((found, stated)) =>
         found.foreach { window =>
-          val result = RewriteSearch.amdgpu(image, kernel, target, window, stated, config)
+          val result =
+            if (sass(target)) RewriteSearch.sass(image, kernel, target, window, stated, config)
+            else RewriteSearch.amdgpu(image, kernel, target, window, stated, config)
           RewriteSearch.lines(label, window, result).foreach(println)
         }
     }

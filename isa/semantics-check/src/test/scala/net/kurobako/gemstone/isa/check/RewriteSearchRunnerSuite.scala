@@ -78,4 +78,40 @@ class RewriteSearchRunnerSuite extends Suite {
       launch.placement
     )
   )
+
+  test("the runner prints the SASS windows of a kernel as the search does, with the rewrite it proves") {
+    installed()
+    val kernel    = SASSFixtures.kernel
+    val directory = Files.createTempDirectory("rewrite-search-runner")
+    val file      = directory.resolve("fixtures.cubin")
+    try {
+      Files.write(file, SASSFixtures.arithmetic.toArray)
+      val output = printed(
+        Array(
+          file.toString,
+          kernel,
+          SASSFixtures.target,
+          "--seed",
+          config.seed.toString,
+          "--budget",
+          "8",
+          "--lanes",
+          "32"
+        )
+      )
+      val small    = config.copy(budget = 8)
+      val expected = SASSWindows.of(SASSFixtures.arithmetic, kernel, SASSFixtures.target).toOption.get.flatMap(window =>
+        RewriteSearch.lines(
+          "fixtures",
+          window,
+          RewriteSearch.sass(SASSFixtures.arithmetic, kernel, SASSFixtures.target, window, SASSFixtures.launch, small)
+        )
+      )
+      assertEquals(output, expected)
+      assert(output.exists(line => line.contains(" from ") && line.contains("IADD3 R4")), output)
+    } finally {
+      Files.delete(file)
+      Files.delete(directory)
+    }
+  }
 }

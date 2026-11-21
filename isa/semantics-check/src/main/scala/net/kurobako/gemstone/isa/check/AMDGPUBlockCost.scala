@@ -10,7 +10,6 @@ import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.profile.Architecture
-import net.kurobako.gemstone.profile.BlockAnalysis
 import net.kurobako.gemstone.profile.Pipe
 import net.kurobako.gemstone.profile.PipelineSimulator
 import net.kurobako.gemstone.profile.ProfileStream
@@ -24,12 +23,12 @@ import net.kurobako.gemstone.vm.Schedule
 import scala.annotation.tailrec
 import scala.util.Using
 
-/** Cycles per iteration of the loop or block of an AMDGPU kernel that holds a window, as [[BlockAnalysis]] gives them
-  * for the kernel with the window rewritten and laid out again. The rewritten kernel is not run. A stated launch has
-  * one wave issue the region once with every lane active, so a region that reaches memory or has more than one path is
-  * not costed. A recorded launch of the unmodified kernel is issued again over the rewritten one, which holds for a
-  * rewrite that leaves the window's live-out state as it was: every instruction outside the window then issues, and
-  * reaches memory, as recorded.
+/** Cycles per iteration of the loop or block of an AMDGPU kernel that holds a window, as
+  * [[net.kurobako.gemstone.profile.BlockAnalysis]] gives them for the kernel with the window rewritten and laid out
+  * again. The rewritten kernel is not run. A stated launch has one wave issue the region once with every lane active,
+  * so a region that reaches memory or has more than one path is not costed. A recorded launch of the unmodified kernel
+  * is issued again over the rewritten one, which holds for a rewrite that leaves the window's live-out state as it was:
+  * every instruction outside the window then issues, and reaches memory, as recorded.
   */
 object AMDGPUBlockCost {
 

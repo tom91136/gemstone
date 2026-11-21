@@ -8,6 +8,7 @@ import net.kurobako.gemstone.flow.Liveness
 import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.isa.amdgpu.asm.*
+import net.kurobako.gemstone.isa.sass.DecodedInstruction
 import net.kurobako.gemstone.profile.Architecture
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.testing.Edges
@@ -122,6 +123,31 @@ object RewriteSearch {
     def from(sequence: Vec[Instruction]): Option[Walker[Instruction]]      = moves.from(sequence).toOption.map(walker)
   }
 
+  private final class SASS(targetName: String) extends Isa[DecodedInstruction, NvidiaHarness, Lookup.Sass] {
+    val reference: Reference[NvidiaHarness, Lookup.Sass]                        = SASSReference
+    val executor: (Case, Vec[Long], NvidiaHarness) => Either[String, Vec[Long]] = Equivalence.vm(SASSReference)
+    val active: Set[String]                                                     = Set.empty
+
+    def steps(sequence: Vec[DecodedInstruction]): Either[String, Vec[Equivalence.Step]] =
+      each(sequence)(instruction => SASSForms.of(targetName, instruction.operation))
+
+    def text(sequence: Vec[DecodedInstruction]): Vec[String] =
+      sequence.map(instruction =>
+        net.kurobako.gemstone.isa.sass.asm.Printer.print(instruction.operation).getOrElse(instruction.mnemonic.raw)
+      )
+
+    def units(name: String, width: Int): Vec[String] = Liveness.units(name, width)
+
+    def memory(expected: NvidiaHarness, obtained: NvidiaHarness): Long =
+      8L * changed(SASSReference.state(expected), SASSReference.state(obtained))
+  }
+
+  private def walker(moves: SASSMoves): Walker[DecodedInstruction] = new Walker[DecodedInstruction] {
+    def propose(seed: Long, limit: Int): Vec[Moves.Candidate[DecodedInstruction]]   = moves.propose(seed, limit)
+    def from(sequence: Vec[DecodedInstruction]): Option[Walker[DecodedInstruction]] =
+      moves.from(sequence).toOption.map(walker)
+  }
+
   def amdgpu(
       image: Vec[Byte],
       function: String,
@@ -133,6 +159,22 @@ object RewriteSearch {
     cost   <- AMDGPUBlockCost.of(image, function, targetName, launch)
     ready  <- search(image, function, targetName, window, config)
     report <- ready.run((at, sequence) => cost.cost(at, ready.isa.text(sequence)))
+  } yield report
+
+  def sass(
+      image: Vec[Byte],
+      function: String,
+      targetName: String,
+      window: Window,
+      launch: AMDGPUBlockCost.Launch,
+      config: Config = Config.default
+  ): Either[String, Report] = for {
+    cost  <- SASSBlockCost.of(image, function, targetName, launch)
+    found <- SASSModel.staticCode(image, function)
+    moves <- SASSMoves.of(image, function, targetName, window)
+    held = found._3.slice(window.first, window.last + 1)
+    uses = found._2.slice(window.first, window.last + 1)
+    report <- new Search(SASS(targetName), window, held, uses, walker(moves), config).run(cost.cost)
   } yield report
 
   def prove(image: Vec[Byte], function: String, targetName: String, window: Window, candidate: Vec[String])

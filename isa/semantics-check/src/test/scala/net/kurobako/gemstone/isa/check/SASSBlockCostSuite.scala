@@ -10,42 +10,17 @@ import net.kurobako.gemstone.testing.*
 
 class SASSBlockCostSuite extends Suite {
 
-  private val targetName = "sm_89"
-  private val kernel     = "intchain"
+  import SASSFixtures.arithmetic
+  import SASSFixtures.cubin
+  import SASSFixtures.kernel
+  import SASSFixtures.launch
 
-  private def cubin(name: String): Vec[Byte] =
-    Vec.unsafeWrapArray(
-      getClass.getResourceAsStream(s"/net/kurobako/gemstone/isa/sass/controlwords/$name").readAllBytes()
-    )
-
-  private val source =
-    """IADD3 R2, R2, 0x1, RZ ;
-      |IADD3 R4, R2, 0x2, RZ ;
-      |IMAD R6, R2, R2, RZ ;
-      |ISETP.GT.U32.AND P0, PT, R6, 0x10, PT ;
-      |@P0 EXIT ;
-      |EXIT ;
-      |""".stripMargin
-
-  /** `intchain` with its code replaced by a block that no load or store reaches. */
-  private lazy val arithmetic: Vec[Byte] = {
-    val target  = Target.parse(targetName).fold(fail(_), identity)
-    val program = Parser.parseProgram(source).fold(error => fail(error.toString), identity)
-    val code    = new Assembler(target).encode(program).fold(error => fail(error.toString), identity)
-    Cubin.replaceKernel(cubin("intchain.sm_89.cubin"), kernel.unsafe[NonEmpty[String]], code)
-      .fold(error => fail(error.raw), identity)
-  }
-
-  private val launch = AMDGPUBlockCost.Launch.Stated(32.unsafe[Int > 0], 0L.unsafe[Long >= 0], None)
+  private val targetName = SASSFixtures.target
 
   private def decoded(image: Vec[Byte]): Vec[DecodedInstruction] =
     SASSModel.staticCode(image, kernel).fold(fail(_), _._3)
 
-  private def windowOf(image: Vec[Byte]): Window =
-    SASSWindows.of(image, kernel, targetName).fold(fail(_), identity).find(window =>
-      window.first == 0 && window.last >= 3
-    )
-      .getOrElse(fail("no window over the first block"))
+  private def windowOf(image: Vec[Byte]): Window = SASSFixtures.first(image)
 
   private def instruction(text: String): DecodedInstruction =
     DecodedInstruction(0.unsafe[Int >= 0], Parser.parse(text).fold(fail(_), identity), None, None, None)
