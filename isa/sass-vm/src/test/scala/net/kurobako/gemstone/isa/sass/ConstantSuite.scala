@@ -274,6 +274,37 @@ class ConstantSuite extends Suite {
     }
   // CUDA 13.3 ptxas loads the driver's malloc from a bank 4 pointer relocated to the undefined function and calls it
   // with CALL.ABS.NOINC, size and result in R4:R5.
+  test("bank pointers relocated to a cooperative-groups syscall bind its driver address") {
+    val base = Harness.module(
+      89,
+      Vec(Entry("driver_call", 0x160, Vec(8), registers = 12)),
+      constants = Vec(".nv.constant4" -> Vec.fill(8)(0.toByte))
+    )
+    val name        = "__cuda_syscall_CGS_sync"
+    val bank        = base.sections.find(_.name == ".nv.constant4").get
+    val names       = Vec.from(s"\u0000$name\u0000".getBytes(StandardCharsets.UTF_8))
+    val strings     = Cubin.Section(base.sections.nonNegativeSize, ".strtab", 3, 0, names.nonNegativeSize, 0, 0, names)
+    val symbolBytes = ByteBuffer.allocate(48).order(ByteOrder.LITTLE_ENDIAN)
+    symbolBytes.putInt(24, 1).put(28, 0x12.toByte)
+    val symbols =
+      Cubin.Section(strings.index + 1, ".symtab", 2, 0, 48, strings.index, 0, Vec.from(symbolBytes.array()))
+    val relocation = Cubin.Section(
+      symbols.index + 1,
+      ".rel.nv.constant4",
+      9,
+      0,
+      16,
+      symbols.index,
+      bank.index,
+      LittleEndian.toVec(0L, 8) ++ LittleEndian.toVec((1L << 32) | 2L, 8)
+    )
+    val module = base.copy(sections = base.sections ++ Vec(strings, symbols, relocation))
+    assertEquals(
+      Cubin.relocateConstants(module, Map.empty).map(_.sections(bank.index).bytes),
+      Right(LittleEndian.toVec(Cubin.DriverFunctions("__cuda_syscall_CGS_sync"), 8))
+    )
+  }
+
   test("bank pointers relocated to the driver's malloc reach it through an absolute register call") {
     val base = Harness.module(
       89,

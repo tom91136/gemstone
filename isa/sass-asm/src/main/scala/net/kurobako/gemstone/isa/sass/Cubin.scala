@@ -80,7 +80,14 @@ object Cubin {
     * allocation reaches, which calls through it recognise.
     */
   val DriverFunctions: Map[NonEmpty[String], Long] =
-    Vec[NonEmpty[String]]("vprintf", "malloc", "free", "__assertfail").zipWithIndex
+    Vec[NonEmpty[String]](
+      "vprintf",
+      "malloc",
+      "free",
+      "__assertfail",
+      "__cuda_syscall_CGS_get_intrinsic_handle",
+      "__cuda_syscall_CGS_sync"
+    ).zipWithIndex
       .map((name, index) => name -> (0xffffff0000000000L | ((index + 1).toLong << 4))).toMap
 
   private val MaximumImageSize = 64 * 1024 * 1024
@@ -293,11 +300,12 @@ object Cubin {
     ).flatTraverse { table =>
       val bank = module.sections(table.info)
       // ptxas binds driver system calls, such as sm_120's copies into other cluster CTAs, through bank 4; the VM
-      // provides none, and reaching a call through one traps.
+      // provides none beyond the driver functions, and reaching a call through one traps.
       val symbols  = relocationSymbols(module, table).getOrElse(Vec.empty[elf.Symbol])
       val syscalls =
-        symbols.indices.filter(index => symbols(index).name.exists(_.raw.startsWith("__cuda_syscall_")))
-          .map(_.toLong).toSet
+        symbols.indices.filter(index =>
+          symbols(index).name.exists(name => name.raw.startsWith("__cuda_syscall_") && !DriverFunctions.contains(name))
+        ).map(_.toLong).toSet
       val drivers = symbols.indices.flatMap(index =>
         symbols(index).name.filter(name =>
           DriverFunctions.contains(name) && symbols(index).kind.raw == SymbolKind.Function &&
