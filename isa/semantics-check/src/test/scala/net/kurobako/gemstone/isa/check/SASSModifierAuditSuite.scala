@@ -28,4 +28,8 @@ class SASSModifierAuditSuite extends Suite {
     val outcomes = rows.map(_(3)).filterNot(Set("covered", "case")).map(_.takeWhile(_ != ':')).distinct
     assert(outcomes.forall(Set("refused", "rides")), outcomes)
   }
+
+  test("a pair of modifiers that the fixtures use has a case of its own") {
+    assertEquals(states("ISETP.AND.GE.U32", "P P R I P"), Vec("covered"))
+  }
 }

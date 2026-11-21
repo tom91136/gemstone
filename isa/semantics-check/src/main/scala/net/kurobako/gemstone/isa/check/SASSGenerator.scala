@@ -38,7 +38,7 @@ object SASSGenerator {
   private[check] def instances(target: String, included: String => Boolean): Vec[Described] =
     SASSModel.entries(Some(target)).filter(entry => included(entry.mnemonic)).flatMap(entry =>
       entry.forms.flatMap(form =>
-        SASSModel.instances(Some(target), entry.mnemonic, form.name).toOption.toVec.flatten
+        SASSModel.instances(Some(target), entry.mnemonic, form.name, pairs = true).toOption.toVec.flatten
           .flatMap(described(target, _, entry.mnemonic, form.name))
       )
     )

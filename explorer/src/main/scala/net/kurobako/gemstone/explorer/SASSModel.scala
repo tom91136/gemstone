@@ -274,9 +274,15 @@ object SASSModel extends Model {
   /** Every instance of a form, under `mnemonic`: every opcode spelling and value of each required modifier together,
     * with one optional modifier where the encoding accepts none of those alone, then each value of each optional
     * modifier alone, as far as the encoding accepts them and up to a bound, then the first of them again with every
-    * predicate that has a default written out; or why none can be written.
+    * predicate that has a default written out. With `pairs`, instances also hold each pair of opcode and modifier
+    * values together, up to a bound. Or why none can be written.
     */
-  def instances(name: Option[String], mnemonic: String, formName: String): Either[String, Vec[Instance]] = for {
+  def instances(
+      name: Option[String],
+      mnemonic: String,
+      formName: String,
+      pairs: Boolean = false
+  ): Either[String, Vec[Instance]] = for {
     target <- target(name)
     database = target.database
     form <- database.byForm.get(formName).toRight(s"no form $formName")
@@ -342,7 +348,44 @@ object SASSModel extends Model {
             choice.values.flatMap(value => text(opcode, chosen.updated(choice.field, value)))
           )
         }
-        val found = (alone ++ combined.map(_._3)).distinctBy(_._1).take(Variants * 2)
+        val single = (alone ++ combined.map(_._3)).distinctBy(_._1).take(Variants * 2)
+        // rows that between them hold every pair of opcode and modifier values the encoding accepts together
+        def covering(opcode: String, base: Map[NVDisasm.Syntax.Field, String]): Vec[(String, Written)] = {
+          type Pair = ((Int, String), (Int, String))
+          val slots  = None +: choices.map(choice => Option(choice.field))
+          val values = opcodes +: choices.map(_.values)
+          val fixed  = slots.zipWithIndex.flatMap((field, slot) =>
+            field.fold(Option(slot -> opcode))(base.get(_).map(slot -> _))
+          ).toMap
+          def within(picks: Map[Int, String]): Set[Pair] =
+            Vec.from(picks).sortBy(_._1).combinations(2).map(pair => (pair(0), pair(1))).toSet
+          val wanted = for {
+            first  <- slots.indices.iterator
+            second <- ((first + 1) until slots.size).iterator
+            low    <- values(first).iterator
+            high   <- values(second).iterator
+          } yield ((first, low), (second, high))
+          wanted.foldLeft((Set.empty[Pair], Vec.empty[(String, Written)])) { case (state @ (covered, rows), pair) =>
+            if (covered(pair) || rows.size >= Variants * 2) state
+            else {
+              val ((first, low), (second, high)) = pair
+              val start                          = fixed.updated(first, low).updated(second, high)
+              val grown = slots.indices.filterNot(start.contains).foldLeft(start)((picks, slot) =>
+                values(slot).map(value =>
+                  value -> (within(picks.updated(slot, value)) -- covered -- within(picks)).size
+                )
+                  .maxByOption(_._2).filter(_._2 > 0).fold(picks)((value, _) => picks.updated(slot, value))
+              )
+              Vec(grown, start).iterator.flatMap(picks =>
+                text(picks(0), picks.flatMap((slot, value) => slots(slot).map(_ -> value))).map(picks -> _)
+              ).nextOption().fold((covered + pair, rows))((picks, row) => (covered ++ within(picks), rows :+ row))
+            }
+          }._2
+        }
+        val paired = Option.when(pairs)(combined).flatMap(_.headOption)
+          .fold(Vec.empty[(String, Written)])((opcode, chosen, _) => covering(opcode, chosen))
+          .filterNot(found => single.exists(_._1 == found._1)).distinctBy(_._1)
+        val found = single ++ paired
         Either.cond(found.nonEmpty, found, Vec.from(failures))
       }
       // An accumulating form writes the register one of its inputs reads.

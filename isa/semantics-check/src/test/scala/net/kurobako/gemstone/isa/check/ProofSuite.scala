@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.check.Proof.Source
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.semantics.render.Verdict as Solved
 import net.kurobako.gemstone.testing.*
+import scala.concurrent.duration.*
 import scala.reflect.ClassTag
 
 /** Proofs over a lane's cases: what the solver decides is checked against the VMs, and the report names what it used.
@@ -179,6 +180,8 @@ abstract class ProofSuite[H, L <: Lookup](reference: Reference[H, L], generate: 
 
 class SASSProofSuite
     extends ProofSuite[NvidiaHarness, Lookup.Sass](SASSReference, () => SASSGenerator.describe("sm_75")) {
+  override def baseTimeout: FiniteDuration = 150.seconds
+
   protected def sum(destination: String, left: Operand, right: Operand): Step =
     step(named("IADD3", 3), Vec(left, right, zero), Vec(destination))
 
