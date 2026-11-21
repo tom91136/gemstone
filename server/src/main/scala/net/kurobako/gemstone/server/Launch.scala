@@ -125,11 +125,12 @@ object Launch {
     )
     sys.runtime.addShutdownHook(shutdownHook)
 
-    override def close(): Unit =
+    override def close(): Unit = {
       try release()
-      finally
-        try { val _ = sys.runtime.removeShutdownHook(shutdownHook) }
-        catch { case _: IllegalStateException => () }
+      catch { case NonFatal(error) => scribe.warn(s"client release failed: ${throwables.detail(error)}") }
+      try { val _ = sys.runtime.removeShutdownHook(shutdownHook) }
+      catch { case _: IllegalStateException => () }
+    }
   }
 
   def launch[A](
