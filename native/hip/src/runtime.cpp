@@ -197,10 +197,12 @@ int residentBlocks(uint64_t threads, size_t shared) {
   return static_cast<int>(blocks);
 }
 
-bool validBlock(dim3 block) {
-  return block.x != 0 && block.y != 0 && block.z != 0 && block.x <= MaxBlockThreads && block.y <= MaxBlockThreads
-         && block.z <= MaxBlockThreads && static_cast<uint64_t>(block.x) * block.y * block.z <= MaxBlockThreads;
+bool oversizedBlock(dim3 block) {
+  return block.x > MaxBlockThreads || block.y > MaxBlockThreads || block.z > MaxBlockThreads
+         || static_cast<uint64_t>(block.x) * block.y * block.z > MaxBlockThreads;
 }
+
+bool validBlock(dim3 block) { return block.x != 0 && block.y != 0 && block.z != 0 && !oversizedBlock(block); }
 
 constexpr char BundleMagic[] = "__CLANG_OFFLOAD_BUNDLE__";
 constexpr size_t BundleMagicSize = sizeof(BundleMagic) - 1U;
@@ -2677,6 +2679,7 @@ extern "C" hipError_t hipModuleLaunchKernel(hipFunction_t function, unsigned int
   if (traceModules())
     std::fprintf(stderr, "Gemstone HIP module launch f=%p grid=%u,%u,%u block=%u,%u,%u args=%p\n", static_cast<void *>(function), gridX,
                  gridY, gridZ, blockX, blockY, blockZ, static_cast<void *>(args));
+  if (oversizedBlock(dim3(blockX, blockY, blockZ))) return remember(hipErrorInvalidValue);
   return dispatchKernel(functionState->kernel, dim3(gridX, gridY, gridZ), dim3(blockX, blockY, blockZ), args, shared, stream, launchBuffer);
 }
 

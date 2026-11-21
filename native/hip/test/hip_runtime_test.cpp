@@ -378,14 +378,15 @@ void asymmetricAndBoundaryLaunches(gemstone_test::RpcFixture &fixture, hipFuncti
       (caps.maxThreadsPerBlock == 1024 && caps.maxThreadsDim[0] == 1024 && caps.maxThreadsDim[1] == 1024 && caps.maxThreadsDim[2] == 1024));
   const auto before = fixture.launches.load();
   for (bool const extended : {false, true}) {
+    const auto expected = extended ? hipErrorInvalidConfiguration : hipErrorInvalidValue;
     for (const dim3 local :
          {dim3{1025, 1, 1}, dim3{1, 1025, 1}, dim3{1, 1, 1025}, dim3{33, 33, 1}, dim3{65536, 65536, 1}, dim3{maximum, 1, 1}}) {
       LaunchShape const invalid{.global = local, .requested = local, .local = local, .groups = {1, 1, 1}, .extended = extended};
       fixture.expect(expectedShape(invalid, seed, true));
       const auto status = launchShape(function, invalid, arguments);
-      if (status != hipErrorInvalidConfiguration)
+      if (status != expected)
         std::fprintf(stderr, "invalid block %ux%ux%u extended=%d returned=%d\n", local.x, local.y, local.z, extended, status);
-      REQUIRE((status == hipErrorInvalidConfiguration));
+      REQUIRE((status == expected));
       REQUIRE((fixture.launches.load() == before));
     }
   }
@@ -1356,6 +1357,8 @@ TEST_CASE("HIP function attributes and occupancy of a registered kernel follow i
   void *arguments[] = {&output};
   CHECK((hipLaunchKernel(reinterpret_cast<const void *>(&occupancyStub), dim3(1), dim3(256), arguments, 0, nullptr)
          == hipErrorLaunchFailure));
+  CHECK((hipLaunchKernel(reinterpret_cast<const void *>(&occupancyStub), dim3(1), dim3(1025), arguments, 0, nullptr)
+         == hipErrorInvalidConfiguration));
   __hipUnregisterFatBinary(token);
 }
 
