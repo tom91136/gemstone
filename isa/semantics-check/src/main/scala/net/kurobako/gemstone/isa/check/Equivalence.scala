@@ -90,7 +90,7 @@ object Equivalence {
   }
 
   /** The sequences on `inputs`, locations not named holding zero, and `memory` where it is set, as the filter runs
-    * them.
+    * them, over `lane` where a proof names one.
     */
   def replay[H, L <: Lookup](
       reference: Reference[H, L],
@@ -100,10 +100,11 @@ object Equivalence {
       liveOut: LiveOut,
       inputs: Map[String, Long],
       memory: Map[Space, Map[Long, Byte]] = Map.empty,
-      allocations: Map[Space, Long] = Map.empty
+      allocations: Map[Space, Long] = Map.empty,
+      lane: Option[Int] = None
   ): Verdict = typed(reference, left, right, liveOut).map { types =>
     val sampled = types.keys.toVec.sorted.map(name => (name, inputs.getOrElse(name, 0L)))
-    compare(reference, executor, left, right, liveOut, types, sampled, 0, memory, allocations) match {
+    compare(reference, executor, left, right, liveOut, types, sampled, 0, memory, allocations, lane) match {
       case Outcome.Skipped                  => Verdict.Undecided("the inputs do not run on both sequences")
       case Outcome.Agreed                   => Verdict.NotRejected(1)
       case Outcome.Differed(counterexample) => Verdict.Rejected(counterexample)
@@ -131,11 +132,12 @@ object Equivalence {
       sampled: Vec[(String, Long)],
       seed: Int,
       memory: Map[Space, Map[Long, Byte]] = Map.empty,
-      allocations: Map[Space, Long] = Map.empty
+      allocations: Map[Space, Long] = Map.empty,
+      lane: Option[Int] = None
   ): Outcome = {
     val initial      = sampled.toMap
-    val leftHarness  = reference.harness(seed.toLong)
-    val rightHarness = reference.harness(seed.toLong)
+    val leftHarness  = reference.harness(seed.toLong, lane)
+    val rightHarness = reference.harness(seed.toLong, lane)
     allocations.foreach { (space, bytes) =>
       reference.allocate(leftHarness, space, bytes)
       reference.allocate(rightHarness, space, bytes)

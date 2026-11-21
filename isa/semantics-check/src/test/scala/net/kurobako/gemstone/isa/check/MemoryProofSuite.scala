@@ -229,6 +229,14 @@ class MemoryProofSuite extends Suite {
     bySolver(prove(AMDGPUReference, amd(load, "v_mov_b32 v7, v6"), amd(load, "v_and_b32 v7, v6, 1"), "v7"))
   }
 
+  test("an AMDGPU replay runs the lane the solver's counterexample names") {
+    installed()
+    val load  = "ds_read_b32 v6, v0"
+    val left  = amd(load, "v_mov_b32 v7, v6")
+    val right = amd(load, "v_cmp_eq_u32 vcc, 7, v6", "v_cndmask_b32 v7, v6, v8, vcc")
+    bySolver(prove(AMDGPUReference, left, right, "v7"))
+  }
+
   private val first  = "STG.E [R2.64], R5"
   private val second = "STG.E [R2.64+0x4], R6"
 

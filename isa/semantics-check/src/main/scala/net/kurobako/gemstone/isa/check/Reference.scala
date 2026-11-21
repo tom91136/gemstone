@@ -11,8 +11,10 @@ import scala.util.Random
   */
 trait Reference[H, L <: Lookup] {
 
-  /** A fresh machine for one run, the same for every `seed`. */
-  def harness(seed: Long): H
+  /** A fresh machine for one run, the same for every `seed`, executing lane `lane` of its wave, or [[lane]] where none
+    * is named, where the ISA runs an instruction once per lane.
+    */
+  def harness(seed: Long, lane: Option[Int] = None): H
 
   /** The results of executing `instance` on `target` with the parameters at `inputs`, in order, or why it cannot run.
     */
@@ -46,7 +48,8 @@ trait Reference[H, L <: Lookup] {
   /** Whether `state` reflects memory writes, so a memory live-out is comparable. */
   def observesMemory: Boolean = true
 
-  /** The lane of a wave a run executes, where the ISA runs an instruction once per lane. */
+  /** The lane of a wave a run executes unless a proof names another, where the ISA runs an instruction once per lane.
+    */
   def lane: Option[Int] = None
 
   /** The inputs of a run of `instance`: the edge-biased `sampled` ones, or others where the instance reads operands

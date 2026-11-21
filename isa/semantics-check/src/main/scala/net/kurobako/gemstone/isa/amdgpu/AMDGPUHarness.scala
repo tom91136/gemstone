@@ -9,12 +9,13 @@ import scala.collection.mutable
 
 private[isa] object AMDGPUHarness {
 
-  /** The one active lane of the wave. */
+  /** The lane a run executes unless it names another. */
   inline val Lane = 4
 
-  /** What lane `index` holds of a vector register [[Lane]] holds as `value`. */
-  def held(value: Long, index: Int): Long =
-    if (index == Lane) Bits.low32(value).toLong else Bits.low32(value * 0x9e3779b1L + index * 0x7f4a7c15L).toLong
+  /** What lane `lane` holds of a vector register the lane `active` holds as `value`. */
+  def held(value: Long, lane: Int, active: Int): Long =
+    if (lane == active) Bits.low32(value).toLong
+    else Bits.low32(value * 0x9e3779b1L + lane * 0x7f4a7c15L).toLong
 
   /** The byte global memory holds at `address` until it is written. */
   def initial(address: Long): Byte = ((address * 0x9e3779b97f4a7c15L) >>> 56).toByte
@@ -141,42 +142,43 @@ private[isa] object AMDGPUHarness {
     )
   }
 
-  /** The dword VGPR `index` holds in lane `lane` until written: its own index as [[held]] spreads it, and VGPR 0's
-    * beyond the last.
+  /** The dword VGPR `index` holds in lane `lane` of a wave whose active lane is `active` until written: its own index
+    * as [[held]] spreads it, and VGPR 0's beyond the last.
     */
-  def background(index: Long, lane: Int): Long = held(if (index >= 256L) 0L else index, lane)
+  def background(index: Long, lane: Int, active: Int): Long =
+    held(if (index >= 256L) 0L else index, lane, active)
 
-  /** A complete wave in which only [[Lane]] is active and every VGPR holds [[background]] until written; `vectors`
-    * takes the VGPRs [[Lane]] writes to values other than that.
+  /** A complete wave in which only `active` is active and every VGPR holds [[background]] until written; `vectors`
+    * takes the VGPRs `active` writes to values other than that.
     */
-  class SingleLane(vectors: mutable.Map[Int, Long]) extends Wave {
+  class SingleLane(vectors: mutable.Map[Int, Long], active: Int) extends Wave {
     private def current(index: UInt[32]): Long = {
       val at = if (index.raw >= 256L) 0 else index.raw.toInt
-      vectors.getOrElse(at, background(at, Lane))
+      vectors.getOrElse(at, background(at, active, active))
     }
 
-    def lane(): UInt[32]                                          = fromRaw[UInt[32]](Lane.toLong)
-    def exec(): UInt[64]                                          = fromRaw[UInt[64]](1L << Lane)
-    def ballot(predicate: Bool): UInt[64]                         = fromRaw[UInt[64]](if (predicate) 1L << Lane else 0L)
-    def read(value: UInt[32], index: UInt[32]): UInt[32]          = fromRaw[UInt[32]](held(value.raw, index.raw.toInt))
+    def lane(): UInt[32]                                 = fromRaw[UInt[32]](active.toLong)
+    def exec(): UInt[64]                                 = fromRaw[UInt[64]](1L << active)
+    def ballot(predicate: Bool): UInt[64]                = fromRaw[UInt[64]](if (predicate) 1L << active else 0L)
+    def read(value: UInt[32], index: UInt[32]): UInt[32] = fromRaw[UInt[32]](held(value.raw, index.raw.toInt, active))
     def permute(value: UInt[32], destination: UInt[32]): UInt[32] =
-      if (destination.raw == Lane.toLong) value else fromRaw[UInt[32]](0L)
+      if (destination.raw == active.toLong) value else fromRaw[UInt[32]](0L)
     def vgpr(index: UInt[32]): UInt[32]                   = fromRaw[UInt[32]](current(index))
     def vgprAt(index: UInt[32], lane: UInt[32]): UInt[32] =
-      if (lane.raw == Lane.toLong) vgpr(index)
-      else fromRaw[UInt[32]](background(index.raw, lane.raw.toInt))
+      if (lane.raw == active.toLong) vgpr(index)
+      else fromRaw[UInt[32]](background(index.raw, lane.raw.toInt, active))
     def writeVgpr(index: UInt[32], value: UInt[32]): Unit =
       if (index.raw < 256L)
-        if (value.raw == background(index.raw, Lane)) { val _ = vectors.remove(index.raw.toInt) }
+        if (value.raw == background(index.raw, active, active)) { val _ = vectors.remove(index.raw.toInt) }
         else vectors(index.raw.toInt) = value.raw
   }
 }
 
-/** The machine a rendered definition's lane runs on: [[AMDGPUHarness.Lane]] alone active in a complete wave whose other
-  * lanes hold what [[AMDGPUHarness.held]] derives from this lane's registers; global memory holding
-  * [[AMDGPUHarness.initial]] until written; and LDS and private memory holding zeros.
+/** The machine a rendered definition's lane runs on: lane `lane` alone active in a complete wave whose other lanes hold
+  * what [[AMDGPUHarness.held]] derives from this lane's registers; global memory holding [[AMDGPUHarness.initial]]
+  * until written; and LDS and private memory holding zeros.
   */
-private[isa] class AMDGPUHarness {
+private[isa] class AMDGPUHarness(val lane: Int = AMDGPUHarness.Lane) {
   import AMDGPUHarness.*
 
   val globalBytes: SeededMemory  = SeededMemory(initial(_))
@@ -185,7 +187,7 @@ private[isa] class AMDGPUHarness {
 
   private val vectorWrites: mutable.Map[Int, Long] = mutable.Map.empty
 
-  given wave: Wave             = SingleLane(vectorWrites)
+  given wave: Wave             = SingleLane(vectorWrites, lane)
   given global: GlobalMemory   = Global(globalBytes)
   given lds: LocalMemory       = Shared(sharedBytes)
   given scratch: PrivateMemory = Scratch(privateBytes)
@@ -195,7 +197,7 @@ private[isa] class AMDGPUHarness {
   /** Records the VGPR `index` as written to `value`, as the reference finds it. */
   def writeVector(index: Int, value: Long): Unit = vectorWrites(index) = value
 
-  /** The bytes written to global memory and to LDS, and the VGPRs [[AMDGPUHarness.Lane]] writes to other than their
+  /** The bytes written to global memory and to LDS, and the VGPRs the active lane writes to other than their
     * [[AMDGPUHarness.background]].
     */
   def writes: (global: Map[Long, Byte], shared: Map[Long, Byte], vectors: Map[Int, Long]) =

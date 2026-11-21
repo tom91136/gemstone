@@ -10,6 +10,7 @@ import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.asm.*
 import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
+import scala.annotation.unused
 import scala.collection.concurrent.TrieMap
 import scala.util.Random
 
@@ -66,7 +67,7 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
     } yield factor).getOrElse(1L)
   }
 
-  def harness(seed: Long): NvidiaHarness = NvidiaHarness(seed)
+  def harness(seed: Long, @unused lane: Option[Int]): NvidiaHarness = NvidiaHarness(seed)
 
   /** The offsets sampled for a constant operand, all but one in eight moved to a multiple of the stride its field
     * encodes; the rest check that execution and the definition both reject an offset the field cannot hold.

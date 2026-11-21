@@ -323,7 +323,7 @@ object Proof {
     val lane = model.get(LaneMasks.Lane).filter(_ => lanes)
     outside match {
       case Some(name) => Result.Undecided(s"the solver's value for $name is outside its range", filtered)
-      case None if lane.exists(found => !reference.lane.contains(found.toInt)) =>
+      case None if lane.isDefined && reference.lane.isEmpty =>
         Result.Undecided(
           s"the solver's counterexample is in lane ${lane.get}, which the reference does not run",
           filtered
@@ -338,7 +338,8 @@ object Proof {
           liveOut,
           inputs,
           SmtBackend.seeds(model),
-          allocations
+          allocations,
+          lane.map(_.toInt)
         ) match {
           case Verdict.Rejected(found)          => Result.Rejected(found, Source.Solver)
           case Verdict.NotRejected(_) if memory =>

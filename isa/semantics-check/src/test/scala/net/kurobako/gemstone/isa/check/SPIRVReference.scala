@@ -7,6 +7,7 @@ import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.isa.spirv.*
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.vm.*
+import scala.annotation.unused
 import scala.collection.concurrent.TrieMap
 
 /** Runs an instance as the only instruction of a one-invocation kernel, or a shader where its semantics are a shader's,
@@ -17,7 +18,7 @@ object SPIRVReference extends Reference[SPIRVHarness, Lookup.Mnemonic] {
   import SPIRVHarness.*
   import SPIRVKernel.*
 
-  def harness(seed: Long): SPIRVHarness = SPIRVHarness(seed)
+  def harness(seed: Long, @unused lane: Option[Int]): SPIRVHarness = SPIRVHarness(seed)
 
   def state(harness: SPIRVHarness): Vec[(Long, Byte)] = harness.changes
 

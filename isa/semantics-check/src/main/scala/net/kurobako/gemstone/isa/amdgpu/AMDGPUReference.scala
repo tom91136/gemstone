@@ -17,13 +17,13 @@ import scala.collection.concurrent.TrieMap
 import scala.util.Random
 
 /** Executes an instruction instance on the VM: its operands and state take the inputs, as do the other lanes of its
-  * vector registers by [[AMDGPUHarness.held]], EXEC activates [[AMDGPUHarness.Lane]] only unless the instance reads it,
-  * and the results are read from that lane.
+  * vector registers by [[AMDGPUHarness.held]], EXEC activates the harness's lane only unless the instance reads it, and
+  * the results are read from that lane.
   */
 private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spellings] {
   import AMDGPUHarness.*
 
-  def harness(seed: Long): AMDGPUHarness = AMDGPUHarness()
+  def harness(seed: Long, lane: Option[Int]): AMDGPUHarness = AMDGPUHarness(lane.getOrElse(Lane))
 
   override def lane: Option[Int] = Some(Lane)
 
@@ -178,8 +178,8 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
   private val Staged: VectorRegisterIndex   = 251
   private val Reached: VectorRegisterIndex  = 252
 
-  /** The registers of [[AMDGPUHarness.Lane]] and EXEC as the wave reaches the instruction at byte offset `end`. */
-  private class Ended(end: Long) extends LaunchObserver {
+  /** The registers of the active lane and EXEC as the wave reaches the instruction at byte offset `end`. */
+  private class Ended(end: Long, lane: Int in 0 ~ 63) extends LaunchObserver {
     val scalars: Array[Long] = Array.ofDim[Long](128)
     val vectors: Array[Long] = Array.ofDim[Long](256)
     val exec: Array[Long]    = Array.ofDim[Long](1)
@@ -188,7 +188,7 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
       (at.instruction, state) match {
         case (Some(offset), view: WaveView) if offset.raw == end =>
           (0 until 128).foreach(index => scalars(index) = view.scalar(index.unsafe[Int in 0 ~ 127]))
-          (0 until 256).foreach(index => vectors(index) = view.vector(index.unsafe[Int in 0 ~ 255], Lane))
+          (0 until 256).foreach(index => vectors(index) = view.vector(index.unsafe[Int in 0 ~ 255], lane))
           exec(0) = view.exec
         case _ => ()
       }
@@ -267,6 +267,7 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
   ): Either[String, Vec[Long]] = {
     val waveSize = TargetDefaults.waveSize(target)
     val wide     = waveSize == 64
+    val active   = harness.lane
     val seeds    = Vec.newBuilder[Instruction]
     // the registers a relative move reaches hold what the definitions' wave holds in each lane, which DPP routes
     val fields = relativeFields(instruction)
@@ -276,7 +277,7 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
         lane  <- 0 until waveSize
       } seeds += Instruction.VWriteLane(
         index.unsafe[VectorRegisterIndex],
-        InstructionSource.Constant(background(index, lane)),
+        InstructionSource.Constant(background(index, lane, active)),
         InstructionSource.Constant(lane.toLong)
       )
     // the matrix core runs only on a complete active wave64
@@ -284,7 +285,7 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
       case (spellings, _, value) if location(spellings).contains(Location.State(RenderContext.Exec)) => value
     }.getOrElse(instruction match {
       case Instruction.VMatrix(shape = shape) if shape.layout == MatrixLayout.Core => -1L
-      case _                                                                       => 1L << Lane
+      case _                                                                       => 1L << active
     })
     def input(register: VectorRegisterIndex): Long = {
       val wanted = Location.Register('v', register)
@@ -307,9 +308,9 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
         Vec(readBack(address, first, bytes), readBack(address, second, bytes))
       // an ADDTID store writes at M0[15:0] plus its offset plus the lane's four bytes, which a seeded VGPR addresses
       case Instruction.Store(address = MemoryAddress.LaneLocal(offset), bytes = bytes) =>
-        val at = Execute.laneLocalAddress(Bits.low32(m0).toLong, offset.toLong, Lane.toLong)
+        val at = Execute.laneLocalAddress(Bits.low32(m0).toLong, offset.toLong, active.toLong)
         seeds +=
-          Instruction.VWriteLane(Written, InstructionSource.Constant(at), InstructionSource.Constant(Lane.toLong))
+          Instruction.VWriteLane(Written, InstructionSource.Constant(at), InstructionSource.Constant(active.toLong))
         Vec((at, MemoryAddress.Local(Written, 0), bytes.raw))
       case Instruction.Atomic(address = MemoryAddress.Local(register, displacement), bytes = bytes) =>
         Vec(readBack(register, displacement, bytes))
@@ -326,9 +327,9 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
         }
       // a buffer load into LDS writes at M0 plus its offset plus the lane's stride, which a seeded VGPR addresses
       case Instruction.LoadLocal(bytes = bytes, offset = offset) =>
-        val at = Execute.ldsOffset(Bits.low32(m0).toLong + offset + Lane * math.max(4, bytes))
+        val at = Execute.ldsOffset(Bits.low32(m0).toLong + offset + active * math.max(4, bytes))
         seeds +=
-          Instruction.VWriteLane(Written, InstructionSource.Constant(at), InstructionSource.Constant(Lane.toLong))
+          Instruction.VWriteLane(Written, InstructionSource.Constant(at), InstructionSource.Constant(active.toLong))
         Vec((at, MemoryAddress.Local(Written, 0), bytes.raw))
       case _ => Vec.empty[(Long, MemoryAddress, Int)]
     }
@@ -379,7 +380,7 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
             (0 until waveSize).foreach(lane =>
               seeds += Instruction.VWriteLane(
                 target,
-                InstructionSource.Constant(held(dword, lane)),
+                InstructionSource.Constant(held(dword, lane, active)),
                 InstructionSource.Constant(lane.toLong)
               )
             )
@@ -400,12 +401,12 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
         seeds += Instruction.VWriteLane(
           Reached,
           InstructionSource.Constant(Execute.ldsOffset(at + dword * 4)),
-          InstructionSource.Constant(Lane.toLong)
+          InstructionSource.Constant(active.toLong)
         )
         seeds += Instruction.VWriteLane(
           Staged,
           InstructionSource.Constant(harness.sharedBytes.peek(at + dword * 4, size)),
-          InstructionSource.Constant(Lane.toLong)
+          InstructionSource.Constant(active.toLong)
         )
         seeds += Instruction.Store(Staged, MemoryAddress.Local(Reached, 0), size.unsafe[Int in 1 ~ 16], high = false)
       }
@@ -434,7 +435,6 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
       )
     }
     val operations = seeds.result() ++ Vec(instruction) ++ captures ++ Vec(Instruction.End)
-    val ended      = Ended((operations.size - 1) * 4L)
     val source     = codeKernel(
       target = target,
       groupSegmentSize = LdsBytes,
@@ -443,6 +443,13 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
     )
     val task = KernelTask.validated("kernel", Dimensions(waveSize.widen[Int > 0], 1, 1), Dimensions.One, Vec.empty)
     for {
+      lane <- active.refine[Int in 0 ~ 63]
+      _    <- Either.cond(
+        lane < waveSize,
+        (),
+        s"lane $lane is not one of the $waveSize lanes of the wave"
+      )
+      ended = Ended((operations.size - 1) * 4L, lane)
       dispatch <- task.left.map(_.raw)
       _        <- VMInterpreter.execute(
         irKernel(operations, source),
@@ -457,7 +464,7 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
       if (fields.nonEmpty)
         (RelativeFirst until RelativeEnd).foreach { index =>
           val value = Bits.low32(ended.vectors(index)).toLong
-          if (value != background(index, Lane)) harness.writeVector(index, value)
+          if (value != background(index, active, active)) harness.writeVector(index, value)
         }
       shared.zipWithIndex.foreach { case ((at, _, bytes), index) =>
         (0 until (bytes + 3) / 4).foreach(dword =>

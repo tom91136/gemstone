@@ -5,13 +5,14 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.nvidia.*
 import net.kurobako.gemstone.isa.ptx.*
 import net.kurobako.gemstone.semantics.render.*
+import scala.annotation.unused
 import scala.collection.concurrent.TrieMap
 
 /** PTX instances lowered as the explorer describes them, with every register declared as its PTX type. */
 object PTXReference extends Reference[NvidiaHarness, Lookup.Registers] {
   private val lowered = TrieMap.empty[String, Option[InstructionSemantics.PTXLowering]]
 
-  def harness(seed: Long): NvidiaHarness = NvidiaHarness(seed)
+  def harness(seed: Long, @unused lane: Option[Int]): NvidiaHarness = NvidiaHarness(seed)
 
   def execute(
       target: Option[String],
