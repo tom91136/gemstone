@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <functional>
 #include <iterator>
 #include <limits>
@@ -368,10 +369,15 @@ ze_result_t waitEvent(Event *event, uint64_t timeout, std::optional<uint64_t> aw
   });
 }
 
+uint64_t deviceTimestamp() {
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+  return (static_cast<uint64_t>(now.tv_sec) * 1'000'000'000ULL) + static_cast<uint64_t>(now.tv_nsec);
+}
+
 // The caller holds event->mutex while publishing completion state.
 void completeEventLocked(Event *event, ze_result_t result) {
-  const auto now = std::chrono::steady_clock::now().time_since_epoch();
-  event->kernelStart = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
+  event->kernelStart = deviceTimestamp();
   event->kernelEnd = event->kernelStart + 1;
   event->completionResult = result;
   event->signalled = true;
@@ -839,10 +845,6 @@ ze_result_t ZE_APICALL deviceCache(ze_device_handle_t, uint32_t *count, ze_devic
 }
 
 ze_result_t ZE_APICALL deviceStatus(ze_device_handle_t) { return ZE_RESULT_SUCCESS; }
-uint64_t deviceTimestamp() {
-  const auto now = std::chrono::steady_clock::now().time_since_epoch();
-  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(now).count());
-}
 
 ze_result_t ZE_APICALL deviceTimestamps(ze_device_handle_t, uint64_t *host, uint64_t *device) {
   if (!host || !device) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
@@ -943,7 +945,7 @@ ze_result_t ZE_APICALL queueCreate(ze_context_handle_t context, ze_device_handle
     return ZE_RESULT_ERROR_INVALID_ENUMERATION;
   if (!validPriority(desc->priority)) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
   if (!validEngine(desc->ordinal, desc->index)) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  auto *created = createHandle<Queue>(owner, target, desc->ordinal, desc->index, desc->mode, desc->priority);
+  auto *created = createHandle<Queue>(owner, target, desc->ordinal, desc->index, desc->flags, desc->mode, desc->priority);
   if (!created) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   *result = reinterpret_cast<ze_command_queue_handle_t>(created);
   return ZE_RESULT_SUCCESS;
@@ -1038,6 +1040,27 @@ ze_result_t ZE_APICALL queueSync(ze_command_queue_handle_t handle, uint64_t time
   if (deviceLost(device)) return ZE_RESULT_ERROR_DEVICE_LOST;
   return reportStatus(device, queue->async.waitFor(timeout));
 }
+ze_result_t ZE_APICALL queueGetOrdinal(ze_command_queue_handle_t handle, uint32_t *ordinal) {
+  auto *queue = cast<Queue>(handle);
+  if (!queue) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!ordinal) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *ordinal = queue->ordinal;
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL queueGetIndex(ze_command_queue_handle_t handle, uint32_t *index) {
+  auto *queue = cast<Queue>(handle);
+  if (!queue) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!index) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *index = queue->index;
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL queueGetFlags(ze_command_queue_handle_t handle, ze_command_queue_flags_t *flags) {
+  auto *queue = cast<Queue>(handle);
+  if (!queue) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!flags) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *flags = queue->flags;
+  return ZE_RESULT_SUCCESS;
+}
 
 ze_result_t ZE_APICALL listCreate(ze_context_handle_t context, ze_device_handle_t device, const ze_command_list_desc_t *desc,
                                   ze_command_list_handle_t *result) {
@@ -1046,7 +1069,7 @@ ze_result_t ZE_APICALL listCreate(ze_context_handle_t context, ze_device_handle_
   if (!owner || !target) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
   if (!desc || !result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (!validEngine(desc->commandQueueGroupOrdinal, 0)) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  auto *created = createHandle<CommandList>(false, owner, target, desc->commandQueueGroupOrdinal);
+  auto *created = createHandle<CommandList>(false, owner, target, desc->commandQueueGroupOrdinal, 0, desc->flags);
   if (!created) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   *result = reinterpret_cast<ze_command_list_handle_t>(created);
   return ZE_RESULT_SUCCESS;
@@ -1062,9 +1085,60 @@ ze_result_t ZE_APICALL listCreateImmediate(ze_context_handle_t context, ze_devic
     return ZE_RESULT_ERROR_INVALID_ENUMERATION;
   if (!validPriority(desc->priority)) return ZE_RESULT_ERROR_INVALID_ENUMERATION;
   if (!validEngine(desc->ordinal, desc->index)) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
-  auto *created = createHandle<CommandList>(true, owner, target, desc->ordinal, desc->index, desc->mode, desc->priority);
+  auto *created = createHandle<CommandList>(true, owner, target, desc->ordinal, desc->index, desc->flags, desc->mode, desc->priority);
   if (!created) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;
   *result = reinterpret_cast<ze_command_list_handle_t>(created);
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL listGetDeviceHandle(ze_command_list_handle_t handle, ze_device_handle_t *device) {
+  auto *list = cast<CommandList>(handle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!device) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *device = reinterpret_cast<ze_device_handle_t>(list->device);
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL listGetContextHandle(ze_command_list_handle_t handle, ze_context_handle_t *context) {
+  auto *list = cast<CommandList>(handle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!context) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *context = reinterpret_cast<ze_context_handle_t>(list->context.get());
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL listGetOrdinal(ze_command_list_handle_t handle, uint32_t *ordinal) {
+  auto *list = cast<CommandList>(handle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!ordinal) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *ordinal = list->ordinal;
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL listIsImmediate(ze_command_list_handle_t handle, ze_bool_t *immediate) {
+  auto *list = cast<CommandList>(handle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!immediate) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *immediate = list->immediate;
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL listImmediateGetIndex(ze_command_list_handle_t handle, uint32_t *index) {
+  auto *list = cast<CommandList>(handle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!index) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (!list->immediate) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+  *index = list->index;
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL listGetFlags(ze_command_list_handle_t handle, ze_command_list_flags_t *flags) {
+  auto *list = cast<CommandList>(handle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!flags) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *flags = list->immediate ? 0 : list->flags;
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL listImmediateGetFlags(ze_command_list_handle_t handle, ze_command_queue_flags_t *flags) {
+  auto *list = cast<CommandList>(handle);
+  if (!list) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!flags) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  if (!list->immediate) return ZE_RESULT_ERROR_INVALID_ARGUMENT;
+  *flags = list->flags;
   return ZE_RESULT_SUCCESS;
 }
 bool listUsesReleased(CommandList *list) {
@@ -2671,6 +2745,20 @@ ze_result_t ZE_APICALL eventPoolCreate(ze_context_handle_t contextHandle, const 
   *result = reinterpret_cast<ze_event_pool_handle_t>(created);
   return ZE_RESULT_SUCCESS;
 }
+ze_result_t ZE_APICALL eventPoolGetContextHandle(ze_event_pool_handle_t handle, ze_context_handle_t *context) {
+  auto *pool = cast<EventPool>(handle);
+  if (!pool) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!context) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *context = reinterpret_cast<ze_context_handle_t>(pool->context.get());
+  return ZE_RESULT_SUCCESS;
+}
+ze_result_t ZE_APICALL eventPoolGetFlags(ze_event_pool_handle_t handle, ze_event_pool_flags_t *flags) {
+  auto *pool = cast<EventPool>(handle);
+  if (!pool) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
+  if (!flags) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
+  *flags = pool->flags;
+  return ZE_RESULT_SUCCESS;
+}
 ze_result_t ZE_APICALL eventPoolDestroy(ze_event_pool_handle_t handle) {
   auto *pool = cast<EventPool>(handle);
   if (!pool) return ZE_RESULT_ERROR_INVALID_NULL_HANDLE;
@@ -4029,6 +4117,9 @@ table->pfnCreate = queueCreate;
 table->pfnDestroy = queueDestroy;
 table->pfnExecuteCommandLists = queueExecute;
 table->pfnSynchronize = queueSync;
+table->pfnGetOrdinal = queueGetOrdinal;
+table->pfnGetIndex = queueGetIndex;
+table->pfnGetFlags = queueGetFlags;
 TABLE_END
 TABLE_BEGIN(zeGetCommandListProcAddrTable, ze_command_list_dditable_t);
 table->pfnCreate = listCreate;
@@ -4056,6 +4147,13 @@ table->pfnAppendSignalEvent = listSignal;
 table->pfnAppendWaitOnEvents = listWait;
 table->pfnAppendEventReset = listResetEvent;
 table->pfnAppendLaunchKernel = listLaunch;
+table->pfnGetDeviceHandle = listGetDeviceHandle;
+table->pfnGetContextHandle = listGetContextHandle;
+table->pfnGetOrdinal = listGetOrdinal;
+table->pfnImmediateGetIndex = listImmediateGetIndex;
+table->pfnIsImmediate = listIsImmediate;
+table->pfnGetFlags = listGetFlags;
+table->pfnImmediateGetFlags = listImmediateGetFlags;
 table->pfnAppendLaunchCooperativeKernel = listLaunch;
 table->pfnAppendLaunchKernelIndirect = listLaunchIndirect;
 table->pfnAppendLaunchMultipleKernelsIndirect = listLaunchMultipleIndirect;
@@ -4085,6 +4183,8 @@ table->pfnDestroy = eventPoolDestroy;
 table->pfnGetIpcHandle = eventPoolGetIpcHandle;
 table->pfnOpenIpcHandle = eventPoolOpenIpcHandle;
 table->pfnCloseIpcHandle = eventPoolCloseIpcHandle;
+table->pfnGetContextHandle = eventPoolGetContextHandle;
+table->pfnGetFlags = eventPoolGetFlags;
 TABLE_END
 TABLE_BEGIN(zeGetEventProcAddrTable, ze_event_dditable_t);
 table->pfnCreate = eventCreate;

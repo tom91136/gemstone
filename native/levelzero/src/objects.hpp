@@ -134,8 +134,10 @@ struct Context final : Handle {
 };
 struct EventPool final : Handle {
   static constexpr Kind HandleKind = Kind::EventPool;
-  EventPool(Context *contextValue, ze_event_pool_flags_t value) : Handle(HandleKind), contextId(contextValue->id), flags(value) {}
+  EventPool(Context *contextValue, ze_event_pool_flags_t value)
+      : Handle(HandleKind), contextId(contextValue->id), context(contextValue), flags(value) {}
   uint64_t contextId;
+  HandleUse<Context> context;
   ze_event_pool_flags_t flags;
   std::vector<Device *> devices;
   uint64_t ipcId = 0;
@@ -523,13 +525,16 @@ private:
 struct CommandList final : Handle {
   static constexpr Kind HandleKind = Kind::List;
   CommandList(bool immediateValue, Context *contextValue, Device *deviceValue, uint32_t ordinalValue, uint32_t indexValue = 0,
-              ze_command_queue_mode_t modeValue = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS,
+              uint32_t flagsValue = 0, ze_command_queue_mode_t modeValue = ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS,
               ze_command_queue_priority_t priorityValue = ZE_COMMAND_QUEUE_PRIORITY_NORMAL)
-      : Handle(HandleKind), immediate(immediateValue), ordinal(ordinalValue), context(contextValue), device(deviceValue),
+      : Handle(HandleKind), immediate(immediateValue), ordinal(ordinalValue), index(indexValue), flags(flagsValue),
+        context(contextValue), device(deviceValue),
         async(engineFor(ordinalValue, indexValue), priorityRank(priorityValue),
               immediate && modeValue != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) {}
   bool immediate;
   uint32_t ordinal;
+  uint32_t index;
+  uint32_t flags;
   [[nodiscard]] bool computeCapable() const { return QueueGroups[ordinal].compute(); }
   std::mutex appendMutex;
   bool closed = false;
@@ -542,11 +547,13 @@ struct CommandList final : Handle {
 
 struct Queue final : Handle {
   static constexpr Kind HandleKind = Kind::Queue;
-  Queue(Context *contextValue, Device *deviceValue, uint32_t ordinalValue, uint32_t indexValue, ze_command_queue_mode_t modeValue,
-        ze_command_queue_priority_t priorityValue)
-      : Handle(HandleKind), ordinal(ordinalValue), context(contextValue), device(deviceValue),
+  Queue(Context *contextValue, Device *deviceValue, uint32_t ordinalValue, uint32_t indexValue, ze_command_queue_flags_t flagsValue,
+        ze_command_queue_mode_t modeValue, ze_command_queue_priority_t priorityValue)
+      : Handle(HandleKind), ordinal(ordinalValue), index(indexValue), flags(flagsValue), context(contextValue), device(deviceValue),
         async(engineFor(ordinalValue, indexValue), priorityRank(priorityValue), modeValue != ZE_COMMAND_QUEUE_MODE_SYNCHRONOUS) {}
   uint32_t ordinal;
+  uint32_t index;
+  ze_command_queue_flags_t flags;
   HandleUse<Context> context;
   Device *device;
   std::mutex synchronousMutex;

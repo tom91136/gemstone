@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <future>
 #include <initializer_list>
 #include <string>
@@ -45,6 +46,12 @@ ContextHandles createContext() {
   ze_context_handle_t context = nullptr;
   REQUIRE(zeContextCreate(driver, &contextDesc, &context) == ZE_RESULT_SUCCESS);
   return {.driver = driver, .device = device, .context = context};
+}
+
+uint64_t rawMonotonicNanoseconds() {
+  timespec now{};
+  clock_gettime(CLOCK_MONOTONIC_RAW, &now);
+  return (static_cast<uint64_t>(now.tv_sec) * 1'000'000'000ULL) + static_cast<uint64_t>(now.tv_nsec);
 }
 
 ze_command_list_handle_t createImmediateList(const ContextHandles &handles) {
@@ -2359,4 +2366,143 @@ TEST_CASE("Level Zero reports the name, multiprocessors, clocks, memory, bus and
   CHECK(cache.cacheSize == 64ULL * 1024 * 1024);
 
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero command lists, queues and event pools report how they were created", "[level-zero][introspection]") {
+  auto [driver, device, context] = createContext();
+  uint32_t groupCount = 0;
+  REQUIRE(zeDeviceGetCommandQueueGroupProperties(device, &groupCount, nullptr) == ZE_RESULT_SUCCESS);
+  std::vector<ze_command_queue_group_properties_t> groups(groupCount);
+  for (auto &group : groups)
+    group.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_GROUP_PROPERTIES;
+  REQUIRE(zeDeviceGetCommandQueueGroupProperties(device, &groupCount, groups.data()) == ZE_RESULT_SUCCESS);
+  const uint32_t ordinal = groupCount - 1;
+  const uint32_t index = groups[ordinal].numQueues - 1;
+
+  ze_command_queue_desc_t queueDesc{};
+  queueDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_QUEUE_DESC;
+  queueDesc.ordinal = ordinal;
+  queueDesc.index = index;
+  queueDesc.flags = ZE_COMMAND_QUEUE_FLAG_IN_ORDER;
+  queueDesc.mode = ZE_COMMAND_QUEUE_MODE_ASYNCHRONOUS;
+  ze_command_queue_handle_t queue = nullptr;
+  REQUIRE(zeCommandQueueCreate(context, device, &queueDesc, &queue) == ZE_RESULT_SUCCESS);
+  uint32_t value = UINT32_MAX;
+  CHECK(zeCommandQueueGetOrdinal(queue, &value) == ZE_RESULT_SUCCESS);
+  CHECK(value == ordinal);
+  value = UINT32_MAX;
+  CHECK(zeCommandQueueGetIndex(queue, &value) == ZE_RESULT_SUCCESS);
+  CHECK(value == index);
+  ze_command_queue_flags_t queueFlags = 0;
+  CHECK(zeCommandQueueGetFlags(queue, &queueFlags) == ZE_RESULT_SUCCESS);
+  CHECK(queueFlags == ZE_COMMAND_QUEUE_FLAG_IN_ORDER);
+  CHECK(zeCommandQueueGetOrdinal(queue, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+  CHECK(zeCommandQueueGetIndex(nullptr, &value) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+
+  ze_command_list_desc_t listDesc{};
+  listDesc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+  listDesc.commandQueueGroupOrdinal = ordinal;
+  listDesc.flags = ZE_COMMAND_LIST_FLAG_RELAXED_ORDERING;
+  ze_command_list_handle_t list = nullptr;
+  REQUIRE(zeCommandListCreate(context, device, &listDesc, &list) == ZE_RESULT_SUCCESS);
+  ze_device_handle_t listDevice = nullptr;
+  CHECK(zeCommandListGetDeviceHandle(list, &listDevice) == ZE_RESULT_SUCCESS);
+  CHECK(listDevice == device);
+  ze_context_handle_t listContext = nullptr;
+  CHECK(zeCommandListGetContextHandle(list, &listContext) == ZE_RESULT_SUCCESS);
+  CHECK(listContext == context);
+  value = UINT32_MAX;
+  CHECK(zeCommandListGetOrdinal(list, &value) == ZE_RESULT_SUCCESS);
+  CHECK(value == ordinal);
+  ze_bool_t immediate = true;
+  CHECK(zeCommandListIsImmediate(list, &immediate) == ZE_RESULT_SUCCESS);
+  CHECK_FALSE(immediate);
+  ze_command_list_flags_t listFlags = 0;
+  CHECK(zeCommandListGetFlags(list, &listFlags) == ZE_RESULT_SUCCESS);
+  CHECK(listFlags == ZE_COMMAND_LIST_FLAG_RELAXED_ORDERING);
+  CHECK(zeCommandListImmediateGetIndex(list, &value) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  ze_command_queue_flags_t immediateFlags = 0;
+  CHECK(zeCommandListImmediateGetFlags(list, &immediateFlags) == ZE_RESULT_ERROR_INVALID_ARGUMENT);
+  CHECK(zeCommandListGetDeviceHandle(nullptr, &listDevice) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+  CHECK(zeCommandListGetContextHandle(list, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+
+  ze_command_list_handle_t immediateList = nullptr;
+  REQUIRE(zeCommandListCreateImmediate(context, device, &queueDesc, &immediateList) == ZE_RESULT_SUCCESS);
+  listDevice = nullptr;
+  CHECK(zeCommandListGetDeviceHandle(immediateList, &listDevice) == ZE_RESULT_SUCCESS);
+  CHECK(listDevice == device);
+  listContext = nullptr;
+  CHECK(zeCommandListGetContextHandle(immediateList, &listContext) == ZE_RESULT_SUCCESS);
+  CHECK(listContext == context);
+  immediate = false;
+  CHECK(zeCommandListIsImmediate(immediateList, &immediate) == ZE_RESULT_SUCCESS);
+  CHECK(immediate);
+  value = UINT32_MAX;
+  CHECK(zeCommandListGetOrdinal(immediateList, &value) == ZE_RESULT_SUCCESS);
+  CHECK(value == ordinal);
+  value = UINT32_MAX;
+  CHECK(zeCommandListImmediateGetIndex(immediateList, &value) == ZE_RESULT_SUCCESS);
+  CHECK(value == index);
+  CHECK(zeCommandListImmediateGetFlags(immediateList, &immediateFlags) == ZE_RESULT_SUCCESS);
+  CHECK(immediateFlags == ZE_COMMAND_QUEUE_FLAG_IN_ORDER);
+
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+  poolDesc.count = 1;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  ze_event_pool_flags_t poolFlags = 0;
+  CHECK(zeEventPoolGetFlags(pool, &poolFlags) == ZE_RESULT_SUCCESS);
+  CHECK(poolFlags == poolDesc.flags);
+  ze_context_handle_t poolContext = nullptr;
+  CHECK(zeEventPoolGetContextHandle(pool, &poolContext) == ZE_RESULT_SUCCESS);
+  CHECK(poolContext == context);
+  CHECK(zeEventPoolGetFlags(nullptr, &poolFlags) == ZE_RESULT_ERROR_INVALID_NULL_HANDLE);
+  CHECK(zeEventPoolGetContextHandle(pool, nullptr) == ZE_RESULT_ERROR_INVALID_NULL_POINTER);
+  ze_event_desc_t eventDesc{};
+  eventDesc.stype = ZE_STRUCTURE_TYPE_EVENT_DESC;
+  ze_event_handle_t event = nullptr;
+  REQUIRE(zeEventCreate(pool, &eventDesc, &event) == ZE_RESULT_SUCCESS);
+  ze_event_pool_handle_t eventPool = nullptr;
+  CHECK(zeEventGetEventPool(event, &eventPool) == ZE_RESULT_SUCCESS);
+  CHECK(eventPool == pool);
+
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(immediateList) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandListDestroy(list) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeCommandQueueDestroy(queue) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
+TEST_CASE("Level Zero host and event timestamps share the raw monotonic clock that profilers read", "[level-zero][events][timestamps]") {
+  const auto handles = createContext();
+  const auto before = rawMonotonicNanoseconds();
+  uint64_t host = 0;
+  uint64_t device = 0;
+  REQUIRE(zeDeviceGetGlobalTimestamps(handles.device, &host, &device) == ZE_RESULT_SUCCESS);
+
+  ze_event_pool_desc_t poolDesc{};
+  poolDesc.stype = ZE_STRUCTURE_TYPE_EVENT_POOL_DESC;
+  poolDesc.flags = ZE_EVENT_POOL_FLAG_HOST_VISIBLE | ZE_EVENT_POOL_FLAG_KERNEL_TIMESTAMP;
+  poolDesc.count = 1;
+  ze_event_pool_handle_t pool = nullptr;
+  REQUIRE(zeEventPoolCreate(handles.context, &poolDesc, 0, nullptr, &pool) == ZE_RESULT_SUCCESS);
+  auto *const event = poolEvent(pool, 0);
+  REQUIRE(zeEventHostSignal(event) == ZE_RESULT_SUCCESS);
+  ze_kernel_timestamp_result_t timestamps{};
+  REQUIRE(zeEventQueryKernelTimestamp(event, &timestamps) == ZE_RESULT_SUCCESS);
+  const auto after = rawMonotonicNanoseconds();
+
+  CHECK(host >= before);
+  CHECK(host <= after);
+  CHECK(device >= before);
+  CHECK(device <= after);
+  CHECK(timestamps.global.kernelStart >= before);
+  CHECK(timestamps.global.kernelEnd <= after);
+
+  REQUIRE(zeEventDestroy(event) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeEventPoolDestroy(pool) == ZE_RESULT_SUCCESS);
+  REQUIRE(zeContextDestroy(handles.context) == ZE_RESULT_SUCCESS);
 }

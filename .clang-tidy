@@ -100,7 +100,7 @@ CheckOptions:
   cppcoreguidelines-special-member-functions.AllowImplicitlyDeletedCopyOrMove: true
   cppcoreguidelines-special-member-functions.AllowMissingMoveFunctionsWhenCopyIsDeleted: true
   cppcoreguidelines-special-member-functions.AllowSoleDefaultDtor: true
-  misc-include-cleaner.IgnoreHeaders: 'bits/.*;signal\.h;stdlib\.h;CL/.*;vulkan/.*;vk_video/.*;cuda.*;cu[A-Za-z_]*\.h;crt/.*;driver_types\.h;vector_types\.h;builtin_types\.h;surface_types\.h;texture_types\.h;library_types\.h;channel_descriptor\.h;mma\.h;cooperative_groups.*;hip/.*;hsa/.*;hsakmt/.*;ze_.*;zes_.*;zet_.*;level_zero/.*;loader/.*;catch2/.*;glaze/.*;fmt/.*;toml.*;magic_enum/.*;thrust/.*;cub/.*;cuda/.*;rocprim/.*;rocthrust/.*;rocblas/.*;hipcub/.*;cublas.*;lz4.*;zstd.*;reproc.*;fire\.hpp;sycl/.*;spirv.*;llvm/.*;clang/.*;lld/.*;mlir/.*;oneapi/.*;aspartame/.*;\.inl;\.inc'
+  misc-include-cleaner.IgnoreHeaders: 'bits/.*;signal\.h;stdlib\.h;time\.h;CL/.*;vulkan/.*;vk_video/.*;cuda.*;cu[A-Za-z_]*\.h;crt/.*;driver_types\.h;vector_types\.h;builtin_types\.h;surface_types\.h;texture_types\.h;library_types\.h;channel_descriptor\.h;mma\.h;cooperative_groups.*;hip/.*;hsa/.*;hsakmt/.*;ze_.*;zes_.*;zet_.*;level_zero/.*;loader/.*;catch2/.*;glaze/.*;fmt/.*;toml.*;magic_enum/.*;thrust/.*;cub/.*;cuda/.*;rocprim/.*;rocthrust/.*;rocblas/.*;hipcub/.*;cublas.*;lz4.*;zstd.*;reproc.*;fire\.hpp;sycl/.*;spirv.*;llvm/.*;clang/.*;lld/.*;mlir/.*;oneapi/.*;aspartame/.*;\.inl;\.inc'
   readability-identifier-naming.ClassCase: CamelCase
   readability-identifier-naming.StructCase: CamelCase
   readability-identifier-naming.UnionCase: CamelCase
