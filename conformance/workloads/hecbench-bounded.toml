@@ -2,7 +2,8 @@
 # (300 s) when measured on a loaded machine, so CI has headroom.
 # mdh is not here: its shipped inputs overflow expf, so its PASS checks nothing, and -itmax 1 exceeds the case limit
 # under emulation.
-# assert is not here: under emulation its device asserts print nothing and the case returns ERROR.
+# assert is not here: its expected output contains "failed", which classifies as a failure on any device, and its
+# performance kernel exceeds the instruction budget under emulation.
 specs = ['*']
 include_programs = [
   'hecbench_abacus', 'hecbench_bitpacking', 'hecbench_fsm', 'hecbench_laplace', 'hecbench_minimod', 'hecbench_overlap',
