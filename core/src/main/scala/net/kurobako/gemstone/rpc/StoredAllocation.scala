@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.rpc
 
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReferenceArray
 import java.util.concurrent.locks.ReentrantLock
 import net.kurobako.gemstone.*
@@ -45,7 +46,12 @@ private object StoredAllocation {
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     private var live = true
 
-    def release(): Unit = write(0L, locks.length * 64L)(_ => live = false)
+    private val holders = AtomicInteger(1)
+
+    def retain(): Unit = { val _ = holders.incrementAndGet() }
+
+    /** Drops one holder; the bytes die with the last. */
+    def release(): Unit = if (holders.decrementAndGet() == 0) write(0L, locks.length * 64L)(_ => live = false)
 
     /** Bytes currently backed by segments. */
     def residentBytes: Long = (0 until segments.length).foldLeft(0L)((total, index) =>
@@ -214,7 +220,8 @@ private case class StoredAllocation(
     base: GuestAddress,
     aliased: Boolean = false,
     hostBacked: Boolean = false,
-    devices: Int = StoredAllocation.AllDevices
+    devices: Int = StoredAllocation.AllDevices,
+    imported: Boolean = false
 ) {
   def size: Long > 0 = storage.size
 }

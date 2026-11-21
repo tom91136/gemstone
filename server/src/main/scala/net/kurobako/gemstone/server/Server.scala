@@ -118,7 +118,9 @@ object Server {
       }
       rollback = (() => journal.foreach(_.markUnreplayable("server startup failed"))) :: rollback
       val capabilities = backends(pool)
-      val clients      = own(Clients(
+      // recorded handles must replay byte for byte, so a recording fixes the epoch
+      val exports = if (journal.isDefined) IpcExports(0L) else IpcExports()
+      val clients = own(Clients(
         () =>
           ExecutionSession(
             backends = capabilities.programs,
@@ -127,7 +129,8 @@ object Server {
             parallelism = pool.parallelism,
             specialization = capabilities.specialization,
             graphics = capabilities.graphics,
-            schedule = settings.schedule
+            schedule = settings.schedule,
+            ipc = exports
           ),
         client => journal.foreach(_.clientClosed(client))
       ))

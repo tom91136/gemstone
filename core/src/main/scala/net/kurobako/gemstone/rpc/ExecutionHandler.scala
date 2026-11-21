@@ -32,6 +32,12 @@ object ExecutionHandler {
       encode(request, session.supplyHostSync(completion, ticket, observed))
     case request @ Operation.ReleaseAllocation(allocation) =>
       encode(request, session.releaseAllocation(allocation))
+    case request @ Operation.ExportAllocation(allocation) =>
+      encode(request, session.exportAllocation(allocation))
+    case request @ Operation.ImportAllocation(handle) =>
+      encode(request, session.importAllocation(handle))
+    case request @ Operation.CloseImportedAllocation(allocation) =>
+      encode(request, session.closeImportedAllocation(allocation))
     case request @ Operation.WriteAllocation(allocation, offset, bytes) =>
       encode(request, session.write(allocation, offset, bytes))
     case request @ Operation.ReadAllocation(allocation, offset, size) =>

@@ -179,6 +179,8 @@ object ExecutionRPC {
       size: Int > 0
   ) derives Codec
 
+  case class ImportedAllocation(allocation: AllocationId, size: Long > 0) derives Codec
+
   case class AllocationRange(allocation: AllocationId, offset: Long >= 0, size: Int >= 0)
   case class AllocationScalar(allocation: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)
 
@@ -229,6 +231,9 @@ object ExecutionRPC {
     case SetAllocationDevices(allocation: AllocationId, devices: Int) extends Operation[Unit]
     case ReleaseAllocation(allocation: AllocationId)
         extends Operation[Unit]
+    case ExportAllocation(allocation: AllocationId)        extends Operation[Vec[Byte]]
+    case ImportAllocation(handle: Vec[Byte])               extends Operation[ImportedAllocation]
+    case CloseImportedAllocation(allocation: AllocationId) extends Operation[Unit]
     case WriteAllocation(allocation: AllocationId, offset: Long >= 0, bytes: Vec[Byte])
         extends Operation[Unit]
     case ReadAllocation(allocation: AllocationId, offset: Long >= 0, size: Int >= 0)

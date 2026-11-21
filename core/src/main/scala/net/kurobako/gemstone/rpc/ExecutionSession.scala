@@ -144,7 +144,8 @@ class ExecutionSession(
     specialization: Option[Backend.Specialization] = None,
     graphics: Option[GraphicsBackend] = None,
     maxPrintEvents: Int > 0 = 16384,
-    schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed
+    schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed,
+    ipc: IpcExports = IpcExports()
 ) extends AutoCloseable {
   import ExecutionSession.*
 
@@ -253,8 +254,48 @@ class ExecutionSession(
         Left(ExecutionFailure.InvalidRequest(s"allocation $id is retained by completion"))
       case Some(allocation) =>
         state.set(current.withoutAllocation(id))
-        allocation.storage.release()
+        retire(allocation)
         Right(())
+    }
+  }
+
+  private def retire(allocation: StoredAllocation): Unit = {
+    if (!allocation.imported) ipc.revoke(allocation.storage)
+    allocation.storage.release()
+  }
+
+  def exportAllocation(id: AllocationId): Either[ExecutionFailure, Vec[Byte]] = stateLock.withLock {
+    open.flatMap { current =>
+      current.allocation(id).toRight(notRegistered(id)).flatMap { allocation =>
+        if (allocation.hostBacked || allocation.imported)
+          Left(ExecutionFailure.InvalidRequest(s"allocation $id cannot be exported"))
+        else Right(ipc.exported(allocation.storage))
+      }
+    }
+  }
+
+  def importAllocation(handle: Vec[Byte]): Either[ExecutionFailure, ImportedAllocation] = stateLock.withLock {
+    open.flatMap { current =>
+      val id = current.nextAllocation
+      if (id.raw > SyntheticAllocationCapacity)
+        Left(ExecutionFailure.OutOfResources(s"session exhausted its $SyntheticAllocationCapacity allocation windows"))
+      else
+        ipc.opened(handle).map { storage =>
+          state.set(
+            current.withAllocation(id, StoredAllocation(storage, syntheticAddress(id), imported = true))
+              .copy(nextAllocation = id.next)
+          )
+          ImportedAllocation(id, storage.size)
+        }
+    }
+  }
+
+  def closeImportedAllocation(id: AllocationId): Either[ExecutionFailure, Unit] = stateLock.withLock {
+    val current = state.get()
+    current.allocation(id) match {
+      case Some(allocation) if allocation.imported => releaseAllocation(id)
+      case Some(_) => Left(ExecutionFailure.InvalidRequest(s"allocation $id was not imported"))
+      case None    => Left(notRegistered(id))
     }
   }
 
@@ -734,7 +775,7 @@ class ExecutionSession(
         None
       else {
         state.set(current.withoutAllocations.copy(programs = Map.empty, completions = Map.empty))
-        current.addresses.allocations.foreach(_.storage.release())
+        current.addresses.allocations.foreach(retire)
         Some(current.programs.values.map(_.loaded).toVector)
       }
     }

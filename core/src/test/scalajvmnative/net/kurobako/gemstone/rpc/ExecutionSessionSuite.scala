@@ -113,6 +113,89 @@ class ExecutionSessionSuite extends Suite {
     }
   }
 
+  private def sharing(epoch: Long = 7L): (IpcExports, ExecutionSession, ExecutionSession) = {
+    val exports = IpcExports(epoch)
+    (
+      exports,
+      ExecutionSession(backends = List(TestBackend()), ipc = exports),
+      ExecutionSession(backends = List(TestBackend()), ipc = exports)
+    )
+  }
+
+  private def bytesOf(session: ExecutionSession, id: AllocationId, size: Int >= 0): Vec[Byte] =
+    session.read(AllocationRange(id, 0L, size)).toOption.get
+
+  test("exporting an allocation yields one stable handle and refuses host-backed or unknown allocations") {
+    val (_, owner, other) = sharing()
+    Using.resources(owner, other) { (owner, _) =>
+      val id     = owner.registerAllocation(16L.unsafe[Long > 0]).toOption.get
+      val handle = owner.exportAllocation(id).toOption.get
+      assertEquals(handle.length, 64)
+      assertEquals(owner.exportAllocation(id), Right(handle))
+      val mirrored = owner.registerAllocation(16L.unsafe[Long > 0]).toOption.get
+      assertEquals(owner.registerAllocationAddress(mirrored, GuestAddress(0x1000L), hostBacked = true), Right(()))
+      owner.exportAllocation(mirrored) match {
+        case Left(ExecutionFailure.InvalidRequest(_)) => ()
+        case other                                    => fail(s"expected invalid request, got $other")
+      }
+      owner.exportAllocation(AllocationId(99L)) match {
+        case Left(ExecutionFailure.NotFound(_)) => ()
+        case other                              => fail(s"expected not found, got $other")
+      }
+    }
+  }
+
+  test("importing a handle in another session shares storage and rejects stale, foreign and malformed handles") {
+    val (_, owner, importer) = sharing()
+    Using.resources(owner, importer) { (owner, importer) =>
+      val id       = owner.registerAllocation(16L.unsafe[Long > 0]).toOption.get
+      val _        = owner.write(id, 0L, Vec[Byte](1, 2, 3))
+      val handle   = owner.exportAllocation(id).toOption.get
+      val imported = importer.importAllocation(handle).toOption.get
+      assertEquals(imported.size: Long, 16L)
+      assertEquals(bytesOf(importer, imported.allocation, 3), Vec[Byte](1, 2, 3))
+      val _ = importer.write(imported.allocation, 1L, Vec[Byte](9))
+      assertEquals(bytesOf(owner, id, 3), Vec[Byte](1, 9, 3))
+      assert(importer.importAllocation(handle.slice(0, 63)).isLeft)
+      assert(importer.importAllocation(Vec.fill(64)(0.toByte)).isLeft)
+      assert(importer.importAllocation(handle.updated(24, (handle(24) + 1).toByte)).isLeft)
+      Using.resource(ExecutionSession(backends = List(TestBackend()), ipc = IpcExports(8L))) { foreign =>
+        assert(foreign.importAllocation(handle).isLeft)
+      }
+    }
+  }
+
+  test("closing an import keeps the owner's data, refuses ordinary allocations and survives the owner's free") {
+    val (_, owner, importer) = sharing()
+    Using.resources(owner, importer) { (owner, importer) =>
+      val id     = owner.registerAllocation(16L.unsafe[Long > 0]).toOption.get
+      val _      = owner.write(id, 0L, Vec[Byte](5, 6))
+      val handle = owner.exportAllocation(id).toOption.get
+      val first  = importer.importAllocation(handle).toOption.get
+      assertEquals(importer.closeImportedAllocation(first.allocation), Right(()))
+      assert(importer.read(AllocationRange(first.allocation, 0L, 2)).isLeft)
+      assertEquals(bytesOf(owner, id, 2), Vec[Byte](5, 6))
+      assert(importer.closeImportedAllocation(first.allocation).isLeft)
+      val local = importer.registerAllocation(16L.unsafe[Long > 0]).toOption.get
+      assert(importer.closeImportedAllocation(local).isLeft)
+      val second = importer.importAllocation(handle).toOption.get
+      assertEquals(owner.releaseAllocation(id), Right(()))
+      assertEquals(bytesOf(importer, second.allocation, 2), Vec[Byte](5, 6))
+      assert(importer.importAllocation(handle).isLeft)
+      assertEquals(importer.closeImportedAllocation(second.allocation), Right(()))
+    }
+  }
+
+  test("closing the owner's session revokes its handles") {
+    val (_, owner, importer) = sharing()
+    Using.resource(importer) { importer =>
+      val id     = owner.registerAllocation(16L.unsafe[Long > 0]).toOption.get
+      val handle = owner.exportAllocation(id).toOption.get
+      owner.close()
+      assert(importer.importAllocation(handle).isLeft)
+    }
+  }
+
   test("printf keeps standard output and standard error apart") {
     val backend = TestBackend((_, _, handler) =>
       for {

@@ -102,6 +102,18 @@ Result<Unit> Client::call(const ReleaseAllocation &request) {
   return implementation->call<Unit>(operation::ReleaseAllocation, request);
 }
 
+Result<std::vector<uint8_t>> Client::call(const ExportAllocation &request) {
+  return implementation->call<std::vector<uint8_t>>(operation::ExportAllocation, request);
+}
+
+Result<ImportedAllocation> Client::call(const ImportAllocation &request) {
+  return implementation->call<ImportedAllocation>(operation::ImportAllocation, request);
+}
+
+Result<Unit> Client::call(const CloseImportedAllocation &request) {
+  return implementation->call<Unit>(operation::CloseImportedAllocation, request);
+}
+
 Result<Unit> Client::call(const WriteAllocation &request) {
   return implementation->call<Unit>(operation::WriteAllocation, request);
 }
