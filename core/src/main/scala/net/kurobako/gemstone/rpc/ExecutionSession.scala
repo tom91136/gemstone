@@ -38,6 +38,9 @@ object ExecutionSession {
   private val SyntheticAllocationCapacity =
     (AddressLayout.AllocationLimit - AddressLayout.AllocationBase) / AddressLayout.AllocationStride
 
+  // the host mirror describes an allocation extent with an Int
+  private val HostExtentLimit: Long = Int.MaxValue
+
   private val Closed = ExecutionFailure.Failed("execution session is closed")
 
   private def notRegistered(id: AllocationId): ExecutionFailure =
@@ -174,7 +177,7 @@ class ExecutionSession(
       state.get().addresses.resolve(address, 1) match {
         case null  => None
         case entry =>
-          Option.when(entry.size <= Int.MaxValue)(HostMemoryRange(entry.base, entry.size.toInt.unsafe[Int > 0]))
+          Option.when(entry.size <= HostExtentLimit)(HostMemoryRange(entry.base, entry.size.toInt.unsafe[Int > 0]))
       },
     () => state.get().hasHostBackedAllocations
   )
@@ -212,6 +215,8 @@ class ExecutionSession(
         val size = allocation.size.raw
         if (address.raw <= 0 || address.raw > Long.MaxValue - size)
           Left(ExecutionFailure.InvalidRequest("allocation address alias has an invalid or overflowing range"))
+        else if (hostBacked && size > HostExtentLimit)
+          Left(ExecutionFailure.OutOfResources(s"host-backed allocation of $size bytes exceeds $HostExtentLimit"))
         else if (allocation.aliased && allocation.base == address && allocation.hostBacked == hostBacked) Right(())
         else if (allocation.aliased)
           Left(ExecutionFailure.InvalidRequest("allocation address alias cannot be remapped"))

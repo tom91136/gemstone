@@ -947,6 +947,20 @@ TEST_CASE("CUDA device allocations past 2 GiB reach both ends and every power-of
   check(library.load<decltype(&cuCtxDestroy_v2)>("cuCtxDestroy_v2")(context));
 }
 
+TEST_CASE("CUDA host-backed allocations past 2 GiB report out of memory", "[cuda][integration][large-memory]") {
+  const SharedLibrary library{cudaLibraryPath().c_str()};
+  check(library.load<decltype(&cuInit)>("cuInit")(0));
+  CUcontext context{};
+  check(library.load<CUresult (*)(CUcontext *, unsigned, CUdevice)>("cuCtxCreate_v2")(&context, 0, 0));
+  constexpr size_t size = size_t{1} << 31;
+
+  CUdeviceptr managed{};
+  CHECK(library.load<decltype(&cuMemAllocManaged)>("cuMemAllocManaged")(&managed, size, CU_MEM_ATTACH_GLOBAL) == CUDA_ERROR_OUT_OF_MEMORY);
+  void *pinned = nullptr;
+  CHECK(library.load<decltype(&cuMemHostAlloc)>("cuMemHostAlloc")(&pinned, size, 0) == CUDA_ERROR_OUT_OF_MEMORY);
+  check(library.load<decltype(&cuCtxDestroy_v2)>("cuCtxDestroy_v2")(context));
+}
+
 TEST_CASE("CUDA managed runtime allocation round-trips host and device", "[cuda][integration]") { runManagedRuntime(); }
 
 TEST_CASE("CUDA driver lookup exposes known unsupported APIs and ordinary stream context", "[cuda][integration]") {

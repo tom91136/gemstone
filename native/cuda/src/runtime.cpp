@@ -862,9 +862,10 @@ CUresult executionReady() noexcept {
   }
 }
 
-std::optional<uint64_t> bindAllocation(size_t size, uintptr_t address, bool hostBacked) noexcept {
+std::optional<uint64_t> bindAllocation(size_t size, uintptr_t address, bool hostBacked,
+                                       gemstone::execution::Error *failure = nullptr) noexcept {
   try {
-    if (const auto id = registerAllocation(*client, size, reinterpret_cast<const void *>(address), hostBacked))
+    if (const auto id = registerAllocation(*client, size, reinterpret_cast<const void *>(address), hostBacked, AllDevices, failure))
       return static_cast<uint64_t>(id->value);
     return std::nullopt;
   } catch (...) {
@@ -959,8 +960,9 @@ CUresult allocate(CUdeviceptr *pointer, size_t size, const void *module) {
 // Host-backed allocations are registered with the service so kernels reach the host bytes directly.
 CUresult registerMirror(uintptr_t pointer, size_t size, bool hostMemory) {
   if (pointer == 0 || size == 0 || executionReady() != CUDA_SUCCESS) return CUDA_ERROR_INVALID_VALUE;
-  const auto id = bindAllocation(size, pointer, true);
-  if (!id) return CUDA_ERROR_UNKNOWN;
+  gemstone::execution::Error failure;
+  const auto id = bindAllocation(size, pointer, true, &failure);
+  if (!id) return failure.kind == FailureKind::OutOfResources ? CUDA_ERROR_OUT_OF_MEMORY : CUDA_ERROR_UNKNOWN;
   const auto status = trackPointer(pointer, size, *id, nullptr, hostMemory, !hostMemory);
   if (status != CUDA_SUCCESS) (void)releaseAllocation(*id);
   return status;

@@ -48,14 +48,16 @@ class CUDACrossWorkgroupSuite extends Suite {
 
     }
 
-  test("native CUDA allocations past 2 GiB are backed by the shared service") {
+  for (
+    name <- Vec(
+      "CUDA device allocations past 2 GiB reach both ends and every power-of-two boundary",
+      "CUDA host-backed allocations past 2 GiB report out of memory"
+    )
+  ) test(s"native large-memory case: $name") {
     val directory = runtimeDirectory
     Using.resource(Server.start(Server.Settings(limits = TaskControl.Limits(1000000L), parallelism = 2))) { server =>
       val result = native.run(
-        Vec.nonEmpty(
-          directory.resolve("cuda_cross_workgroup_test").toString,
-          "CUDA device allocations past 2 GiB reach both ends and every power-of-two boundary"
-        ),
+        Vec.nonEmpty(directory.resolve("cuda_cross_workgroup_test").toString, name),
         directory,
         native.serverEnvironment(
           server.endpoint,

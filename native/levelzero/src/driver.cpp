@@ -1840,11 +1840,14 @@ ze_result_t allocate(Context *context, Device *device, size_t size, size_t align
   std::optional<uint64_t> allocationId;
   if (remote.mode() == ClientMode::Ready) {
     std::scoped_lock const rpcLock(rpcTransactionMutex);
-    const auto registered = registerAllocation(*remote.client(), size, *result, true);
+    gemstone::execution::Error failure;
+    const auto registered = registerAllocation(*remote.client(), size, *result, true, AllDevices, &failure);
     if (!registered) {
       recordRemoteError(remote.error());
       std::free(*result);
       *result = nullptr;
+      if (failure.kind == FailureKind::OutOfResources)
+        return type == ZE_MEMORY_TYPE_HOST ? ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY : ZE_RESULT_ERROR_OUT_OF_DEVICE_MEMORY;
       return reportStatus(device, ZE_RESULT_ERROR_DEVICE_LOST);
     }
     allocationId = static_cast<uint64_t>(registered->value);

@@ -20,13 +20,17 @@ inline constexpr uint32_t AllDevices = UINT32_MAX;
  * outside the `devices` bit set fault when they access the allocation.
  */
 inline std::optional<AllocationId> registerAllocation(Client &client, uint64_t size, const void *address, bool hostBacked = false,
-                                                      uint32_t devices = AllDevices) {
+                                                      uint32_t devices = AllDevices, Error *failure = nullptr) {
   const auto id = client.call(RegisterAllocation{{static_cast<int64_t>(size)}});
-  if (!id) return std::nullopt;
+  if (!id) {
+    if (failure) *failure = id.error();
+    return std::nullopt;
+  }
   const GuestAddress base{static_cast<int64_t>(reinterpret_cast<uintptr_t>(address))};
-  if (client.call(RegisterAllocationAddress{
-          .allocation = id.value(), .nativeBase = base, .hostBacked = hostBacked, .devices = static_cast<int32_t>(devices)}))
-    return id.value();
+  const auto bound = client.call(RegisterAllocationAddress{
+      .allocation = id.value(), .nativeBase = base, .hostBacked = hostBacked, .devices = static_cast<int32_t>(devices)});
+  if (bound) return id.value();
+  if (failure) *failure = bound.error();
   (void)client.call(ReleaseAllocation{id.value()});
   return std::nullopt;
 }

@@ -89,6 +89,19 @@ class ExecutionSessionSuite extends Suite {
     }
   }
 
+  test("a host-backed alias is refused for an allocation whose extent the host mirror cannot describe") {
+    Using.resource(ExecutionSession(backends = List(TestBackend()))) { service =>
+      val large = service.registerAllocation((Int.MaxValue.toLong + 1L).unsafe[Long > 0]).toOption.get
+      service.registerAllocationAddress(large, GuestAddress(0x1000L), hostBacked = true) match {
+        case Left(ExecutionFailure.OutOfResources(_)) => ()
+        case other                                    => fail(s"expected out of resources, got $other")
+      }
+      assertEquals(service.registerAllocationAddress(large, GuestAddress(0x1000L)), Right(()))
+      val fitting = service.registerAllocation(Int.MaxValue.toLong.unsafe[Long > 0]).toOption.get
+      assertEquals(service.registerAllocationAddress(fitting, GuestAddress(0x200000000L), hostBacked = true), Right(()))
+    }
+  }
+
   test("an allocation beyond the storage limit is refused") {
     Using.resource(ExecutionSession(backends = List(TestBackend()))) { service =>
       val refused = service.registerAllocation((StoredAllocation.MaximumBytes + 1L).unsafe[Long > 0])
