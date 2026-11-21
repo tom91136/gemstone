@@ -48,7 +48,7 @@ class SASSWindowsSuite extends Suite {
     def at(address: Int): Boolean = kept(address / 16)
     assertEquals(instructions(0x40 / 16).mnemonic.raw, "IMAD", "the wide product reads the constant bank")
     assert(at(0x00) && at(0x40) && at(0x90) && at(0xa0) && at(0x520), "constant-bank reads are admitted")
-    assert(!at(0x60) && !at(0x510), "no checked case writes a predicate beside a constant-bank read")
+    assert(at(0x60) && at(0x510), "a predicate written beside a constant-bank read is admitted")
     assert(!at(0x30), "a uniform register is written through the warp")
     assert(at(0x50) && at(0xb0) && at(0x530), "loads and stores of global memory are admitted")
     assert(!at(0x70), "a convergence barrier has no rendering")
@@ -61,7 +61,7 @@ class SASSWindowsSuite extends Suite {
     val (graph, uses, instructions) = coded(loopKernel, Vec(24))
     val windows                     = SASSWindows.of(graph, uses, instructions, "sm_89", 8)
     val spans                       = windows.map(window => (loop(window.first), loop(window.last)))
-    val gained                      = Vec((0x00, 0x00), (0x40, 0x50), (0x90, 0xc0), (0x520, 0x530))
+    val gained                      = Vec((0x00, 0x00), (0x40, 0x60), (0x90, 0xc0), (0x510, 0x530))
     assertEquals(
       spans.filterNot(gained.contains),
       Vec(
@@ -90,7 +90,7 @@ class SASSWindowsSuite extends Suite {
     assertEquals(spans.size, 23)
     assertEquals(
       spans.groupMapReduce((first, last) => (last - first) / 16 + 1)(_ => 1)(_ + _),
-      Map(1 -> 7, 2 -> 7, 3 -> 3, 4 -> 2, 5 -> 2, 6 -> 1, 8 -> 1)
+      Map(1 -> 7, 2 -> 5, 3 -> 5, 4 -> 2, 5 -> 2, 6 -> 1, 8 -> 1)
     )
     val loaded = windows.find(window => loop(window.first) == 0x40).getOrElse(fail("no window at 0x40"))
     assert(loaded.liveOut.contains("R5"), "what the load reads is live to the store at the kernel's end")

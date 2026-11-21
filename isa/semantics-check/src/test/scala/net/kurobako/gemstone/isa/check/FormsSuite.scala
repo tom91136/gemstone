@@ -149,6 +149,13 @@ class FormsSuite extends Suite {
     )
   }
 
+  test("a form that writes a predicate beside a constant read has checked cases") {
+    Vec(
+      "LOP3.LUT P0, RZ, R6, c[0x0][0x170], RZ, 0xc0, !PT",
+      "LEA R2, P0, R6, c[0x0][0x168], 0x2"
+    ).foreach(text => assert(admitted(text).lane.cases.nonEmpty, text))
+  }
+
   test("a guarded load or store makes its access only where the guard holds") {
     val load = admitted("@P0 LDG.E R5, [R2.64]")
     assertEquals(accesses(load), Vec(("load", 32)))
@@ -180,16 +187,16 @@ class FormsSuite extends Suite {
 
   test("what is refused with no guard is refused under one for the same reason") {
     Vec(
-      "BRA 0x20"                     -> "has no rendering: lowers to Branch, with no staged semantics",
-      "CALL.REL.NOINC 0x10"          -> "has no rendering: lowers to Branch, with no staged semantics",
-      "RET.REL.NODEC R20, 0x0"       -> "has no rendering: lowers to Branch, with no staged semantics",
-      "BSSY B0, 0x20"                -> "has no rendering: lowers to Convergence, with no staged semantics",
-      "BSYNC B0"                     -> "has no rendering: lowers to Convergence, with no staged semantics",
-      "EXIT"                         -> "has no rendering: lowers to Return, with no staged semantics",
-      "LDS R5, [R2]"                 -> "is refused: Memory.loadShared is not a plain memory access",
-      "UMOV UR4, 0x1"                -> "is refused: Warp.leader is not a plain memory access",
-      "LDC R5, c[0x3][R2]"           -> "reads a constant bank at an offset a register holds",
-      "IADD3 R1, P1, P2, R2, R3, R4" -> "has no checked case of"
+      "BRA 0x20"                 -> "has no rendering: lowers to Branch, with no staged semantics",
+      "CALL.REL.NOINC 0x10"      -> "has no rendering: lowers to Branch, with no staged semantics",
+      "RET.REL.NODEC R20, 0x0"   -> "has no rendering: lowers to Branch, with no staged semantics",
+      "BSSY B0, 0x20"            -> "has no rendering: lowers to Convergence, with no staged semantics",
+      "BSYNC B0"                 -> "has no rendering: lowers to Convergence, with no staged semantics",
+      "EXIT"                     -> "has no rendering: lowers to Return, with no staged semantics",
+      "LDS R5, [R2]"             -> "is refused: Memory.loadShared is not a plain memory access",
+      "UMOV UR4, 0x1"            -> "is refused: Warp.leader is not a plain memory access",
+      "LDC R5, c[0x3][R2]"       -> "reads a constant bank at an offset a register holds",
+      "IADD3 R2, P0, R4, R5, RZ" -> "has no checked case of"
     ).foreach { (text, reason) =>
       assert(written(text).left.exists(_.contains(reason)), written(text))
       assert(written(s"@P0 $text").left.exists(_.contains(reason)), written(s"@P0 $text"))

@@ -154,14 +154,15 @@ object SASSModel extends Model {
 
   /** The operand text of a form's instances: registers four apart so no pair or quad overlaps the next, predicates
     * numbered in order, `0x1` immediates and constants of bank 3 at offsets `0x10`, `0x110` and on in operand order.
-    * Operands with a default keep it. Code addresses are `0x20`, the final instruction of the function an instance
-    * lowers in.
+    * Operands with a default keep it, but for predicates where `predicates` holds. Code addresses are `0x20`, the final
+    * instruction of the function an instance lowers in.
     */
   private def spelling(
       database: NVDisasm.Database,
       form: NVDisasm.Form,
       fields: Vec[NVDisasm.Syntax.Field],
-      mnemonic: String
+      mnemonic: String,
+      predicates: Boolean
   ): Either[String, Spelling] = {
     val counters = form.opcodes.exists(_.name.startsWith("CS2"))
     fields.foldLeft[Either[String, Spelling]](
@@ -187,9 +188,9 @@ object SASSModel extends Model {
             symbol("RZ", "URZ").map(_.copy(zero = true))
           case NVDisasm.FieldKind.UniformRegister | NVDisasm.FieldKind.NonZeroUniformRegister =>
             Right(state.register(field, "UR"))
-          case kind if kind.isRegister                                   => Right(state.register(field, "R"))
-          case kind if kind.isPredicateOperand && field.default.nonEmpty => Right(state)
-          case kind if kind.isPredicateOperand                           =>
+          case kind if kind.isRegister => Right(state.register(field, "R"))
+          case kind if kind.isPredicateOperand && field.default.nonEmpty && !predicates => Right(state)
+          case kind if kind.isPredicateOperand                                          =>
             val prefix = if (kind == NVDisasm.FieldKind.UniformPredicate) "UP" else "P"
             val name   = s"$prefix${state.predicates}"
             Right(state.spell(field, name).copy(
@@ -272,14 +273,18 @@ object SASSModel extends Model {
 
   /** Every instance of a form, under `mnemonic`: every opcode spelling and value of each required modifier together,
     * with one optional modifier where the encoding accepts none of those alone, then each value of each optional
-    * modifier alone, as far as the encoding accepts them and up to a bound; or why none can be written.
+    * modifier alone, as far as the encoding accepts them and up to a bound, then the first of them again with every
+    * predicate that has a default written out; or why none can be written.
     */
   def instances(name: Option[String], mnemonic: String, formName: String): Either[String, Vec[Instance]] = for {
     target <- target(name)
     database = target.database
     form <- database.byForm.get(formName).toRight(s"no form $formName")
     fields = NVDisasm.Syntax.fields(form.syntax)
-    spelt <- spelling(database, form, fields, mnemonic)
+    spelt <- spelling(database, form, fields, mnemonic, predicates = false)
+    writing = Option.when(fields.exists(field => field.category.isPredicateOperand && field.default.nonEmpty))(
+      spelling(database, form, fields, mnemonic, predicates = true)
+    ).flatMap(_.toOption)
     opcodes  = form.opcodes.map(_.name).filter(_.takeWhile(_ != '.') == mnemonic).distinct
     choices  = SASSModifiers.of(database, fields)
     required = choices.filter(_.required)
@@ -435,10 +440,14 @@ object SASSModel extends Model {
             .map(search(_, rounds - 1))
           tried.collectFirst { case found @ Right(_) => found }.orElse(tried.headOption).getOrElse(Left(failures))
         }
-      search(spelt, 3).left.map(_.headOption.getOrElse(s"$formName has no opcode under $mnemonic"))
+      search(spelt, 3).left.map(_.headOption.getOrElse(s"$formName has no opcode under $mnemonic")).map(base =>
+        Vec(base) ++ writing.flatMap(search(_, 3).toOption).map((operands, instances) =>
+          (operands, instances.take(1).filterNot(found => base._2.exists(_._1 == found._1)))
+        )
+      )
     }
-  } yield found._2.map((text, written) =>
-    (target.sm, text, found._1.names, found._1.order, found._1.constants, written)
+  } yield found.flatMap((operands, instances) =>
+    instances.map((text, written) => (target.sm, text, operands.names, operands.order, operands.constants, written))
   )
 
   /** The register and count of a condition that the register's index, URZ counting as one past it, is a multiple of the
