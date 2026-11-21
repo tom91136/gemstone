@@ -310,11 +310,9 @@ bool isNvidia(const gemstone::DevicePreset &preset) { return preset.target.start
 bool isAmd(const gemstone::DevicePreset &preset) { return preset.target.starts_with("gfx"); }
 
 uint32_t publishedCudaCores(std::string_view name) {
-  static constexpr std::pair<std::string_view, uint32_t> cores[] = {{"GeForce GTX 980", 2048},
-                                                                    {"GeForce GTX 1080", 2560},
-                                                                    {"GeForce RTX 2080", 2944},
-                                                                    {"Quadro GV100", 5120},
-                                                                    {"GeForce RTX 5080", 10752}};
+  static constexpr std::pair<std::string_view, uint32_t> cores[] = {{"GeForce GTX 980", 2048},  {"GeForce GTX 1080", 2560},
+                                                                    {"GeForce RTX 2080", 2944}, {"GeForce RTX 4060 Ti", 4352},
+                                                                    {"Quadro GV100", 5120},     {"GeForce RTX 5080", 10752}};
   for (const auto &[card, count] : cores)
     if (card == name) return count;
   FAIL("no published CUDA core count for " << name);

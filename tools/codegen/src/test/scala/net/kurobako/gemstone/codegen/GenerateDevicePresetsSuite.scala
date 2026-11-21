@@ -29,6 +29,13 @@ class GenerateDevicePresetsSuite extends Suite {
     )
   }
 
+  test("the RTX 4060 Ti preset renders the card's multiprocessors, memory and L2") {
+    val rendered = GenerateDevicePresets.render(DevicePreset.all)
+    assert(
+      rendered.contains(""""GeForce RTX 4060 Ti", "sm_89", 34, 2535, 17179869184, 18000, 128, 33554432},""")
+    )
+  }
+
   test("every preset is rendered exactly once") {
     val rendered = GenerateDevicePresets.render(DevicePreset.all)
     assertEquals(

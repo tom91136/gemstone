@@ -57,6 +57,16 @@ object DevicePreset {
       l2Bytes = 4 << 20
     ),
     DevicePreset(
+      "GeForce RTX 4060 Ti",
+      "sm_89",
+      multiprocessors = 34,
+      boostMhz = 2535,
+      memoryBytes = 16L << 30,
+      memoryMTps = 18000,
+      busWidthBits = 128,
+      l2Bytes = 32 << 20
+    ),
+    DevicePreset(
       "GeForce RTX 5080",
       "sm_120",
       multiprocessors = 84,
