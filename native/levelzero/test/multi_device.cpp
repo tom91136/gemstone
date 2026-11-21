@@ -141,6 +141,23 @@ TEST_CASE("Level Zero reports the owning device of a device allocation", "[level
   REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
 }
 
+TEST_CASE("Level Zero refuses a device allocation larger than the memory of the device", "[level-zero][multi-device]") {
+  const auto node = enumerate();
+  auto *const context = createContext(node.driver);
+
+  ze_device_properties_t properties{};
+  properties.stype = ZE_STRUCTURE_TYPE_DEVICE_PROPERTIES;
+  REQUIRE(zeDeviceGetProperties(node.devices[0], &properties) == ZE_RESULT_SUCCESS);
+  ze_device_mem_alloc_desc_t allocationDesc{};
+  allocationDesc.stype = ZE_STRUCTURE_TYPE_DEVICE_MEM_ALLOC_DESC;
+  void *memory = nullptr;
+  CHECK(zeMemAllocDevice(context, &allocationDesc, properties.maxMemAllocSize + 1, 64, node.devices[0], &memory)
+        == ZE_RESULT_ERROR_UNSUPPORTED_SIZE);
+  CHECK(zeMemAllocDevice(context, &allocationDesc, SIZE_MAX, 64, node.devices[0], &memory) == ZE_RESULT_ERROR_UNSUPPORTED_SIZE);
+  CHECK(memory == nullptr);
+  REQUIRE(zeContextDestroy(context) == ZE_RESULT_SUCCESS);
+}
+
 TEST_CASE("Level Zero exposes peer access between root devices", "[level-zero][multi-device]") {
   const auto node = enumerate();
 

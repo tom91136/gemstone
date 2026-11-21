@@ -768,6 +768,9 @@ CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, c
     if (pointer < p.base + p.size && p.base < pointer + size) return CUDA_ERROR_INVALID_VALUE;
   }
   const auto device = std::max(activeDevice(), 0);
+  const bool charged = !host && !managed;
+  if (charged && !deviceLedger.tryCharge(physicalDevice(device), size, deviceSpec().totalGlobalMemoryBytes))
+    return CUDA_ERROR_OUT_OF_MEMORY;
   try {
     pointers.push_back(PointerMetadata{.base = pointer,
                                        .size = size,
@@ -778,9 +781,9 @@ CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, c
                                        .managed = managed,
                                        .device = device});
   } catch (const std::exception &) {
+    if (charged) deviceLedger.refund(physicalDevice(device), size);
     return CUDA_ERROR_UNKNOWN;
   }
-  if (!host && !managed) deviceLedger.charge(physicalDevice(device), size);
   return CUDA_SUCCESS;
 }
 
@@ -931,6 +934,8 @@ CUresult allocate(CUdeviceptr *pointer, size_t size, const void *module) {
   if (!pointer || !contextIsLive(activeContext())) return CUDA_ERROR_INVALID_VALUE;
   if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
   const size_t bytes = size == 0 ? 1 : size;
+  if (!deviceLedger.fits(physicalDevice(std::max(activeDevice(), 0)), bytes, deviceSpec().totalGlobalMemoryBytes))
+    return CUDA_ERROR_OUT_OF_MEMORY;
   if (bytes > UINT64_MAX - 255) return CUDA_ERROR_INVALID_VALUE;
   const uint64_t span = (static_cast<uint64_t>(bytes) + 255) & ~uint64_t{255};
   CUdeviceptr address = 0;

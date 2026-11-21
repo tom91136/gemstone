@@ -1829,6 +1829,7 @@ ze_result_t allocate(Context *context, Device *device, size_t size, size_t align
   reapDeferredFrees();
   if (!result) return ZE_RESULT_ERROR_INVALID_NULL_POINTER;
   if (remote.mode() == ClientMode::Misconfigured) return ZE_RESULT_ERROR_UNINITIALIZED;
+  if (type != ZE_MEMORY_TYPE_HOST && size > deviceMemorySize()) return ZE_RESULT_ERROR_UNSUPPORTED_SIZE;
   const size_t backing = backingSize(std::max(size, size_t{1}), type);
   *result = alignedAllocate(backing, granularityAlignment(alignment, type));
   if (!*result) return ZE_RESULT_ERROR_OUT_OF_HOST_MEMORY;

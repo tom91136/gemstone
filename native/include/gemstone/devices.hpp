@@ -27,6 +27,17 @@ public:
     std::scoped_lock const lock(mutex);
     usedBytes[device] -= std::min(bytes, usedBytes[device]);
   }
+  bool fits(uint32_t device, uint64_t bytes, uint64_t capacity) const {
+    std::scoped_lock const lock(mutex);
+    return bytes <= capacity && usedBytes[device] <= capacity - bytes;
+  }
+  /** Charges `bytes` unless that would exceed `capacity`. */
+  bool tryCharge(uint32_t device, uint64_t bytes, uint64_t capacity) {
+    std::scoped_lock const lock(mutex);
+    if (bytes > capacity || usedBytes[device] > capacity - bytes) return false;
+    usedBytes[device] += bytes;
+    return true;
+  }
   uint64_t used(uint32_t device) const {
     std::scoped_lock const lock(mutex);
     return usedBytes[device];

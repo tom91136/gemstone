@@ -145,6 +145,34 @@ TEST_CASE("runtime memset fills linear and pitched allocations", "[cuda][memset]
   REQUIRE(cudaFree(device) == cudaSuccess);
 }
 
+TEST_CASE("device allocations past the memory of the selected device report out of memory", "[cuda][memory][capacity]") {
+  const gemstone_test::Environment device(gemstone::environment::Device, "GeForce GTX 980");
+  createContext();
+  size_t available = 0;
+  size_t total = 0;
+  REQUIRE(cuMemGetInfo_v2(&available, &total) == CUDA_SUCCESS);
+  REQUIRE(total == (size_t{4} << 30));
+
+  void *pointer = nullptr;
+  CUdeviceptr driverPointer = 0;
+  CHECK(cudaMalloc(&pointer, total + 1) == cudaErrorMemoryAllocation);
+  CHECK(cudaMalloc(&pointer, SIZE_MAX) == cudaErrorMemoryAllocation);
+  CHECK(cuMemAlloc_v2(&driverPointer, total + 1) == CUDA_ERROR_OUT_OF_MEMORY);
+  CHECK(cuMemAlloc_v2(&driverPointer, SIZE_MAX) == CUDA_ERROR_OUT_OF_MEMORY);
+
+  void *first = nullptr;
+  void *second = nullptr;
+  REQUIRE(cudaMalloc(&first, (available / 2) + 4096) == cudaSuccess);
+  CHECK(cudaMalloc(&second, available / 2) == cudaErrorMemoryAllocation);
+  REQUIRE(cudaFree(first) == cudaSuccess);
+  REQUIRE(cudaMalloc(&second, available / 2) == cudaSuccess);
+  REQUIRE(cudaFree(second) == cudaSuccess);
+
+  size_t remaining = 0;
+  REQUIRE(cuMemGetInfo_v2(&remaining, &total) == CUDA_SUCCESS);
+  CHECK(remaining == available);
+}
+
 TEST_CASE("stream context reports the context that created the stream", "[cuda][stream]") {
   auto *const first = createContext();
   CUcontext owner = nullptr;

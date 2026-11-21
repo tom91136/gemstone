@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <cstdint>
 
 #include <catch2/catch_test_macros.hpp>
 #include <hip/hip_runtime_api.h>
@@ -47,6 +48,18 @@ TEST_CASE("HIP malloc heap limit is bounded by the memory of the selected device
   CHECK((hipDeviceSetLimit(hipLimitMallocHeapSize, size_t{16} << 30) == hipErrorInvalidValue));
   CHECK((heapLimit() == (size_t{8} << 30)));
   REQUIRE((hipDeviceSetLimit(hipLimitMallocHeapSize, DefaultHeap) == hipSuccess));
+}
+
+TEST_CASE("HIP malloc reports out of memory past the memory of the device", "[hip][limits]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  size_t available = 0;
+  size_t total = 0;
+  REQUIRE((hipMemGetInfo(&available, &total) == hipSuccess));
+  void *pointer = nullptr;
+  CHECK((hipMalloc(&pointer, total + 1) == hipErrorOutOfMemory));
+  CHECK((hipMalloc(&pointer, SIZE_MAX) == hipErrorOutOfMemory));
+  CHECK((pointer == nullptr));
 }
 
 TEST_CASE("HIP memory info reports the free memory of the selected device preset", "[hip][limits]") {

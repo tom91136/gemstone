@@ -824,22 +824,29 @@ hsa_status_t registerRemoteAllocation(RuntimeState &runtime, void *base, size_t 
     releaseRemote();
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
-  try {
-    auto allocation = std::make_shared<Allocation>(base, size, start, id, pool, owned, device, charged);
-    std::scoped_lock const guard(runtime.lock);
-    runtime.allocations.emplace(start, allocation);
-    runtime.allocationIds.emplace(id, allocation);
-    runtime.ledger.charge(device, charged);
-    return HSA_STATUS_SUCCESS;
-  } catch (...) {
-    runtime.aql->unregisterAllocation(reinterpret_cast<uint64_t>(base));
-    releaseRemote();
-    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  }
+  const bool admitted = [&] {
+    try {
+      auto allocation = std::make_shared<Allocation>(base, size, start, id, pool, owned, device, charged);
+      std::scoped_lock const guard(runtime.lock);
+      runtime.allocations.emplace(start, allocation);
+      runtime.allocationIds.emplace(id, allocation);
+      if (runtime.ledger.tryCharge(device, charged, deviceMemoryBytes())) return true;
+      runtime.allocations.erase(start);
+      runtime.allocationIds.erase(id);
+      return false;
+    } catch (...) {
+      return false;
+    }
+  }();
+  if (admitted) return HSA_STATUS_SUCCESS;
+  runtime.aql->unregisterAllocation(reinterpret_cast<uint64_t>(base));
+  releaseRemote();
+  return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 }
 
 hsa_status_t allocate(RuntimeState &runtime, uint64_t pool, size_t requested, void **result, bool owned, uint32_t device = 0) {
   if (!result || requested == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (owned && pool == GpuPool && !runtime.ledger.fits(device, requested, deviceMemoryBytes())) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   if (requested > std::numeric_limits<size_t>::max() - (AllocationGranule - 1U)) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   const size_t rounded = (requested + AllocationGranule - 1U) & ~(static_cast<size_t>(AllocationGranule) - 1U);
   // ROCr allocations are page-granular and several vendor kernels use the
@@ -862,8 +869,7 @@ hsa_status_t allocate(RuntimeState &runtime, uint64_t pool, size_t requested, vo
                                                [memory] { std::free(memory); });
   if (status != HSA_STATUS_SUCCESS) {
     if (traceMemory())
-      std::fprintf(stderr, "Gemstone HSA allocation alias failed address=%p size=%zu error=%s\n", memory, size,
-                   runtime.client->error().c_str());
+      std::fprintf(stderr, "Gemstone HSA allocation alias failed size=%zu error=%s\n", size, runtime.client->error().c_str());
     return status;
   }
   *result = start;
