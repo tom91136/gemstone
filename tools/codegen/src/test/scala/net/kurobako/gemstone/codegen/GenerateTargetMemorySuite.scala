@@ -9,10 +9,27 @@ class GenerateTargetMemorySuite extends Suite {
   test("only targets with a reference card get a row, carrying its bus width and L2 bytes") {
     val rendered = GenerateTargetMemory.render(Architecture.all)
     assert(
-      rendered.contains("""if (target == "sm_89") return TargetMemory{.busWidthBits = 128, .l2Bytes = 33554432};""")
+      rendered.contains(
+        """if (target == "sm_89") return TargetMemory{.busWidthBits = 128, .l2Bytes = 33554432, """ +
+          """.persistingL2Bytes = 4194304, .persistingL2DefaultBytes = 6291456, .l2FetchBytes = 64};"""
+      )
     )
     assert(!rendered.contains("gfx1036"))
     assert(rendered.contains("return std::nullopt;"))
+  }
+
+  test("L2 controls are rendered only for the targets that carry them") {
+    val rendered = GenerateTargetMemory.render(Architecture.all)
+    assert(
+      rendered.contains("""if (target == "sm_75") return TargetMemory{.busWidthBits = 256, .l2Bytes = 4194304};""")
+    )
+  }
+
+  test("L2 fields default to unset, so rows without a control block still compile") {
+    val rendered = GenerateTargetMemory.render(Architecture.all)
+    assert(rendered.contains("std::optional<int32_t> persistingL2Bytes = std::nullopt;"))
+    assert(rendered.contains("std::optional<int32_t> persistingL2DefaultBytes = std::nullopt;"))
+    assert(rendered.contains("std::optional<int32_t> l2FetchBytes = std::nullopt;"))
   }
 
   test("every target with memory values is rendered exactly once") {

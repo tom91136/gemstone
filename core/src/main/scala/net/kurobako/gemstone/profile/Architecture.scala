@@ -118,8 +118,15 @@ object Architecture {
         .getOrElse((dram, ProfileReport.Tier.Dram))
   }
 
+  /** L2 controls a runtime reports: persisting size and default window, and L2 fetch granularity. */
+  case class L2Control(
+      persistingBytes: Sourced[Long],
+      persistingDefaultBytes: Sourced[Long],
+      fetchBytes: Sourced[Int]
+  ) derives CanEqual
+
   /** The device memory of the reference card a target's values describe, as the device reports it. */
-  case class Memory(busWidthBits: Sourced[Int], l2Bytes: Sourced[Long]) derives CanEqual
+  case class Memory(busWidthBits: Sourced[Int], l2Bytes: Sourced[Long], l2Control: Option[L2Control]) derives CanEqual
 
   enum WorkgroupCap derives CanEqual {
     case AllWorkgroups, MultiSubgroupWorkgroups
@@ -608,6 +615,13 @@ object Architecture {
     "CUDA 13.3"
   )
 
+  private val adaL2 = Source.Probed(
+    "cuCtxGetLimit over limit ids 0 to 9 on a fresh context",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA UMD 13.5"
+  )
+
   val sm89: Architecture = Architecture(
     "sm_89",
     Global(Sourced(32, cudaBestPractice89), Sourced(128, cudaBestPractice89)),
@@ -647,7 +661,16 @@ object Architecture {
     sharedPipes = Map(Pipe.Fp64 -> adaSharedFp64),
     branchRedirect = Some(Sourced(10, adaRedirect)),
     pipeRestart = Map(Pipe.Fp64 -> Sourced(21, adaFp64Restart))
-  ).on(Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)))
+  ).on(
+    Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)),
+    Some(
+      L2Control(
+        Sourced(4194304L, Source.Estimate("persisting L2 maximum, not probed on the device")),
+        Sourced(6291456L, adaL2),
+        Sourced(64, adaL2)
+      )
+    )
+  )
 
   val sm86: Architecture = sm89
     .derived(
@@ -1630,7 +1653,7 @@ case class Architecture(
     )
   }
 
-  private def on(card: Architecture.Card): Architecture = {
+  private def on(card: Architecture.Card, l2Control: Option[Architecture.L2Control] = None): Architecture = {
     val dram = for {
       bandwidth <- card.bandwidthGBs
       count     <- card.multiprocessors
@@ -1646,7 +1669,8 @@ case class Architecture(
       memory = Some(
         Architecture.Memory(
           Architecture.Sourced(card.busWidthBits, source),
-          Architecture.Sourced(card.l2KiB * 1024L, source)
+          Architecture.Sourced(card.l2KiB * 1024L, source),
+          l2Control
         )
       )
     )
