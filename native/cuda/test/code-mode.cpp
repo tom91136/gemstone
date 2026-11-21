@@ -211,6 +211,17 @@ TEST_CASE("CUDA SASS routes compile PTX modules with nvJitLink", "[cuda][code-mo
   CHECK(session.fixture.launches.load() == 1);
 }
 
+TEST_CASE("CUDA SASS routes compile PTX older than the relocatable compile floor", "[cuda][code-mode]") {
+  const FakeNvJitLink jit("1");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");
+  FailureSession session;
+  session.loadKernel(".version 3.0\n.target sm_20\n.address_size 64\n.visible .entry probe() { ret; }\n");
+  CHECK(session.fixture.lastProgramImage() == executableCubin());
+  CHECK(session.load(".version 1.4\n.target sm_10, map_f64_to_f32\n.entry probe() { ret; }\n") == CUDA_SUCCESS);
+  CHECK(session.launch() == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+}
+
 TEST_CASE("CUDA SASS routes link one PTX input into a cubin", "[cuda][code-mode]") {
   const FakeNvJitLink jit("1");
   const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "sass");

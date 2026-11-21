@@ -1,3 +1,4 @@
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -5,6 +6,8 @@
 #include <ios>
 #include <iterator>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -50,6 +53,18 @@ int nvJitLinkAddData(Link *handle, int type, const void *data, size_t, const cha
   if (text.contains(".version 99")) {
     handle->log = "ptxas fatal   : Unsupported .version 99.0; current version is '9.3'\n";
     return PtxCompile;
+  }
+  if (const auto at = text.find(".version"); at != std::string::npos) {
+    const auto digits = text.find_first_not_of(" \t", at + std::string_view(".version").size());
+    const char *const end = text.data() + text.size();
+    int major = 0;
+    int minor = 0;
+    const auto [dot, majorError] = std::from_chars(text.data() + digits, end, major);
+    const bool parsed = majorError == std::errc{} && dot != end && *dot == '.' && std::from_chars(dot + 1, end, minor).ec == std::errc{};
+    if (parsed && (major < 3 || (major == 3 && minor < 1))) {
+      handle->log = "ptxas fatal   : 'Compile only(-c)' requires PTX ISA .version 3.1 or later\n";
+      return PtxCompile;
+    }
   }
   if (!text.contains(".entry")) {
     handle->log = "ptxas fatal   : Parsing error\n";

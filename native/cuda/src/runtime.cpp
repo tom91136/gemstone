@@ -404,6 +404,28 @@ CUresult jitFailureStatus(int result, std::string_view log) {
   return CUDA_ERROR_INVALID_PTX;
 }
 
+// nvJitLink compiles relocatably and ptxas refuses that below ISA 3.1, where the driver's own JIT takes any version
+std::string liftPtxVersion(std::string ptx) {
+  constexpr std::string_view directive = ".version";
+  const char *const end = ptx.data() + ptx.size();
+  for (auto at = ptx.find(directive); at != std::string::npos; at = ptx.find(directive, at + 1)) {
+    const auto head = std::string_view(ptx).substr(0, at);
+    if (head.substr(head.find_last_of('\n') + 1).find_first_not_of(" \t\r") != std::string_view::npos) continue;
+    const char *begin = ptx.data() + at + directive.size();
+    while (begin != end && (*begin == ' ' || *begin == '\t'))
+      ++begin;
+    int major = 0;
+    int minor = 0;
+    const auto [dot, majorError] = std::from_chars(begin, end, major);
+    if (majorError != std::errc{} || dot == end || *dot != '.') return ptx;
+    const auto [stop, minorError] = std::from_chars(dot + 1, end, minor);
+    if (minorError != std::errc{} || major > 3 || (major == 3 && minor >= 1)) return ptx;
+    ptx.replace(static_cast<size_t>(begin - ptx.data()), static_cast<size_t>(stop - begin), "3.1");
+    return ptx;
+  }
+  return ptx;
+}
+
 CUresult compilePtx(const std::vector<std::string> &modules, std::vector<uint8_t> &cubin) {
   const auto path = gemstone::environment::value(gemstone::environment::CudaNvjitlinkLibraryFile);
   if (!path) {
@@ -420,9 +442,10 @@ CUresult compilePtx(const std::vector<std::string> &modules, std::vector<uint8_t
   const char *options[]{architecture.c_str()};
   NvJitLink::Handle handle = nullptr;
   int result = link->create(&handle, 1, options);
-  for (size_t index = 0; result == 0 && index < modules.size(); ++index)
-    result = link->addData(handle, NvJitLink::InputPtx, modules[index].c_str(), modules[index].size() + 1,
-                           ("module" + std::to_string(index)).c_str());
+  for (size_t index = 0; result == 0 && index < modules.size(); ++index) {
+    const auto ptx = liftPtxVersion(modules[index]);
+    result = link->addData(handle, NvJitLink::InputPtx, ptx.c_str(), ptx.size() + 1, ("module" + std::to_string(index)).c_str());
+  }
   if (result == 0) result = link->complete(handle);
   size_t size = 0;
   if (result == 0) result = link->cubinSize(handle, &size);
