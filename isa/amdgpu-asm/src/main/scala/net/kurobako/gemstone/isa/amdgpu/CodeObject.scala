@@ -21,6 +21,9 @@ case class CodeObject private (image: Vec[Byte]) {
   /** Executable bytes with locally resolvable relocations applied to a private copy. */
   def executableSections: Either[CodeObjectError, Vec[ExecutableSection]] = ELF.executableSections(image)
 
+  def kernelCode(name: NonEmpty[String]): Either[CodeObjectError, Vec[Byte]] =
+    ELF.index(image).flatMap(_.kernelCode(name.raw))
+
   /** This code object with kernel `name`'s code replaced by `code` of the same size, at its function symbol. */
   def patchKernel(name: NonEmpty[String], code: Vec[Byte]): Either[CodeObjectError, CodeObject] = (for {
     parsed <- elf.Image.parse(image)

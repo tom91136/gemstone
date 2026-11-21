@@ -223,14 +223,14 @@ object RewriteSearch {
     target <- targetName.refine[Target].left.map(_.raw)
     found  <- AMDGPUModel.staticCode(image, function)
     moves  <- AMDGPUMoves.of(image, function, targetName, window)
-    parsed <- each(found._3.zip(found._2))((text, use) => instruction(text).map(_ -> use))
     block = found._1.blocks(window.block)
     _ <- Either.cond(
       block.first <= window.first && window.last <= block.last,
       (),
       s"the window ${window.first}..${window.last} is not inside the block ${block.first}..${block.last}"
     )
-    held = parsed.slice(window.first, window.last + 1)
+    held <-
+      each(found._3.zip(found._2).slice(window.first, window.last + 1))((text, use) => instruction(text).map(_ -> use))
   } yield new Search(AMDGPU(target), window, held.map(_._1), held.map(_._2), walker(moves), config)
 
   private def instruction(text: String): Either[String, Instruction] =

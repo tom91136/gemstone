@@ -72,7 +72,7 @@ object AMDGPUBlockCost {
         .toRight(s"no calibrated pipeline model for $targetName")
       name      <- function.refine[NonEmpty[String]].left.map(_ => s"no AMDGPU kernel '$function'")
       original  <- static(image, function)
-      parsed    <- each(original.text)(instruction(_))
+      kernel    <- CodeObject.decode(image).flatMap(_.kernelCode(name)).left.map(_.message.raw)
       granule   <- AMDGPUModel.registerGranule(image, function)
       resources <- launch match {
         case Launch.Stated(lanes, shared, _) => AMDGPUModel.staticResources(image, function, lanes, shared)
@@ -87,7 +87,7 @@ object AMDGPUBlockCost {
             resources <- stream.resources.toRight("the recording holds no launch")
           } yield resources
       }
-    } yield new AMDGPUBlockCost(image, name, target, architecture, launch, original, parsed, granule, resources)
+    } yield new AMDGPUBlockCost(image, name, target, architecture, launch, original, kernel, granule, resources)
 
   /** The stream the VM records for `groups` workgroups of `lanes` lanes of `function`. `arguments` holds one value for
     * each parameter of the kernel: a scalar's value, or the size in bytes of a zeroed buffer of its own.
@@ -164,6 +164,8 @@ object AMDGPUBlockCost {
     mnemonic == "s_branch" || mnemonic.startsWith("s_cbranch_")
   }
 
+  private def pcRelative(instruction: Instruction): Boolean = relative(instruction.opcode.raw) || branch(instruction)
+
   private def units(use: RegisterUse, names: Vec[String]): Set[String] =
     names.flatMap(name => Liveness.units(name, use.unitsOf(name))).toSet
 
@@ -179,7 +181,7 @@ final class AMDGPUBlockCost private (
     architecture: Architecture,
     launch: AMDGPUBlockCost.Launch,
     original: AMDGPUBlockCost.Static,
-    parsed: Vec[Instruction],
+    kernel: Vec[Byte],
     granule: Int,
     resources: KernelResources
 ) {
@@ -191,23 +193,41 @@ final class AMDGPUBlockCost private (
   private def end(index: Int): Either[String, Int] =
     original.offsets.lift(index + 1).toRight(s"no instruction follows ${original.text(index)}")
 
-  private def retargeted(index: Int, boundary: Int, shift: Int): Either[String, String] = {
-    val instruction = parsed(index)
-    if (relative(instruction.opcode.raw))
-      Left(s"${original.text(index)} is relative to the program counter, so the kernel is not laid out again")
-    else if (!branch(instruction)) Right(original.text(index))
+  private def start(index: Int): Int = original.offsets(index) - original.offsets(0)
+
+  private def span(index: Int): Vec[Byte] =
+    kernel.slice(start(index), original.offsets.lift(index + 1).fold(kernel.size)(_ - original.offsets(0)))
+
+  private def refused(index: Int): Either[String, Vec[Byte]] =
+    Left(s"${original.text(index)} is relative to the program counter, so the kernel is not laid out again")
+
+  private def retargeted(index: Int, instruction: Instruction, boundary: Int, shift: Int): Either[String, Vec[Byte]] =
+    instruction.operands match {
+      case Vec(Operand.IntegerLiteral(value, _)) =>
+        def moved(offset: Int) = if (offset >= boundary) offset + shift else offset
+        val from               = original.offsets(index)
+        val to                 = from + 4 + 4 * value.toShort
+        val words              = (moved(to) - moved(from) - 4) / 4
+        Instruction.decode(instruction.definition, Vec(Operand.IntegerLiteral(BigInt(words), 10)), instruction.mods)
+          .map(Printer.render(_)).left.map(reason => s"${original.text(index)}: $reason")
+          .flatMap(text => bytes(Vec(text)))
+      case _ => Left(s"${original.text(index)} has no literal target")
+    }
+
+  private def relocated(index: Int, boundary: Int, shift: Int): Either[String, Vec[Byte]] =
+    if (shift == 0) Right(span(index))
     else
-      instruction.operands match {
-        case Vec(Operand.IntegerLiteral(value, _)) =>
-          def moved(offset: Int) = if (offset >= boundary) offset + shift else offset
-          val from               = original.offsets(index)
-          val to                 = from + 4 + 4 * value.toShort
-          val words              = (moved(to) - moved(from) - 4) / 4
-          Instruction.decode(instruction.definition, Vec(Operand.IntegerLiteral(BigInt(words), 10)), instruction.mods)
-            .map(Printer.render(_)).left.map(reason => s"${original.text(index)}: $reason")
-        case _ => Left(s"${original.text(index)} has no literal target")
+      instruction(original.text(index)) match {
+        case Right(value) if branch(value)     => retargeted(index, value, boundary, shift)
+        case Right(value) if pcRelative(value) => refused(index)
+        case Right(_)                          => Right(span(index))
+        case Left(_)                           =>
+          Binary.decodeStatementAt(kernel, start(index).unsafe[Int >= 0], TargetMode(target)) match {
+            case Right(DecodedStatement(Program.Statement.Instruction(value), _)) =>
+              if (pcRelative(value)) refused(index) else Right(span(index))
+            case _ => Left(s"${original.text(index)} does not decode, so the kernel is not laid out again")
+          }
       }
-  }
 
   private def rewritten(window: Window, replacement: Vec[String]): Either[String, (Static, Int)] = for {
     boundary <- end(window.last)
@@ -220,13 +240,12 @@ final class AMDGPUBlockCost private (
       (),
       s"the window ${window.first}..${window.last} does not reassemble to its own size"
     )
-    text <-
-      if (shift == 0) Right(original.text.patch(window.first, replacement, length))
-      else
-        each(Vec.from(original.text.indices))(retargeted(_, boundary, shift))
-          .map(_.patch(window.first, replacement, length))
-    code     <- bytes(text)
-    replaced <- CodeObject.decode(image).flatMap(_.replaceKernel(function, code)).left.map(_.message.raw)
+    pieces <- each(Vec.from(original.text.indices))(index =>
+      if (index == window.first) Right(after)
+      else if (window.first < index && index <= window.last) Right(Vec.empty[Byte])
+      else relocated(index, boundary, shift)
+    )
+    replaced <- CodeObject.decode(image).flatMap(_.replaceKernel(function, pieces.flatten)).left.map(_.message.raw)
     laid     <- static(replaced.image, function.raw)
     base  = laid.offsets.headOption.getOrElse(0) - original.offsets.headOption.getOrElse(0)
     lines = architecture.fetchLine.fold(1L)(_.value.toLong)

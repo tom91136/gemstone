@@ -1,8 +1,11 @@
 package net.kurobako.gemstone.isa.check
 
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.flow.Window
+import net.kurobako.gemstone.isa.amdgpu.*
+import net.kurobako.gemstone.isa.amdgpu.asm.*
 import net.kurobako.gemstone.profile.Architecture
 import net.kurobako.gemstone.profile.BlockAnalysis
 import net.kurobako.gemstone.profile.HardwareLoops
@@ -270,6 +273,41 @@ class RewriteSearchSuite extends Suite {
     assertEquals(first.candidates, second.candidates)
     assertEquals(first.wrong, second.wrong)
     assertEquals(rows(first), rows(second))
+  }
+
+  private def withUnprintable(function: NonEmpty[String]): (Vec[Byte], Int) = {
+    val image   = WindowFixtures.compiled
+    val decoded = CodeObject.decode(image).fold(error => fail(error.message.raw), identity)
+    val mode    = TargetMode(decoded.target.fold(error => fail(error.message.raw), identity))
+    val code    = decoded.kernelCode(function).fold(error => fail(error.message.raw), identity)
+    val steps   = LazyList.unfold(0) { offset =>
+      Binary.decodeStatementAt(code, offset.unsafe[Int >= 0], mode).toOption.map { step =>
+        ((offset, step), offset + step.size.raw)
+      }
+    }.toVector
+    val (offset, at) = steps.zipWithIndex.collectFirst {
+      case ((offset, step), index)
+          if step.size == 8 && Printer.render(Program(Vec(step.statement))).startsWith("v_") =>
+        (offset, index)
+    }.getOrElse(fail(s"no 8-byte vector instruction in ${function.raw}"))
+    val replacement = Hex.parse("f8 b0 f3 02 03 94 21 70").fold(fail(_), identity)
+    val spliced     = decoded
+      .patchKernel(function, code.patch(offset, replacement, replacement.size))
+      .fold(error => fail(error.message.raw), _.image)
+    (spliced, at)
+  }
+
+  test("an unprintable instruction bounds the windows and leaves the others searched") {
+    installed()
+    val function    = WindowFixtures.streaming
+    val (image, at) = withUnprintable(function)
+    assert(Parser.parse(assembly(image, function.raw)(at)).isLeft, assembly(image, function.raw)(at))
+    val all = windows(image, 8, function.raw)
+    assert(all.forall(window => window.last < at || at < window.first), all)
+    assert(all.exists(_.last < at) && all.exists(_.first > at), all)
+    assert(all.exists { window =>
+      RewriteSearch.amdgpu(image, function.raw, target, window, oneWave, search).isRight
+    })
   }
 
   private def fixture(
