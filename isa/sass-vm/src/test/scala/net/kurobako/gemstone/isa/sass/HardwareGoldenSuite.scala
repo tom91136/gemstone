@@ -196,6 +196,25 @@ class HardwareGoldenSuite extends Suite {
       |5dcd4b82 7fffffff fffffffe ffff0000 -> ddcd4b81 fffefffe 00000001
       |"""
   )
+  // RTX 4060 Ti sm_89, driver 615, CUDA 13.3, 400 random inputs of which these are the first of each carry-in pair and
+  // carry count: IADD3.X names two carries, the first set when the five addends reach 2^32 and the second at 2^33
+  private val iadd3xTwoCarriesSm89 = rows(
+    """
+      |28ddd365 54de42e7 7e47b002 00000000 -> fc03c64e 00000000 00000000
+      |93979efd 4156f38c c509bb25 00000000 -> 99f84dae 00000001 00000000
+      |dced248a b3bcbed4 fa017d5c 00000000 -> 8aab60ba 00000001 00000001
+      |2e7b601b 0301665a 19bd9146 00000001 -> 4b3a57bc 00000000 00000000
+      |dee13a81 31115cfd 95c493b4 00000001 -> a5b72b33 00000001 00000000
+      |e1b7668d fdabfbb6 caa68a69 00000001 -> aa09ecad 00000001 00000001
+      |249ed281 068696bd 3a7e444b 00000002 -> 65a3ad8a 00000000 00000000
+      |bd81313b 4ca0a3d2 38bfd997 00000002 -> 42e1aea5 00000001 00000000
+      |c44b796f e5b49b0a ef8088f3 00000002 -> 99809d6d 00000001 00000001
+      |1c52ded8 2e791423 04af3d55 00000003 -> 4f7b3052 00000000 00000000
+      |ccd41e0e c16f93ce 235a4712 00000003 -> b19df8f0 00000001 00000000
+      |f29ee378 f4d61e30 778b5588 00000003 -> 5f005732 00000001 00000001
+      |"""
+  )
+
   // Titan X (Pascal) sm_61, driver 580, CUDA 12.8: half_f32 hadd_rzop_w
   private val haddRzOperandSm61 = rows(
     """
@@ -1019,6 +1038,26 @@ class HardwareGoldenSuite extends Suite {
 
   test("sm_70 hardware: HADD2.F32 rounds the half sum before widening it") {
     check(70, Vec("R0:u16", "R7:u16"), "HADD2.F32 R7, R0.H0_H0, R7.H0_H0", Vec("R7"), haddWideSm70)
+  }
+
+  test("sm_89 hardware: IADD3.X names the carries of its five addends") {
+    check(
+      89,
+      Vec("R4", "R5", "R6", "R7"),
+      "LOP3.LUT R8, R7, 0x1, RZ, 0xc0, !PT; LOP3.LUT R9, R7, 0x2, RZ, 0xc0, !PT; ISETP.NE.U32.AND P0, PT, R8, RZ, PT; ISETP.NE.U32.AND P1, PT, R9, RZ, PT; IADD3.X R10, P2, P3, R4, R5, R6, P0, P1; SEL R11, RZ, 0x1, !P2; SEL R12, RZ, 0x1, !P3",
+      Vec("R10", "R11", "R12"),
+      iadd3xTwoCarriesSm89
+    )
+  }
+
+  test("sm_89 hardware: IADD3.X reads its carry-ins before it writes the carries it names") {
+    check(
+      89,
+      Vec("R4", "R5", "R6", "R7"),
+      "LOP3.LUT R8, R7, 0x1, RZ, 0xc0, !PT; LOP3.LUT R9, R7, 0x2, RZ, 0xc0, !PT; ISETP.NE.U32.AND P0, PT, R8, RZ, PT; ISETP.NE.U32.AND P1, PT, R9, RZ, PT; IADD3.X R10, P1, P0, R4, R5, R6, P0, P1; SEL R11, RZ, 0x1, !P1; SEL R12, RZ, 0x1, !P0",
+      Vec("R10", "R11", "R12"),
+      iadd3xTwoCarriesSm89
+    )
   }
 
   test("sm_89 hardware: HADD2 then HADD2.F32 of -RZ widens the half sum") {

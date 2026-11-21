@@ -1108,13 +1108,12 @@ private object VMIntegerCompiler {
     import context.*
     requireModifiers(Set(Modifier.X))
     if (modifiers.contains(Modifier.X)) {
-      // From sm_100 the form also names its two discarded carry outputs.
       val inputs =
-        if (operands.size == 8 && operands.slice(1, 3).forall(OperandQueries.isAlwaysPredicate)) operands.drop(3)
+        if (operands.size == 8) operands.drop(3)
         else if (operands.size == 7) operands.drop(2)
         else if (operands.size == 6) operands.drop(1)
         else unsupported("IADD3.X carry outputs")
-      // the three sources, the carry the lane adds and the carry it discards
+      // the three sources and the two carries the lane adds
       val wide = binary(IntegerOperation.Add, widen(source(inputs(0))), widen(source(inputs(1))), 64)
       emit(IntegerBinary(IntegerOperation.Add, wide.slot, wide, widen(source(inputs(2))), 64))
       Vec(bit(predicateSource(inputs(3))), bit(predicateSource(inputs(4)))).foreach(value =>
@@ -1122,9 +1121,12 @@ private object VMIntegerCompiler {
       )
       val result = temp()
       emit(IntegerBinary(IntegerOperation.BitwiseAnd, result.slot, wide, Low32, 64))
-      // the form that names the carry it produces at its second operand
-      if (operands.size == 7)
-        writePredicate(operands(1), compare(Comparison.GreaterThan, NumericFormat.Unsigned(64), wide, Low32))
+      // the carries it names: one or more carried out, and two carried out
+      def carry(operand: Operand, limit: Value): Unit =
+        if (!OperandQueries.isAlwaysPredicate(operand))
+          writePredicate(operand, compare(Comparison.GreaterThan, NumericFormat.Unsigned(64), wide, limit))
+      if (operands.size >= 7) carry(operands(1), Low32)
+      if (operands.size == 8) carry(operands(2), Value.Immediate(0x1ffffffffL))
       store(operands.head, result)
     } else {
       val carries = operands.size - 4

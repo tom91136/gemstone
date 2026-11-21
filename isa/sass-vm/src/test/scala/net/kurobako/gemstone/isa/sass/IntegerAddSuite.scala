@@ -511,6 +511,21 @@ class IntegerAddSuite extends Suite {
     )
   }
 
+  test("IADD3.X reads its carries before it writes the two it produces") {
+    check(
+      86,
+      """MOV R0, 0xffffffff
+        |IADD3 R4, P0, P1, R0, 1, RZ
+        |IADD3.X R5, P1, P2, R0, R0, RZ, P0, P1
+        |IADD3.X R6, RZ, RZ, RZ, P1, P2
+        |MOV R7, R5
+        |LDC.64 R2, c[0x0][0x160]
+        |STG.E.64 [R2.64], R6
+        |EXIT""".stripMargin,
+      Vec(1, -1)
+    )
+  }
+
   // clang's predicates kernel in conformance/unified/src/cuda/integer_forms.cu adds a flag through R9.H0 on sm_50
   for (sm <- Vec(50, 60)) test(s"sm_$sm IADD3 zero-extends the half each source selects") {
     check(
