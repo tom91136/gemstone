@@ -307,14 +307,14 @@ class Assembler(target: Target) {
                 .left.map(assembly(_))
             rebuilt.map { updated =>
               val kept = preserved.filter(old =>
-                updated == instruction || moved.get(BigInt(old.address)).exists(now =>
-                  instruction.operands.zip(operands).forall {
-                    case (before, after) if before == after => true
-                    case (before, after)                    =>
-                      OperandQueries.integer(after).zip(OperandQueries.integer(before))
-                        .exists((next, previous) => next - now == previous - old.address.raw)
-                  }
-                )
+                !ControlFlow.directTarget(instruction) || moved.get(BigInt(old.address)).exists { now =>
+                  def steady(before: Operand, after: Operand): Boolean =
+                    OperandQueries.integer(after).zip(OperandQueries.integer(before))
+                      .forall((next, previous) => next - now == previous - old.address.raw)
+                  val pairs = instruction.operands.zip(operands)
+                  pairs.forall((before, after) => before == after || steady(before, after)) &&
+                  pairs.lastOption.forall(steady(_, _))
+                }
               ).map(_.copy(address = address, operation = updated))
               (statements :+ operation.copy(instruction = updated, preserved = kept), index + 1)
             }

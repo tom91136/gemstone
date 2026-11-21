@@ -47,6 +47,19 @@ class ProgramRoundTripSuite extends Suite {
     assertEquals(branch.operands.collect { case Operand.Bits(value, _) => value }, Vec(BigInt(0x30)))
   }
 
+  test("relaying re-encodes a branch that moved while its target did not") {
+    val code    = assembled(parsed(".target SM89\nNOP;\nBRA 0x0;\nEXIT;\n"), 89)
+    val program = Disassembler(target(89)).decode(code).fold(error => fail(error.message), identity(_))
+    val extra   = Parser.parse("NOP").fold(fail(_), identity(_))
+    val edited  = program.copy(statements = program.statements.patch(1, Vec(Program.Statement.Operation(extra)), 0))
+    val encoded = Assembler(target(89)).relaid(edited).flatMap(Assembler(target(89)).encode(_))
+      .fold(error => fail(error.message), identity(_))
+    val branch = CodeSection.decode(Vec.toArray(encoded), target(89)).fold(fail(_), identity(_)).instructions
+      .find(_.mnemonic.raw == "BRA").getOrElse(fail("no branch"))
+    assertEquals(branch.operands.collect { case Operand.Bits(value, _) => value }, Vec(BigInt(0)))
+    assertEquals(branch.address.raw, 0x20)
+  }
+
   sms.foreach { sm =>
     test(s"SM$sm bytes survive program and text round trips, including legacy controls") {
       val original = Fixture.saxpy(sm)
