@@ -198,10 +198,9 @@ class AMDGPUBlockCostSuite extends Suite {
       AMDGPUWindows.of(image, kernel, target, 8).fold(fail(_), identity).find(w => w.first == 22 && w.last == 29)
         .getOrElse(fail("no window"))
     val code     = AMDGPUModel.staticCode(image, kernel).fold(fail(_), _._3.slice(region.first, region.last + 1))
-    val floored  = RewriteSearch.floored[String](identity, code)(cost.cost)
-    val original = floored(region, code).fold(fail(_), _.cycles)
+    val original = cost.cost(region, code).fold(fail(_), _.cycles)
     (0 to code.size).foreach { at =>
-      val grown = floored(region, code.take(at) ++ Vec("s_cmp_ge_u32 s8, s14") ++ code.drop(at))
+      val grown = cost.cost(region, code.take(at) ++ Vec("s_cmp_ge_u32 s8, s14") ++ code.drop(at))
         .fold(fail(_), _.cycles)
       assert(grown >= original, s"a dead instruction at $at costs $grown against $original")
     }

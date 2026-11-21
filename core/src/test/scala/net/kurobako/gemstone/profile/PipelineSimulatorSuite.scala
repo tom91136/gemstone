@@ -257,6 +257,32 @@ class PipelineSimulatorSuite extends Suite {
     assertEquals(block.entries.filter(_.warp == 0).map(_.issue), Vec(0L, 1L, 5L))
   }
 
+  test("waves that run a block once cost its steady state, with the entries of one pass") {
+    val body = Vec(
+      op(Some(Pipe.Fma), reads = Vec("r0"), writes = Vec("r1"), latency = 4),
+      op(Some(Pipe.Fma), reads = Vec("r1"), writes = Vec("r2"), latency = 4),
+      op(Some(Pipe.Fp64), reads = Vec("r2"), writes = Vec("r3"), latency = 8),
+      op(reads = Vec("r3"), writes = Vec("r4"))
+    )
+    val once   = PipelineSimulator.simulate(Architecture.sm89, occupancy(16), Stream.once(body))
+    val steady = PipelineSimulator.simulate(Architecture.sm89, occupancy(16), Stream.repeat(body))
+    assertEqualsDouble(once.cyclesPerIteration, steady.cyclesPerIteration, 1e-9)
+    assertEquals(once.binding, steady.binding)
+    assert(!once.steady)
+    assertEquals(once.entries.map(_.iteration).distinct, Vec(0L))
+  }
+
+  test("an instruction on a pipe that is not the busiest never lowers the cost of a block of many waves") {
+    val body = Vec.fill(6)(op(Some(Pipe.Fp64), reads = Vec("r0"), writes = Vec("r1"), latency = 8))
+    val cost = (ops: Vec[Op]) =>
+      PipelineSimulator.simulate(Architecture.sm89, occupancy(16), Stream.once(ops)).cyclesPerIteration
+    val base = cost(body)
+    (0 to body.size).foreach { at =>
+      val grown = cost(body.take(at) ++ Vec(op()) ++ body.drop(at))
+      assert(grown >= base, s"an instruction at $at costs $grown against $base")
+    }
+  }
+
   test("block executed once agrees with ProfileReport.costs per instruction") {
     val kinds   = Vec(None, Some(Pipe.Fma), Some(Pipe.Alu), Some(Pipe.Mufu), Some(Pipe.Fp64))
     val entries = kinds.map(pipe => (instruction(pipe), Profile.Counters.zero.copy(issues = 1L, activeLanes = 32L)))

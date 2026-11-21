@@ -37,11 +37,13 @@ object PipelineSimulator {
     private case class Repeat(body: Vec[Op]) extends Stream {
       def op(position: Long): Option[Op] = Some(body((position % body.size).toInt))
       def period: Option[Int]            = Some(body.size)
+      def overlapped: Stream             = this
     }
 
     private case class Once(ops: Vec[Op]) extends Stream {
       def op(position: Long): Option[Op] = Option.when(position < ops.size)(ops(position.toInt))
       def period: Option[Int]            = None
+      def overlapped: Stream             = Repeat(ops)
     }
 
     def repeat(body: Vec[Op]): Stream = Repeat(body)
@@ -52,6 +54,9 @@ object PipelineSimulator {
   trait Stream {
     def op(position: Long): Option[Op]
     def period: Option[Int]
+
+    /** The stream of successive waves through one slot: each wave runs the stream once and a new one follows. */
+    def overlapped: Stream
   }
 
   case class Entry(
@@ -127,25 +132,58 @@ object PipelineSimulator {
   private def ahead[K](times: scala.collection.Map[K, Long], now: Long): Map[K, Long] =
     times.view.collect { case (key, time) if time > now => key -> (time - now) }.toMap
 
-  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private case class Residency(count: Int, active: Int, scheduled: Architecture.IssueOrder)
+
+  private def residency(architecture: Architecture, occupancy: Option[Occupancy], placement: Option[Placement]) = {
+    val partitions = architecture.limits.partitions.value
+    val resident   = placement.getOrElse(Placement.even(occupancy.fold(1)(_.subgroups), partitions)).warpsPerPartition
+    val active     = resident.count(_ > 0)
+    val order      = architecture.issueOrder.map(_.value).getOrElse(Architecture.IssueOrder.RoundRobin)
+    // A spread placement models the same waves on every active partition; their mix comes from
+    // several workgroups, so the single-partition age order is only applied when one is active.
+    Residency(resident.maxOption.getOrElse(1), active, if (active == 1) order else Architecture.IssueOrder.RoundRobin)
+  }
+
+  /** The cycles per iteration of a stream that waves run once. Waves in lockstep through one pipe finish in an order
+    * that one more instruction can change, so with several of them the cost is the steady state of waves that follow
+    * one another, which depends only on what the pipes and the dependencies allow. The entries stay those of one pass.
+    */
   def simulate(
       architecture: Architecture,
       occupancy: Option[Occupancy],
       stream: Stream,
       placement: Option[Placement] = None
   ): Block = {
+    val block   = pass(architecture, occupancy, stream, placement)
+    val waves   = residency(architecture, occupancy, placement)
+    val overlap = stream.period.isEmpty && waves.count > 1 && waves.scheduled == Architecture.IssueOrder.RoundRobin
+    if (!overlap) block
+    else {
+      val steady = pass(architecture, occupancy, stream.overlapped, placement)
+      block.copy(
+        cyclesPerIteration = steady.cyclesPerIteration,
+        binding = steady.binding,
+        pressure = steady.pressure,
+        source = steady.source
+      )
+    }
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def pass(
+      architecture: Architecture,
+      occupancy: Option[Occupancy],
+      stream: Stream,
+      placement: Option[Placement]
+  ): Block = {
     val rates      = architecture.throughput
     val partitions = architecture.limits.partitions.value
-    val subgroups  = occupancy.fold(1)(_.subgroups)
-    val resident   = placement.getOrElse(Placement.even(subgroups, partitions)).warpsPerPartition
-    val count      = resident.maxOption.getOrElse(1)
+    val waves      = residency(architecture, occupancy, placement)
+    val count      = waves.count
+    val active     = waves.active
+    val scheduled  = waves.scheduled
     val slots      = math.max(1, (rates.issues.value / partitions).toInt)
     val warps      = Vec.fill(count)(Warp())
-    val active     = resident.count(_ > 0)
-    val order      = architecture.issueOrder.map(_.value).getOrElse(Architecture.IssueOrder.RoundRobin)
-    // A spread placement models the same waves on every active partition; their mix comes from
-    // several workgroups, so the single-partition age order is only applied when one is active.
-    val scheduled  = if (active == 1) order else Architecture.IssueOrder.RoundRobin
     val busyUntil  = mutable.Map.empty[ProfileReport.Binding, Long]
     val queued     = mutable.Map.empty[ProfileReport.Binding, Vec[Long]]
     val busyCycles = mutable.Map.empty[ProfileReport.Binding, Long]
