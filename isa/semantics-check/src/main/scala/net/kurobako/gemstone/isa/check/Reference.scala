@@ -29,10 +29,10 @@ trait Reference[H, L <: Lookup] {
   /** The machine state an instruction may change, such as memory, to compare after both runs. */
   def state(harness: H): Any
 
-  /** The addresses of memory a run loaded from. Two sequences are compared on them; a definition is not compared with
-    * execution on them, since it describes one lane and execution may load for the others of its wave.
+  /** The bytes of memory a run loaded, by address. Two sequences are compared on them; a definition is not compared
+    * with execution on them, since it describes one lane and execution may load for the others of its wave.
     */
-  def loads(@unused harness: H): Set[Long] = Set.empty
+  def loads(@unused harness: H): Set[(Long, Byte)] = Set.empty
 
   /** Sets the bytes of `space` that `harness` holds before any write, by address, where the ISA can. */
   def seed(@unused harness: H, @unused space: Space, @unused bytes: Map[Long, Byte]): Unit = ()

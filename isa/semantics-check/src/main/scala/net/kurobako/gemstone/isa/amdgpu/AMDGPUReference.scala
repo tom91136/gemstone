@@ -34,7 +34,7 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
   override def seed(harness: AMDGPUHarness, space: Space, bytes: Map[Long, Byte]): Unit =
     if (space == Space.Global) harness.globalBytes.seed(bytes)
 
-  override def loads(harness: AMDGPUHarness): Set[Long] = harness.loads
+  override def loads(harness: AMDGPUHarness): Set[(Long, Byte)] = harness.loads
 
   private val Single = raw"([sva])(\d+)".r
   private val Range  = raw"([sva])\[(\d+):(\d+)\]".r

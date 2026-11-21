@@ -161,6 +161,20 @@ class MemoryProofSuite extends Suite {
     byFilter(prove(AMDGPUReference, amd("global_load_dword v6, v[2:3], off", move), amd(move), "v6"))
   }
 
+  test("a load moved across a store to its address reads other bytes, though its result is overwritten") {
+    installed()
+    val clear = "v_mov_b32 v6, 0"
+    val load  = "global_load_dword v6, v[2:3], off"
+    byFilter(prove(AMDGPUReference, amd(low, load, clear), amd(load, clear, low), "v6"))
+  }
+
+  test("a SASS load moved across a store to its address reads other bytes, though its result is overwritten") {
+    installed()
+    val clear = "MOV R7, RZ"
+    val load  = "LDG.E R7, [R2.64]"
+    byFilter(prove(SASSReference, nvidia(first, load, clear), nvidia(load, clear, first), "R7"))
+  }
+
   test("a store of what was just loaded is not the absence of both: it writes bytes the other does not") {
     val move = "v_mov_b32 v7, v1"
     val back = amd("global_load_dword v6, v[2:3], off", "global_store_dword v[2:3], v6, off", move)

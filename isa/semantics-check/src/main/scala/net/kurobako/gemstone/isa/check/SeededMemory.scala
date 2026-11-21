@@ -22,7 +22,7 @@ object SeededMemory {
   */
 class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, mask: Long = -1L) {
   private val written = mutable.LongMap.empty[Byte]
-  private val loaded  = mutable.Set.empty[Long]
+  private val loaded  = mutable.Set.empty[(Long, Byte)]
   private val seeded  = mutable.LongMap.empty[Byte]
 
   private def initially(address: Long): Byte = seeded.getOrElse(address, initial(address))
@@ -30,8 +30,8 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
   /** Sets the bytes the cells hold before they are written. */
   def seed(bytes: Map[Long, Byte]): Unit = bytes.foreach((address, value) => seeded(address & mask) = value)
 
-  /** Every address loaded from. */
-  def loads: Set[Long] = loaded.toSet
+  /** Every byte loaded, by address. */
+  def loads: Set[(Long, Byte)] = loaded.toSet
 
   /** Every byte written, by address. */
   def writes: Map[Long, Byte] = written.toMap
@@ -44,8 +44,9 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
     val at = (address + index) & mask
     if (at >= limit) value
     else {
-      loaded += at
-      value | ((written.getOrElse(at, initially(at)) & 0xffL) << (index * 8))
+      val byte = written.getOrElse(at, initially(at))
+      loaded += ((at, byte))
+      value | ((byte & 0xffL) << (index * 8))
     }
   }
 
