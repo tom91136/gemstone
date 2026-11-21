@@ -153,8 +153,10 @@ object RewriteSearch {
 
     def units(name: String, width: Int): Vec[String] = Liveness.units(name, width)
 
-    def memory(expected: NvidiaHarness, obtained: NvidiaHarness): Long =
-      8L * changed(SASSReference.state(expected), SASSReference.state(obtained))
+    def memory(expected: NvidiaHarness, obtained: NvidiaHarness): Long = {
+      val (left, right) = (SASSReference.state(expected), SASSReference.state(obtained))
+      8L * (changed(left.global, right.global) + changed(left.shared, right.shared))
+    }
   }
 
   private def walker(moves: SASSMoves): Walker[DecodedInstruction] = new Walker[DecodedInstruction] {

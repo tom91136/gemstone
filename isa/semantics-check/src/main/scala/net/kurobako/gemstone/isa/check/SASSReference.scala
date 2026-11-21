@@ -1,6 +1,8 @@
 package net.kurobako.gemstone.isa.check
 
+import java.util.regex.Pattern
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.isa.catalogue.*
@@ -12,11 +14,14 @@ import scala.collection.concurrent.TrieMap
 import scala.util.Random
 
 /** SASS instances lowered on their target as the explorer describes them, with the constant bank they read bound to
-  * memory holding the harness's bytes. Each instance lowers once, with its constant operands at their default offsets,
-  * and a run moves them to the offsets its inputs give, which must encode.
+  * memory holding the harness's bytes, and the shared memory they access loaded from the harness and read back into it.
+  * Each instance lowers once, with its constant operands at their default offsets, and a run moves them to the offsets
+  * its inputs give, which must encode.
   */
 object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
   private type Lowered = (lowering: InstructionSemantics.SASSLowering, bank: Long)
+
+  private val BracketedOperand = raw"\[([^\]]*)\]".r
 
   private val lowered = TrieMap.empty[(Int, String), Option[Lowered]]
 
@@ -66,6 +71,25 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
   /** The offsets sampled for a constant operand, all but one in eight moved to a multiple of the stride its field
     * encodes; the rest check that execution and the definition both reject an offset the field cannot hold.
     */
+  /** The parameters an instance of a shared access addresses with: the registers its bracketed operand names. */
+  private def addressing(
+      target: Option[String],
+      instance: String,
+      lookup: Lookup.Sass
+  ): Set[String] = (for {
+    selected <- target.flatMap(Target.parse(_).toOption)
+    found    <- lowered.getOrElseUpdate((selected.sm, instance), lower(selected.sm, instance, lookup.operands))
+    if found.lowering.steps.exists(step => SASSSharedMemory.touched(step.instruction).nonEmpty)
+    spans = BracketedOperand.findAllMatchIn(instance).map(_.group(1)).toVec
+  } yield lookup.operands.collect {
+    case (spelling, binding) if spans.exists(_.matches(raw".*\b${Pattern.quote(spelling)}\b.*")) => binding
+  }.toSet).getOrElse(Set.empty)
+
+  /** The offsets sampled for a constant operand, all but one in eight moved to a multiple of the stride its field
+    * encodes; the rest check that execution and the definition both reject an offset the field cannot hold. The
+    * register a shared access addresses with is sampled below the allocation, in the same proportion, at a multiple of
+    * the widest access.
+    */
   // the operands of one instruction
   @SuppressWarnings(Array("bonsai:keyed-lookup-in-loop"))
   override def inputs(
@@ -75,14 +99,19 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
       parameters: Vec[(String, Type)],
       sampled: Vec[Long],
       random: Random
-  ): Vec[Long] = parameters.zip(sampled).map {
-    case ((name, Type.Ranged(_, intervals)), value)
-        if lookup.constants.exists(_.binding == name) && random.nextInt(8) != 0 =>
-      val stride = lookup.written.stride(name)
-      val floor  = value - Math.floorMod(value, stride)
-      Vec(floor, floor + stride).find(aligned => intervals.exists((low, high) => aligned >= low && aligned <= high))
-        .getOrElse(value)
-    case (_, value) => value
+  ): Vec[Long] = {
+    val addresses = addressing(target, instance, lookup)
+    parameters.zip(sampled).map {
+      case ((name, Type.Ranged(_, intervals)), value)
+          if lookup.constants.exists(_.binding == name) && random.nextInt(8) != 0 =>
+        val stride = lookup.written.stride(name)
+        val floor  = value - Math.floorMod(value, stride)
+        Vec(floor, floor + stride).find(aligned => intervals.exists((low, high) => aligned >= low && aligned <= high))
+          .getOrElse(value)
+      case ((name, _), _) if addresses(name) && random.nextInt(8) != 0 =>
+        random.nextInt(NvidiaHarness.SharedBytes / 16).toLong * 16
+      case (_, value) => value
+    }
   }
 
   def execute(
@@ -114,19 +143,20 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
       lookup.constants.flatMap((binding, offset) => offsets.get(binding).map(offset -> _))
     )
     values <- NvidiaWarpgroups.product(steps).fold(
-      NvidiaMatrices.product(steps).fold(single(lowering, parameters, inputs, results, bank))(multiply =>
-        NvidiaMatrices.run(
-          lowering.prologue,
-          steps,
-          lowering.registerCount,
-          lowering.predicateCount,
-          multiply,
-          parameters,
-          inputs,
-          results,
-          harness.seed,
-          bank
-        )
+      NvidiaMatrices.product(steps).fold(single(lowering, parameters, inputs, results, bank, harness.sharedBytes))(
+        multiply =>
+          NvidiaMatrices.run(
+            lowering.prologue,
+            steps,
+            lowering.registerCount,
+            lowering.predicateCount,
+            multiply,
+            parameters,
+            inputs,
+            results,
+            harness.seed,
+            bank
+          )
       )
     )(warpgroup =>
       NvidiaWarpgroups.run(
@@ -150,8 +180,10 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
       parameters: Vec[(String, Type)],
       inputs: Vec[Long],
       results: Vec[(String, Type)],
-      bank: SASSConstantBank
+      bank: SASSConstantBank,
+      shared: SeededMemory
   ): Either[String, Vec[Long]] = {
+    val memory = SASSSharedMemory(lowering.steps, lowering.registerCount, shared)
     val locate = (name: String) =>
       lowering.registers.get(name).map(NvidiaReference.Slot.Registers(_))
         .orElse(lowering.predicates.get(name).map(NvidiaReference.Slot.Predicate(_)))
@@ -162,22 +194,35 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
       sources <- NvidiaReference.slots(operands.map(_._1._1), locate)
       targets <- NvidiaReference.slots(results.map(_._1), locate)
       values  <- NvidiaReference.run(
-        lowering.prologue,
-        lowering.steps,
-        lowering.registerCount,
+        lowering.prologue ++ memory.preload,
+        memory.instrumented,
+        (lowering.registerCount.raw + memory.registers).unsafe[Int >= 0],
         lowering.predicateCount,
         sources.zip(operands).map { case (slot, ((_, tpe), value)) => (slot, tpe, value) },
-        targets.zip(results.map(_._2)),
+        targets.zip(results.map(_._2)) ++ memory.outputs,
         bank
       )
-    } yield values
+    } yield {
+      memory.settle(values.drop(targets.size))
+      values.take(targets.size)
+    }
   }
 
-  def state(harness: NvidiaHarness): Map[Long, Byte] = harness.globalBytes.writes
+  def state(harness: NvidiaHarness): (global: Map[Long, Byte], shared: Map[Long, Byte]) =
+    (harness.globalBytes.writes, harness.sharedBytes.writes)
 
-  override def seed(harness: NvidiaHarness, space: Space, bytes: Map[Long, Byte]): Unit =
-    if (space == Space.Global) harness.globalBytes.seed(bytes)
+  override def seed(harness: NvidiaHarness, space: Space, bytes: Map[Long, Byte]): Unit = space match {
+    case Space.Global => harness.globalBytes.seed(bytes)
+    case Space.Shared => harness.sharedBytes.seed(bytes)
+    case _            => ()
+  }
 
   override def loads(harness: NvidiaHarness): Map[Space, Set[(Long, Byte)]] =
-    Map(Space.Global -> harness.globalBytes.loads)
+    Map(Space.Global -> harness.globalBytes.loads, Space.Shared -> harness.sharedBytes.loads)
+
+  override def allocation(space: Space): Option[Long] =
+    Option.when(space == Space.Shared)(NvidiaHarness.SharedBytes.toLong)
+
+  override def allocate(harness: NvidiaHarness, space: Space, bytes: Long): Unit =
+    if (space == Space.Shared) harness.sharedBytes.resize(bytes)
 }

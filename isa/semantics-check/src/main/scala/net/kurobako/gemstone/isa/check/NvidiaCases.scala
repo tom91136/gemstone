@@ -11,8 +11,9 @@ object NvidiaCases {
   def included(definition: Definition): Boolean =
     definition.contexts.forall(context => context.tpe.split('.').last != "Memory")
 
-  /** Whether `definition` accesses no memory but global memory by plain loads and stores, which fault on no input where
-    * every address is mapped.
+  /** Whether `definition` accesses no memory but global and shared memory by plain loads and stores, which fault on no
+    * input where every global address is mapped and a shared access outside the allocation reads zero and writes
+    * nothing.
     */
   def global(definition: Definition): Boolean = included(GlobalAccess.plain(definition))
 

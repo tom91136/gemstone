@@ -277,10 +277,52 @@ class MemoryProofSuite extends Suite {
   private def refusal(text: String): String =
     SASSForms.of("sm_89", parse(text)).fold(identity, _ => fail(s"$text is admitted"))
 
-  test("SASS accesses of shared memory and atomics stay refused") {
-    Vec("LDS R7, [R5.X4]", "STS [R5.X4], R0", "ATOMG.E.AND P0, R0, desc[UR4][R8.64], R12").foreach(text =>
+  test("SASS atomics stay refused, shared atomics among them") {
+    Vec("ATOMG.E.AND P0, R0, desc[UR4][R8.64], R12", "ATOMS.AND RZ, [R5], R0").foreach(text =>
       assert(refusal(text).nonEmpty, text)
     )
+  }
+
+  test("SASS loads and stores of shared memory are admitted") {
+    Vec("LDS R7, [R5]", "LDS.64 R6, [R5+0x8]", "STS [R5+0x4], R0", "STS.128 [R5], R4").foreach(text =>
+      assert(SASSForms.of("sm_89", parse(text)).isRight, SASSForms.of("sm_89", parse(text)))
+    )
+  }
+
+  private val shared   = "STS [R5], R6"
+  private val adjacent = "STS [R5+0x4], R7"
+
+  test("SASS shared stores at offsets of one base that cannot overlap are proved equal in either order") {
+    installed()
+    proved(prove(SASSReference, nvidia(shared, adjacent), nvidia(adjacent, shared)), "STS")
+  }
+
+  test("SASS shared stores whose addresses may alias are told apart in either order") {
+    installed()
+    val apart = "STS [R8], R7"
+    rejected(prove(SASSReference, nvidia(shared, apart), nvidia(apart, shared)))
+  }
+
+  test("a SASS shared load moved across a store is proved equal where it cannot overlap, rejected where it may") {
+    installed()
+    val load = "LDS R9, [R5+0x4]"
+    proved(prove(SASSReference, nvidia(shared, load), nvidia(load, shared), "R9"), "LDS")
+    val alias = "LDS R9, [R8]"
+    rejected(prove(SASSReference, nvidia(shared, alias), nvidia(alias, shared), "R9"))
+  }
+
+  test("a SASS shared read of what was just stored is not the stored register, where the allocation ends before it") {
+    installed()
+    val within = "LOP3.LUT R5, R5, 0x3c, RZ, 0xc0, !PT"
+    val read   = "LDS R9, [R5]"
+    bySolver(prove(SASSReference, nvidia(within, shared, read), nvidia(within, shared, read, "MOV R9, R6"), "R9"))
+  }
+
+  test("a SASS shared load moved across a store to its address reads other bytes, though its result is overwritten") {
+    installed()
+    val clear = "MOV R9, RZ"
+    val load  = "LDS R9, [R5]"
+    byFilter(prove(SASSReference, nvidia(shared, load, clear), nvidia(load, clear, shared), "R9"))
   }
 
   test("wide SASS loads and stores are admitted") {
@@ -348,5 +390,19 @@ class MemoryProofSuite extends Suite {
         (mnemonic, width)
       )
     assertEquals(cases.filter(_.startsWith("ATOMG")), Vec.empty[String])
+  }
+
+  test("the SASS lane checks shared loads and stores, wide ones among them, and no atomic") {
+    val cases = SASSGenerator.describe("sm_86", Set("LDS", "STS", "ATOMS").contains).map(_.instance)
+    for {
+      mnemonic <- Vec("LDS", "STS")
+      width    <- Vec("64", "128")
+    }
+      assert(
+        cases.exists(instance => instance.startsWith(mnemonic) && instance.matches(raw".*\.$width .*")),
+        (mnemonic, width)
+      )
+    assert(cases.exists(_.startsWith("LDS")) && cases.exists(_.startsWith("STS")), cases)
+    assertEquals(cases.filter(_.startsWith("ATOMS")), Vec.empty[String])
   }
 }

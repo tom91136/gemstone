@@ -28,6 +28,9 @@ object NvidiaHarness {
     offset > -size && offset < InstructionSemantics.ConstantBytes
   }
 
+  /** The most bytes of shared memory a workgroup may allocate: the opt-in limit of the largest target. */
+  inline val SharedBytes = 0x38c00
+
   /** The byte global memory holds at `address` until it is written, so every address is mapped. */
   def global(seed: Long, address: Long): Byte = SeededMemory.byte(~seed, address)
 
@@ -112,11 +115,13 @@ object NvidiaHarness {
 
 /** One lane alone in its warp, block and grid, as the reference launches it, the constant bank it reads, whose bytes
   * follow the seed, and global memory holding [[NvidiaHarness.global]] until written, but where the constant bank is
-  * bound. Warp collectives see only the lane itself.
+  * bound. Shared memory is zero until written and exists below its allocation, by offset into the window. Warp
+  * collectives see only the lane itself.
   */
 class NvidiaHarness(val seed: Long) {
 
   val globalBytes: SeededMemory = SeededMemory(NvidiaHarness.global(seed, _))
+  val sharedBytes: SeededMemory = SeededMemory(_ => 0, NvidiaHarness.SharedBytes)
 
   /** `raw` as the prelude type `T`. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.asInstanceOf"))
@@ -212,7 +217,7 @@ class NvidiaHarness(val seed: Long) {
     }
   }
 
-  /** Global memory by address; the other spaces are never staged into a checked definition. */
+  /** Global and shared memory by address; the other spaces are never staged into a checked definition. */
   private class Global extends Memory {
     private def unstaged(what: String): Nothing = throw UnsupportedOperationException(what)
 
@@ -248,27 +253,38 @@ class NvidiaHarness(val seed: Long) {
       )
     }
 
+    def loadShared[T](address: UInt[64])(using Type.Reified[T]): T =
+      value(sharedBytes.load(aligned(address) - VMAddressSpace.SharedBase, bytes[T]))
+
+    def storeShared[T](address: UInt[64], stored: T)(using Type.Reified[T]): Unit =
+      sharedBytes.store(
+        aligned(address) - VMAddressSpace.SharedBase,
+        stored match {
+          case flag: Boolean => if (flag) 1L else 0L
+          case raw: Long     => raw
+        },
+        bytes[T]
+      )
+
     def alignLoadGlobal(address: UInt[64], bytes: UInt[64]): Unit  = wide(address, bytes)
     def alignStoreGlobal(address: UInt[64], bytes: UInt[64]): Unit = wide(address, bytes)
+    def alignLoadShared(address: UInt[64], bytes: UInt[64]): Unit  = wide(address, bytes)
+    def alignStoreShared(address: UInt[64], bytes: UInt[64]): Unit = wide(address, bytes)
 
     private def wide(address: UInt[64], bytes: UInt[64]): Unit =
       if ((address.raw & ((bytes.raw & -bytes.raw) - 1)) != 0L) throw IllegalArgumentException("misaligned")
 
-    def alignLoad(address: UInt[64], bytes: UInt[64]): Unit        = unstaged("alignLoad")
-    def alignLoadShared(address: UInt[64], bytes: UInt[64]): Unit  = unstaged("alignLoadShared")
-    def alignLoadLocal(address: UInt[64], bytes: UInt[64]): Unit   = unstaged("alignLoadLocal")
-    def alignStore(address: UInt[64], bytes: UInt[64]): Unit       = unstaged("alignStore")
-    def alignStoreShared(address: UInt[64], bytes: UInt[64]): Unit = unstaged("alignStoreShared")
-    def alignStoreLocal(address: UInt[64], bytes: UInt[64]): Unit  = unstaged("alignStoreLocal")
+    def alignLoad(address: UInt[64], bytes: UInt[64]): Unit       = unstaged("alignLoad")
+    def alignLoadLocal(address: UInt[64], bytes: UInt[64]): Unit  = unstaged("alignLoadLocal")
+    def alignStore(address: UInt[64], bytes: UInt[64]): Unit      = unstaged("alignStore")
+    def alignStoreLocal(address: UInt[64], bytes: UInt[64]): Unit = unstaged("alignStoreLocal")
 
-    def localBase(): UInt[64]                                                    = unstaged("localBase")
-    def sharedWindow(): UInt[64]                                                 = unstaged("sharedWindow")
-    def load[T](address: UInt[64])(using Type.Reified[T]): T                     = unstaged("load")
-    def loadShared[T](address: UInt[64])(using Type.Reified[T]): T               = unstaged("loadShared")
-    def loadLocal[T](address: UInt[64])(using Type.Reified[T]): T                = unstaged("loadLocal")
-    def store[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit       = unstaged("store")
-    def storeShared[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit = unstaged("storeShared")
-    def storeLocal[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit  = unstaged("storeLocal")
+    def localBase(): UInt[64]                                                   = unstaged("localBase")
+    def sharedWindow(): UInt[64]                                                = unstaged("sharedWindow")
+    def load[T](address: UInt[64])(using Type.Reified[T]): T                    = unstaged("load")
+    def loadLocal[T](address: UInt[64])(using Type.Reified[T]): T               = unstaged("loadLocal")
+    def store[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit      = unstaged("store")
+    def storeLocal[T](address: UInt[64], value: T)(using Type.Reified[T]): Unit = unstaged("storeLocal")
 
     def reduceGlobal(
         address: UInt[64],

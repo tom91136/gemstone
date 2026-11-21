@@ -193,7 +193,7 @@ class FormsSuite extends Suite {
       "BSSY B0, 0x20"            -> "has no rendering: lowers to Convergence, with no staged semantics",
       "BSYNC B0"                 -> "has no rendering: lowers to Convergence, with no staged semantics",
       "EXIT"                     -> "has no rendering: lowers to Return, with no staged semantics",
-      "LDS R5, [R2]"             -> "is refused: Memory.loadShared is not a plain memory access",
+      "LD.E R5, [R2.64]"         -> "is refused: Memory.load is not a plain memory access",
       "UMOV UR4, 0x1"            -> "is refused: Warp.leader is not a plain memory access",
       "LDC R5, c[0x3][R2]"       -> "reads a constant bank at an offset a register holds",
       "IADD3 R2, P0, R4, R5, RZ" -> "has no checked case of"

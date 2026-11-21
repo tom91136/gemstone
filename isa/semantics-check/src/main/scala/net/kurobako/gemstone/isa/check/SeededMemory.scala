@@ -35,6 +35,9 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
   /** Sets the bytes the cells hold before they are written. */
   def seed(bytes: Map[Long, Byte]): Unit = bytes.foreach((address, value) => seeded(address & mask) = value)
 
+  /** The bytes that differ from [[SeededMemory.Initial]]'s or were written, by address, within the cells that exist. */
+  def held: Map[Long, Byte] = (seeded ++ written).iterator.filter((address, _) => address < extent.get).toMap
+
   /** Every byte loaded, by address. */
   def loads: Set[(Long, Byte)] = loaded.toSet
 
