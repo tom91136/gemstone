@@ -13,14 +13,11 @@ object Generate {
   private val generators: Map[String, Generator] =
     Map(
       "PTX"            -> PTXGenerator,
-      "SASS"           -> SASSGenerator.earlier,
-      "SASSHopper"     -> SASSGenerator.hopper,
-      "SASSBlackwell"  -> SASSGenerator.blackwell,
       "AMDGPU"         -> AMDGPUGenerator.rest,
       "AMDGPUMatrix"   -> AMDGPUGenerator.matrix,
       "AMDGPUResource" -> AMDGPUGenerator.resource,
       "SPIRV"          -> SPIRVGenerator
-    )
+    ) ++ SASSGenerator.architectures.map(target => s"SASS${target.stripPrefix("sm_")}" -> SASSGenerator.of(target))
 
   def main(arguments: Array[String]): Unit = {
     val output = Paths.get(arguments(0))

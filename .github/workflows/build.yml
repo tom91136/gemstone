@@ -226,6 +226,7 @@ jobs:
       build: ${{ steps.shards.outputs.build }}
       run: ${{ steps.shards.outputs.run }}
       lint: ${{ steps.shards.outputs.lint }}
+      semantics: ${{ steps.shards.outputs.semantics }}
     steps:
       - *checkout
       - id: shards
@@ -238,6 +239,11 @@ jobs:
           done
           backends=$(sed -n 's/^add_lint(\([a-z]*\) .*/"\1"/p' conformance/artifacts/CMakeLists.txt | paste -sd ,)
           echo "lint=[$backends]" | tee -a "$GITHUB_OUTPUT"
+          isas=$({
+            sed -n 's/^lazy val semanticsCheck[A-Za-z]* *= semanticsCheckOf("\([A-Za-z]*\)").*/\1/p' build.sbt
+            sed -n 's/^sm_\([0-9]*\)$/SASS\1/p' isa/semantics-check/src/main/resources/net/kurobako/gemstone/isa/check/sass-architectures.txt
+          } | sed 's/.*/"&"/' | paste -sd ,)
+          echo "semantics=[$isas]" | tee -a "$GITHUB_OUTPUT"
 
   conformance-package-cache:
     runs-on: ubuntu-24.04
@@ -607,14 +613,14 @@ jobs:
           sbt --server --batch 'set conformance / conformanceLintTargets := Seq("lint-${{ matrix.backend }}")' conformance/lintBackends
 
   semantics:
-    needs: [resolve, build]
+    needs: [resolve, shards, build]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        isa: [PTX, SASS, SASSHopper, SASSBlackwell, AMDGPU, AMDGPUMatrix, AMDGPUResource, SPIRV]
+        isa: ${{ fromJSON(needs.shards.outputs.semantics) }}
     env:
       GEMSTONE_OFFLINE_ON: 1
       GEMSTONE_EXECUTION_THREAD_COUNT: 2

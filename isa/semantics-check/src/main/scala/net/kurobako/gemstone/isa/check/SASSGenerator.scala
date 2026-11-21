@@ -1,9 +1,11 @@
 package net.kurobako.gemstone.isa.check
 
+import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.semantics.render.*
+import scala.util.Using
 
 /** Every SASS instance the explorer describes on a representative target of each architecture generation, checked
   * against executing it.
@@ -72,15 +74,15 @@ object SASSGenerator {
       forms.map(_._1).distinct.flatMap(form => guards.flatMap(guarded(target, grouped(form), _)))
   }
 
-  /** The cases of Maxwell, Turing and Ampere, of Hopper, and of both Blackwell families, each compiled on its own as
-    * together they outgrow the build's heap.
-    */
-  val earlier: Generator   = Part("SASS", Vec("sm_50", "sm_75", "sm_86"))
-  val hopper: Generator    = Part("SASSHopper", Vec("sm_90"))
-  val blackwell: Generator = Part("SASSBlackwell", Vec("sm_100", "sm_120"))
+  /** The architectures checked, one project each, in the file the build derives those projects from. */
+  lazy val architectures: Vec[String] =
+    Using.resource(getClass.getResourceAsStream("sass-architectures.txt"))(stream =>
+      Vec.from(String(stream.readAllBytes(), StandardCharsets.UTF_8).linesIterator.map(_.trim).filter(_.nonEmpty))
+    )
 
-  private class Part(prefix: String, parts: Vec[String]) extends Generator {
+  /** The cases of `target`, compiled on their own as every architecture's together outgrow the build's heap. */
+  def of(target: String): Generator = new Generator {
     def sources: Vec[(name: String, source: String)] =
-      NvidiaCases.sources(prefix, "SASSSuite", parts.flatMap(describe(_)))
+      NvidiaCases.sources(s"SASS${target.stripPrefix("sm_")}x", "SASSSuite", describe(target))
   }
 }

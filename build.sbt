@@ -603,8 +603,8 @@ lazy val semanticsCheck = module(project.in(file("isa/semantics-check")))
   .settings(name := "gemstone-semantics-check")
 
 /** Every instruction form the explorer describes for `isa`, rendered as a definition, compiled and checked. */
-def semanticsCheckOf(isa: String): Project =
-  module(Project(s"semanticsCheck$isa", file(s"isa/semantics-check/generated/${isa.toLowerCase}")))
+def semanticsChecked(isa: String)(project: Project): Project =
+  module(project)
     .dependsOn(semanticsCheck % "compile->compile;test->test")
     .settings(
       name                := s"gemstone-semantics-check-${isa.toLowerCase}",
@@ -622,10 +622,23 @@ def semanticsCheckOf(isa: String): Project =
       }
     )
 
-lazy val semanticsCheckPTX            = semanticsCheckOf("PTX")
-lazy val semanticsCheckSASS           = semanticsCheckOf("SASS")
-lazy val semanticsCheckSASSHopper     = semanticsCheckOf("SASSHopper")
-lazy val semanticsCheckSASSBlackwell  = semanticsCheckOf("SASSBlackwell")
+def semanticsCheckOf(isa: String): Project =
+  semanticsChecked(isa)(Project(s"semanticsCheck$isa", file(s"isa/semantics-check/generated/${isa.toLowerCase}")))
+
+lazy val semanticsCheckPTX = semanticsCheckOf("PTX")
+
+/** The SASS definitions, one project for each architecture of `sass-architectures.txt`: together they outgrow the heap.
+  */
+lazy val semanticsCheckSASS = SassArchitecture.all(file(".")).foldLeft(
+  projectMatrix.in(file("isa/semantics-check/generated/sass"))
+)((matrix, architecture) =>
+  matrix.customRow(
+    scalaVersions = Seq(scala3Version),
+    axisValues = Seq(architecture, VirtualAxis.jvm),
+    process = semanticsChecked(s"SASS${architecture.sm}")(_)
+  )
+)
+
 lazy val semanticsCheckAMDGPU         = semanticsCheckOf("AMDGPU")
 lazy val semanticsCheckAMDGPUMatrix   = semanticsCheckOf("AMDGPUMatrix")
 lazy val semanticsCheckAMDGPUResource = semanticsCheckOf("AMDGPUResource")
@@ -1262,15 +1275,15 @@ lazy val gemstone = project.in(file("."))
     commands += SemanticsChecks.command(
       "semanticsCheckAll",
       Seq(
-        semanticsCheckPTX,
-        semanticsCheckSASS,
-        semanticsCheckSASSHopper,
-        semanticsCheckSASSBlackwell,
-        semanticsCheckAMDGPU,
-        semanticsCheckAMDGPUMatrix,
-        semanticsCheckAMDGPUResource,
-        semanticsCheckSPIRV
-      ).map(_.id)
+        Seq(semanticsCheckPTX.id),
+        semanticsCheckSASS.filterProjects(Seq(VirtualAxis.jvm)).map(_.id),
+        Seq(
+          semanticsCheckAMDGPU,
+          semanticsCheckAMDGPUMatrix,
+          semanticsCheckAMDGPUResource,
+          semanticsCheckSPIRV
+        ).map(_.id)
+      ).flatten
     ),
     cleanFiles += baseDirectory.value / "target"
   )
