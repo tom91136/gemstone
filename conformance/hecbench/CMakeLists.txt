@@ -17,14 +17,15 @@ patch_exact("${staging}/src/bitpacking-cuda/main.cu"
   "100000001"
   "2000001")
 
-# Bounded workload: NUM 256 at tolerance 1e-4 (733 iterations, 183.6 s in the bounded run; the default NUM 1024 needs
-# 27,250 iterations and its serial CPU reference exceeds 15 minutes).
+# Bounded workload: NUM 256 at tolerance 1e-3 (82 iterations; 1e-4 needs 733 and took 364.7 s on emulated sm_60 beside
+# other cases, over the 300 s budget; the default NUM 1024 at 1e-6 needs 27,250 iterations and its serial CPU reference
+# exceeds 15 minutes).
 patch_exact("${staging}/src/laplace-cuda/kernels.h"
   "#define NUM 1024"
   "#define NUM 256")
 patch_exact("${staging}/src/laplace-cuda/main.cu"
   "Real tol = 1.e-6;"
-  "Real tol = 1.e-4;")
+  "Real tol = 1.e-3;")
 
 # Bounded workload: the kernel repeat count is a compile-time constant; one launch of 1024 blocks takes about a minute.
 patch_exact("${staging}/src/fsm-cuda/parameters.h"
