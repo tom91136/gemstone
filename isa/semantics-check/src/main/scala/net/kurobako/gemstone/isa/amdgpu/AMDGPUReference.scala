@@ -34,7 +34,12 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
   override def seed(harness: AMDGPUHarness, space: Space, bytes: Map[Long, Byte]): Unit =
     if (space == Space.Global) harness.globalBytes.seed(bytes)
 
-  override def loads(harness: AMDGPUHarness): Set[(Long, Byte)] = harness.loads
+  override def loads(harness: AMDGPUHarness): Map[Space, Set[(Long, Byte)]] = harness.loads
+
+  override def allocation(space: Space): Option[Long] = Option.when(space == Space.Shared)(LdsBytes.toLong)
+
+  override def allocate(harness: AMDGPUHarness, space: Space, bytes: Long): Unit =
+    if (space == Space.Shared) harness.sharedBytes.resize(bytes)
 
   private val Single = raw"([sva])(\d+)".r
   private val Range  = raw"([sva])\[(\d+):(\d+)\]".r
@@ -167,6 +172,8 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
   private val Spare: VectorRegisterIndex    = 255
   private val Readback: VectorRegisterIndex = 200
   private val Written: VectorRegisterIndex  = 250
+  private val Staged: VectorRegisterIndex   = 251
+  private val Reached: VectorRegisterIndex  = 252
 
   /** The registers of [[AMDGPUHarness.Lane]] and EXEC as the wave reaches the instruction at byte offset `end`. */
   private class Ended(end: Long) extends LaunchObserver {
@@ -322,6 +329,14 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
         Vec((at, MemoryAddress.Local(Written, 0), bytes.raw))
       case _ => Vec.empty[(Long, MemoryAddress, Int)]
     }
+    // what an instruction reads of LDS is what the harness holds there, which a launch starts without
+    val reads = instruction match {
+      case Instruction.Load(address = MemoryAddress.Local(register, displacement), bytes = bytes) =>
+        Vec(readBack(register, displacement, bytes))
+      case Instruction.LoadPair(address = address, bytes = bytes, first = first, second = second) =>
+        Vec(readBack(address, first, bytes), readBack(address, second, bytes))
+      case _ => Vec.empty[(Long, MemoryAddress, Int)]
+    }
     // a definition that ignores M0 names none, so the offsets it should apply are seeded all the same
     if (
       fields.nonEmpty &&
@@ -376,6 +391,22 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
     seeds +=
       (if (wide) Instruction.SMove64(Fixed.ExecLo, InstructionSource.Constant(exec))
        else Instruction.SMove(Fixed.ExecLo, InstructionSource.Constant(exec)))
+    reads.foreach { (at, _, bytes) =>
+      (0 until (bytes + 3) / 4).foreach { dword =>
+        val size = math.min(4, bytes - dword * 4)
+        seeds += Instruction.VWriteLane(
+          Reached,
+          InstructionSource.Constant(Execute.ldsOffset(at + dword * 4)),
+          InstructionSource.Constant(Lane.toLong)
+        )
+        seeds += Instruction.VWriteLane(
+          Staged,
+          InstructionSource.Constant(harness.sharedBytes.peek(at + dword * 4, size)),
+          InstructionSource.Constant(Lane.toLong)
+        )
+        seeds += Instruction.Store(Staged, MemoryAddress.Local(Reached, 0), size.unsafe[Int in 1 ~ 16], high = false)
+      }
+    }
     val accumulators = results.flatMap((spellings, tpe) =>
       location(spellings) match {
         case Some(Location.Register('a', index)) => Vec.tabulate(dwords(tpe))(index + _)

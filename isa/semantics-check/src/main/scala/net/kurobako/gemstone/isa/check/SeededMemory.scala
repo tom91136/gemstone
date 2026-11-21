@@ -1,5 +1,6 @@
 package net.kurobako.gemstone.isa.check
 
+import java.util.concurrent.atomic.AtomicLong
 import net.kurobako.gemstone.collection.*
 import scala.collection.mutable
 
@@ -24,8 +25,12 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
   private val written = mutable.LongMap.empty[Byte]
   private val loaded  = mutable.Set.empty[(Long, Byte)]
   private val seeded  = mutable.LongMap.empty[Byte]
+  private val extent  = AtomicLong(limit)
 
   private def initially(address: Long): Byte = seeded.getOrElse(address, initial(address))
+
+  /** Sets the cells below `bytes` as those that exist. */
+  def resize(bytes: Long): Unit = extent.set(bytes)
 
   /** Sets the bytes the cells hold before they are written. */
   def seed(bytes: Map[Long, Byte]): Unit = bytes.foreach((address, value) => seeded(address & mask) = value)
@@ -42,7 +47,7 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
 
   def load(address: Long, size: Int): Long = (0 until size).foldLeft(0L) { (value, index) =>
     val at = (address + index) & mask
-    if (at >= limit) value
+    if (at >= extent.get) value
     else {
       val byte = written.getOrElse(at, initially(at))
       loaded += ((at, byte))
@@ -50,9 +55,15 @@ class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, m
     }
   }
 
+  /** What [[load]] returns, without recording a load. */
+  def peek(address: Long, size: Int): Long = (0 until size).foldLeft(0L) { (value, index) =>
+    val at = (address + index) & mask
+    if (at >= extent.get) value else value | ((written.getOrElse(at, initially(at)) & 0xffL) << (index * 8))
+  }
+
   def store(address: Long, value: Long, size: Int): Unit = (0 until size).foreach { index =>
     val at = (address + index) & mask
-    if (at < limit) written(at) = (value >>> (index * 8)).toByte
+    if (at < extent.get) written(at) = (value >>> (index * 8)).toByte
   }
 
   def read(address: Long, size: Int): Vec[Byte] =

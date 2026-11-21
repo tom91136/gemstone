@@ -5,6 +5,7 @@ import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.amdgpu.LaneMasks
 import net.kurobako.gemstone.isa.check.Equivalence.*
 import net.kurobako.gemstone.isa.check.Equivalence.Verdict
+import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.semantics.render.Verdict as Solved
 import scala.collection.mutable
@@ -65,13 +66,16 @@ object Proof {
       uncovered(lane, left ++ right) match {
         case Some(kase) => Result.Refused(s"${describe(kase)} is not a case of the differential lane")
         case None       =>
-          modeFailures(left ++ right) match {
+          modeFailures(left ++ right).orElse(unallocated(reference, left ++ right)) match {
             case Some(reason) => Result.Refused(reason)
             case None         =>
               validate(left.iterator ++ right.iterator, liveOut) match {
                 case Left(reason) => Result.Refused(reason)
                 case Right(types) =>
-                  val (l, r) = (compose(left, liveOut, types), compose(right, liveOut, types))
+                  val (l, r) = (
+                    bounded(compose(left, liveOut, types), reference),
+                    bounded(compose(right, liveOut, types), reference)
+                  )
                   solver(l, r, liveOut.memory) match {
                     case Solved.Equal                  => Result.Proved(report(left ++ right, filtered))
                     case Solved.Unavailable            => Result.Unavailable(filtered)
@@ -107,6 +111,22 @@ object Proof {
           }
       }
   }
+
+  /** Why `steps` access shared memory that `reference` does not allocate, naming its instruction. */
+  private def unallocated[H, L <: Lookup](reference: Reference[H, L], steps: Vec[Step]): Option[String] =
+    steps.find(step => GlobalAccess.shares(step.kase.definition)).filter(_ =>
+      reference.allocation(Space.Shared).isEmpty
+    )
+      .map(step => s"${step.kase.instance} accesses shared memory, which this ISA does not allocate")
+
+  /** `definition` where the shared allocation it reads is at most the most the reference gives a workgroup. */
+  private def bounded[H, L <: Lookup](definition: Definition, reference: Reference[H, L]): Definition =
+    reference.allocation(Space.Shared).filter(_ => definition.parameters.exists(_.name == SmtBackend.SharedSize))
+      .fold(definition)(limit =>
+        definition.copy(requirements =
+          definition.requirements :+ Term.Binary("<=", Term.Variable(SmtBackend.SharedSize), Term.Literal(limit))
+        )
+      )
 
   /** Why a mode of one of `steps` is not rendered, naming its instruction. */
   private def modeFailures(steps: Vec[Step]): Option[String] =
@@ -176,10 +196,12 @@ object Proof {
 
     val results = liveOut.locations.map(location => (location, types(location), read(location)))
     val lane    = Term.Binary("<", Term.Variable(LaneMasks.Lane), Term.Literal(LaneMasks.Lanes.toLong))
+    val shares  = steps.exists(step => GlobalAccess.shares(step.kase.definition))
     Definition(
       "sequence",
       inputs.toVec.map(location => (location, types(location))) ++
-        (if (lanes) Vec((LaneMasks.Lane, LaneMasks.LaneType)) else Vec.empty),
+        (if (lanes) Vec((LaneMasks.Lane, LaneMasks.LaneType)) else Vec.empty[(String, Type)]) ++
+        (if (shares) Vec((SmtBackend.SharedSize, Form.Pair)) else Vec.empty),
       contexts.toVec,
       required.result() ++ (if (lanes) Vec(lane) else Vec.empty),
       body.result(),
@@ -307,7 +329,17 @@ object Proof {
           filtered
         )
       case None =>
-        Equivalence.replay(reference, executor, left, right, liveOut, inputs, SmtBackend.seeds(model)) match {
+        val allocations = model.get(SmtBackend.SharedSize).map(Space.Shared -> _).toMap
+        Equivalence.replay(
+          reference,
+          executor,
+          left,
+          right,
+          liveOut,
+          inputs,
+          SmtBackend.seeds(model),
+          allocations
+        ) match {
           case Verdict.Rejected(found)          => Result.Rejected(found, Source.Solver)
           case Verdict.NotRejected(_) if memory =>
             Result.Undecided(

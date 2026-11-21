@@ -182,7 +182,7 @@ class MemoryProofSuite extends Suite {
   }
 
   test("accesses of LDS, flat and scratch memory, and atomics, stay refused") {
-    Vec("ds_read_b32 v1, v2", "ds_write_b32 v2, v1", "flat_load_dword v1, v[2:3]", "ds_add_u32 v4, v3").foreach(text =>
+    Vec("flat_load_dword v1, v[2:3]", "ds_add_u32 v4, v3").foreach(text =>
       assert(AMDGPUForms.of(gfx906, text).left.exists(_.contains("is not a plain memory access")), text)
     )
     val atomics = AMDGPUGenerator.cases(Set("global_atomic_add", "global_atomic_cmpswap").contains, _ == "gfx906")
@@ -191,6 +191,36 @@ class MemoryProofSuite extends Suite {
       val form = AMDGPUForms.of(gfx906, kase.instance)
       assert(form.left.exists(_.contains("is refused")), form.fold(identity, _ => s"${kase.instance} is admitted"))
     }
+  }
+
+  private val near   = "ds_write_b32 v0, v1"
+  private val beside = "ds_write_b32 v0, v2 offset:4"
+
+  test("AMDGPU LDS stores at offsets of one base that cannot overlap are proved equal in either order") {
+    installed()
+    proved(prove(AMDGPUReference, amd(near, beside), amd(beside, near)), "ds_write_b32")
+  }
+
+  test("AMDGPU LDS stores whose addresses may alias are told apart in either order") {
+    installed()
+    val apart = "ds_write_b32 v3, v2"
+    rejected(prove(AMDGPUReference, amd(near, apart), amd(apart, near)))
+  }
+
+  test("an AMDGPU LDS load moved across a store is proved equal where it cannot overlap, rejected where it may") {
+    installed()
+    val load = "ds_read_b32 v6, v0 offset:4"
+    proved(prove(AMDGPUReference, amd(near, load), amd(load, near), "v6"), "ds_read_b32")
+    val alias = "ds_read_b32 v6, v3"
+    rejected(prove(AMDGPUReference, amd(near, alias), amd(alias, near), "v6"))
+  }
+
+  test("an AMDGPU LDS read of what was just stored is not the stored register, where the allocation ends before it") {
+    installed()
+    val within = "v_and_b32 v3, 63, v0"
+    val store  = "ds_write_b32 v3, v1"
+    val read   = "ds_read_b32 v2, v3"
+    bySolver(prove(AMDGPUReference, amd(within, store, read), amd(within, store, read, "v_mov_b32 v2, v1"), "v2"))
   }
 
   private val first  = "STG.E [R2.64], R5"

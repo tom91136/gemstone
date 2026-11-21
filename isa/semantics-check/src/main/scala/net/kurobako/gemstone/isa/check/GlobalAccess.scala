@@ -3,43 +3,49 @@ package net.kurobako.gemstone.isa.check
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.amdgpu.GlobalMemory
+import net.kurobako.gemstone.isa.amdgpu.LocalMemory
 import net.kurobako.gemstone.isa.nvidia.Machine as NvidiaMachine
 import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
 
 /** Each ISA's loads and stores of global memory as the machine's plain accesses of [[Space.Global]]: whole bytes by
   * 64-bit address, little-endian, which [[Rejection]] admits and a solver encodes as one array both sequences of a
-  * proof share. Every other access of memory stays as its ISA renders it, and so stays refused, as does a definition
-  * that both loads and stores, an update in place that other lanes may race with, and a SASS definition of more than
-  * one access, which execution aligns as one where the definition renders one per element.
+  * proof share. AMDGPU LDS is the same as [[Space.Shared]], by 32-bit address within an allocation. Every other access
+  * of memory stays as its ISA renders it, and so stays refused, as does a definition that both loads and stores, an
+  * update in place that other lanes may race with, and a SASS definition of more than one access, which execution
+  * aligns as one where the definition renders one per element.
   */
 object GlobalAccess {
   private val amdgpu = classOf[GlobalMemory].getName
+  private val lds    = classOf[LocalMemory].getName
   private val nvidia = NvidiaMachine.memoryContext._1
   private val Sized  = "(load|store)(8|16|32|64)".r
   private val global = RenderMachine.space(Space.Global)
+  private val shared = RenderMachine.space(Space.Shared)
 
   private def bytes(tpe: Type): Boolean = tpe match {
     case Type.Integer(width, false) => width % 8 == 0
     case _                          => false
   }
 
-  private def load(tpe: Type, address: Term): Term = Term.context(
+  private def load(space: Term, tpe: Type, address: Term): Term = Term.context(
     RenderMachine.Machine,
-    MachineCall("load", Vec(tpe), Vec((global, None), (plain(address), Some(RenderMachine.Word)))),
+    MachineCall("load", Vec(tpe), Vec((space, None), (plain(address), Some(RenderMachine.Word)))),
     Some(tpe)
   )
 
-  private def store(tpe: Type, address: Term, value: Term): Term = Term.context(
+  private def store(space: Term, tpe: Type, address: Term, value: Term): Term = Term.context(
     RenderMachine.Machine,
     MachineCall(
       "store",
       Vec(tpe),
-      Vec((global, None), (plain(address), Some(RenderMachine.Word)), (plain(value), Some(tpe)))
+      Vec((space, None), (plain(address), Some(RenderMachine.Word)), (plain(value), Some(tpe)))
     ),
     None,
     effect = true
   )
+
+  private def space(owner: String): Term = if (owner == lds) shared else global
 
   private def width(bytes: Term): Term = bytes match {
     case Term.Call(_, Vec(literal @ Term.Literal(_))) => literal
@@ -47,18 +53,25 @@ object GlobalAccess {
   }
 
   private def plain(term: Term): Term = term match {
-    case Term.Context(contextType = `amdgpu`, method = Sized("load", width), arguments = Vec(address)) =>
-      load(Type.unsigned(width.toInt.unsafe[Int in 1 ~ 64]), address)
-    case Term.Context(contextType = `amdgpu`, method = Sized("store", width), arguments = Vec(address, value)) =>
-      store(Type.unsigned(width.toInt.unsafe[Int in 1 ~ 64]), address, value)
+    case Term.Context(
+          contextType = owner @ (`amdgpu` | `lds`),
+          method = Sized("load", width),
+          arguments = Vec(address)
+        ) =>
+      load(space(owner), Type.unsigned(width.toInt.unsafe[Int in 1 ~ 64]), address)
+    case Term.Context(
+          contextType = owner @ (`amdgpu` | `lds`),
+          method = Sized("store", width),
+          arguments = Vec(address, value)
+        ) => store(space(owner), Type.unsigned(width.toInt.unsafe[Int in 1 ~ 64]), address, value)
     case Term.Context(contextType = `nvidia`, method = "loadGlobal", typeArguments = Vec(tpe), arguments = Vec(address))
-        if bytes(tpe) => load(tpe, address)
+        if bytes(tpe) => load(global, tpe, address)
     case Term.Context(
           contextType = `nvidia`,
           method = "storeGlobal",
           typeArguments = Vec(tpe),
           arguments = Vec(address, value)
-        ) if bytes(tpe) => store(tpe, address, value)
+        ) if bytes(tpe) => store(global, tpe, address, value)
     case Term.Context(
           contextType = `nvidia`,
           method = check @ ("alignLoadGlobal" | "alignStoreGlobal"),
@@ -95,7 +108,7 @@ object GlobalAccess {
     val body         = definition.body.map(statement => statement.copy(term = plain(statement.term)))
     val results      = definition.results.map((name, tpe, value) => (name, tpe, plain(value)))
     val reached      = (requirements ++ body.map(_.term) ++ results.map(_._3)).flatMap(_.contexts).distinct
-    val memories     = Set(amdgpu, nvidia, RenderMachine.Machine.contextType)
+    val memories     = Set(amdgpu, lds, nvidia, RenderMachine.Machine.contextType)
     val known        = definition.contexts.map(context => (context.name, context.tpe))
     val made         = definition.copy(
       contexts = known.filter(context => !memories(context._2) || reached.contains(context)) ++
@@ -110,6 +123,13 @@ object GlobalAccess {
   /** Whether `definition` loads or stores memory through the machine's plain accesses. */
   def accesses(definition: Definition): Boolean =
     definition.contexts.exists(_.tpe == RenderMachine.Machine.contextType)
+
+  /** Whether `definition` accesses [[Space.Shared]] through the machine's plain accesses. */
+  def shares(definition: Definition): Boolean = terms(definition).exists {
+    case Term.Context(contextType = owner, arguments = arguments) =>
+      owner == RenderMachine.Machine.contextType && arguments.headOption.contains(shared)
+    case _ => false
+  }
 
   /** Whether `definition` loads memory. */
   def loads(definition: Definition): Boolean = terms(definition).exists(machine("load"))

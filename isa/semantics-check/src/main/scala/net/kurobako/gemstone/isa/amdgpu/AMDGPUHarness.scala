@@ -201,6 +201,7 @@ private[isa] class AMDGPUHarness {
   def writes: (global: Map[Long, Byte], shared: Map[Long, Byte], vectors: Map[Int, Long]) =
     (globalBytes.writes, sharedBytes.writes, vectorWrites.toMap)
 
-  /** The bytes of global memory loaded, by address. */
-  def loads: Set[(Long, Byte)] = globalBytes.loads
+  /** The bytes of global memory and of LDS loaded, by address. */
+  def loads: Map[Space, Set[(Long, Byte)]] =
+    Map(Space.Global -> globalBytes.loads, Space.Shared -> sharedBytes.loads)
 }

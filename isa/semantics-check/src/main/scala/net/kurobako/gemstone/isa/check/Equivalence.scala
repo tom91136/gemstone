@@ -99,10 +99,11 @@ object Equivalence {
       right: Vec[Step],
       liveOut: LiveOut,
       inputs: Map[String, Long],
-      memory: Map[Space, Map[Long, Byte]] = Map.empty
+      memory: Map[Space, Map[Long, Byte]] = Map.empty,
+      allocations: Map[Space, Long] = Map.empty
   ): Verdict = typed(reference, left, right, liveOut).map { types =>
     val sampled = types.keys.toVec.sorted.map(name => (name, inputs.getOrElse(name, 0L)))
-    compare(reference, executor, left, right, liveOut, types, sampled, 0, memory) match {
+    compare(reference, executor, left, right, liveOut, types, sampled, 0, memory, allocations) match {
       case Outcome.Skipped                  => Verdict.Undecided("the inputs do not run on both sequences")
       case Outcome.Agreed                   => Verdict.NotRejected(1)
       case Outcome.Differed(counterexample) => Verdict.Rejected(counterexample)
@@ -129,11 +130,16 @@ object Equivalence {
       types: Map[String, Type],
       sampled: Vec[(String, Long)],
       seed: Int,
-      memory: Map[Space, Map[Long, Byte]] = Map.empty
+      memory: Map[Space, Map[Long, Byte]] = Map.empty,
+      allocations: Map[Space, Long] = Map.empty
   ): Outcome = {
     val initial      = sampled.toMap
     val leftHarness  = reference.harness(seed.toLong)
     val rightHarness = reference.harness(seed.toLong)
+    allocations.foreach { (space, bytes) =>
+      reference.allocate(leftHarness, space, bytes)
+      reference.allocate(rightHarness, space, bytes)
+    }
     memory.foreach { (space, bytes) =>
       reference.seed(leftHarness, space, bytes)
       reference.seed(rightHarness, space, bytes)

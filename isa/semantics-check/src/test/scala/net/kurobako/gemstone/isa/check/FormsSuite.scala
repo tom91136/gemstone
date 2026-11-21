@@ -71,7 +71,7 @@ class FormsSuite extends Suite {
     assertEquals(at(0x10).left.map(_.contains("is refused: Launch.")), Left(true))
     assertEquals(at(0x30).left.map(_.contains("is refused: Warp.")), Left(true))
     assertEquals(
-      AMDGPUForms.of(gfx906, "ds_read_b32 v1, v2").left.map(_.contains("is refused: LocalMemory.")),
+      AMDGPUForms.of(gfx906, "ds_add_u32 v1, v2").left.map(_.contains("is refused: LocalMemory.")),
       Left(true)
     )
   }

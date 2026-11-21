@@ -63,6 +63,12 @@ object SmtBackend extends Backend {
   private val Stored    = "stored"
 
   /** The constant banks, which nothing stores to: one memory of every bank's bytes, a bank above its offsets. */
+  /** The parameter that holds the bytes a workgroup allocates of the shared space, which addresses 32 bits wide reach
+    * from zero: a byte at or past it reads zero and drops writes.
+    */
+  val SharedSize = "shared_size"
+
+  private val Shared       = "Shared"
   private val Constants    = "Constants"
   private val Seeded       = raw"seed_([A-Za-z]+)_(\d+)_(a|\d+)".r
   private val Converted    = raw"\.to\[(UInt|SInt)\[(\d+)\]\]".r
@@ -142,7 +148,7 @@ object SmtBackend extends Backend {
           (0 until width / 8).toList.map(byte =>
             Seed(
               s"${name}_$byte",
-              s"(define-fun ${name}_$byte () (_ BitVec 8) (select ${initial(space)} ${offset(address, byte)}))"
+              s"(define-fun ${name}_$byte () (_ BitVec 8) (select ${initial(space)} ${reached(space, address, byte)}))"
             )
           )
     }
@@ -305,6 +311,7 @@ object SmtBackend extends Backend {
         for {
           width <- whole(term, tpe.bits)
           key   <- spaceKey(space)
+          _     <- allocated(key)
           a     <- expression(address)
           v     <- expression(value)
         } yield store(key, bits(a, 64), bits(v, width), width, guard)
@@ -312,6 +319,7 @@ object SmtBackend extends Backend {
           if isMachine(contextType) =>
         for {
           key   <- spaceKey(space)
+          _     <- allocated(key)
           a     <- expression(address)
           d     <- expression(data)
           width <- d match {
@@ -335,8 +343,10 @@ object SmtBackend extends Backend {
       accessed += space
       val previous = current(space)
       val updated  = (0 until width / 8).foldLeft(previous) { (array, index) =>
-        val byte = if (width == 8) data else s"((_ extract ${8 * index + 7} ${8 * index}) $data)"
-        s"(store $array ${offset(address, index)} $byte)"
+        val byte        = if (width == 8) data else s"((_ extract ${8 * index + 7} ${8 * index}) $data)"
+        val (at, valid) = reach(space, address, index)
+        val written     = s"(store $array $at $byte)"
+        valid.fold(written)(inside => s"(ite $inside $written $array)")
       }
       val target = symbol(s"${prefix}memory_${spaceName(space)}_${counter.next()}")
       val value  = guard.fold(updated)(condition => s"(ite $condition $updated $previous)")
@@ -348,10 +358,23 @@ object SmtBackend extends Backend {
     private def read(space: String, address: String, width: Int): String = {
       accessed += space
       val array = current(space)
-      (0 until width / 8).map(index => s"(select $array ${offset(address, index)})").reverse.reduceLeft {
-        (high, low) => s"(concat $high $low)"
-      }
+      (0 until width / 8).map { index =>
+        val (at, valid) = reach(space, address, index)
+        valid.fold(s"(select $array $at)")(inside => s"(ite $inside (select $array $at) ${literal(0, 8)})")
+      }.reverse.reduceLeft((high, low) => s"(concat $high $low)")
     }
+
+    /** The address of byte `index` of an access at `address` of `space`, and where it is a byte of the allocation. */
+    private def reach(space: String, address: String, index: Int): (String, Option[String]) =
+      (
+        reached(space, address, index),
+        Option.when(spaceName(space) == Shared)(
+          s"(bvult ${reached(space, address, index)} ${bits(values(SharedSize), 64)})"
+        )
+      )
+
+    private def allocated(space: String): Either[String, Unit] =
+      Either.cond(spaceName(space) != Shared || values.contains(SharedSize), (), "shared memory has no allocation size")
 
     private def current(space: String): String = stored.getOrElse(space, initial(space))
 
@@ -383,6 +406,7 @@ object SmtBackend extends Backend {
           ) if isMachine(contextType) =>
         for {
           key   <- spaceKey(space)
+          _     <- allocated(key)
           a     <- expression(address)
           shape <- shapeOf(tpe)
         } yield {
@@ -860,6 +884,11 @@ object SmtBackend extends Backend {
     val masked = if (width >= 64) value else value & ((1L << width) - 1)
     s"(_ bv${java.lang.Long.toUnsignedString(masked)} $width)"
   }
+
+  /** The address of byte `index` of an access at `address` of `space`, shared addresses wrapping at 32 bits. */
+  private def reached(space: String, address: String, index: Int): String =
+    if (spaceName(space) == Shared) s"(bvand ${offset(address, index)} ${literal(0xffffffffL, 64)})"
+    else offset(address, index)
 
   private def offset(address: String, index: Int): String =
     if (index == 0) address else s"(bvadd $address ${literal(index, 64)})"

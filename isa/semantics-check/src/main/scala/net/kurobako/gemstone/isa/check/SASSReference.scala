@@ -178,5 +178,6 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
   override def seed(harness: NvidiaHarness, space: Space, bytes: Map[Long, Byte]): Unit =
     if (space == Space.Global) harness.globalBytes.seed(bytes)
 
-  override def loads(harness: NvidiaHarness): Set[(Long, Byte)] = harness.globalBytes.loads
+  override def loads(harness: NvidiaHarness): Map[Space, Set[(Long, Byte)]] =
+    Map(Space.Global -> harness.globalBytes.loads)
 }
