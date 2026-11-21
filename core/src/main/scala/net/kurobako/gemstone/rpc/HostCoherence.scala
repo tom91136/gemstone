@@ -303,7 +303,8 @@ private class HostCoherence(
         mirroring.increment()
         if (shared) {
           mirroring.decrement()
-          atomic(completion, address, size.widen[Int in 1 ~ 8])(update)
+          while (mirroring.sum() != 0L) PlatformConcurrency.yieldThread()
+          flushWrites(completion).flatMap(_ => atomic(completion, address, size.widen[Int in 1 ~ 8])(update))
         } else {
           var previous = Option.empty[Long]
           try

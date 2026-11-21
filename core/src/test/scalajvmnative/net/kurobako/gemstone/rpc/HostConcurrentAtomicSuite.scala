@@ -56,36 +56,41 @@ class HostConcurrentAtomicSuite extends Suite {
 
   private def run(lanes: Int, rounds: Int, local: Vector[Boolean], staggered: Boolean): Long = {
     val failure  = AtomicReference(Option.empty[Fault])
-    val arrived  = AtomicInteger()
     val first    = AtomicInteger()
     val started  = CountDownLatch(1)
     val together = CountDownLatch(dispatches)
-    val memory   = NativeMemory()
+    drive { (index, context) =>
+      def add(): Either[Fault, Long] =
+        if (local(index)) context.memory.atomicModifyLocalValue(GuestAddress(base), 8)(_ + 1)
+        else context.memory.atomicModifyValue(GuestAddress(base), 8)(_ + 1)
+      def step(): Unit = {
+        add().left.foreach(f => failure.set(Some(f)))
+        if (index == 0 && first.incrementAndGet() == lanes * rounds / 2) started.countDown()
+      }
+      if (!staggered) {
+        together.countDown()
+        assert(together.await(60L, TimeUnit.SECONDS), "dispatches did not meet")
+      } else if (index != 0) assert(started.await(60L, TimeUnit.SECONDS), "first dispatch did not start")
+      val threads = Vector.fill(lanes)(Thread(() => (0 until rounds).foreach(_ => step())))
+      threads.foreach(_.start())
+      threads.foreach { thread =>
+        thread.join(60000L)
+        assert(!thread.isAlive, "lane did not finish")
+      }
+      failure.get().toLeft(())
+    }(failure)
+  }
+
+  /** Runs two dispatches over one host word; `body` gets the order in which the dispatches started. */
+  private def drive(body: (Int, TaskContext) => Either[Fault, Unit])(failure: AtomicReference[Option[Fault]]): Long = {
+    val arrived = AtomicInteger()
+    val memory  = NativeMemory()
     class FakeProgram extends Backend.Program {
       override def symbols: Either[Fault, ProgramSymbols] = Right(ProgramSymbols(Vec.empty, Vec.empty))
       override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
         KernelMetadata.validated(0, 1, Vec.empty).left.map(Fault.InvalidRequest(_))
-      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] = {
-        val index                      = arrived.getAndIncrement()
-        def add(): Either[Fault, Long] =
-          if (local(index)) context.memory.atomicModifyLocalValue(GuestAddress(base), 8)(_ + 1)
-          else context.memory.atomicModifyValue(GuestAddress(base), 8)(_ + 1)
-        def step(): Unit = {
-          add().left.foreach(f => failure.set(Some(f)))
-          if (index == 0 && first.incrementAndGet() == lanes * rounds / 2) started.countDown()
-        }
-        if (!staggered) {
-          together.countDown()
-          assert(together.await(60L, TimeUnit.SECONDS), "dispatches did not meet")
-        } else if (index != 0) assert(started.await(60L, TimeUnit.SECONDS), "first dispatch did not start")
-        val threads = Vector.fill(lanes)(Thread(() => (0 until rounds).foreach(_ => step())))
-        threads.foreach(_.start())
-        threads.foreach { thread =>
-          thread.join(60000L)
-          assert(!thread.isAlive, "lane did not finish")
-        }
-        failure.get().toLeft(())
-      }
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+        body(arrived.getAndIncrement(), context)
       override def close(): Unit = ()
     }
     class FakeBackend extends Backend {
@@ -148,4 +153,11 @@ class HostConcurrentAtomicSuite extends Suite {
     test(s"$name atomics on host memory are shared by ${if (staggered) "staggered" else "simultaneous"} dispatches") {
       assertEquals(run(lanes = 3, rounds = 200, local, staggered), 2L * 3 * 200)
     }
+
+  test("workgroup-scope atomics lose no update across repeated simultaneous dispatches") {
+    val lost = (0 until 100).count(_ =>
+      run(lanes = 3, rounds = 200, Vector(true, true), staggered = false) != 2L * 3 * 200
+    )
+    assertEquals(lost, 0)
+  }
 }
