@@ -41,6 +41,8 @@ object Fixture {
 
   def exists(name: String): Boolean = listings.contains(name)
 
+  def names: Vec[String] = Vec.from(listings.keys).sorted
+
   def code(name: String): Vec[Byte] = Vec.unsafeWrapArray(bytes.hex(CompilerKernelFixtures.code(name)))
 
   def copyAddCubin: Vec[Byte] = Vec.unsafeWrapArray(bytes.hex(CompilerKernelFixtures.copyAddCubin))

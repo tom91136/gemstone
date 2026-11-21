@@ -32,16 +32,20 @@ object SASSGenerator {
       )
     )
 
-  /** Each definition `target` describes once, but those that access memory other than by plain loads and stores of
-    * global memory, with the first instance that lowers to it. Only the entries `included` holds are described.
+  /** Every instance `target` describes, but those that access memory other than by plain loads and stores of global
+    * memory. Only the entries `included` holds are described.
     */
-  private[check] def plain(target: String, included: String => Boolean): Vec[Described] =
+  private[check] def instances(target: String, included: String => Boolean): Vec[Described] =
     SASSModel.entries(Some(target)).filter(entry => included(entry.mnemonic)).flatMap(entry =>
       entry.forms.flatMap(form =>
         SASSModel.instances(Some(target), entry.mnemonic, form.name).toOption.toVec.flatten
           .flatMap(described(target, _, entry.mnemonic, form.name))
       )
-    ).distinctBy(value => ScalaBackend.show(value.kase.definition))
+    )
+
+  /** Each definition `target` describes once, with the first of the [[instances]] that lowers to it. */
+  private[check] def plain(target: String, included: String => Boolean): Vec[Described] =
+    instances(target, included).distinctBy(value => ScalaBackend.show(value.kase.definition))
 
   /** The first of `form`, the cases of one mnemonic and operand kinds, that lowers under `guard`, on the last predicate
     * its instance does not name: instances number theirs from `P0`. The reference runs the elements of a matrix product
