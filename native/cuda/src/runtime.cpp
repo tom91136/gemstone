@@ -14,10 +14,13 @@
 #include <atomic>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
+#include <deque>
 #include <fstream>
 #include <functional>
 #include <ios>
@@ -74,6 +77,11 @@ extern "C" GEMSTONE_INTERNAL_API CUresult gemstone_cuda_unsupported_driver();
 using namespace aspartame;
 using namespace gemstone::execution;
 using gemstone::readNative;
+
+struct CUlogsCallbackEntry_st {
+  CUlogsCallback callback;
+  void *data;
+};
 
 namespace {
 
@@ -256,8 +264,8 @@ CUresult graphResult(Outcome outcome) {
   return CUDA_ERROR_UNKNOWN;
 }
 
-CUresult enqueueCommand(CUstream stream, std::function<int32_t()> work) {
-  if (gemstone::graph::divert(work) || captures.record(stream, work)) return CUDA_SUCCESS;
+CUresult enqueueCommand(CUstream stream, Kind kind, std::function<int32_t()> work) {
+  if (gemstone::graph::divert(work) || captures.record(stream, kind, work)) return CUDA_SUCCESS;
   if (const auto latched = stickyError.load(); latched != CUDA_SUCCESS) return latched;
   try {
     commands().submit(stream, std::move(work));
@@ -1469,7 +1477,7 @@ template <class Copy> CUresult copyNow(const Copy *copy) { return copy ? copyVol
 
 template <class Copy> CUresult copyAsync(const Copy *copy, CUstream stream) {
   if (!copy) return CUDA_ERROR_INVALID_VALUE;
-  return enqueueCommand(stream, [volume = volumeCopy(*copy)] { return copyVolume(volume); });
+  return enqueueCommand(stream, Kind::Memcpy, [volume = volumeCopy(*copy)] { return copyVolume(volume); });
 }
 
 template <class T> CUresult memsetNow(CUdeviceptr destination, T value, size_t count) {
@@ -2033,6 +2041,59 @@ CUresult describeError(CUresult status, const char **text, const char *ErrorText
   if (!found || !(found->*field)) return CUDA_ERROR_INVALID_VALUE;
   *text = found->*field;
   return CUDA_SUCCESS;
+}
+
+std::string timestamp() {
+  const auto now = std::chrono::system_clock::now();
+  const auto seconds = std::chrono::system_clock::to_time_t(now);
+  const auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+  std::tm local{};
+  localtime_r(&seconds, &local);
+  char text[32];
+  std::snprintf(text, sizeof text, "[%02d:%02d:%02d.%03d]", local.tm_hour, local.tm_min, local.tm_sec, static_cast<int>(millis));
+  return text;
+}
+
+constexpr size_t DriverLogCapacity = 25600;
+
+struct LogLine {
+  CUlogIterator sequence;
+  std::string text;
+};
+
+struct DriverLog {
+  std::mutex mutex;
+  std::deque<LogLine> lines;
+  size_t bytes = 0;
+  CUlogIterator next = 0;
+  std::vector<std::unique_ptr<CUlogsCallbackEntry_st>> callbacks;
+};
+
+DriverLog driverLog;
+
+void logMessage(const std::string &message) {
+  std::vector<std::pair<CUlogsCallback, void *>> subscribers;
+  {
+    std::scoped_lock const lock(driverLog.mutex);
+    std::string text = timestamp() + "[" + std::to_string(getpid()) + "][CUDA][E] " + message + "\n";
+    driverLog.bytes += text.size();
+    driverLog.lines.push_back({.sequence = driverLog.next++, .text = std::move(text)});
+    while (driverLog.bytes > DriverLogCapacity) {
+      driverLog.bytes -= driverLog.lines.front().text.size();
+      driverLog.lines.pop_front();
+    }
+    for (const auto &entry : driverLog.callbacks)
+      subscribers.emplace_back(entry->callback, entry->data);
+  }
+  for (const auto &[callback, data] : subscribers) {
+    std::string bare = message;
+    callback(data, CU_LOG_LEVEL_ERROR, bare.data(), bare.size());
+  }
+}
+
+CUresult reportFailure(CUresult status, const char *function) {
+  logMessage("Returning " + std::to_string(status) + " (" + errorText(status)->driverName + ") from " + function);
+  return status;
 }
 
 CUresult cudartLoadModuleImage(CUmodule *module, const void *image, bool allowEmpty) {
@@ -3295,8 +3356,79 @@ CUresult cuDevicePrimaryCtxReset_v2(CUdevice device) {
   return CUDA_SUCCESS;
 }
 
+CUresult cuLogsRegisterCallback(CUlogsCallback callbackFunc, void *userData, CUlogsCallbackHandle *callbackOut) {
+  if (!callbackFunc) {
+    logMessage("callbackFunc cannot be NULL");
+    return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuLogsRegisterCallback");
+  }
+  auto entry = std::make_unique<CUlogsCallbackEntry_st>(CUlogsCallbackEntry_st{.callback = callbackFunc, .data = userData});
+  if (callbackOut) *callbackOut = entry.get();
+  std::scoped_lock const lock(driverLog.mutex);
+  driverLog.callbacks.push_back(std::move(entry));
+  return CUDA_SUCCESS;
+}
+
+CUresult cuLogsUnregisterCallback(CUlogsCallbackHandle callback) {
+  if (!callback) {
+    logMessage("Callback handle cannot be NULL");
+    return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuLogsUnregisterCallback");
+  }
+  {
+    std::scoped_lock const lock(driverLog.mutex);
+    const auto found = std::find_if(driverLog.callbacks.begin(), driverLog.callbacks.end(),
+                                    [callback](const auto &entry) { return entry.get() == callback; });
+    if (found != driverLog.callbacks.end()) {
+      driverLog.callbacks.erase(found);
+      return CUDA_SUCCESS;
+    }
+  }
+  return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuLogsUnregisterCallback");
+}
+
+CUresult cuLogsCurrent(CUlogIterator *iteratorOut, unsigned int flags) {
+  if (!iteratorOut || flags) return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuLogsCurrent");
+  std::scoped_lock const lock(driverLog.mutex);
+  *iteratorOut = driverLog.next;
+  return CUDA_SUCCESS;
+}
+
+CUresult cuLogsDumpToMemory(CUlogIterator *iterator, char *buffer, size_t *size, unsigned int flags) {
+  if (!buffer || !size || flags) return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuLogsDumpToMemory");
+  const auto capacity = *size ? *size - 1 : 0;
+  const auto from = iterator ? *iterator : 0;
+  std::string dump;
+  CUlogIterator end = from;
+  bool pending = false;
+  {
+    std::scoped_lock const lock(driverLog.mutex);
+    pending = from < driverLog.next;
+    for (const auto &line : driverLog.lines) {
+      if (line.sequence < from) continue;
+      if (dump.size() + line.text.size() > capacity) break;
+      dump += line.text;
+      end = line.sequence + 1;
+    }
+  }
+  if (pending && dump.empty()) {
+    *size = 0;
+    logMessage("Provided buffer");
+    return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuLogsDumpToMemory");
+  }
+  if (*size) {
+    std::memcpy(buffer, dump.data(), dump.size());
+    buffer[dump.size()] = '\0';
+  }
+  *size = dump.size();
+  if (iterator) *iterator = end;
+  return CUDA_SUCCESS;
+}
+
 CUresult cuMemAlloc_v2(CUdeviceptr *pointer, size_t size) {
   if (const auto status = unlessCaptureProhibits(); status != CUDA_SUCCESS) return status;
+  if (size == 0) {
+    logMessage("Requested 0 byte allocation");
+    return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuMemAlloc_v2");
+  }
   return allocate(pointer, size, nullptr);
 }
 
@@ -3337,7 +3469,7 @@ CUresult cuMemPrefetchAsync(CUdeviceptr devPtr, size_t, CUdevice device, CUstrea
   if (device != CU_DEVICE_CPU && !validDevice(device)) return CUDA_ERROR_INVALID_DEVICE;
   const auto found = pointerMetadata(devPtr);
   if (!found || !found->managed) return CUDA_ERROR_INVALID_VALUE;
-  return enqueueCommand(stream, [] { return CUDA_SUCCESS; });
+  return enqueueCommand(stream, Kind::Empty, [] { return CUDA_SUCCESS; });
 }
 
 CUresult cuMemAllocHost_v2(void **pointer, size_t size) {
@@ -3488,7 +3620,7 @@ CUresult cuMemAllocFromPoolAsync(CUdeviceptr *pointer, size_t size, CUmemoryPool
 }
 
 CUresult cuMemFreeAsync(CUdeviceptr pointer, CUstream stream) {
-  return enqueueCommand(stream, [=] { return releaseToPool(pointer) ? CUDA_SUCCESS : cuMemFree_v2(pointer); });
+  return enqueueCommand(stream, Kind::Work, [=] { return releaseToPool(pointer) ? CUDA_SUCCESS : cuMemFree_v2(pointer); });
 }
 
 CUresult cuMemPoolCreate(CUmemoryPool *pool, const CUmemPoolProps *) {
@@ -3696,7 +3828,7 @@ CUresult cuMemcpyAsync(CUdeviceptr destination, CUdeviceptr source, size_t size,
   const bool fromDevice = devicePointer(source);
   if (toDevice && !fromDevice) return cuMemcpyHtoDAsync_v2(destination, reinterpret_cast<const void *>(source), size, stream);
   if (!toDevice && fromDevice) return cuMemcpyDtoHAsync_v2(reinterpret_cast<void *>(destination), source, size, stream);
-  return enqueueCommand(stream, [=] { return cuMemcpy(destination, source, size); });
+  return enqueueCommand(stream, Kind::Memcpy, [=] { return cuMemcpy(destination, source, size); });
 }
 
 // Pageable sources are staged before returning, as the driver does, so callers may reuse them immediately.
@@ -3705,17 +3837,17 @@ CUresult cuMemcpyHtoDAsync_v2(CUdeviceptr destination, const void *source, size_
     try {
       const auto staged =
           std::make_shared<std::vector<uint8_t>>(static_cast<const uint8_t *>(source), static_cast<const uint8_t *>(source) + size);
-      return enqueueCommand(stream, [=] { return cuMemcpyHtoD_v2(destination, staged->data(), size); });
+      return enqueueCommand(stream, Kind::Memcpy, [=] { return cuMemcpyHtoD_v2(destination, staged->data(), size); });
     } catch (...) {
       return CUDA_ERROR_OUT_OF_MEMORY;
     }
   }
-  return enqueueCommand(stream, [=] { return cuMemcpyHtoD_v2(destination, source, size); });
+  return enqueueCommand(stream, Kind::Memcpy, [=] { return cuMemcpyHtoD_v2(destination, source, size); });
 }
 
 // Copies into pageable memory complete before returning, as the driver does.
 CUresult cuMemcpyDtoHAsync_v2(void *destination, CUdeviceptr source, size_t size, CUstream stream) {
-  const auto queued = enqueueCommand(stream, [=] { return cuMemcpyDtoH_v2(destination, source, size); });
+  const auto queued = enqueueCommand(stream, Kind::Memcpy, [=] { return cuMemcpyDtoH_v2(destination, source, size); });
   if (queued != CUDA_SUCCESS || !destination || size == 0 || !pageableHost(destination, size) || streamDeferred(stream)) return queued;
   return cuStreamSynchronize(stream);
 }
@@ -3741,19 +3873,19 @@ CUresult cuMemcpyAtoHAsync_v2(void *destination, CUarray source, size_t offset, 
 }
 
 CUresult cuMemcpyDtoDAsync_v2(CUdeviceptr destination, CUdeviceptr source, size_t size, CUstream stream) {
-  return enqueueCommand(stream, [=] { return cuMemcpyDtoD_v2(destination, source, size); });
+  return enqueueCommand(stream, Kind::Memcpy, [=] { return cuMemcpyDtoD_v2(destination, source, size); });
 }
 
 CUresult cuMemsetD8Async(CUdeviceptr destination, unsigned char value, size_t count, CUstream stream) {
-  return enqueueCommand(stream, [=] { return cuMemsetD8_v2(destination, value, count); });
+  return enqueueCommand(stream, Kind::Memset, [=] { return cuMemsetD8_v2(destination, value, count); });
 }
 
 CUresult cuMemsetD16Async(CUdeviceptr destination, unsigned short value, size_t count, CUstream stream) {
-  return enqueueCommand(stream, [=] { return cuMemsetD16_v2(destination, value, count); });
+  return enqueueCommand(stream, Kind::Memset, [=] { return cuMemsetD16_v2(destination, value, count); });
 }
 
 CUresult cuMemsetD32Async(CUdeviceptr destination, unsigned int value, size_t count, CUstream stream) {
-  return enqueueCommand(stream, [=] { return cuMemsetD32_v2(destination, value, count); });
+  return enqueueCommand(stream, Kind::Memset, [=] { return cuMemsetD32_v2(destination, value, count); });
 }
 
 CUresult cuMemsetD2D8_v2(CUdeviceptr destination, size_t pitch, unsigned char value, size_t width, size_t height) {
@@ -3769,15 +3901,15 @@ CUresult cuMemsetD2D32_v2(CUdeviceptr destination, size_t pitch, unsigned int va
 }
 
 CUresult cuMemsetD2D8Async(CUdeviceptr destination, size_t pitch, unsigned char value, size_t width, size_t height, CUstream stream) {
-  return enqueueCommand(stream, [=] { return cuMemsetD2D8_v2(destination, pitch, value, width, height); });
+  return enqueueCommand(stream, Kind::Memset, [=] { return cuMemsetD2D8_v2(destination, pitch, value, width, height); });
 }
 
 CUresult cuMemsetD2D16Async(CUdeviceptr destination, size_t pitch, unsigned short value, size_t width, size_t height, CUstream stream) {
-  return enqueueCommand(stream, [=] { return cuMemsetD2D16_v2(destination, pitch, value, width, height); });
+  return enqueueCommand(stream, Kind::Memset, [=] { return cuMemsetD2D16_v2(destination, pitch, value, width, height); });
 }
 
 CUresult cuMemsetD2D32Async(CUdeviceptr destination, size_t pitch, unsigned int value, size_t width, size_t height, CUstream stream) {
-  return enqueueCommand(stream, [=] { return cuMemsetD2D32_v2(destination, pitch, value, width, height); });
+  return enqueueCommand(stream, Kind::Memset, [=] { return cuMemsetD2D32_v2(destination, pitch, value, width, height); });
 }
 
 CUresult cuMemcpy2D_v2(const CUDA_MEMCPY2D *copy) { return copyNow(copy); }
@@ -5095,7 +5227,7 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
     }
     if (const auto status = deviceHeapFor(launch.deviceHeap); status != CUDA_SUCCESS) return status;
     if (const auto status = buildFunction(*entry); status != CUDA_SUCCESS) return status;
-    return enqueueCommand(stream, [launch = std::move(launch), encoding = entry->module->encoding] -> int32_t {
+    return enqueueCommand(stream, Kind::Kernel, [launch = std::move(launch), encoding = entry->module->encoding] -> int32_t {
       std::string error;
       CompletionResult result;
       if (launchAndCollect(launch, result, error)) return CUDA_SUCCESS;
@@ -5279,7 +5411,7 @@ CUresult cuTensorMapReplaceAddress(CUtensorMap *tensorMap, void *globalAddress) 
 
 CUresult cuLaunchHostFunc(CUstream stream, CUhostFn callback, void *userData) {
   if (!contextIsLive(activeContext()) || !callback) return CUDA_ERROR_INVALID_VALUE;
-  return enqueueCommand(stream, [=] {
+  return enqueueCommand(stream, Kind::Host, [=] {
     callback(userData);
     return CUDA_SUCCESS;
   });
@@ -5291,7 +5423,7 @@ CUresult cuLaunchHostFunc_v2(CUstream stream, CUhostFn callback, void *userData,
 
 CUresult cuStreamAddCallback(CUstream stream, CUstreamCallback callback, void *userData, unsigned flags) {
   if (flags != 0 || !contextIsLive(activeContext()) || !callback) return CUDA_ERROR_INVALID_VALUE;
-  return enqueueCommand(stream, [=] {
+  return enqueueCommand(stream, Kind::Host, [=] {
     callback(stream, CUDA_SUCCESS, userData);
     return CUDA_SUCCESS;
   });
@@ -5348,7 +5480,7 @@ CUresult cuStreamQuery(CUstream stream) { return queueStatus(commands().query(co
 CUresult cuStreamAttachMemAsync(CUstream stream, CUdeviceptr, size_t, unsigned int flags) {
   if (flags != CU_MEM_ATTACH_GLOBAL && flags != CU_MEM_ATTACH_HOST && flags != CU_MEM_ATTACH_SINGLE) return CUDA_ERROR_INVALID_VALUE;
   if (!contextIsLive(activeContext())) return CUDA_ERROR_INVALID_CONTEXT;
-  return enqueueCommand(stream, [] { return CUDA_SUCCESS; });
+  return enqueueCommand(stream, Kind::Empty, [] { return CUDA_SUCCESS; });
 }
 
 CUresult cuProfilerStart() { return CUDA_SUCCESS; }
@@ -5500,6 +5632,19 @@ CUresult cuGraphGetRootNodes(CUgraph graph, CUgraphNode *nodes, size_t *count) {
   return graphResult(gemstone::graph::list(*graphOf(graph), nodes, count, true));
 }
 
+CUresult cuGraphNodeGetType(CUgraphNode node, CUgraphNodeType *type) {
+  if (!node || !type) return CUDA_ERROR_INVALID_VALUE;
+  switch (reinterpret_cast<gemstone::graph::Node *>(node)->kind) {
+    case Kind::Kernel: *type = CU_GRAPH_NODE_TYPE_KERNEL; break;
+    case Kind::Memcpy: *type = CU_GRAPH_NODE_TYPE_MEMCPY; break;
+    case Kind::Memset: *type = CU_GRAPH_NODE_TYPE_MEMSET; break;
+    case Kind::Host: *type = CU_GRAPH_NODE_TYPE_HOST; break;
+    case Kind::Empty: *type = CU_GRAPH_NODE_TYPE_EMPTY; break;
+    case Kind::Work: return CUDA_ERROR_NOT_SUPPORTED;
+  }
+  return CUDA_SUCCESS;
+}
+
 CUresult cuGraphClone(CUgraph *clone, CUgraph original) {
   if (!clone || !original) return CUDA_ERROR_INVALID_VALUE;
   *clone = reinterpret_cast<CUgraph>(std::make_unique<gemstone::graph::Graph>(graphOf(original)->clone()).release());
@@ -5508,7 +5653,7 @@ CUresult cuGraphClone(CUgraph *clone, CUgraph original) {
 
 CUresult cuGraphInstantiateWithFlags(CUgraphExec *exec, CUgraph graph, unsigned long long flags) {
   if (!exec || !graph) return CUDA_ERROR_INVALID_VALUE;
-  if (flags != 0) return CUDA_ERROR_NOT_SUPPORTED;
+  if (flags & ~static_cast<unsigned long long>(CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH)) return CUDA_ERROR_NOT_SUPPORTED;
   *exec =
       reinterpret_cast<CUgraphExec>(std::make_unique<gemstone::graph::Exec>(gemstone::graph::Exec::instantiate(*graphOf(graph))).release());
   return CUDA_SUCCESS;
@@ -5530,7 +5675,7 @@ CUresult cuGraphInstantiate(CUgraphExec *exec, CUgraph graph, CUgraphNode *error
 CUresult cuGraphLaunch(CUgraphExec exec, CUstream stream) {
   if (!exec) return CUDA_ERROR_INVALID_VALUE;
   for (const auto &step : execOf(exec)->steps)
-    if (const auto status = enqueueCommand(stream, step.work); status != CUDA_SUCCESS) return status;
+    if (const auto status = enqueueCommand(stream, step.kind, step.work); status != CUDA_SUCCESS) return status;
   return CUDA_SUCCESS;
 }
 
@@ -6053,7 +6198,7 @@ cudaError_t cudaMalloc(void **pointer, size_t size) {
   if (!pointer) return cudaErrorInvalidValue;
   if (const auto status = ensureRuntimeContext(); status != CUDA_SUCCESS) return runtimeStatus(status);
   CUdeviceptr device = 0;
-  const auto status = cuMemAlloc_v2(&device, size);
+  const auto status = size == 0 ? CUDA_SUCCESS : cuMemAlloc_v2(&device, size);
   if (status == CUDA_SUCCESS) *pointer = reinterpret_cast<void *>(device);
   return runtimeStatus(status);
 }
@@ -6161,7 +6306,7 @@ cudaError_t cudaMemcpyAsync(void *destination, const void *source, size_t size, 
     case cudaMemcpyDeviceToHost: return runtimeStatus(cuMemcpyDtoHAsync_v2(destination, reinterpret_cast<uintptr_t>(source), size, stream));
     case cudaMemcpyDefault:
       return runtimeStatus(cuMemcpyAsync(reinterpret_cast<uintptr_t>(destination), reinterpret_cast<uintptr_t>(source), size, stream));
-    default: return runtimeStatus(enqueueCommand(stream, [=] { return cudaMemcpy(destination, source, size, kind); }));
+    default: return runtimeStatus(enqueueCommand(stream, Kind::Memcpy, [=] { return cudaMemcpy(destination, source, size, kind); }));
   }
 }
 

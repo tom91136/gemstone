@@ -111,7 +111,7 @@ hipError_t graphResult(gemstone::graph::Outcome outcome) {
 }
 
 hipError_t enqueueCommand(hipStream_t stream, std::function<int32_t()> work) {
-  if (gemstone::graph::divert(work) || captures.record(stream, work)) return hipSuccess;
+  if (gemstone::graph::divert(work) || captures.record(stream, gemstone::graph::Kind::Work, work)) return hipSuccess;
   try {
     commands().submit(stream, std::move(work));
     return hipSuccess;

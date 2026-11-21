@@ -191,6 +191,15 @@ TEST_CASE("device allocations past the memory of the selected device report out 
   CHECK(remaining == available);
 }
 
+TEST_CASE("zero byte device allocations return a null runtime pointer and fail in the driver", "[cuda][memory]") {
+  createContext();
+  void *pointer = nullptr;
+  CHECK(cudaMalloc(&pointer, 0) == cudaSuccess);
+  CHECK(pointer == nullptr);
+  CUdeviceptr driverPointer = 0;
+  CHECK(cuMemAlloc_v2(&driverPointer, 0) == CUDA_ERROR_INVALID_VALUE);
+}
+
 TEST_CASE("stream context reports the context that created the stream", "[cuda][stream]") {
   auto *const first = createContext();
   CUcontext owner = nullptr;

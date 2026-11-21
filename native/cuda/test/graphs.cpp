@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -66,6 +67,30 @@ CUDA_MEMCPY3D copyDevice(CUdeviceptr source, CUdeviceptr target, size_t size) {
 }
 
 void countCall(void *userData) { ++*static_cast<std::atomic<int> *>(userData); }
+
+constexpr char EmptyKernel[] = R"PTX(.version 8.4
+.target sm_89
+.address_size 64
+
+.visible .entry noop()
+{
+  ret;
+}
+)PTX";
+
+CUfunction loadKernel(const char *image, const char *name) {
+  CUmodule module = nullptr;
+  REQUIRE(cuModuleLoadData(&module, image) == CUDA_SUCCESS);
+  CUfunction function = nullptr;
+  REQUIRE(cuModuleGetFunction(&function, module, name) == CUDA_SUCCESS);
+  return function;
+}
+
+CUgraphNodeType nodeType(CUgraphNode node) {
+  CUgraphNodeType type{};
+  CHECK(cuGraphNodeGetType(node, &type) == CUDA_SUCCESS);
+  return type;
+}
 
 } // namespace
 
@@ -262,6 +287,110 @@ TEST_CASE("host node runs its callback on each launch", "[cuda][graph][host]") {
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
+TEST_CASE("graph instantiates with auto free on launch and relaunches", "[cuda][graph][instantiate]") {
+  auto *const context = createContext();
+  CUgraph graph = nullptr;
+  REQUIRE(cuGraphCreate(&graph, 0) == CUDA_SUCCESS);
+  CUgraphNode node = nullptr;
+  REQUIRE(cuGraphAddEmptyNode(&node, graph, nullptr, 0) == CUDA_SUCCESS);
+
+  CUgraphExec exec = nullptr;
+  REQUIRE(cuGraphInstantiateWithFlags(&exec, graph, CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH) == CUDA_SUCCESS);
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  REQUIRE(cuGraphLaunch(exec, stream) == CUDA_SUCCESS);
+  REQUIRE(cuGraphLaunch(exec, stream) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+
+  REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("graph node type reports the kind of each explicit node", "[cuda][graph][node-type]") {
+  auto *const context = createContext();
+  constexpr size_t size = 16;
+  const auto buffer = allocate(size);
+  const auto other = allocate(size);
+  fixture.kernelMetadata(0, 0, {});
+  auto *const function = loadKernel(EmptyKernel, "noop");
+  std::atomic<int> calls = 0;
+
+  CUgraph graph = nullptr;
+  REQUIRE(cuGraphCreate(&graph, 0) == CUDA_SUCCESS);
+  CUDA_HOST_NODE_PARAMS hostParams{};
+  hostParams.fn = countCall;
+  hostParams.userData = &calls;
+  CUgraphNode host = nullptr;
+  REQUIRE(cuGraphAddHostNode(&host, graph, nullptr, 0, &hostParams) == CUDA_SUCCESS);
+  CUgraphNode empty = nullptr;
+  REQUIRE(cuGraphAddEmptyNode(&empty, graph, nullptr, 0) == CUDA_SUCCESS);
+  CUDA_KERNEL_NODE_PARAMS kernelParams{};
+  kernelParams.func = function;
+  kernelParams.gridDimX = 1;
+  kernelParams.gridDimY = 1;
+  kernelParams.gridDimZ = 1;
+  kernelParams.blockDimX = 1;
+  kernelParams.blockDimY = 1;
+  kernelParams.blockDimZ = 1;
+  CUgraphNode kernel = nullptr;
+  REQUIRE(cuGraphAddKernelNode(&kernel, graph, nullptr, 0, &kernelParams) == CUDA_SUCCESS);
+  const auto set = fill(buffer, 0x7, size);
+  CUgraphNode setNode = nullptr;
+  REQUIRE(cuGraphAddMemsetNode(&setNode, graph, nullptr, 0, &set, nullptr) == CUDA_SUCCESS);
+  const auto copy = copyDevice(buffer, other, size);
+  CUgraphNode copyNode = nullptr;
+  REQUIRE(cuGraphAddMemcpyNode(&copyNode, graph, nullptr, 0, &copy, nullptr) == CUDA_SUCCESS);
+
+  CHECK(nodeType(host) == CU_GRAPH_NODE_TYPE_HOST);
+  CHECK(nodeType(empty) == CU_GRAPH_NODE_TYPE_EMPTY);
+  CHECK(nodeType(kernel) == CU_GRAPH_NODE_TYPE_KERNEL);
+  CHECK(nodeType(setNode) == CU_GRAPH_NODE_TYPE_MEMSET);
+  CHECK(nodeType(copyNode) == CU_GRAPH_NODE_TYPE_MEMCPY);
+  CUgraphNodeType type = CU_GRAPH_NODE_TYPE_EMPTY;
+  CHECK(cuGraphNodeGetType(nullptr, &type) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuGraphNodeGetType(empty, nullptr) == CUDA_ERROR_INVALID_VALUE);
+
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(buffer) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(other) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("captured nodes keep their memset and memcpy kinds", "[cuda][graph][capture][node-type]") {
+  auto *const context = createContext();
+  constexpr size_t size = 32;
+  const auto source = allocate(size);
+  const auto target = allocate(size);
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+  REQUIRE(cuMemsetD8Async(source, 0x11, size, stream) == CUDA_SUCCESS);
+  REQUIRE(cuMemcpyAsync(target, source, size, stream) == CUDA_SUCCESS);
+  CUgraph graph = nullptr;
+  REQUIRE(cuStreamEndCapture(stream, &graph) == CUDA_SUCCESS);
+
+  size_t count = 0;
+  REQUIRE(cuGraphGetNodes(graph, nullptr, &count) == CUDA_SUCCESS);
+  REQUIRE(count == 2);
+  std::vector<CUgraphNode> nodes(count);
+  REQUIRE(cuGraphGetNodes(graph, nodes.data(), &count) == CUDA_SUCCESS);
+  std::vector<CUgraphNodeType> types;
+  types.reserve(nodes.size());
+  for (auto *const node : nodes)
+    types.push_back(nodeType(node));
+  CHECK(std::count(types.begin(), types.end(), CU_GRAPH_NODE_TYPE_MEMSET) == 1);
+  CHECK(std::count(types.begin(), types.end(), CU_GRAPH_NODE_TYPE_MEMCPY) == 1);
+
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(source) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(target) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("graph exec update accepts same topology and rejects a changed one", "[cuda][graph][update]") {
   auto *const context = createContext();
   constexpr size_t size = 16;
@@ -339,7 +468,7 @@ TEST_CASE("capture misuse and invalid arguments return driver errors", "[cuda][g
   CUgraph empty = nullptr;
   REQUIRE(cuGraphCreate(&empty, 0) == CUDA_SUCCESS);
   CUgraphExec exec = nullptr;
-  CHECK(cuGraphInstantiateWithFlags(&exec, empty, 1) == CUDA_ERROR_NOT_SUPPORTED);
+  CHECK(cuGraphInstantiateWithFlags(&exec, empty, CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD) == CUDA_ERROR_NOT_SUPPORTED);
   REQUIRE(cuGraphDestroy(empty) == CUDA_SUCCESS);
   REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);

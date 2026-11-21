@@ -172,12 +172,12 @@ public:
     std::vector<Node *> frontier;
   };
 
-  bool record(Stream stream, Work &work) {
+  bool record(Stream stream, Kind kind, Work &work) {
     std::scoped_lock const lock(mutex);
     const auto capture = captures.find(stream);
     if (capture == captures.end()) return false;
     auto &frontier = capture->second->frontier[stream];
-    auto node = std::make_unique<Node>(Node{Kind::Work, std::move(work), frontier});
+    auto node = std::make_unique<Node>(Node{kind, std::move(work), frontier});
     frontier = {node.get()};
     capture->second->graph->nodes.push_back(std::move(node));
     return true;
