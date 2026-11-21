@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <iterator>
 #include <string>
 
 #include <catch2/catch_test_macros.hpp>
@@ -162,6 +163,7 @@ TEST_CASE("CUDA context limits read back the value set", "[cuda][limits]") {
 }
 
 TEST_CASE("CUDA query-only context limits report the driver's values and reject sets", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
   auto *const context = createContext();
   CHECK(limit(CU_LIMIT_SHMEM_SIZE) == 101376);
   CHECK(limit(CU_LIMIT_CIG_ENABLED) == 0);
@@ -169,6 +171,68 @@ TEST_CASE("CUDA query-only context limits report the driver's values and reject 
   CHECK(cuCtxSetLimit(CU_LIMIT_CIG_ENABLED, 1) == CUDA_ERROR_NOT_PERMITTED);
   CHECK(limit(CU_LIMIT_SHMEM_SIZE) == 101376);
   CHECK(limit(CU_LIMIT_CIG_ENABLED) == 0);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA context limits replay the probe sweep of the RTX 4060 Ti driver", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  constexpr size_t defaults[] = {1024, 1671168, 8388608, 2, 2048, 64, 6291456, 101376, 0};
+  for (size_t id = 0; id < std::size(defaults); ++id) {
+    CHECK(limit(static_cast<CUlimit>(id)) == defaults[id]);
+  }
+  size_t value = 0;
+  CHECK(cuCtxGetLimit(&value, static_cast<CUlimit>(9)) == CUDA_ERROR_UNSUPPORTED_LIMIT);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 4096) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_STACK_SIZE) == 4096);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_MALLOC_HEAP_SIZE, DefaultHeap) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_MALLOC_HEAP_SIZE) == DefaultHeap);
+  CHECK(cuCtxSetLimit(static_cast<CUlimit>(99), 1) == CUDA_ERROR_INVALID_VALUE);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH, 1) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH) == 1);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH, 3) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_SYNC_DEPTH) == 3);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA context limits replay the probe's shared memory and pending launch sequence", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  CHECK(limit(CU_LIMIT_SHMEM_SIZE) == 101376);
+  CHECK(cuCtxSetLimit(CU_LIMIT_SHMEM_SIZE, 1) == CUDA_ERROR_NOT_PERMITTED);
+  CHECK(cuCtxSetLimit(CU_LIMIT_CIG_ENABLED, 1) == CUDA_ERROR_NOT_PERMITTED);
+  CHECK(limit(CU_LIMIT_CIG_ENABLED) == 0);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 0) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_STACK_SIZE) == 0);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 1024) == CUDA_SUCCESS);
+  REQUIRE(cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT, 1) == CUDA_SUCCESS);
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT) == 32);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA shared memory attributes come from the selected target's description", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  int optin = 0;
+  int perSm = 0;
+  REQUIRE(cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&perSm, cudaDevAttrMaxSharedMemoryPerMultiprocessor, 0) == cudaSuccess);
+  CHECK(optin == 101376);
+  CHECK(perSm == 102400);
+  CHECK(limit(CU_LIMIT_SHMEM_SIZE) == static_cast<size_t>(optin));
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA shared memory attributes follow a smaller target's description", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_75");
+  auto *const context = createContext();
+  int optin = 0;
+  int perSm = 0;
+  REQUIRE(cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0) == cudaSuccess);
+  REQUIRE(cudaDeviceGetAttribute(&perSm, cudaDevAttrMaxSharedMemoryPerMultiprocessor, 0) == cudaSuccess);
+  CHECK(optin == 65536);
+  CHECK(perSm == 65536);
+  CHECK(limit(CU_LIMIT_SHMEM_SIZE) == static_cast<size_t>(optin));
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 

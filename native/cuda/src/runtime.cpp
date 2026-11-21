@@ -105,8 +105,6 @@ constexpr int32_t MaxGridDimY = 65535;
 constexpr int32_t MaxGridDimZ = 65535;
 constexpr int32_t MaxPitch = std::numeric_limits<int32_t>::max();
 constexpr int32_t MaxSharedMemoryPerBlock = 49152;
-constexpr int32_t MaxSharedMemoryPerBlockOptin = 98304;
-constexpr int32_t MaxSharedMemoryPerMultiprocessor = 98304;
 constexpr int32_t TotalConstantMemory = 65536;
 constexpr int32_t WarpSize = 32;
 constexpr int32_t MaxRegistersPerBlock = 65536;
@@ -122,6 +120,7 @@ constexpr int32_t MemoryClockRateKhz = 1500000;
 constexpr int32_t GlobalMemoryBusWidth = 128;
 constexpr int32_t L2CacheSize = 4194304;
 constexpr int32_t MaxPersistingL2CacheSize = 4194304;
+constexpr size_t MinDevicePendingLaunchCount = 32;
 constexpr int32_t MaxAccessPolicyWindowSize = 4096;
 constexpr int32_t TextureAlignment = 256;
 constexpr int32_t TexturePitchAlignment = 32;
@@ -284,12 +283,20 @@ std::optional<int> configuredPtxVersion() {
   return target ? parsePtxTarget(*target) : std::nullopt;
 }
 
-gemstone::TargetMemory targetMemory() {
-  if (const auto device = gemstone::environment::selectedDevicePreset())
-    return {.busWidthBits = device->busWidthBits, .l2Bytes = device->l2Bytes};
+std::optional<gemstone::TargetMemory> describedTargetMemory() {
+  if (const auto device = gemstone::environment::selectedDevicePreset()) return gemstone::targetMemory(device->target);
   const auto target = configuredPtxVersion();
-  return (target ? gemstone::targetMemory("sm_" + std::to_string(*target)) : std::nullopt)
-      .value_or(gemstone::TargetMemory{.busWidthBits = device_limits::GlobalMemoryBusWidth, .l2Bytes = device_limits::L2CacheSize});
+  return target ? gemstone::targetMemory("sm_" + std::to_string(*target)) : std::nullopt;
+}
+
+gemstone::TargetMemory targetMemory() {
+  auto memory = describedTargetMemory().value_or(
+      gemstone::TargetMemory{.busWidthBits = device_limits::GlobalMemoryBusWidth, .l2Bytes = device_limits::L2CacheSize});
+  if (const auto device = gemstone::environment::selectedDevicePreset()) {
+    memory.busWidthBits = device->busWidthBits;
+    memory.l2Bytes = device->l2Bytes;
+  }
+  return memory;
 }
 
 std::string_view deviceName() {
@@ -630,11 +637,19 @@ struct ContextLimits {
   size_t l2FetchGranularity = 64;
   size_t persistingL2CacheSize = 6291456;
 };
+ContextLimits defaultContextLimits() {
+  auto limits = ContextLimits{};
+  const auto memory = targetMemory();
+  if (memory.l2FetchBytes) limits.l2FetchGranularity = static_cast<size_t>(*memory.l2FetchBytes);
+  if (memory.persistingL2DefaultBytes) limits.persistingL2CacheSize = static_cast<size_t>(*memory.persistingL2DefaultBytes);
+  return limits;
+}
 std::mutex contextMutex;
 std::map<CUcontext, int> contexts;
 std::map<CUcontext, CUfunc_cache> cacheConfigs;
 std::map<CUcontext, ContextLimits> contextLimits;
 std::atomic<uint64_t> nextContext{1};
+ContextLimits &contextLimitsOf(CUcontext context) { return contextLimits.try_emplace(context, defaultContextLimits()).first->second; }
 struct PrimaryContext {
   CUcontext context = nullptr;
   uint32_t references = 0;
@@ -3138,7 +3153,7 @@ size_t *contextLimitField(ContextLimits &limits, CUlimit limit) {
 
 bool reportedLimit(CUlimit limit, size_t *value) {
   switch (limit) {
-    case CU_LIMIT_SHMEM_SIZE: *value = 101376; return true;
+    case CU_LIMIT_SHMEM_SIZE: *value = static_cast<size_t>(activeTargetLimits().maxSharedMemoryPerBlock); return true;
     case CU_LIMIT_CIG_ENABLED: *value = 0; return true;
     default: return false;
   }
@@ -3166,7 +3181,7 @@ CUresult cuCtxGetLimit(size_t *value, CUlimit limit) {
   }
   if (reportedLimit(limit, value)) return CUDA_SUCCESS;
   std::scoped_lock const lock{contextMutex};
-  auto *const field = contextLimitField(contextLimits[context], limit);
+  auto *const field = contextLimitField(contextLimitsOf(context), limit);
   if (!field) return rejectedLimit(limit);
   *value = *field;
   return CUDA_SUCCESS;
@@ -3177,9 +3192,9 @@ CUresult cuCtxSetLimit(CUlimit limit, size_t value) {
   if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
   if (limit != CU_LIMIT_MALLOC_HEAP_SIZE) {
     std::scoped_lock const lock{contextMutex};
-    auto *const field = contextLimitField(contextLimits[context], limit);
+    auto *const field = contextLimitField(contextLimitsOf(context), limit);
     if (!field) return rejectedLimit(limit);
-    *field = value;
+    *field = limit == CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT ? std::max(value, device_limits::MinDevicePendingLaunchCount) : value;
     return CUDA_SUCCESS;
   }
   if (value > DeviceHeapMaximumLimit) return CUDA_ERROR_OUT_OF_MEMORY;
@@ -5810,7 +5825,7 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrStreamPrioritiesSupported: *value = 1; break;
     case cudaDevAttrGlobalL1CacheSupported: *value = 1; break;
     case cudaDevAttrLocalL1CacheSupported: *value = 1; break;
-    case cudaDevAttrMaxSharedMemoryPerMultiprocessor: *value = MaxSharedMemoryPerMultiprocessor; break;
+    case cudaDevAttrMaxSharedMemoryPerMultiprocessor: *value = activeTargetLimits().maxSharedMemoryPerMultiprocessor; break;
     case cudaDevAttrMaxRegistersPerMultiprocessor: *value = MaxRegistersPerMultiprocessor; break;
     case cudaDevAttrManagedMemory: *value = 1; break;
     case cudaDevAttrIsMultiGpuBoard: *value = 0; break;
@@ -5825,10 +5840,10 @@ cudaError_t cudaDeviceGetAttribute(int *value, cudaDeviceAttr attribute, int dev
     case cudaDevAttrCanUseHostPointerForRegisteredMem: *value = 1; break;
     case cudaDevAttrCooperativeLaunch: *value = 1; break;
     case cudaDevAttrReserved96: *value = 0; break;
-    case cudaDevAttrMaxSharedMemoryPerBlockOptin: *value = MaxSharedMemoryPerBlockOptin; break;
+    case cudaDevAttrMaxSharedMemoryPerBlockOptin: *value = activeTargetLimits().maxSharedMemoryPerBlock; break;
     case cudaDevAttrPageableMemoryAccessUsesHostPageTables: *value = 0; break;
     case cudaDevAttrDirectManagedMemAccessFromHost: *value = 0; break;
-    case cudaDevAttrMaxPersistingL2CacheSize: *value = MaxPersistingL2CacheSize; break;
+    case cudaDevAttrMaxPersistingL2CacheSize: *value = targetMemory().persistingL2Bytes.value_or(MaxPersistingL2CacheSize); break;
     case cudaDevAttrMaxAccessPolicyWindowSize: *value = MaxAccessPolicyWindowSize; break;
     case cudaDevAttrMemoryPoolsSupported: *value = 1; break;
     case cudaDevAttrMaxBlocksPerMultiprocessor: *value = MaxBlocksPerMultiprocessor; break;
