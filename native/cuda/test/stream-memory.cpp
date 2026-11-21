@@ -903,3 +903,59 @@ TEST_CASE("a zero byte copy succeeds whatever the device pointer", "[cuda][memor
   CHECK(cuMemcpyDtoD_v2(0, 0, 0) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+TEST_CASE("cuIpcGetMemHandle names an allocation's base and refuses anything else", "[cuda][ipc]") {
+  auto *const context = createContext();
+  CUdeviceptr pointer = 0;
+  REQUIRE(cuMemAlloc_v2(&pointer, 64) == CUDA_SUCCESS);
+  CUipcMemHandle first{};
+  CUipcMemHandle second{};
+  REQUIRE(cuIpcGetMemHandle(&first, pointer) == CUDA_SUCCESS);
+  REQUIRE(cuIpcGetMemHandle(&second, pointer) == CUDA_SUCCESS);
+  CHECK(std::memcmp(first.reserved, second.reserved, sizeof(first.reserved)) == 0);
+  CHECK(cuIpcGetMemHandle(&first, pointer + 8) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuIpcGetMemHandle(nullptr, pointer) == CUDA_ERROR_INVALID_VALUE);
+  CUdeviceptr managed = 0;
+  REQUIRE(cuMemAllocManaged(&managed, 64, CU_MEM_ATTACH_GLOBAL) == CUDA_SUCCESS);
+  CHECK(cuIpcGetMemHandle(&first, managed) == CUDA_ERROR_INVALID_VALUE);
+  REQUIRE(cuMemFree_v2(managed) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(pointer) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("cuIpcOpenMemHandle_v2 maps the allocation at a new pointer and refuses bad flags or handles", "[cuda][ipc]") {
+  auto *const context = createContext();
+  CUdeviceptr pointer = 0;
+  REQUIRE(cuMemAlloc_v2(&pointer, 64) == CUDA_SUCCESS);
+  CUipcMemHandle handle{};
+  REQUIRE(cuIpcGetMemHandle(&handle, pointer) == CUDA_SUCCESS);
+  CUdeviceptr opened = 0;
+  REQUIRE(cuIpcOpenMemHandle_v2(&opened, handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS) == CUDA_SUCCESS);
+  CHECK(opened != pointer);
+  size_t size = 0;
+  CHECK(cuMemGetAddressRange_v2(nullptr, &size, opened) == CUDA_SUCCESS);
+  CHECK(size >= 64);
+  CUdeviceptr refused = 0;
+  CHECK(cuIpcOpenMemHandle_v2(&refused, handle, 0) == CUDA_ERROR_INVALID_VALUE);
+  const CUipcMemHandle forged{};
+  CHECK(cuIpcOpenMemHandle_v2(&refused, forged, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS) == CUDA_ERROR_INVALID_VALUE);
+  REQUIRE(cuIpcCloseMemHandle(opened) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(pointer) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("cuIpcCloseMemHandle unmaps an import once and leaves the owner's allocation alone", "[cuda][ipc]") {
+  auto *const context = createContext();
+  CUdeviceptr pointer = 0;
+  REQUIRE(cuMemAlloc_v2(&pointer, 64) == CUDA_SUCCESS);
+  CUipcMemHandle handle{};
+  REQUIRE(cuIpcGetMemHandle(&handle, pointer) == CUDA_SUCCESS);
+  CUdeviceptr opened = 0;
+  REQUIRE(cuIpcOpenMemHandle_v2(&opened, handle, CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS) == CUDA_SUCCESS);
+  CHECK(cuIpcCloseMemHandle(pointer) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuIpcCloseMemHandle(opened) == CUDA_SUCCESS);
+  CHECK(cuIpcCloseMemHandle(opened) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemFree_v2(opened) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuMemFree_v2(pointer) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}

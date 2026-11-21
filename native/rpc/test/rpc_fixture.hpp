@@ -576,6 +576,36 @@ private:
         hostBacked.erase(id);
         allocationDevices.erase(id);
         encodePayload(result, Unit{});
+      } else if (operationTag == operation::ExportAllocation) {
+        const auto id = static_cast<uint64_t>(decodePayload<ExportAllocation>(payload).allocation.value);
+        GEMSTONE_RPC_REQUIRE(allocations.count(id) == 1);
+        std::vector<uint8_t> handle(64);
+        std::memcpy(handle.data(), &id, sizeof(id));
+        handle[63] = 1;
+        encodePayload(result, handle);
+      } else if (operationTag == operation::ImportAllocation) {
+        const auto handle = decodePayload<ImportAllocation>(payload).handle;
+        uint64_t exported = 0;
+        if (handle.size() == 64 && handle[63] == 1) std::memcpy(&exported, handle.data(), sizeof(exported));
+        if (!allocations.contains(exported)) {
+          failed = true;
+          failure = "IPC memory handle is not valid";
+          failureKind = FailureKind::NotFound;
+        } else {
+          const auto id = nextAllocation++;
+          allocations[id] = allocations.at(exported);
+          importedAllocations.insert(id);
+          encodePayload(result, ImportedAllocation{.allocation = AllocationId{static_cast<int64_t>(id)},
+                                                   .size = {static_cast<int64_t>(allocations[id].size())}});
+        }
+      } else if (operationTag == operation::CloseImportedAllocation) {
+        const auto id = static_cast<uint64_t>(decodePayload<CloseImportedAllocation>(payload).allocation.value);
+        GEMSTONE_RPC_REQUIRE(importedAllocations.erase(id) == 1);
+        allocations.erase(id);
+        allocationAddresses.erase(id);
+        hostBacked.erase(id);
+        allocationDevices.erase(id);
+        encodePayload(result, Unit{});
       } else if (operationTag == operation::RegisterAllocationAddress) {
         const auto request = decodePayload<RegisterAllocationAddress>(payload);
         const auto id = static_cast<uint64_t>(request.allocation.value);
@@ -1123,6 +1153,7 @@ private:
   std::vector<std::pair<uint32_t, std::vector<uint8_t>>> specialization;
   std::map<uint64_t, uint64_t> allocationAddresses;
   std::map<uint64_t, bool> hostBacked;
+  std::set<uint64_t> importedAllocations;
   std::map<uint64_t, uint32_t> allocationDevices;
   uint32_t launchDevice = 0;
   uint32_t deviceGrants = 0;

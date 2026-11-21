@@ -772,11 +772,13 @@ struct PointerMetadata {
   bool host;
   bool managed;
   int device;
+  bool imported = false;
 };
 std::mutex pointerMutex;
 std::vector<PointerMetadata> pointers;
 
-CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, const void *module, bool host, bool managed) {
+CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, const void *module, bool host, bool managed,
+                      bool imported = false) {
   if (pointer == 0 || size == 0 || allocationId == 0 || size > UINT64_MAX - pointer) return CUDA_ERROR_INVALID_VALUE;
   std::scoped_lock const lock{pointerMutex};
   for (const auto &p : pointers) {
@@ -795,7 +797,8 @@ CUresult trackPointer(CUdeviceptr pointer, size_t size, uint64_t allocationId, c
                                        .module = module,
                                        .host = host,
                                        .managed = managed,
-                                       .device = device});
+                                       .device = device,
+                                       .imported = imported});
   } catch (const std::exception &) {
     if (charged) deviceLedger.refund(physicalDevice(device), size);
     return CUDA_ERROR_UNKNOWN;
@@ -807,7 +810,7 @@ template <class Predicate> void untrackPointers(Predicate predicate) {
   std::scoped_lock const lock{pointerMutex};
   std::erase_if(pointers, [&](const PointerMetadata &p) {
     if (!predicate(p)) return false;
-    if (!p.host && !p.managed) deviceLedger.refund(physicalDevice(p.device), p.size);
+    if (!p.host && !p.managed && !p.imported) deviceLedger.refund(physicalDevice(p.device), p.size);
     return true;
   });
 }
@@ -3396,6 +3399,52 @@ CUresult cuMemGetAddressRange_v2(CUdeviceptr *base, size_t *size, CUdeviceptr po
   if (!allocation) return CUDA_ERROR_INVALID_VALUE;
   if (base) *base = allocation->base;
   if (size) *size = allocation->size;
+  return CUDA_SUCCESS;
+}
+
+CUresult cuIpcGetMemHandle(CUipcMemHandle *handle, CUdeviceptr pointer) {
+  if (!handle) return CUDA_ERROR_INVALID_VALUE;
+  const auto allocation = pointerMetadata(pointer);
+  if (!allocation || allocation->base != pointer || allocation->host || allocation->managed || allocation->imported)
+    return CUDA_ERROR_INVALID_VALUE;
+  if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
+  const auto exported = client->call(ExportAllocation{AllocationId{static_cast<int64_t>(allocation->id)}});
+  if (!exported || exported.value().size() != sizeof(handle->reserved)) return CUDA_ERROR_INVALID_VALUE;
+  std::memcpy(handle->reserved, exported.value().data(), sizeof(handle->reserved));
+  return CUDA_SUCCESS;
+}
+
+CUresult cuIpcOpenMemHandle_v2(CUdeviceptr *pointer, CUipcMemHandle handle, unsigned flags) {
+  if (!pointer || flags != CU_IPC_MEM_LAZY_ENABLE_PEER_ACCESS || !contextIsLive(activeContext())) return CUDA_ERROR_INVALID_VALUE;
+  if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
+  const auto imported = client->call(ImportAllocation{std::vector<uint8_t>(handle.reserved, handle.reserved + sizeof(handle.reserved))});
+  if (!imported) return CUDA_ERROR_INVALID_VALUE;
+  const auto id = static_cast<uint64_t>(imported.value().allocation.value);
+  const auto bytes = static_cast<uint64_t>(imported.value().size.value);
+  const auto abandon = [&] { (void)client->call(CloseImportedAllocation{imported.value().allocation}); };
+  CUdeviceptr address = 0;
+  {
+    const std::scoped_lock lock(stateMutex);
+    if (nextDeviceAddress == 0) nextDeviceAddress = keplerDevice() ? 0x0000008000000000 : 0x0000400000000000;
+    const uint64_t span = (bytes + 255) & ~uint64_t{255};
+    if (nextDeviceAddress > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) - span) return abandon(), CUDA_ERROR_UNKNOWN;
+    address = nextDeviceAddress;
+    nextDeviceAddress += span;
+  }
+  if (!client->call(RegisterAllocationAddress{
+          .allocation = imported.value().allocation, .nativeBase = {static_cast<int64_t>(address)}, .hostBacked = false, .devices = -1}))
+    return abandon(), CUDA_ERROR_UNKNOWN;
+  if (const auto status = trackPointer(address, bytes, id, nullptr, false, false, true); status != CUDA_SUCCESS) return abandon(), status;
+  *pointer = address;
+  return CUDA_SUCCESS;
+}
+
+CUresult cuIpcCloseMemHandle(CUdeviceptr pointer) {
+  const auto allocation = pointerMetadata(pointer);
+  if (!allocation || allocation->base != pointer || !allocation->imported) return CUDA_ERROR_INVALID_VALUE;
+  if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
+  if (!client->call(CloseImportedAllocation{AllocationId{static_cast<int64_t>(allocation->id)}})) return CUDA_ERROR_UNKNOWN;
+  untrackDevice(pointer);
   return CUDA_SUCCESS;
 }
 
