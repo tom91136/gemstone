@@ -471,6 +471,35 @@ class HostMemoryExecutionSuite extends Suite {
     assertEquals(writes, bytes(address = 0x8000, value = 11, 4) ++ bytes(address = 0x8004, value = 23, 4))
   }
 
+  test("a read exchange publishes the dispatch's earlier plain stores") {
+    val source         = header + """
+      .visible .entry probe() {
+        .reg .u64 %data, %flag, %out; .reg .u32 %value, %seen, %count; .reg .pred %done, %more;
+        mov.u64 %data, 4096; mov.u64 %flag, 8192; mov.u64 %out, 32768;
+        mov.u32 %value, 1; st.global.u32 [%data], %value;
+        mov.u32 %count, 0;
+      spin:
+        ld.relaxed.sys.global.u32 %seen, [%flag];
+        setp.ne.u32 %done, %seen, 0; @%done bra finish;
+        add.u32 %count, %count, 1;
+        setp.lt.u32 %more, %count, 64; @%more bra spin;
+      finish:
+        st.global.u32 [%out], %count; ret;
+      }"""
+    val (_, writes, _) = runImage(
+      ProgramEncoding.PTXText,
+      Vec.from(source.getBytes(StandardCharsets.UTF_8)),
+      1,
+      Vec.empty,
+      bytes(0x1000, 0, 4) ++ bytes(0x2000, 0, 4) ++ bytes(0x8000, 0, 4),
+      beforeRead = (range, native) =>
+        if (range.address.raw <= 0x2000L && 0x2000L < range.address.raw + range.size && native(0x1000L) == 1.toByte)
+          bytes(address = 0x2000, value = 1, 4)
+        else Map.empty
+    )
+    assertEquals(writes, bytes(address = 0x1000, value = 1, 4) ++ bytes(address = 0x8000, value = 0, 4))
+  }
+
   test("a warp of relaxed.sys loads is served by one read exchange without per-lane atomics") {
     val source         = header + """
       .visible .entry probe() {

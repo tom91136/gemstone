@@ -91,7 +91,7 @@ private class HostCoherence(
                 case None    =>
                   val reads = memory.requests()
                   if (completion.hasReadWaiters && reads.nonEmpty)
-                    result = Some(Right(HostMemoryBatch(reads, Vec.empty, false)))
+                    result = Some(Right(HostMemoryBatch(reads, memory.takeDirty(), false)))
                   else changed.await()
               }
           }
