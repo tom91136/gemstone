@@ -841,12 +841,18 @@ bool devicePointer(CUdeviceptr pointer) {
 
 ClientManager executionManager;
 Client *client = nullptr;
+std::atomic<bool> forkedChild{false};
 
 CUresult executionReady() noexcept {
   if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
+  if (forkedChild.load()) return CUDA_ERROR_NOT_INITIALIZED;
   try {
     if (!environmentAccepted()) return CUDA_ERROR_NOT_INITIALIZED;
     client = executionManager.ready() ? executionManager.client() : nullptr;
+    if (client) {
+      static const int registered = pthread_atfork(nullptr, nullptr, [] { forkedChild.store(true); });
+      (void)registered;
+    }
     return client ? CUDA_SUCCESS : CUDA_ERROR_NOT_INITIALIZED;
   } catch (...) {
     return CUDA_ERROR_NOT_INITIALIZED;

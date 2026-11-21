@@ -8,6 +8,8 @@
 #include <thread>
 #include <vector>
 
+#include <unistd.h>
+
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
 #include <cuda_runtime_api.h>
@@ -16,6 +18,7 @@
 
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
+#include <sys/wait.h>
 
 extern "C" CUresult cuCtxCreate_v2(CUcontext *context, unsigned flags, CUdevice device);
 extern "C" CUresult cuProfilerStart();
@@ -782,5 +785,25 @@ TEST_CASE("event elapsed time of context events spans the recorded work", "[cuda
   REQUIRE(cuEventDestroy_v2(start) == CUDA_SUCCESS);
   REQUIRE(cuEventDestroy_v2(stop) == CUDA_SUCCESS);
   REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("a forked child of an initialised process cannot reach the execution service", "[cuda][fork]") {
+  auto *const context = createContext();
+  CUdeviceptr parent = 0;
+  REQUIRE(cuMemAlloc_v2(&parent, 16) == CUDA_SUCCESS);
+  const auto child = fork();
+  REQUIRE(child >= 0);
+  if (child == 0) {
+    CUdeviceptr inherited = 0;
+    _exit(cuMemAlloc_v2(&inherited, 16) == CUDA_ERROR_NOT_INITIALIZED ? 0 : 1);
+  }
+  int status = 0;
+  REQUIRE(waitpid(child, &status, 0) == child);
+  CHECK((WIFEXITED(status) && WEXITSTATUS(status) == 0));
+  CUdeviceptr next = 0;
+  CHECK(cuMemAlloc_v2(&next, 16) == CUDA_SUCCESS);
+  CHECK(cuMemFree_v2(next) == CUDA_SUCCESS);
+  CHECK(cuMemFree_v2(parent) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
