@@ -77,7 +77,8 @@ object Pipes {
           Instruction.AsyncBulkReduce | Instruction.AsyncBulkFill | Instruction.AsyncTensor |
           Instruction.TensorMapReplace | Instruction.TensorMapCopy | Instruction.AsyncSharedStore |
           Instruction.AsyncSharedReduce | Instruction.ClusterMap | Instruction.ClusterRankOf |
-          Instruction.ClusterBarrier | Instruction.ClusterTryCancel | Instruction.ClusterCancelStatus |
+          Instruction.ClusterBarrier | Instruction.GridBarrier | Instruction.ClusterTryCancel |
+          Instruction.ClusterCancelStatus |
           Instruction.ClusterCancelCta | Instruction.TensorMemoryAllocate | Instruction.TensorMemoryDeallocate |
           Instruction.TensorMemoryClaim | Instruction.TensorMemoryRelease | Instruction.TensorMemoryLoad |
           Instruction.TensorMemoryStore | Instruction.TensorMemoryCopy | Instruction.TensorMemoryShift |

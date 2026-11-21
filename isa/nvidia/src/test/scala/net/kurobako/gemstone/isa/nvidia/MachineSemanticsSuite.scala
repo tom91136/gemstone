@@ -1170,6 +1170,16 @@ class MachineSemanticsSuite extends Suite {
     )
   }
 
+  test("a grid barrier requests the wait with its flags") {
+    assertEquals(
+      shown(gridBarrier()),
+      """def `barrier.grid`(mask: UInt[64])(using barriers: Barriers): Unit = {
+        |  barriers.gridBarrier(mask)
+        |  ()
+        |}""".stripMargin
+    )
+  }
+
   test("a cluster barrier requests the arrival or the wait") {
     assertEquals(
       shown(clusterBarrier(arrive = true)),

@@ -92,6 +92,7 @@ private[isa] object MachineRendering {
   private def renderCluster(instruction: Instruction, machine: NvidiaMachineRender): Option[Term.Steps] =
     instruction match {
       case Instruction.ClusterBarrier(arrive)                 => Some(machine.clusterBarrier(arrive))
+      case Instruction.GridBarrier(flags)                     => Some(machine.gridBarrier(flags))
       case Instruction.ClusterMap(destination, address, rank) =>
         Some(clusterMap(Render, machine)(destination, address, rank))
       case Instruction.ClusterRankOf(destination, address) => Some(clusterRank(Render, machine)(destination, address))

@@ -424,6 +424,8 @@ private[isa] class VMMachineOps(val context: VMContext)
 
   inline def clusterBarrier(arrive: Boolean): Flow[Step] = Right(Step.ClusterBarrier(arrive))
 
+  inline def gridBarrier(flags: Value): Flow[Step] = Right(Step.GridBarrier(flags))
+
   inline def call(function: Value, returns: Vec[Parameter], parameters: Vec[Parameter]): Flow[Step] =
     VMMachineOps.call(context, function, returns, parameters)
 

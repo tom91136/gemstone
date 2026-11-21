@@ -26,6 +26,11 @@ private object VMBuiltins {
     case _         => 0
   }
 
+  private inline val GridScope = 1L
+
+  // The driver's opaque handle to the grid of a cooperative launch.
+  private inline val GridHandle = 0x7ffffffffffffL
+
   def execute(
       context: VMContext,
       lane: WorkgroupLane,
@@ -63,6 +68,8 @@ private object VMBuiltins {
         )))
       case Builtin.Free         => heap(context).flatMap(ContextHeap.free(context.device.memory, _, parameter(0)))
       case Builtin.LaunchDevice => launch(context, lane, parameters, parameter(_, _)).map(_ => returnValue(0L))
+      case Builtin.GridHandle   =>
+        Right(returnValue(if (parameter(0, 4) == GridScope && context.device.gridWorkspace != 0L) GridHandle else 0L))
     }
   }
 

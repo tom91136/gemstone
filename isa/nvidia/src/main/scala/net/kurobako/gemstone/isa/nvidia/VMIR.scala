@@ -399,6 +399,7 @@ private[isa] object VMIR {
     case Free
     case AssertFail
     case LaunchDevice
+    case GridHandle
   }
 
   /** Warp-level matrix operand types, their fragments across a warp's lanes, and the operations over them. */
@@ -1612,6 +1613,9 @@ private[isa] object VMIR {
     case ClusterMap(destination: Register, address: Value, rank: Value)
     case ClusterRankOf(destination: Register, address: Value)
     case ClusterBarrier(arrive: Boolean)
+
+    /** Arrival at, and wait for, a grid-wide barrier of a cooperative launch; `flags` are the driver call's. */
+    case GridBarrier(flags: Value)
 
     /** `clusterlaunchcontrol.try_cancel`: its response at `response` and the transaction completing on the mbarrier at
       * `barrier`, in every CTA of the cluster at the same offsets where `multicast`.

@@ -354,6 +354,9 @@ private[isa] object MachineDefinitions {
   def warpBarrier(guarded: Boolean = false): Either[String, Definition] =
     rendered("bar.warp.sync", guarded)(_.warpSync(mask))
 
+  def gridBarrier(): Either[String, Definition] =
+    rendered("barrier.grid")(_.gridBarrier(mask))
+
   def clusterBarrier(arrive: Boolean): Either[String, Definition] =
     rendered("barrier.cluster")(_.clusterBarrier(arrive))
 

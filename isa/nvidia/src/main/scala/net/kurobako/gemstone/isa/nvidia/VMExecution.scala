@@ -32,6 +32,7 @@ private object VMExecution {
     case WarpSync(memberMask: Value, exclusive: Boolean)
     case ConvergenceSync(token: Register)
     case ClusterBarrier(arrive: Boolean)
+    case GridBarrier(flags: Value)
     case WorkgroupBarrier(arrivals: Vec[WorkgroupArrival], blocking: Boolean, reduction: Option[BarrierReduction])
     case Call(calls: Vec[DeviceCall], parameters: Vec[Parameter], returnParameters: Vec[Parameter])
     case Return(mask: VMLaneMask)

@@ -12,6 +12,7 @@ import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.util.boundary
 import scala.util.boundary.break
 
@@ -33,12 +34,23 @@ private[isa] object VMInterpreter {
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class ClusterSync {
-    var phase                              = 0L
-    var arrived                            = false
-    var members: Vec[Execution]            = Vec.empty
-    def completes(own: Execution): Boolean =
-      if (members.isEmpty) own.clusterArrival
-      else members.exists(_.clusterArrivals) && members.forall(_.clusterArrival)
+    var phase                           = 0L
+    var arrived                         = false
+    var members: Vec[Phases]            = Vec.empty
+    def completes(own: Phases): Boolean =
+      if (members.isEmpty) own.arrival else members.exists(_.arrivals) && members.forall(_.arrival)
+  }
+
+  /** One workgroup's side of a [[ClusterSync]]: its lanes' arrivals and the cohorts waiting for a phase to complete. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private class Phases(laneCount: Int, live: () => VMLaneMask, val sync: ClusterSync, val name: String) {
+    lazy val waiting: ArrayBuffer[ClusterWaiting] = mutable.ArrayBuffer.empty[ClusterWaiting]
+    lazy val lanePhase: Array[Long]               = Array.fill(laneCount)(-1L)
+    lazy val waitedPhase: Array[Long]             = Array.fill(laneCount)(-1L)
+    var arrived                                   = VMLaneMask.Empty
+
+    def arrivals: Boolean = arrived.nonEmpty
+    def arrival: Boolean  = arrived.intersect(live()) == live()
   }
 
   // Frames compare by identity, so warp-scoped keys never match across activations.
@@ -516,7 +528,7 @@ private[isa] object VMInterpreter {
               sync
             )
           )
-          sync.members = members
+          sync.members = members.map(_.clusterPhases)
           (blocks, members)
         }
         val members = units.flatMap(_._2)
@@ -589,7 +601,7 @@ private[isa] object VMInterpreter {
               pace
             )
           )
-          sync.members = members
+          sync.members = members.map(_.clusterPhases)
           val result = interleave(
             kernel,
             members,
@@ -619,6 +631,7 @@ private[isa] object VMInterpreter {
     val allLanes  = VMLaneMask.all(laneCount)
     device.memory.allocate(GridWorkspaceBytes).flatMap { workspace =>
       val cooperative = device.copy(gridWorkspace = workspace.raw)
+      val sync        = ClusterSync()
       val groups      =
         Vec.tabulate(geometry.groupTotal.toInt)(index => geometry.groupCoordinates(index.toLong.unsafe[Long >= 0]))
       val blocks  = groups.map(_ => Block(laneCount))
@@ -631,9 +644,11 @@ private[isa] object VMInterpreter {
           parameterBlock,
           cooperative,
           dynamicSharedBytes,
-          block
+          block,
+          gridSync = sync
         )
       )
+      sync.members = members.map(_.gridPhases)
       val result = interleave(
         kernel,
         members,
@@ -757,7 +772,8 @@ private[isa] object VMInterpreter {
       block: Block,
       cluster: Option[Dimensions] = None,
       sync: ClusterSync = ClusterSync(),
-      pace: Pace = Pace.Free
+      pace: Pace = Pace.Free,
+      gridSync: ClusterSync = ClusterSync()
   ) {
     private val workgroup = block.workgroup
     private val effects   = block.effects
@@ -804,13 +820,8 @@ private[isa] object VMInterpreter {
     private val resumed      = mutable.ArrayBuffer.empty[Waiting]
     private val released     = mutable.ArrayBuffer.empty[Waiting]
 
-    private lazy val clusterWaiting     = mutable.ArrayBuffer.empty[ClusterWaiting]
-    private lazy val clusterLanePhase   = Array.fill(workgroup.laneCount)(-1L)
-    private lazy val clusterWaitedPhase = Array.fill(workgroup.laneCount)(-1L)
-    private var clusterArrived          = VMLaneMask.Empty
-
-    def clusterArrivals: Boolean = clusterArrived.nonEmpty
-    def clusterArrival: Boolean  = clusterArrived.intersect(live) == live
+    val clusterPhases: Phases = Phases(workgroup.laneCount, () => live, sync, "cluster")
+    val gridPhases: Phases    = Phases(workgroup.laneCount, () => live, gridSync, "grid")
 
     private type Run = boundary.Label[Either[Fault, Unit]]
 
@@ -1013,16 +1024,20 @@ private[isa] object VMInterpreter {
       runnable -> cohort.lanes.subtract(runnable)
     }
 
-    private def clusterPhase: Long = sync.phase
+    private def releasePhases()(using Run): Unit = {
+      release(clusterPhases)
+      release(gridPhases)
+    }
 
-    private def releaseCluster()(using Run): Unit =
+    private def release(phases: Phases)(using Run): Unit = {
+      val sync = phases.sync
       if (sync.arrived) {
-        if (sync.completes(this) && (clusterArrived.nonEmpty || sync.members.nonEmpty)) {
+        if (sync.completes(phases) && (phases.arrived.nonEmpty || sync.members.nonEmpty)) {
           sync.phase += 1L
-          if (sync.members.isEmpty) clusterArrived = VMLaneMask.Empty
-          else sync.members.foreach(_.clusterArrived = VMLaneMask.Empty)
+          if (sync.members.isEmpty) phases.arrived = VMLaneMask.Empty
+          else sync.members.foreach(_.arrived = VMLaneMask.Empty)
         }
-        val pending  = clusterWaiting.toVector
+        val pending  = phases.waiting.toVector
         val departed = mutable.LongMap.empty[VMLaneMask]
         pending.foreach { entry =>
           if (!entry.arrival) departed.update(
@@ -1030,16 +1045,16 @@ private[isa] object VMInterpreter {
             departed.get(entry.phase).fold(entry.cohort.lanes)(_.union(entry.cohort.lanes))
           )
         }
-        clusterWaiting.clear()
+        phases.waiting.clear()
         pending.foreach { entry =>
-          val participants = if (entry.arrival) clusterArrived
+          val participants = if (entry.arrival) phases.arrived
           else departed.getOrElse(entry.phase, VMLaneMask.Empty)
           val released = entry.cohort.lanes.intersect(live).filterLanes { lane =>
             val warp = live.warpBits(lane.raw)
-            if (entry.arrival && entry.phase < clusterPhase) true
-            else (entry.arrival || entry.phase < clusterPhase) && (participants.warpBits(lane.raw) & warp) == warp
+            if (entry.arrival && entry.phase < sync.phase) true
+            else (entry.arrival || entry.phase < sync.phase) && (participants.warpBits(lane.raw) & warp) == warp
           }
-          if (!entry.arrival) released.foreachLane(lane => clusterWaitedPhase(lane.raw) = entry.phase)
+          if (!entry.arrival) released.foreachLane(lane => phases.waitedPhase(lane.raw) = entry.phase)
           transition(
             entry.cohort,
             MachineEvent.Kind.Resumed,
@@ -1047,9 +1062,10 @@ private[isa] object VMInterpreter {
           )
           advance(entry.cohort, released)
           val remaining = entry.cohort.lanes.intersect(live).subtract(released)
-          if (remaining.nonEmpty) clusterWaiting += entry.copy(cohort = entry.cohort.copy(lanes = remaining))
+          if (remaining.nonEmpty) phases.waiting += entry.copy(cohort = entry.cohort.copy(lanes = remaining))
         }
       }
+    }
 
     private def livePart(base: WorkgroupLane.WarpBase, frame: VMFrame, members: Long): Long =
       (members & 0xffffffffL) & frame.live.warpBits(base.raw) & live.warpBits(base.raw)
@@ -1366,31 +1382,53 @@ private[isa] object VMInterpreter {
     }
 
     private def clusterBarrier(cohort: Cohort, active: VMLaneMask, arrival: Boolean)(using Run): Unit = {
+      val phases  = clusterPhases
       var invalid = false
       active.foreachLane { lane =>
         if (arrival) {
-          if (clusterLanePhase(lane.raw) > clusterWaitedPhase(lane.raw)) invalid = true
-          clusterLanePhase(lane.raw) = clusterPhase
-        } else if (clusterLanePhase(lane.raw) < 0) invalid = true
+          if (phases.lanePhase(lane.raw) > phases.waitedPhase(lane.raw)) invalid = true
+          phases.lanePhase(lane.raw) = phases.sync.phase
+        } else if (phases.lanePhase(lane.raw) < 0) invalid = true
       }
       if (invalid) fail(Fault.Backend("cluster barrier requires one arrival before each wait"))
       if (arrival) {
-        sync.arrived = true
-        clusterArrived = clusterArrived.union(active)
-        clusterWaiting += ClusterWaiting(cohort.copy(lanes = active), clusterPhase, arrival = true)
+        phases.sync.arrived = true
+        phases.arrived = phases.arrived.union(active)
+        phases.waiting += ClusterWaiting(cohort.copy(lanes = active), phases.sync.phase, arrival = true)
       } else {
-        val phases = mutable.LongMap.empty[VMLaneMask.Builder]
-        active.foreachLane(lane => phases.getOrElseUpdate(clusterLanePhase(lane.raw), VMLaneMask.Builder()).add(lane))
-        phases.foreach((phase, lanes) =>
-          clusterWaiting += ClusterWaiting(cohort.copy(lanes = lanes.result()), phase, false)
+        val groups = mutable.LongMap.empty[VMLaneMask.Builder]
+        active.foreachLane(lane =>
+          groups.getOrElseUpdate(phases.lanePhase(lane.raw), VMLaneMask.Builder()).add(lane)
+        )
+        groups.foreach((phase, lanes) =>
+          phases.waiting += ClusterWaiting(cohort.copy(lanes = lanes.result()), phase, false)
         )
       }
+      blockOnPhase(phases, cohort, active)
+    }
+
+    private def gridBarrier(cohort: Cohort, active: VMLaneMask, flags: Value)(using Run): Unit = {
+      if (device.gridWorkspace == 0L)
+        fail(Fault.Unsupported("grid synchronisation in a launch that is not cooperative"))
+      var leader = false
+      active.foreachLane(lane => leader ||= (context.read(lane, flags) & 1L) != 0L)
+      if (leader)
+        fail(Fault.Unsupported("grid synchronisation of one thread per workgroup (flag 1) is not implemented"))
+      val phases = gridPhases
+      active.foreachLane(lane => phases.lanePhase(lane.raw) = phases.sync.phase)
+      phases.sync.arrived = true
+      phases.arrived = phases.arrived.union(active)
+      phases.waiting += ClusterWaiting(cohort.copy(lanes = active), phases.sync.phase, arrival = false)
+      blockOnPhase(phases, cohort, active)
+    }
+
+    private def blockOnPhase(phases: Phases, cohort: Cohort, active: VMLaneMask)(using Run): Unit = {
       transition(
         cohort,
-        MachineEvent.Kind.Blocked(MachineUnit.Reason.Cluster(s"cluster phase $clusterPhase")),
+        MachineEvent.Kind.Blocked(MachineUnit.Reason.Cluster(s"${phases.name} phase ${phases.sync.phase}")),
         location(cohort.frame, cohort.pc, active)
       )
-      releaseCluster()
+      release(phases)
     }
 
     private def complete(cohort: Cohort, mask: VMLaneMask)(using Run): Unit = {
@@ -1490,6 +1528,9 @@ private[isa] object VMInterpreter {
         case Right(Step.ClusterBarrier(arrival)) =>
           advance(cohort, skipped)
           clusterBarrier(cohort, active, arrival)
+        case Right(Step.GridBarrier(flags)) =>
+          advance(cohort, skipped)
+          gridBarrier(cohort, active, flags)
         case Right(Step.WorkgroupBarrier(arrivals, blocking, reduction)) =>
           advance(cohort, skipped)
           arrivals.foreach(arriveWorkgroup(cohort, _, reduction, !blocking))
@@ -1509,14 +1550,14 @@ private[isa] object VMInterpreter {
           complete(cohort, mask)
           advance(cohort, skipped)
           if (skipped.isEmpty) retire(cohort)
-          releaseCluster()
+          releasePhases()
           releaseAll()
         case Right(Step.Exit(mask)) =>
           frame.live = frame.live.subtract(mask)
           live = live.subtract(mask)
           advance(cohort, skipped)
           if (skipped.isEmpty) retire(cohort)
-          releaseCluster()
+          releasePhases()
           releaseAll()
       }
       if (observing) {
@@ -1537,6 +1578,11 @@ private[isa] object VMInterpreter {
       Vec.from(waiting.values.flatMap(_.map(value =>
         s"${value.key.describe}, ${value.cohort.frame.routine.name} pc ${value.cohort.pc}"
       ))) ++
+        Vec(clusterPhases, gridPhases).flatMap(phases =>
+          Vec.from(phases.waiting.map(entry =>
+            s"${phases.name} phase ${entry.phase}, ${entry.cohort.frame.routine.name} pc ${entry.cohort.pc}"
+          ))
+        ) ++
         (if (stuck) Vec.from(ready.cohorts.map(value => s"collective, ${value.frame.routine.name} pc ${value.pc}"))
          else Vec.empty)
 
@@ -1628,13 +1674,13 @@ private[isa] object VMInterpreter {
 
     /** Runs at most `budget` steps after releasing cluster barrier phases other members completed. */
     def slice(budget: Int): Either[Fault, Unit] = boundary {
-      releaseCluster()
+      releasePhases()
       var steps = 0
       while (steps < budget && live.nonEmpty && runnable) {
         next()
         steps += 1
       }
-      releaseCluster()
+      releasePhases()
       Right(())
     }
 

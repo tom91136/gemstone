@@ -131,7 +131,8 @@ object RegisterUses {
             Instruction.AsyncBulkFill | Instruction.AsyncTensor | Instruction.TensorMapReplace |
             Instruction.TensorMapCopy | Instruction.AsyncSharedStore) => warpMemoryOps(instruction)
       case _: (Instruction.AsyncSharedReduce | Instruction.ClusterMap | Instruction.ClusterRankOf |
-            Instruction.ClusterBarrier | Instruction.ClusterTryCancel | Instruction.ClusterCancelStatus |
+            Instruction.ClusterBarrier | Instruction.GridBarrier | Instruction.ClusterTryCancel |
+            Instruction.ClusterCancelStatus |
             Instruction.ClusterCancelCta | Instruction.TensorMemoryAllocate | Instruction.TensorMemoryDeallocate |
             Instruction.TensorMemoryClaim | Instruction.TensorMemoryRelease | Instruction.TensorMemoryLoad |
             Instruction.TensorMemoryStore | Instruction.TensorMemoryCopy | Instruction.TensorMemoryShift |
@@ -351,6 +352,8 @@ object RegisterUses {
         writeRegister(destination); readValue(address)
       case Instruction.ClusterBarrier(_) =>
         ()
+      case Instruction.GridBarrier(flags) =>
+        readValue(flags)
       case Instruction.ClusterTryCancel(response, barrier, _) =>
         readValues(Vec(response, barrier))
       case Instruction.ClusterCancelStatus(destination, response) =>

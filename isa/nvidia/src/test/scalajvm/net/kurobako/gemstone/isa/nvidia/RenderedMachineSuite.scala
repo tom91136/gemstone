@@ -285,6 +285,7 @@ class RenderedMachineSuite extends Suite {
     assertEquals(errors(warpBarrier(guarded = true)), Nil)
     assertEquals(errors(clusterBarrier(arrive = true)), Nil)
     assertEquals(errors(clusterBarrier(arrive = false)), Nil)
+    assertEquals(errors(gridBarrier()), Nil)
   }
 
   test("rendered tensor memory allocations, deallocations and permits compile") {

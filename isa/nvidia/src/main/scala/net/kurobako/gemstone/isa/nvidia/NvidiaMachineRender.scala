@@ -645,6 +645,17 @@ private[isa] class NvidiaMachineRender(names: Names, guard: Option[Term])
     )
   )
 
+  inline def gridBarrier(flags: Value): Term.Steps =
+    guarded(
+      guard,
+      Term.context(
+        Barriers,
+        MachineCall("gridBarrier", Vec.empty, Vec((names.value(flags), Some(Word)))),
+        None,
+        effect = true
+      )
+    )
+
   inline def warpSync(memberMask: Value): Term.Steps = warpBarrier("warpSync", memberMask)
 
   inline def warpPartition(memberMask: Value): Term.Steps = warpBarrier("warpPartition", memberMask)

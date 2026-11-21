@@ -57,6 +57,7 @@ private[isa] trait NvidiaMachine[V, L, D, C, F[_]] extends Any
 
   /** The lanes arrive at the cluster barrier if `arrive`, and otherwise wait at it. */
   inline def clusterBarrier(arrive: Boolean): F[Step]
+  inline def gridBarrier(flags: Value): F[Step]
 
   /** `data` stored at `offset` in the shared window of `cta`, then `next`. */
   inline def storeCluster(lane: L, cta: C, offset: V, data: D)(inline next: => F[Unit]): F[Unit]

@@ -492,7 +492,8 @@ private object VMControlCompiler {
 
   /** A call to the driver's device runtime: `malloc` and `free` on the device heap, `vprintf`, which prints the format
     * in R4 with the argument buffer in R6, and `__assertfail`, which fails the launch as a failed device assertion
-    * does. Arguments and results are in R4 onwards.
+    * does. Arguments and results are in R4 onwards. The cooperative-groups syscalls return the grid's handle in R4:R5,
+    * and wait for every thread of the grid at a barrier with the flags in R6.
     */
   private def driverCall(name: String, guard: Option[ExecutionPredicate])(using context: VMCompilationContext): Unit = {
     import context.*
@@ -523,6 +524,14 @@ private object VMControlCompiler {
         step(StoreParameter(buffer, 0, source(Operand.Register(RegisterBank.R, 8), 32), 32))
         step(StoreParameter(Parameter(3), 0, source(Operand.Register(RegisterBank.R, 10), 64), 64))
         step(CallBuiltin(Builtin.AssertFail, Vec.empty, Vec(argument, Parameter(1), buffer, Parameter(3))))
+      case "__cuda_syscall_CGS_get_intrinsic_handle" =>
+        step(StoreParameter(argument, 0, source(Operand.Register(RegisterBank.R, 4), 32), 32))
+        step(CallBuiltin(Builtin.GridHandle, Vec(result), Vec(argument)))
+        step(LoadParameter(Vec(register(4)), result, 0, 32, signed = false))
+        step(LoadParameter(Vec(register(5)), result, 4, 32, signed = false))
+      case "__cuda_syscall_CGS_sync" =>
+        step(GridBarrier(source(Operand.Register(RegisterBank.R, 6), 32)))
+        step(Move(register(4), Value.Immediate(0L), 32))
       case _ => step(Trap)
     }
   }

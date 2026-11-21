@@ -51,7 +51,8 @@ private object VMSemantics {
       VMTensor.execute(operation, context)
     case _: (Instruction.MBarrierLoad | Instruction.MBarrierInit | Instruction.MBarrierInvalidate |
           Instruction.MBarrierArrive | Instruction.MBarrierTest | Instruction.MBarrierTransaction |
-          Instruction.MBarrierPending | Instruction.WarpBarrier | Instruction.ClusterBarrier) =>
+          Instruction.MBarrierPending | Instruction.WarpBarrier | Instruction.ClusterBarrier |
+          Instruction.GridBarrier) =>
       executeBarrierMachine(instruction, context)
     case _: (Instruction.BarrierSync | Instruction.BarrierArrive | Instruction.BarrierReduce) =>
       executeWorkgroupBarrier(instruction, context)
@@ -211,6 +212,7 @@ private object VMSemantics {
       case Instruction.WarpBarrier(memberMask, exclusive) =>
         if (exclusive) machine.warpPartition(memberMask) else machine.warpSync(memberMask)
       case Instruction.ClusterBarrier(arrive) => machine.clusterBarrier(arrive)
+      case Instruction.GridBarrier(flags)     => machine.gridBarrier(flags)
     }
   }
 
