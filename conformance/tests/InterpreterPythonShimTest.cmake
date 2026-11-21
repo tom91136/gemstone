@@ -39,4 +39,18 @@ if(NOT "--case" IN_LIST lines OR NOT "smoke/vector_add" IN_LIST lines)
   fail("the shim must forward its arguments to the program:\n${lines}")
 endif()
 
+file(CREATE_LINK "${directory}/base" "${directory}/linked" SYMBOLIC)
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env --unset=PYTHONPATH
+    "CONFORMANCE_INTERPRETER_DIRECTORY=${directory}/linked"
+    "${directory}/shim" --case smoke/vector_add
+  OUTPUT_VARIABLE text RESULT_VARIABLE result ERROR_VARIABLE error)
+if(NOT result EQUAL 0)
+  fail("shim through a symlinked cache failed: ${error}")
+endif()
+string(REPLACE "\n" ";" lines "${text}")
+if(NOT "CUDA_HOME=${directory}/base/numba-${KEY}/cuda" IN_LIST lines)
+  fail("a symlinked cache must reach the interpreter as its real path:\n${lines}")
+endif()
+
 file(REMOVE_RECURSE "${directory}")

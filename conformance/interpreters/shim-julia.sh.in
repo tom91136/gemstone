@@ -2,6 +2,7 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 base=${CONFORMANCE_INTERPRETER_DIRECTORY:-@CONFORMANCE_INTERPRETER_DIRECTORY@}
+base=$(CDPATH= cd -- "$base" && pwd -P)
 depot="$base/@PACKAGE@-@KEY@"
 julia="$base/julia-@JULIA@/bin/julia"
 project="$depot/environment/@PROJECT@"
