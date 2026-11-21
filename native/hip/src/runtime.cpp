@@ -322,6 +322,7 @@ struct State {
   gemstone::PeerAccess peers;
   std::unordered_map<hipStream_t, int> streamDevices;
   std::unordered_map<hipStream_t, int> streamPriorities;
+  std::unordered_map<hipStream_t, unsigned int> streamFlags;
   std::unordered_map<void **, std::shared_ptr<Module>> modules;
   std::vector<std::weak_ptr<Module>> driverModules;
   std::unordered_map<const void *, FunctionBinding> kernels;
@@ -2268,6 +2269,7 @@ hipError_t createStream(hipStream_t *stream, unsigned int flags, int priority) {
     std::scoped_lock const guard(state().lock);
     state().streamDevices.emplace(created, currentDevice);
     state().streamPriorities.emplace(created, std::clamp(priority, -1, 1));
+    state().streamFlags.emplace(created, flags & hipStreamNonBlocking);
   }
   *stream = created;
   return remember(hipSuccess);
@@ -2287,6 +2289,7 @@ extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
     std::scoped_lock const guard(state().lock);
     state().streamDevices.erase(stream);
     state().streamPriorities.erase(stream);
+    state().streamFlags.erase(stream);
   }
   return remember(hipSuccess);
 }
@@ -2327,6 +2330,18 @@ extern "C" hipError_t hipStreamGetPriority(hipStream_t stream, int *priority) {
   std::scoped_lock const guard(state().lock);
   const auto found = state().streamPriorities.find(stream);
   *priority = found == state().streamPriorities.end() ? 0 : found->second;
+  return remember(hipSuccess);
+}
+extern "C" hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int *flags) {
+  if (!flags) return remember(hipErrorInvalidValue);
+  if (!stream || sentinelStream(stream)) {
+    *flags = hipStreamDefault;
+    return remember(hipSuccess);
+  }
+  if (!validStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  std::scoped_lock const guard(state().lock);
+  const auto found = state().streamFlags.find(stream);
+  *flags = found == state().streamFlags.end() ? hipStreamDefault : found->second;
   return remember(hipSuccess);
 }
 extern "C" int hipGetStreamDeviceId(hipStream_t stream) { return stream && !sentinelStream(stream) ? streamDevice(stream) : currentDevice; }

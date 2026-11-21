@@ -1695,6 +1695,26 @@ TEST_CASE("HIP function attributes and module occupancy follow the device model"
   REQUIRE((hipModuleUnload(module) == hipSuccess));
 }
 
+TEST_CASE("HIP streams report the flags they were created with", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  hipStream_t blocking = nullptr;
+  hipStream_t nonBlocking = nullptr;
+  REQUIRE((hipStreamCreate(&blocking) == hipSuccess));
+  REQUIRE((hipStreamCreateWithFlags(&nonBlocking, hipStreamNonBlocking) == hipSuccess));
+  unsigned int flags = 99;
+  REQUIRE((hipStreamGetFlags(blocking, &flags) == hipSuccess));
+  CHECK((flags == hipStreamDefault));
+  REQUIRE((hipStreamGetFlags(nonBlocking, &flags) == hipSuccess));
+  CHECK((flags == hipStreamNonBlocking));
+  REQUIRE((hipStreamGetFlags(nullptr, &flags) == hipSuccess));
+  CHECK((flags == hipStreamDefault));
+  CHECK((hipStreamGetFlags(blocking, nullptr) == hipErrorInvalidValue));
+  REQUIRE((hipStreamDestroy(blocking) == hipSuccess));
+  CHECK((hipStreamGetFlags(blocking, &flags) == hipErrorInvalidResourceHandle));
+  REQUIRE((hipStreamDestroy(nonBlocking) == hipSuccess));
+}
+
 TEST_CASE("HIP streams report their priority and capture mode exchanges", "[hip]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);

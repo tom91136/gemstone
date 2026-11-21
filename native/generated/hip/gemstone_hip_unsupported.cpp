@@ -277,7 +277,6 @@ GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamEndCapture_spt, gemstone_hip_unsu
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamGetAttribute, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamGetCaptureInfo_spt, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamGetCaptureInfo_v2_spt, gemstone_hip_unsupported)
-GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamGetFlags, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamGetFlags_spt, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamGetId, gemstone_hip_unsupported)
 GEMSTONE_UNSUPPORTED_AS(hipError_t(), hipStreamGetPriority_spt, gemstone_hip_unsupported)

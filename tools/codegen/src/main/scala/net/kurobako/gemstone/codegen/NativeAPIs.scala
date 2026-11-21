@@ -197,7 +197,7 @@ hipModuleOccupancyMaxPotentialBlockSize hipModuleUnload hipOccupancyMaxActiveBlo
 hipOccupancyMaxPotentialBlockSize
 hipPeekAtLastError hipPointerGetAttributes hipRuntimeGetVersion hipSetDevice hipStreamAddCallback
 hipStreamBeginCapture hipStreamCreate hipStreamCreateWithFlags hipStreamCreateWithPriority hipStreamDestroy
-hipStreamEndCapture hipStreamGetDevice hipStreamGetPriority hipStreamIsCapturing hipStreamQuery hipStreamSynchronize hipStreamWaitEvent
+hipStreamEndCapture hipStreamGetDevice hipStreamGetFlags hipStreamGetPriority hipStreamIsCapturing hipStreamQuery hipStreamSynchronize hipStreamWaitEvent
 hipThreadExchangeStreamCaptureMode"""),
         legacy = Vector(
           "hipKernelGetLibrary",
