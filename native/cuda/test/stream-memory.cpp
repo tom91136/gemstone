@@ -881,3 +881,16 @@ TEST_CASE("a forked child of an initialised process cannot reach the execution s
   CHECK(cuMemFree_v2(parent) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+TEST_CASE("a device allocation owns the rest of its 256 byte granule", "[cuda][memory]") {
+  auto *const context = createContext();
+  CUdeviceptr pointer = 0;
+  REQUIRE(cuMemAlloc_v2(&pointer, 40) == CUDA_SUCCESS);
+  fixture.checkAllocationContainingAddress(reinterpret_cast<const void *>(pointer + 255));
+  fixture.checkAllocationContainingAddress(reinterpret_cast<const void *>(pointer + 256), false);
+  size_t size = 0;
+  REQUIRE(cuMemGetAddressRange_v2(nullptr, &size, pointer) == CUDA_SUCCESS);
+  CHECK(size == 40);
+  REQUIRE(cuMemFree_v2(pointer) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}

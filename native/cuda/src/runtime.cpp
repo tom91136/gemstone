@@ -963,7 +963,8 @@ CUresult allocate(CUdeviceptr *pointer, size_t size, const void *module) {
     address = nextDeviceAddress;
     nextDeviceAddress += span;
   }
-  const auto id = bindAllocation(bytes, address, false);
+  auto id = bindAllocation(span, address, false);
+  if (!id && span != bytes) id = bindAllocation(bytes, address, false);
   if (!id) return CUDA_ERROR_UNKNOWN;
   if (const auto status = trackPointer(address, bytes, *id, module, false, false); status != CUDA_SUCCESS) {
     (void)releaseAllocation(*id);
