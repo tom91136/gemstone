@@ -142,8 +142,8 @@ private object VMHalfCompiler {
     }
     val raw      = source(base)
     val selected = base match {
-      // a constant bank holds a float32, which the half instructions narrow to a half
-      case Operand.ConstantBank(_, _) if selectors.isEmpty || selectors == Vec(OperandSelector.F32) =>
+      // a float32 constant bank source narrows to a half; before Volta that is every constant without a selector
+      case Operand.ConstantBank(_, _) if (selectors.isEmpty && sm < 70) || selectors == Vec(OperandSelector.F32) =>
         val narrowed = convert(raw, NumericFormat.IEEE(32), format(bfloat16), Some(ConversionRounding.RN))
         halves(narrowed, narrowed)
       case _ => selectors match {

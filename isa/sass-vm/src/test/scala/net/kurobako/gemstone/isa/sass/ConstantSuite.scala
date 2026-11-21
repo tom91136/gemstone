@@ -46,6 +46,17 @@ class ConstantSuite extends Suite {
     assertEquals(run.words(0, 2).head, 0x4624L)
   }
 
+  // RTX 4060 Ti sm_89, driver 615, CUDA 13.3: ComplexF16 multiplication in CUDA.jl, (0.75+0.5i)(1.25-0.375i)
+  for (sm <- Vec(89)) test(s"sm_$sm a constant half source without a selector reads both packed halves") {
+    val run = program(
+      sm,
+      "LDC.64 R2, c[0x0][0x160]; LDC.U16 R0, c[0x0][0x16a]; LDC.U16 R4, c[0x0][0x16e]; LDC.U16 R5, c[0x0][0x168]; " +
+        "HMUL2 R0, R0.H0_H0, c[0x0][0x16c]; HFMA2 R4, R4.H0_H0, c[0x0][0x168].H0_H0, R0.reuse.H0_H0; " +
+        "HFMA2 R0, R5.H0_H0, c[0x0][0x16c].H0_H0, -R0.H1_H1; PRMT R0, R0, 0x5410, R4; STG.E [R2.64], R0; EXIT"
+    ).launch(1)(Arg.zeros(4), Arg.u32(0x38003a00L), Arg.u32(0xb6003d00L))
+    assertEquals(run.words(0).head, 0x35803c80L)
+  }
+
   // cooperative_groups reads the grid workspace the driver writes to c0: its high word, then its low word
   for {
     (sm, high, low) <- Vec(
