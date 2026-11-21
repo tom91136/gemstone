@@ -48,6 +48,13 @@ class StaticTimingSuite extends Suite {
     assert(pipes.contains("ISETP" -> Some(Pipe.Alu)), pipes)
   }
 
+  test("loads and stores reach memory and arithmetic does not") {
+    val memory = instructions.zip(timing).map((instruction, row) => instruction.mnemonic.raw -> row.memory)
+    assert(memory.contains("LDG" -> true), memory)
+    assert(memory.contains("IADD3" -> false), memory)
+    assert(!memory.contains("IADD3" -> true), memory)
+  }
+
   test("a launch's resources hold the kernel's registers and the lanes asked for") {
     val resources =
       program.staticResources(name, 128.unsafe[Int > 0], 0L.unsafe[Long >= 0]).fold(e => fail(e.message), identity)

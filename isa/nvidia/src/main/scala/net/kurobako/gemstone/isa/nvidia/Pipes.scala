@@ -7,6 +7,20 @@ object Pipes {
 
   private def float(width: Int): Pipe = if (width == 64) Pipe.Fp64 else Pipe.Fma
 
+  /** Whether the instruction reads or writes memory other than registers and the kernel's parameters. */
+  def reachesMemory(instruction: Instruction): Boolean = instruction match {
+    case Instruction.Load(_, _, _, _, access)       => access != MemoryAccess.Parameter
+    case Instruction.LoadVector(_, _, _, _, access) => access != MemoryAccess.Parameter
+    case Instruction.Store(_, _, _, access)         => access != MemoryAccess.Parameter
+    case Instruction.StoreVector(_, _, _, access)   => access != MemoryAccess.Parameter
+    case _: (Instruction.Atomic | Instruction.AtomicCompareExchange | Instruction.AsyncCopy |
+          Instruction.AsyncBulkStore | Instruction.AsyncBulkCopy | Instruction.AsyncBulkReduce |
+          Instruction.AsyncSharedStore | Instruction.Texture | Instruction.TensorMapCopy |
+          Instruction.SharedLockLoad | Instruction.SharedStoreUnlock | Instruction.TensorMemoryLoad |
+          Instruction.TensorMemoryStore | Instruction.TensorMemoryCopy | Instruction.MBarrierLoad) => true
+    case _ => false
+  }
+
   def of(instruction: Instruction): Option[Pipe] = instruction match {
     case _: (Instruction.Tensor | Instruction.TensorMemoryMultiply) => Some(Pipe.Tensor)
     case _: (Instruction.IntegerUnary | Instruction.BitFind | Instruction.CompareSetCombined |

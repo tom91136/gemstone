@@ -5,7 +5,6 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.flow.ControlFlowGraph
 import net.kurobako.gemstone.flow.Liveness
-import net.kurobako.gemstone.flow.Loop
 import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.isa.KernelMetadata
 import net.kurobako.gemstone.isa.amdgpu.*
@@ -71,7 +70,7 @@ object AMDGPUBlockCost {
   def of(image: Vec[Byte], function: String, targetName: String, launch: Launch): Either[String, AMDGPUBlockCost] =
     for {
       target       <- targetName.refine[Target].left.map(_.raw)
-      architecture <- Architecture.named(targetName).filter(calibrated(_))
+      architecture <- Architecture.named(targetName).filter(BlockRegion.calibrated(_))
         .toRight(s"no calibrated pipeline model for $targetName")
       name      <- function.refine[NonEmpty[String]].left.map(_ => s"no AMDGPU kernel '$function'")
       original  <- static(image, function)
@@ -146,13 +145,6 @@ object AMDGPUBlockCost {
       value.refine[Long > 0].left.map(_.raw).map(KernelTask.Argument.Local(_))
   }
 
-  private def calibrated(architecture: Architecture): Boolean =
-    (architecture.branchRedirect.map(_.source) ++ architecture.issueOrder.map(_.source) ++
-      architecture.pipeLatency.values.map(_.source)).exists {
-      case Architecture.Source.Probed(_, _, _, _) => true
-      case _                                      => false
-    }
-
   private def static(image: Vec[Byte], function: String): Either[String, Static] = for {
     code   <- AMDGPUModel.staticCode(image, function)
     timing <- AMDGPUModel.staticTiming(image, function)
@@ -173,9 +165,6 @@ object AMDGPUBlockCost {
     val mnemonic = instruction.opcode.raw
     mnemonic == "s_branch" || mnemonic.startsWith("s_cbranch_")
   }
-
-  private def innermost(graph: ControlFlowGraph, block: Int): Option[Loop] =
-    Option.when(graph.reducible)(graph.loops.filter(_.body.contains(block)).minByOption(_.body.size)).flatten
 
   private def units(use: RegisterUse, names: Vec[String]): Set[String] =
     names.flatMap(name => Liveness.units(name, use.unitsOf(name))).toSet
@@ -358,15 +347,7 @@ final class AMDGPUBlockCost private (
 
   private def costed(laid: Static, anchor: Int, shift: Int, window: Window, count: Int): Either[String, Cost] = {
     val graph  = laid.graph
-    val block  = graph.blocks.indexWhere(block => block.first <= anchor && anchor <= block.last)
-    val loop   = innermost(graph, block)
-    val blocks = loop.fold(Vec(block))(_.body.sorted)
-    val header = loop.fold(block)(_.header)
-    val kind   = loop.fold(BlockAnalysis.Kind.Block)(_ => BlockAnalysis.Kind.Loop)
-    val order  = blocks.flatMap(index => Vec.from(graph.blocks(index).first to graph.blocks(index).last))
-    val inside = blocks.toSet
-    val paths  = loop.nonEmpty && blocks.exists(index => graph.blocks(index).successors.count(inside) != 1)
-    val label  = s"$function/${kind.name}@${BlockAnalysis.hex(laid.offsets(graph.blocks(header).first).toLong)}"
+    val region = BlockRegion.of(function.raw, graph, laid.offsets, anchor)
     val rows   = Vec.tabulate(laid.text.size)(index =>
       StaticProfile.Row(
         laid.offsets(index).toLong,
@@ -382,22 +363,20 @@ final class AMDGPUBlockCost private (
     val issued    = launch match {
       case Launch.Stated(_, _, _) =>
         for {
-          _      <- Either.cond(!paths, (), s"the loop at $label has more than one path and no recorded issue counts")
-          _      <- each(order.map(laid.text(_)))(memory(_))
-          stream <- StaticProfile.stream(function, graph, rows, order, occupied)
+          _ <- Either.cond(
+            !region.paths,
+            (),
+            s"the loop at ${region.label} has more than one path and no recorded issue counts"
+          )
+          _      <- each(region.order.map(laid.text(_)))(memory(_))
+          stream <- StaticProfile.stream(function, graph, rows, region.order, occupied)
         } yield stream
       case Launch.Recorded(recorded, _) =>
         inherited(window, count, laid).flatMap(StaticProfile.replay(recorded, function, graph, rows, _, occupied))
     }
     for {
-      stream   <- issued
-      analysis <- BlockAnalysis.of(stream, architecture, launch.placement)
-      regions  <- analysis.select(Some(label))
-      timing   <- regions.head.status match {
-        case BlockAnalysis.Status.Executed(timing) => Right(timing)
-        case BlockAnalysis.Status.Withheld(reason) => Left(s"$label is withheld: $reason")
-        case BlockAnalysis.Status.NotExecuted      => Left(s"$label is not executed")
-      }
+      stream <- issued
+      timing <- BlockRegion.timing(stream, architecture, launch.placement, region.label)
     } yield Cost(timing.block.cyclesPerIteration, timing.block.source, shift)
   }
 
@@ -408,7 +387,7 @@ final class AMDGPUBlockCost private (
     (laid, shift) =>
       val graph   = original.graph
       val home    = graph.blocks(window.block)
-      val members = innermost(graph, window.block).fold(Vec(window.block))(_.body.sorted).flatMap(index =>
+      val members = BlockRegion.innermost(graph, window.block).fold(Vec(window.block))(_.body.sorted).flatMap(index =>
         Vec.from(graph.blocks(index).first to graph.blocks(index).last)
       )
       val outside = (Vec.from(home.first to home.last) ++ members).filterNot(index =>
