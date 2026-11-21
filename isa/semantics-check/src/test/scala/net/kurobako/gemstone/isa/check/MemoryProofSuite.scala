@@ -223,6 +223,12 @@ class MemoryProofSuite extends Suite {
     bySolver(prove(AMDGPUReference, amd(within, store, read), amd(within, store, read, "v_mov_b32 v2, v1"), "v2"))
   }
 
+  test("AMDGPU sequences that differ only where LDS holds non-zero bytes are told apart by the solver's memory") {
+    installed()
+    val load = "ds_read_b32 v6, v0"
+    bySolver(prove(AMDGPUReference, amd(load, "v_mov_b32 v7, v6"), amd(load, "v_and_b32 v7, v6, 1"), "v7"))
+  }
+
   private val first  = "STG.E [R2.64], R5"
   private val second = "STG.E [R2.64+0x4], R6"
 

@@ -31,8 +31,11 @@ private[isa] object AMDGPUReference extends Reference[AMDGPUHarness, Lookup.Spel
   @SuppressWarnings(Array("scalafix:PublicSignatures.any-type"))
   def state(harness: AMDGPUHarness): Any = harness.writes
 
-  override def seed(harness: AMDGPUHarness, space: Space, bytes: Map[Long, Byte]): Unit =
-    if (space == Space.Global) harness.globalBytes.seed(bytes)
+  override def seed(harness: AMDGPUHarness, space: Space, bytes: Map[Long, Byte]): Unit = space match {
+    case Space.Global => harness.globalBytes.seed(bytes)
+    case Space.Shared => harness.sharedBytes.seed(bytes)
+    case _            => ()
+  }
 
   override def loads(harness: AMDGPUHarness): Map[Space, Set[(Long, Byte)]] = harness.loads
 
