@@ -103,7 +103,7 @@ function(conformance_verify_relocation artifact support supplement)
     endif()
     # Interpreter cases resolve an environment cache that deliberately stays out of the artifact, so only their shim
     # belongs to the relocation check.
-    if(entry MATCHES "\tcases$")
+    if(entry MATCHES "\tcases(\t|$)")
       if(NOT EXISTS "${relocated_artifact}/${program}")
         file(REMOVE_RECURSE "${relocated_root}")
         message(FATAL_ERROR "relocated interpreter program is missing: ${program}")
