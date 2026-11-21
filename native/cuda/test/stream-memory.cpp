@@ -4,8 +4,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <ios>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -43,6 +47,20 @@ CUcontext createContext() {
   CUcontext context = nullptr;
   REQUIRE(cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS);
   return context;
+}
+
+std::pair<uintptr_t, uintptr_t> programBreakHeap() {
+  std::ifstream maps("/proc/self/maps");
+  for (std::string line; std::getline(maps, line);) {
+    if (!line.ends_with("[heap]")) continue;
+    uintptr_t begin = 0;
+    uintptr_t end = 0;
+    char dash = 0;
+    std::istringstream range(line);
+    range >> std::hex >> begin >> dash >> end;
+    return {begin, end};
+  }
+  return {0, 0};
 }
 
 std::vector<uint8_t> readDevice(CUdeviceptr device, size_t size) {
@@ -311,6 +329,34 @@ TEST_CASE("host-visible allocations are zero filled when recycled", "[cuda][host
       const auto *bytes = static_cast<const uint8_t *>(memory);
       CHECK(std::all_of(bytes, bytes + byteCount, [](uint8_t byte) { return byte == 0; }));
       std::memset(memory, 0xA5, byteCount);
+      if (kind == Kind::Managed) REQUIRE(cuMemFree_v2(managed) == CUDA_SUCCESS);
+      else REQUIRE(cuMemFreeHost(memory) == CUDA_SUCCESS);
+    }
+  }
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("host-visible allocations sit above the 4 GiB generic window and outside the program break heap", "[cuda][host]") {
+  auto *const context = createContext();
+  constexpr uintptr_t genericLocalLimit = uintptr_t{1} << 32;
+  enum class Kind { Pinned, HostAlloc, Managed };
+  for (const auto kind : {Kind::Pinned, Kind::HostAlloc, Kind::Managed}) {
+    for (const size_t byteCount : {size_t{1}, size_t{800}, size_t{4096}, size_t{5000}}) {
+      void *memory = nullptr;
+      CUdeviceptr managed = 0;
+      switch (kind) {
+        case Kind::Pinned: REQUIRE(cuMemAllocHost_v2(&memory, byteCount) == CUDA_SUCCESS); break;
+        case Kind::HostAlloc: REQUIRE(cuMemHostAlloc(&memory, byteCount, CU_MEMHOSTALLOC_DEVICEMAP) == CUDA_SUCCESS); break;
+        case Kind::Managed:
+          REQUIRE(cuMemAllocManaged(&managed, byteCount, CU_MEM_ATTACH_GLOBAL) == CUDA_SUCCESS);
+          memory = reinterpret_cast<void *>(managed);
+          break;
+      }
+      const auto address = reinterpret_cast<uintptr_t>(memory);
+      const auto [heapBegin, heapEnd] = programBreakHeap();
+      const bool inHeap = address >= heapBegin && address < heapEnd;
+      CHECK(address >= genericLocalLimit);
+      CHECK_FALSE(inHeap);
       if (kind == Kind::Managed) REQUIRE(cuMemFree_v2(managed) == CUDA_SUCCESS);
       else REQUIRE(cuMemFreeHost(memory) == CUDA_SUCCESS);
     }

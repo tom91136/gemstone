@@ -67,6 +67,7 @@
 #include "completion.hpp"
 #include "transfer.hpp"
 #include <environment_keys.hpp>
+#include <sys/mman.h>
 
 extern "C" GEMSTONE_INTERNAL_API CUresult gemstone_cuda_unsupported_driver();
 
@@ -991,14 +992,23 @@ CUresult unregisterMirror(uintptr_t pointer) {
 
 std::mutex mirrorMutex;
 gemstone::MemoryRegistrations mirrors;
-std::map<uintptr_t, std::unique_ptr<unsigned char[]>> mirrorStorage;
+struct UnmapPages {
+  size_t length;
+  void operator()(void *base) const { munmap(base, length); }
+};
+using MirrorPages = std::unique_ptr<void, UnmapPages>;
+std::map<uintptr_t, MirrorPages> mirrorStorage;
 
 CUresult mirroredAllocate(void **pointer, size_t size, bool hostMemory, unsigned flags = 0) {
   if (!pointer) return CUDA_ERROR_INVALID_VALUE;
   const size_t bytes = size == 0 ? 1 : size;
-  std::unique_ptr<unsigned char[]> storage{new (std::nothrow) unsigned char[bytes]{}};
-  if (!storage) return CUDA_ERROR_UNKNOWN;
-  const auto address = reinterpret_cast<uintptr_t>(storage.get());
+  const auto page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  const size_t length = (bytes + page - 1) & ~(page - 1);
+  // mapped rather than malloc'd: a non-PIE host keeps its break heap below the 4 GiB window the NVIDIA machine reads as thread-local
+  void *const mapped = mmap(nullptr, length, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (mapped == MAP_FAILED) return CUDA_ERROR_UNKNOWN;
+  MirrorPages storage{mapped, UnmapPages{length}};
+  const auto address = reinterpret_cast<uintptr_t>(mapped);
   if (const auto status = registerMirror(address, bytes, hostMemory); status != CUDA_SUCCESS) return status;
   std::scoped_lock const lock{mirrorMutex};
   try {
@@ -1016,7 +1026,7 @@ CUresult mirroredAllocate(void **pointer, size_t size, bool hostMemory, unsigned
 
 // Empty when the pointer starts no host-backed registration.
 std::optional<CUresult> freeMirror(uintptr_t pointer, gemstone::MemoryOwnership ownership = gemstone::MemoryOwnership::Owned) {
-  std::unique_ptr<unsigned char[]> storage;
+  MirrorPages storage;
   {
     std::scoped_lock const lock{mirrorMutex};
     const auto *view = mirrors.exact(pointer);
