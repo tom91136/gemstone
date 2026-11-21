@@ -110,6 +110,16 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
   # Bulk asynchronous copies use the CUDA 12 tensor-map and cuda::ptx interfaces.
   if(CUDAToolkit_VERSION VERSION_GREATER_EQUAL 12)
     target_sources(unified PRIVATE src/cuda/async_bulk.cu)
+    # The cooperative-groups case links the device runtime through nvJitLink, which ships with CUDA 12.
+    find_library(unified_cudadevrt NAMES cudadevrt HINTS "${CUDAToolkit_LIBRARY_DIR}")
+    if(TARGET CUDA::nvJitLink AND unified_cudadevrt)
+      target_sources(unified PRIVATE src/cuda/cooperative.cpp)
+      target_link_libraries(unified PRIVATE CUDA::nvJitLink)
+      set_source_files_properties(src/cuda/cooperative.cpp PROPERTIES
+        COMPILE_DEFINITIONS "UNIFIED_CUDADEVRT_LIBRARY=\"${unified_cudadevrt}\"")
+    else()
+      message(STATUS "libcudadevrt or nvJitLink not found: cooperative cases are not registered")
+    endif()
   else()
     message(STATUS "CUDA ${CUDAToolkit_VERSION} predates 12: async_bulk cases are not registered")
   endif()

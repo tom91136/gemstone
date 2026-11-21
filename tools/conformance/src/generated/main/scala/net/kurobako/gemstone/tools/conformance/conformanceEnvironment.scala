@@ -4,6 +4,7 @@ package net.kurobako.gemstone.tools.conformance
 object conformanceEnvironment {
   val BuildProfile: String = "CONFORMANCE_BUILD_PROFILE"
   val CaseShard: String = "CONFORMANCE_CASE_SHARD"
+  val CudadevrtLibrary: String = "CONFORMANCE_CUDADEVRT_LIBRARY"
   val CudaCodeMode: String = "CONFORMANCE_CUDA_CODE_MODE"
   val Deadline: String = "CONFORMANCE_DEADLINE"
   val DeviceCount: String = "CONFORMANCE_DEVICE_COUNT"
