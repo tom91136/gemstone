@@ -3578,7 +3578,8 @@ CUresult cuFlushGPUDirectRDMAWrites(CUflushGPUDirectRDMAWritesTarget, CUflushGPU
 
 CUresult cuMemcpyHtoD_v2(CUdeviceptr destination, const void *source, size_t size) {
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
-  if (!source && size != 0) return CUDA_ERROR_INVALID_VALUE;
+  if (size == 0) return CUDA_SUCCESS;
+  if (!source) return CUDA_ERROR_INVALID_VALUE;
   const auto binding = pointerBinding(destination);
   if (!binding || size > binding->remaining) return CUDA_ERROR_INVALID_VALUE;
   if (copyMirrored(reinterpret_cast<void *>(destination), source, destination, size)) return CUDA_SUCCESS;
@@ -3587,7 +3588,8 @@ CUresult cuMemcpyHtoD_v2(CUdeviceptr destination, const void *source, size_t siz
 
 CUresult cuMemcpyDtoH_v2(void *destination, CUdeviceptr source, size_t size) {
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
-  if (!destination && size != 0) return CUDA_ERROR_INVALID_VALUE;
+  if (size == 0) return CUDA_SUCCESS;
+  if (!destination) return CUDA_ERROR_INVALID_VALUE;
   if (copyMirrored(destination, reinterpret_cast<const void *>(source), source, size)) return CUDA_SUCCESS;
   const auto binding = pointerBinding(source);
   if (!binding || size > binding->remaining) return CUDA_ERROR_INVALID_VALUE;

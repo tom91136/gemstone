@@ -894,3 +894,12 @@ TEST_CASE("a device allocation owns the rest of its 256 byte granule", "[cuda][m
   REQUIRE(cuMemFree_v2(pointer) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+TEST_CASE("a zero byte copy succeeds whatever the device pointer", "[cuda][memory]") {
+  auto *const context = createContext();
+  uint8_t host = 0;
+  CHECK(cuMemcpyDtoH_v2(&host, 0, 0) == CUDA_SUCCESS);
+  CHECK(cuMemcpyHtoD_v2(0, &host, 0) == CUDA_SUCCESS);
+  CHECK(cuMemcpyDtoD_v2(0, 0, 0) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
