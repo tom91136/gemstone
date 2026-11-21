@@ -238,6 +238,18 @@ class LoadedProgram(
         )
     }
 
+  /** The byte offset, pipe and planned issue cycles of each instruction, as a launch of the kernel profiles them. */
+  def staticTiming(name: NonEmpty[String]): Either[Fault, Vec[StaticTiming.Row]] =
+    compile(name).map(lowered => StaticTiming.of(lowered.kernel.entry.routine.program, lowered.offsets))
+
+  /** What a launch of the kernel with `workgroupLanes` lanes and `dynamicShared` further shared bytes reports. */
+  def staticResources(
+      name: NonEmpty[String],
+      workgroupLanes: Int > 0,
+      dynamicShared: Long >= 0
+  ): Either[Fault, KernelResources] =
+    compile(name).map(lowered => VMInterpreter.resources(lowered.kernel, workgroupLanes, dynamicShared))
+
   override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
     compile(task.kernelName).flatMap { lowered =>
       val observer: LaunchObserver | Null = context.control.observer.orNull

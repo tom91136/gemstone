@@ -328,16 +328,16 @@ private[isa] object VMInterpreter {
         heap = heap,
         schedule = schedule
       )
-      device.observer.observed(_.launched(resources(kernel, geometry, dynamicSharedBytes)))
+      device.observer.observed(_.launched(resources(kernel, geometry.groupVolume, dynamicSharedBytes.widen[Long >= 0])))
       launch(kernel, geometry, block, device, dynamicSharedBytes, cluster, cooperative)
     }
 
-  private def resources(kernel: Kernel, geometry: LaunchGeometry, dynamicSharedBytes: Int >= 0): KernelResources =
+  def resources(kernel: Kernel, workgroupLanes: Int > 0, dynamicSharedBytes: Long >= 0): KernelResources =
     KernelResources(
-      workgroupLanes = geometry.groupVolume,
+      workgroupLanes = workgroupLanes,
       subgroupSize = 32,
       registersPerLane = kernel.registersPerLane,
-      sharedBytes = kernel.staticSharedBytes + dynamicSharedBytes.widen[Long >= 0]
+      sharedBytes = kernel.staticSharedBytes + dynamicSharedBytes
     )
 
   /** The cluster shape a launch runs with: the launch's own, which must agree with any the kernel requires. */
