@@ -179,6 +179,22 @@ TEST_CASE("CUDA function attributes forward the register count and local size fr
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
+TEST_CASE("CUDA kernel launch bounds limit the reported block size and the launch", "[cuda][function-attributes]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  auto *const unbounded = loadKernel(ConstReferenced80, "k_const80");
+  CHECK(functionAttribute(unbounded, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK) == 1024);
+  fixture.kernelLaunchBound(256);
+  auto *const bounded = loadKernel(SharedReferenced, "k_shared400");
+  CHECK(functionAttribute(bounded, CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK) == 256);
+  const auto launches = fixture.launches.load();
+  CHECK(cuLaunchKernel(bounded, 1, 1, 1, 512, 1, 1, 0, nullptr, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuLaunchKernel(bounded, 1, 1, 1, 16, 32, 1, 0, nullptr, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(fixture.launches.load() == launches);
+  fixture.kernelLaunchBound(std::nullopt);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("CUDA cuLinkAddFile adds a PTX file to the link", "[cuda][function-attributes]") {
   const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
   auto *const context = createContext();

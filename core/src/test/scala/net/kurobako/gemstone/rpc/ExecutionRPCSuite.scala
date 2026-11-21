@@ -230,6 +230,15 @@ class ExecutionRPCSuite extends Suite {
     )
   }
 
+  test("the maximum threads per work-group survive metadata transport") {
+    val metadata = KernelMetadata.validated(0, 0, Vec.empty, maxThreadsPerWorkGroup = Some(256)).toOption.get
+    assertEquals(
+      Wire.Codec[KernelMetadata].encode(metadata, ExecutionRPC.Limits)
+        .flatMap(Wire.Codec[KernelMetadata].decode(_, ExecutionRPC.Limits)),
+      Right(metadata)
+    )
+  }
+
   test("operations use their exact names as tags") {
     val tags = operations.map(operation =>
       Wire.Protocol[Operation].encodePayload(operation, ExecutionRPC.Limits).toOption.get._1
@@ -368,7 +377,8 @@ class ExecutionRPCSuite extends Suite {
       registerCount: Option[Int >= 0] = None,
       sharedSizeBytes: Option[Int >= 0] = None,
       constSizeBytes: Option[Int >= 0] = None,
-      localSizeBytes: Option[Int >= 0] = None
+      localSizeBytes: Option[Int >= 0] = None,
+      maxThreadsPerWorkGroup: Option[Int > 0] = None
   ) derives Codec
 
   private case class UncheckedGlobalSymbol(

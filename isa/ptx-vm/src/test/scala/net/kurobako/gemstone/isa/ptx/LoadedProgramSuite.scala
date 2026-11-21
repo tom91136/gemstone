@@ -227,6 +227,33 @@ class LoadedProgramSuite extends Suite {
     assertEquals(idle.constSizeBytes, Some(80: Int >= 0))
   }
 
+  test("exposes the PTX .maxntid product as the thread bound") {
+    val source =
+      ".version 8.0\n.target sm_80\n.address_size 64\n" +
+        ".visible .entry scalar(.param .u64 p) .maxntid 128 { ret; }\n" +
+        ".visible .entry tuple(.param .u64 p) .maxntid 32, 4, 2 .minnctapersm 2 { ret; }\n" +
+        ".visible .entry open(.param .u64 p) { ret; }\n"
+    val program = Parser.parse(source).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
+
+    assertEquals(loaded.kernel("scalar").value.maxThreadsPerWorkGroup.map(_.raw), Some(128))
+    assertEquals(loaded.kernel("tuple").value.maxThreadsPerWorkGroup.map(_.raw), Some(256))
+    assertEquals(loaded.kernel("open").value.maxThreadsPerWorkGroup, None)
+  }
+
+  test("exposes the .maxntid that nvcc emits for __launch_bounds__") {
+    val source =
+      ".version 9.3\n.target sm_89\n.address_size 64\n" +
+        ".visible .entry bounded(\n\t.param .u64 bounded_param_0\n)\n.maxntid 256, 1, 1\n{\n\t.reg .b32 \t%r<2>;\n" +
+        "\t.reg .b64 \t%rd<5>;\n\tld.param.u64 \t%rd1, [bounded_param_0];\n\tcvta.to.global.u64 \t%rd2, %rd1;\n" +
+        "\tmov.u32 \t%r1, %tid.x;\n\tmul.wide.u32 \t%rd3, %r1, 4;\n\tadd.s64 \t%rd4, %rd2, %rd3;\n" +
+        "\tst.global.u32 \t[%rd4], %r1;\n\tret;\n}\n"
+    val program = Parser.parse(source).fold(error => fail(error.message), value => value)
+    val loaded  = LoadedProgram.load(program, text = execution.text).fold(error => fail(error.message), value => value)
+
+    assertEquals(loaded.kernel("bounded").value.maxThreadsPerWorkGroup.map(_.raw), Some(256))
+  }
+
   test("exposes PTX pointer parameters as allocations") {
     val source =
       ".version 8.0\n.target sm_80\n.address_size 64\n" +

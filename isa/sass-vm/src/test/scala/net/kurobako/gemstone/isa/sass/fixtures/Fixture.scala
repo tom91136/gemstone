@@ -47,6 +47,8 @@ object Fixture {
 
   def functionAttributesCubin: Vec[Byte] = Vec.unsafeWrapArray(bytes.hex(FunctionAttributeFixtures.cubin))
 
+  def launchBoundCubin: Vec[Byte] = Vec.unsafeWrapArray(bytes.hex(LaunchBoundFixtures.cubin))
+
   /** SAXPY machine code; sm_89 comes from the `-hex` listing of the unoptimised build. */
   def saxpy(sm: Int): Vec[Byte] =
     if (sm != 89) code(s"saxpySm$sm")

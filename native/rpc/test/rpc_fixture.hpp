@@ -241,6 +241,10 @@ public:
     std::scoped_lock const lock(stateMutex);
     kernelResourceCounts = resources;
   }
+  void kernelLaunchBound(std::optional<uint32_t> maxThreads) {
+    std::scoped_lock const lock(stateMutex);
+    kernelMaxThreads = maxThreads;
+  }
   void programCatalogue(std::vector<ProgramKernel> kernels, std::vector<ProgramGlobal> globals) {
     std::scoped_lock const lock(stateMutex);
     programKernels = std::move(kernels);
@@ -491,6 +495,7 @@ private:
     metadata.sharedSizeBytes = resource(kernelResourceCounts.sharedSizeBytes);
     metadata.constSizeBytes = resource(kernelResourceCounts.constSizeBytes);
     metadata.localSizeBytes = resource(kernelResourceCounts.localSizeBytes);
+    if (kernelMaxThreads) metadata.maxThreadsPerWorkGroup = IntPositive{static_cast<int32_t>(*kernelMaxThreads)};
     encodePayload(result, metadata);
   }
   bool receive(int socket, void *output, size_t size) {
@@ -1094,6 +1099,7 @@ private:
   std::vector<KernelParameter> kernelParameters{{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0},
                                                 {.width = 4, .offset = 8, .kind = 1, .containsPointers = 0}};
   KernelResources kernelResourceCounts{};
+  std::optional<uint32_t> kernelMaxThreads;
   std::optional<std::array<uint32_t, 3>> requiredWorkGroupSize;
   std::optional<std::vector<ShaderDescriptor>> preparedDescriptors;
   std::vector<ProgramKernel> programKernels{{.name = "add", .linkageName = "add.kd"}};

@@ -28,6 +28,7 @@ struct KernelLayout {
   uint32_t kernargSize = 0;
   uint32_t explicitArgumentCount = 0;
   std::vector<KernargField> fields;
+  std::optional<uint32_t> maxThreadsPerWorkGroup;
 };
 
 /** `object` is the exact handle placed in AQL dispatch packets. */

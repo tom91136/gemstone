@@ -37,7 +37,8 @@ object Cubin {
       explicitCluster: Boolean = false,
       registerCount: Int >= 0 = 0,
       sharedSizeBytes: Int >= 0 = 0,
-      localSizeBytes: Int >= 0 = 0
+      localSizeBytes: Int >= 0 = 0,
+      maxThreadsPerBlock: Option[Int > 0] = None
   ) {
     // constant loads are word-sized, so a trailing narrow parameter is readable up to the next word boundary
     def parameterExtent: Int = (parameterSize + 3) / 4 * 4
@@ -750,6 +751,17 @@ object Cubin {
           z <- LittleEndian.decodeInt32(value, 8).refine[Int > 0]
         } yield LaunchGeometry.Dimensions(x, y, z)
       }.getOrElse(Right(LaunchGeometry.Dimensions.One))
+      maxThreads <- attrs.collectFirst { case (0x05, value) =>
+        for {
+          _ <- record(value, 12, "invalid cubin maximum thread dimensions")
+          x <- LittleEndian.decodeInt32(value, 0).refine[Int > 0]
+          y <- LittleEndian.decodeInt32(value, 4).refine[Int > 0]
+          z <- LittleEndian.decodeInt32(value, 8).refine[Int > 0]
+          xy = x.raw.toLong * y.raw
+          _       <- check(xy <= Int.MaxValue && xy * z.raw <= Int.MaxValue, "invalid cubin maximum thread dimensions")
+          product <- (xy * z.raw).toInt.refine[Int > 0]
+        } yield product
+      }.sequence
       registers <- registerCounts.get(section.link.raw -> (section.info & 0x00ffffff))
         .fold((section.info >>> 24).refine[Int >= 0])(Right(_))
       localSize  = localSizes.getOrElse(section.link.raw -> (section.info & 0x00ffffff), 0: Int >= 0)
@@ -765,7 +777,8 @@ object Cubin {
       attrs.exists(_._1 == 0x3e),
       registerCount = registers,
       sharedSizeBytes = sharedSize,
-      localSizeBytes = localSize
+      localSizeBytes = localSize,
+      maxThreadsPerBlock = maxThreads
     )
   }
 }

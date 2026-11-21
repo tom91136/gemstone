@@ -140,20 +140,25 @@ object CodeObjectMetadata {
       name: Option[String],
       symbol: Option[String],
       argumentBlockSize: Option[Int >= 0],
-      parameters: Option[Vec[(KernelMetadata.Parameter, Option[String])]]
+      parameters: Option[Vec[(KernelMetadata.Parameter, Option[String])]],
+      maxThreadsPerWorkGroup: Option[Int > 0]
   )
 
   private def decodeKernel(reader: Reader): Either[CodeObjectError, KernelManifest] =
     reader.mapSize.flatMap { count =>
       (0 until count).foldLeft[Either[CodeObjectError, KernelFields]](
-        Right(KernelFields(None, None, None, None))
+        Right(KernelFields(None, None, None, None, None))
       ) { case (result, _) =>
         result.flatMap { fields =>
           reader.string.flatMap {
-            case ".name"                 => reader.string.map(value => fields.copy(name = Some(value)))
-            case ".symbol"               => reader.string.map(value => fields.copy(symbol = Some(value)))
-            case ".kernarg_segment_size" => reader.uint32.map(value => fields.copy(argumentBlockSize = Some(value)))
-            case ".args"                 =>
+            case ".name"                    => reader.string.map(value => fields.copy(name = Some(value)))
+            case ".symbol"                  => reader.string.map(value => fields.copy(symbol = Some(value)))
+            case ".kernarg_segment_size"    => reader.uint32.map(value => fields.copy(argumentBlockSize = Some(value)))
+            case ".max_flat_workgroup_size" =>
+              reader.uint32.flatMap(_.refine[Int > 0].left.map(_ =>
+                CodeObjectError.Invalid("AMDGPU max flat work-group size must be positive")
+              )).map(value => fields.copy(maxThreadsPerWorkGroup = Some(value)))
+            case ".args" =>
               reader.arraySize.flatMap { parameterCount =>
                 decodeAll(parameterCount)(decodeParameter(reader)).map(value => fields.copy(parameters = Some(value)))
               }
@@ -174,8 +179,12 @@ object CodeObjectMetadata {
                 CodeObjectError.Invalid("AMDGPU kernel symbol must be non-empty")
               )
               metadata <-
-                KernelMetadata.validated(blockSize, sorted.count(_._2.isEmpty).unsafe[Int >= 0], sorted.map(_._1))
-                  .left.map(detail => CodeObjectError.Invalid(detail))
+                KernelMetadata.validated(
+                  blockSize,
+                  sorted.count(_._2.isEmpty).unsafe[Int >= 0],
+                  sorted.map(_._1),
+                  maxThreadsPerWorkGroup = fields.maxThreadsPerWorkGroup
+                ).left.map(detail => CodeObjectError.Invalid(detail))
             } yield KernelManifest(
               refinedName,
               refinedSymbol,

@@ -215,6 +215,10 @@ struct Kernel {
   std::atomic<bool> built{false};
 };
 
+uint32_t kernelBlockLimit(const Kernel &kernel) {
+  return std::min<uint32_t>(kernel.layout.maxThreadsPerWorkGroup.value_or(MaxBlockThreads), MaxBlockThreads);
+}
+
 struct Module;
 
 struct Variable {
@@ -790,6 +794,7 @@ hipError_t dispatchKernel(const std::shared_ptr<Kernel> &kernel, dim3 grid, dim3
               || grid.z > std::numeric_limits<uint32_t>::max() / block.z))
       || shared > std::numeric_limits<uint32_t>::max())
     return remember(hipErrorInvalidConfiguration);
+  if (static_cast<uint64_t>(block.x) * block.y * block.z > kernelBlockLimit(*kernel)) return remember(hipErrorLaunchFailure);
   const dim3 global = !globalWorkItems ? dim3(grid.x * block.x, grid.y * block.y, grid.z * block.z) : *globalWorkItems;
   if (global.x < block.x || global.y < block.y || global.z < block.z) return remember(hipErrorInvalidConfiguration);
   // A kernel is built on its first launch, which reports a build failure the way a lazily loaded module does.
@@ -2154,8 +2159,9 @@ extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, 
 }
 
 namespace {
-hipError_t potentialBlockSize(int *minGridSize, int *blockSize, size_t shared, int blockSizeLimit) {
-  const uint32_t limit = blockSizeLimit > 0 ? std::min<uint32_t>(static_cast<uint32_t>(blockSizeLimit), MaxBlockThreads) : MaxBlockThreads;
+hipError_t potentialBlockSize(int *minGridSize, int *blockSize, const Kernel &kernel, size_t shared, int blockSizeLimit) {
+  const uint32_t kernelLimit = kernelBlockLimit(kernel);
+  const uint32_t limit = blockSizeLimit > 0 ? std::min<uint32_t>(static_cast<uint32_t>(blockSizeLimit), kernelLimit) : kernelLimit;
   uint64_t bestResident = 0;
   uint32_t best = 0;
   for (uint32_t threads = limit; threads >= 1; --threads) {
@@ -2176,17 +2182,19 @@ extern "C" hipError_t hipOccupancyMaxPotentialBlockSize(int *minGridSize, int *b
                                                         int blockSizeLimit) {
   if (!minGridSize || !blockSize || !functionAddress) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  if (!resolveKernel(functionAddress, currentDevice)) return remember(hipErrorInvalidDeviceFunction);
-  return remember(potentialBlockSize(minGridSize, blockSize, shared, blockSizeLimit));
+  const auto kernel = resolveKernel(functionAddress, currentDevice);
+  if (!kernel) return remember(hipErrorInvalidDeviceFunction);
+  return remember(potentialBlockSize(minGridSize, blockSize, *kernel, shared, blockSizeLimit));
 }
 
 extern "C" hipError_t hipFuncGetAttributes(struct hipFuncAttributes *attributes, const void *functionAddress) {
   if (!attributes || !functionAddress) return remember(hipErrorInvalidValue);
   if (!ensureInitialised()) return remember(hipErrorNoDevice);
-  if (!resolveKernel(functionAddress, currentDevice)) return remember(hipErrorInvalidDeviceFunction);
+  const auto kernel = resolveKernel(functionAddress, currentDevice);
+  if (!kernel) return remember(hipErrorInvalidDeviceFunction);
   std::memset(attributes, 0, sizeof(*attributes));
   attributes->binaryVersion = 900;
-  attributes->maxThreadsPerBlock = MaxBlockThreads;
+  attributes->maxThreadsPerBlock = static_cast<int>(kernelBlockLimit(*kernel));
   return remember(hipSuccess);
 }
 
@@ -2195,7 +2203,7 @@ extern "C" hipError_t hipFuncGetAttribute(int *value, hipFunction_attribute attr
   auto *handle = functionHandle(function);
   if (!handle->kernel || !handle->module->loaded) return remember(hipErrorInvalidDeviceFunction);
   switch (attribute) {
-    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: *value = MaxBlockThreads; break;
+    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: *value = static_cast<int>(kernelBlockLimit(*handle->kernel)); break;
     case HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
     case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
     case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
@@ -2676,7 +2684,7 @@ extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSize(int *minGridSize, 
                                                               int blockSizeLimit) {
   if (!minGridSize || !blockSize || !function) return remember(hipErrorInvalidValue);
   if (!functionHandle(function)->kernel || !functionHandle(function)->module->loaded) return remember(hipErrorInvalidDeviceFunction);
-  return remember(potentialBlockSize(minGridSize, blockSize, shared, blockSizeLimit));
+  return remember(potentialBlockSize(minGridSize, blockSize, *functionHandle(function)->kernel, shared, blockSizeLimit));
 }
 extern "C" hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t function, unsigned int gridX, unsigned int gridY, unsigned int gridZ,
                                                        unsigned int blockX, unsigned int blockY, unsigned int blockZ, unsigned int shared,

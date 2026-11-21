@@ -1448,6 +1448,7 @@ struct Function {
   int sharedSizeBytes = 0;
   int constSizeBytes = 0;
   int localSizeBytes = 0;
+  int maxThreadsPerBlock = device_limits::MaxThreadsPerBlock;
   std::array<int, 3> clusterDimensions{};
   Module *module{};
   std::string name;
@@ -4351,6 +4352,8 @@ CUresult cuModuleGetFunction(CUfunction *function, CUmodule module, const char *
     if (kernel.sharedSizeBytes) entry->sharedSizeBytes = kernel.sharedSizeBytes->value;
     if (kernel.constSizeBytes) entry->constSizeBytes = kernel.constSizeBytes->value;
     if (kernel.localSizeBytes) entry->localSizeBytes = kernel.localSizeBytes->value;
+    if (kernel.maxThreadsPerWorkGroup)
+      entry->maxThreadsPerBlock = std::min<int>(kernel.maxThreadsPerWorkGroup->value, device_limits::MaxThreadsPerBlock);
     entry->parameters = kernel.parameters;
     auto *const handle = reinterpret_cast<CUfunction>(entry.get());
     {
@@ -4622,7 +4625,7 @@ CUresult cuFuncGetAttribute(int *value, CUfunction_attribute attribute, CUfuncti
   if (!value || !function) return CUDA_ERROR_INVALID_VALUE;
   switch (attribute) {
     case CU_FUNC_ATTRIBUTE_NUM_REGS: return functionField(function, &Function::registerCount, value);
-    case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: *value = device_limits::MaxThreadsPerBlock; return CUDA_SUCCESS;
+    case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: return functionField(function, &Function::maxThreadsPerBlock, value);
     case CU_FUNC_ATTRIBUTE_PTX_VERSION:
     case CU_FUNC_ATTRIBUTE_BINARY_VERSION: {
       const auto version = registeredPtxVersion(function);
@@ -4901,6 +4904,7 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
 
     const auto [entry, required] = findLaunchFunction(function);
     if (!entry) return CUDA_ERROR_INVALID_VALUE;
+    if (static_cast<uint64_t>(blockX) * blockY * blockZ > static_cast<uint64_t>(entry->maxThreadsPerBlock)) return CUDA_ERROR_INVALID_VALUE;
     std::vector<void *> packedParameters;
     if (extra) {
       uint8_t *buffer = nullptr;
@@ -5854,7 +5858,8 @@ cudaError_t cudaGetDeviceProperties(cudaDeviceProp *properties, int device) {
 cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attributes, const void *function) {
   if (!attributes || !function) return cudaErrorInvalidValue;
   std::memset(attributes, 0, offsetof(cudaFuncAttributes, preferredShmemCarveout) + sizeof(attributes->preferredShmemCarveout));
-  attributes->maxThreadsPerBlock = device_limits::MaxThreadsPerBlock;
+  if (const auto status = functionField(function, &Function::maxThreadsPerBlock, &attributes->maxThreadsPerBlock); status != CUDA_SUCCESS)
+    return runtimeStatus(status);
   if (const auto status = functionField(function, &Function::registerCount, &attributes->numRegs); status != CUDA_SUCCESS)
     return runtimeStatus(status);
   const auto version = registeredPtxVersion(function);

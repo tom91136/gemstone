@@ -31,7 +31,8 @@ object KernelMetadata {
       value.registerCount,
       value.sharedSizeBytes,
       value.constSizeBytes,
-      value.localSizeBytes
+      value.localSizeBytes,
+      value.maxThreadsPerWorkGroup
     )
   )
 
@@ -46,7 +47,8 @@ object KernelMetadata {
       registerCount: Option[Int >= 0] = None,
       sharedSizeBytes: Option[Int >= 0] = None,
       constSizeBytes: Option[Int >= 0] = None,
-      localSizeBytes: Option[Int >= 0] = None
+      localSizeBytes: Option[Int >= 0] = None,
+      maxThreadsPerWorkGroup: Option[Int > 0] = None
   ): Either[NonEmpty[String], KernelMetadata] =
     for {
       _ <- Either.cond[NonEmpty[String], Unit](
@@ -79,7 +81,8 @@ object KernelMetadata {
       registerCount,
       sharedSizeBytes,
       constSizeBytes,
-      localSizeBytes
+      localSizeBytes,
+      maxThreadsPerWorkGroup
     )
 }
 
@@ -95,5 +98,6 @@ case class KernelMetadata private (
     registerCount: Option[Int >= 0],
     sharedSizeBytes: Option[Int >= 0],
     constSizeBytes: Option[Int >= 0],
-    localSizeBytes: Option[Int >= 0]
+    localSizeBytes: Option[Int >= 0],
+    maxThreadsPerWorkGroup: Option[Int > 0]
 )

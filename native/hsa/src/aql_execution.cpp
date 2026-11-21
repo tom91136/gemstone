@@ -62,7 +62,9 @@ PacketFailure packetFailure(FailureKind kind) {
 std::optional<KernelLayout> layoutFrom(const KernelMetadata &metadata) {
   KernelLayout layout{.kernargSize = static_cast<uint32_t>(metadata.argumentBlockSize.value),
                       .explicitArgumentCount = static_cast<uint32_t>(metadata.explicitParameterCount.value),
-                      .fields = {}};
+                      .fields = {},
+                      .maxThreadsPerWorkGroup = {}};
+  if (metadata.maxThreadsPerWorkGroup) layout.maxThreadsPerWorkGroup = static_cast<uint32_t>(metadata.maxThreadsPerWorkGroup->value);
   for (const auto &parameter : metadata.parameters) {
     const KernargField field{.kind = parameter.kind,
                              .offset = static_cast<uint32_t>(parameter.offset.value),

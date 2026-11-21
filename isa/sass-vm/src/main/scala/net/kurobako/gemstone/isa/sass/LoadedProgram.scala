@@ -129,7 +129,8 @@ class LoadedProgram(
           registerCount = Some(kernel.registerCount),
           sharedSizeBytes = Some(kernel.sharedSizeBytes),
           constSizeBytes = Some(Cubin.constSizeBytes(module)),
-          localSizeBytes = Some(kernel.localSizeBytes)
+          localSizeBytes = Some(kernel.localSizeBytes),
+          maxThreadsPerWorkGroup = kernel.maxThreadsPerBlock
         ).left.map(Fault.InvalidRequest(_))
     }
 

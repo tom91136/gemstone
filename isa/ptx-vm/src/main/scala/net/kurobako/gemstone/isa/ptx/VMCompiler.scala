@@ -273,6 +273,20 @@ private object VMCompiler {
       }.toRight(Error.Invalid("invalid .reqnctapercluster cluster shape"))
     }
 
+  /** The thread count `.maxntid` bounds a launch to: the product of its one to three dimensions. */
+  def maxThreadsDirective(directives: Vec[Statement.Directive]): Either[Error, Option[Int > 0]] =
+    directives.collectFirst {
+      case Statement.Directive(path, arguments, _, _) if path.raw == Vec("maxntid") => arguments
+    }.traverse { arguments =>
+      arguments.traverse(argument => NumericLiteral.immediate(argument.operand)).flatMap { dimensions =>
+        Option.when(dimensions.nonEmpty && dimensions.size <= 3 && dimensions.forall(_ > 0)) {
+          dimensions.foldLeft(Option(1L))((product, dimension) =>
+            product.filter(_ <= Int.MaxValue).map(_ * Math.min(dimension, Int.MaxValue.toLong + 1))
+          )
+        }.flatten.filter(_ <= Int.MaxValue).map(_.toInt.unsafe[Int > 0])
+      }.toRight(Error.Invalid("invalid .maxntid thread bound"))
+    }
+
   /** One kernel compilation: lowers the entry and every routine it can reach. */
   class KernelCompilation(
       val module: Module,

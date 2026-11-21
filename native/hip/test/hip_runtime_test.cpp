@@ -1273,6 +1273,92 @@ TEST_CASE("HIP occupancy reports a block size for a registered kernel", "[hip]")
   __hipUnregisterFatBinary(token);
 }
 
+TEST_CASE("HIP kernel launch bounds limit the reported block size and the launch", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  fixture.kernelMetadata(88, 2,
+                         {{.width = 8, .offset = 0, .kind = 2, .containsPointers = 0},
+                          {.width = 4, .offset = 8, .kind = 1, .containsPointers = 1},
+                          {.width = 4, .offset = 16, .kind = 1, .containsPointers = 1},
+                          {.width = 4, .offset = 20, .kind = 1, .containsPointers = 1},
+                          {.width = 4, .offset = 24, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 28, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 30, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 32, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 34, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 36, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 38, .kind = 1, .containsPointers = 1},
+                          {.width = 2, .offset = 80, .kind = 1, .containsPointers = 1}});
+  fixture.kernelLaunchBound(256);
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module = nullptr;
+  hipFunction_t function = nullptr;
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  int bound = 0;
+  REQUIRE((hipFuncGetAttribute(&bound, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, function) == hipSuccess));
+  CHECK((bound == 256));
+  void *allocation = nullptr;
+  REQUIRE((hipMalloc(&allocation, (1024 + 2) * sizeof(uint32_t)) == hipSuccess));
+  auto *output = static_cast<uint32_t *>(allocation) + 1;
+  uint32_t seed = 5;
+  void *arguments[] = {&output, &seed};
+  const auto before = fixture.launches.load();
+  for (const dim3 block : {dim3{512, 1, 1}, dim3{16, 32, 1}, dim3{257, 1, 1}, dim3{1, 1, 1024}}) {
+    for (bool const extended : {false, true}) {
+      const LaunchShape shape{.global = block, .requested = block, .local = block, .groups = {1, 1, 1}, .extended = extended};
+      CHECK((launchShape(function, shape, arguments) == hipErrorLaunchFailure));
+    }
+  }
+  CHECK((fixture.launches.load() == before));
+  const LaunchShape allowed{.global = {256, 1, 1}, .requested = {256, 1, 1}, .local = {256, 1, 1}, .groups = {1, 1, 1}, .extended = false};
+  fixture.expect(expectedShape(allowed, seed));
+  fixture.expectTrailingArguments(implicitArguments(allowed.global, allowed.local));
+  CHECK((launchShape(function, allowed, arguments) == hipSuccess));
+  CHECK((hipDeviceSynchronize() == hipSuccess));
+  fixture.check();
+  REQUIRE((hipFree(allocation) == hipSuccess));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
+TEST_CASE("HIP kernels without a launch bound report the device limit", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module = nullptr;
+  hipFunction_t function = nullptr;
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  int bound = 0;
+  REQUIRE((hipFuncGetAttribute(&bound, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, function) == hipSuccess));
+  CHECK((bound == 1024));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
+TEST_CASE("HIP function attributes and occupancy of a registered kernel follow its launch bound", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  fixture.kernelLaunchBound(128);
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto bundle = offloadBundle(gemstone::hsa::test::codeObjectFixture(1, true, true));
+  const std::array<const void *, 3> wrapper{nullptr, bundle.data(), nullptr};
+  void **const token = __hipRegisterFatBinary(wrapper.data());
+  __hipRegisterFunction(token, reinterpret_cast<const void *>(&occupancyStub), nullptr, "add", 0, nullptr, nullptr, nullptr, nullptr,
+                        nullptr);
+  hipFuncAttributes attributes{};
+  REQUIRE((hipFuncGetAttributes(&attributes, reinterpret_cast<const void *>(&occupancyStub)) == hipSuccess));
+  CHECK((attributes.maxThreadsPerBlock == 128));
+  int minGridSize = 0;
+  int blockSize = 0;
+  REQUIRE(
+      (hipOccupancyMaxPotentialBlockSize(&minGridSize, &blockSize, reinterpret_cast<const void *>(&occupancyStub), 0, 0) == hipSuccess));
+  CHECK((blockSize <= 128));
+  int *output = nullptr;
+  void *arguments[] = {&output};
+  CHECK((hipLaunchKernel(reinterpret_cast<const void *>(&occupancyStub), dim3(1), dim3(256), arguments, 0, nullptr)
+         == hipErrorLaunchFailure));
+  __hipUnregisterFatBinary(token);
+}
+
 TEST_CASE("HIP reports the multiprocessors, clock and memory of the selected device preset", "[hip]") {
   const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
   char name[64]{};

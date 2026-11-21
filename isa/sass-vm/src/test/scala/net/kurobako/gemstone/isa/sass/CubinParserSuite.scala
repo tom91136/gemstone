@@ -42,6 +42,35 @@ class CubinParserSuite extends Suite {
     assert(Cubin.decode(Vec.unsafeWrapArray(clusterElf(0, explicit = false))).isLeft)
   }
 
+  // ptxas EIATTR_MAX_THREADS (format 4, attribute 0x05, three u32 dimensions).
+  private def maxThreadsElf(x: Int, y: Int, z: Int): Array[Byte] = metadataElf(
+    8,
+    89,
+    Seq(
+      elfImage.Section(".text.probe", 1),
+      elfImage.Section(".nv.info.probe", 1, Vec.unsafeWrapArray(bytes.words(0x000c0504, x, y, z)))
+    )
+  )
+
+  test("cubin reads the per-kernel maximum thread count and rejects empty dimensions") {
+    val bounded = Cubin.decode(Vec.unsafeWrapArray(maxThreadsElf(32, 4, 2))).value.kernels.head
+    assertEquals(bounded.maxThreadsPerBlock.map(_.raw), Some(256))
+    val open = Cubin.decode(Vec.unsafeWrapArray(clusterElf(1, explicit = false))).value.kernels.head
+    assertEquals(open.maxThreadsPerBlock, None)
+    assert(Cubin.decode(Vec.unsafeWrapArray(maxThreadsElf(0, 1, 1))).isLeft)
+  }
+
+  test("a ptxas cubin states __launch_bounds__ as the thread bound") {
+    val module = Cubin.decode(Fixture.launchBoundCubin).value
+    assertEquals(module.kernels.find(_.name == "bounded").get.maxThreadsPerBlock.map(_.raw), Some(256))
+    assertEquals(module.kernels.find(_.name == "open").get.maxThreadsPerBlock, None)
+    val program = CubinBackend(text = Harness.text).load(Fixture.launchBoundCubin).value
+    try {
+      assertEquals(program.kernel("bounded").value.maxThreadsPerWorkGroup.map(_.raw), Some(256))
+      assertEquals(program.kernel("open").value.maxThreadsPerWorkGroup, None)
+    } finally program.close()
+  }
+
   test("CUDA ELF ABI 7 reads the architecture from the low flags byte") {
     assertEquals(Cubin.decode(Vec.unsafeWrapArray(metadataElf(7, 35))).map(_.sm.raw), Right(35))
   }

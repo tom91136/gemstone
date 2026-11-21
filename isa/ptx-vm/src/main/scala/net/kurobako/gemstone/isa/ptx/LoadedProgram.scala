@@ -178,9 +178,10 @@ class LoadedProgram private (prepared: LoadedProgram.Prepared, workgroups: Workg
   override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
     module.entries.get(name).toRight(Fault.NotFound(s"PTX kernel '$name' is not present"))
       .flatMap(entry =>
-        VMCompiler.parameterLayout(entry.parameters).leftMap(error => Fault.InvalidProgram(error.message))
+        VMCompiler.parameterLayout(entry.parameters).map(entry -> _)
+          .leftMap(error => Fault.InvalidProgram(error.message))
       )
-      .flatMap { layout =>
+      .flatMap { (entry, layout) =>
         val parameters = layout.map(parameter =>
           KernelMetadata.Parameter(
             parameter.widthBytes,
@@ -195,13 +196,17 @@ class LoadedProgram private (prepared: LoadedProgram.Prepared, workgroups: Workg
           shared <- module.sharedLayouts.get(name).traverse(kernelShared =>
             boundedSize(kernelShared.extent, "shared size")
           )
-          constant <- boundedSize(module.constExtent, "const size")
+          constant   <- boundedSize(module.constExtent, "const size")
+          maxThreads <- VMCompiler.maxThreadsDirective(entry.directives).leftMap(error =>
+            Fault.InvalidProgram(error.message)
+          )
           metadata <- KernelMetadata.validated(
             size,
             parameters.nonNegativeSize,
             parameters,
             sharedSizeBytes = shared,
-            constSizeBytes = Some(constant)
+            constSizeBytes = Some(constant),
+            maxThreadsPerWorkGroup = maxThreads
           ).leftMap(Fault.InvalidRequest(_))
         } yield metadata
       }

@@ -30,6 +30,13 @@ class CodeObjectMetadataSuite extends Suite {
     )
   }
 
+  test("decode the maximum flat work-group size as the thread bound") {
+    val bounded = CodeObjectMetadata.decode(Vec.from(codeObject(hidden = false, maxFlat = Some(256)))).value.head
+    assertEquals(bounded.metadata.maxThreadsPerWorkGroup.map(_.raw), Some(256))
+    val unbounded = CodeObjectMetadata.decode(Vec.from(codeObject(hidden = false))).value.head
+    assertEquals(unbounded.metadata.maxThreadsPerWorkGroup, None)
+  }
+
   test("exclude hidden AMDGPU fields from the explicit parameter count") {
     val manifest = CodeObjectMetadata.decode(Vec.unsafeWrapArray(codeObject(hidden = true))).value.head
     val metadata = manifest.metadata
@@ -76,7 +83,8 @@ class CodeObjectMetadataSuite extends Suite {
   private def codeObject(
       hidden: Boolean,
       blockSize: Option[Array[Byte]] = None,
-      omitArguments: Boolean = false
+      omitArguments: Boolean = false,
+      maxFlat: Option[Int] = None
   ): Array[Byte] = {
     val arguments = Seq(
       argument(offset = 0, size = 8, "global_buffer"),
@@ -86,7 +94,7 @@ class CodeObjectMetadataSuite extends Suite {
     val metadata = concat(
       Array(0x81.toByte),
       string("amdhsa.kernels"),
-      Array(0x91.toByte, (if (omitArguments) 0x83 else 0x84).toByte),
+      Array(0x91.toByte, ((if (omitArguments) 0x83 else 0x84) + maxFlat.size).toByte),
       if (omitArguments) Array.emptyByteArray
       else concat(string(".args"), Array((0x90 | arguments.size).toByte), concat(arguments*)),
       string(".kernarg_segment_size"),
@@ -94,7 +102,8 @@ class CodeObjectMetadataSuite extends Suite {
       string(".name"),
       string("add"),
       string(".symbol"),
-      string("add.kd")
+      string("add.kd"),
+      maxFlat.fold(Array.emptyByteArray)(size => concat(string(".max_flat_workgroup_size"), unsigned(size)))
     )
     val description = metadata ++ Array.ofDim[Byte](((metadata.length + 3) & ~3) - metadata.length)
     val note        = bytes.words(7, metadata.length, 32) ++ "AMDGPU\u0000\u0000".getBytes(StandardCharsets.US_ASCII) ++
