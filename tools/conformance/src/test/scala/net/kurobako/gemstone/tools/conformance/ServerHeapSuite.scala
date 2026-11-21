@@ -17,4 +17,15 @@ class ServerHeapSuite extends munit.FunSuite {
   test("a small host keeps a usable heap") {
     assertEquals(CLI.serverHeapMegabytes(2, 8L << 30), CLI.MinimumHeapMegabytes)
   }
+
+  test("the case budget is the memory the server heap and the reserve leave") {
+    val heap = CLI.serverHeapMegabytes(2, runner)
+    assertEquals(CLI.memoryBudgetMegabytes(runner, heap), (runner >> 20) - heap - CLI.ReservedMegabytes)
+    assertEquals(CLI.memoryBudgetMegabytes(runner, heap), 2 * CLI.CaseMegabytes)
+  }
+
+  test("the case budget stays positive and bounded") {
+    assertEquals(CLI.memoryBudgetMegabytes(8L << 30, CLI.MinimumHeapMegabytes), 1L)
+    assertEquals(CLI.memoryBudgetMegabytes(Long.MaxValue, 28L << 10), Int.MaxValue.toLong)
+  }
 }

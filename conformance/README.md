@@ -103,7 +103,9 @@ The cuda, amd, Level Zero, and SYCL groups size their run shards from `artifacts
 costs its backend's base cost plus its interpreter and bounded HeCBench programs, and the group takes as many shards,
 architecture slices first and then case slices, as keep each within the wall time budget. A program without a cost entry
 fails `Shards.cmake`. The emulation server's heap is the memory left after the concurrent cases and a reserve, so a
-16 GB runner gives it about 5.7 GB.
+16 GB runner gives it about 4.7 GB. The driver then admits a case only while the memory needs of the running cases fit
+what the heap and the reserve leave; `conformance_memory_<program>` in `ShardCosts.cmake` gives a program's need, and a
+program without one takes an even share.
 
 CI records the emulated server with JFR and uploads each conformance run's recording as the `jfr-<shard>` artifact,
 beside the `report-<shard>` reports.

@@ -74,6 +74,7 @@ struct TestProgram {
   fs::path path;
   uint32_t timeoutSeconds;
   std::string format;
+  uint32_t memoryMegabytes = 0;
 };
 bool validIdentifier(std::string_view value) {
   return !value.empty() && value ^ forall([](char c) {
@@ -542,6 +543,13 @@ static uint32_t parseTimeout(std::string_view value, const fs::path &manifest) {
     throw std::runtime_error(fmt::format("invalid timeout in {}", manifest.string()));
   return static_cast<uint32_t>(result);
 }
+static uint32_t parseMemory(std::string_view value, const fs::path &manifest) {
+  uint32_t result = 0;
+  const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
+  if (error != std::errc{} || end != value.data() + value.size() || result == 0)
+    throw std::runtime_error(fmt::format("invalid memory need in {}", manifest.string()));
+  return result;
+}
 static std::vector<TestProgram> testPrograms(const fs::path &artifact, const Workload &workload) {
   const auto manifest = artifact / "test-programs.txt";
   std::ifstream input(manifest);
@@ -559,13 +567,16 @@ static std::vector<TestProgram> testPrograms(const fs::path &artifact, const Wor
     if (!fs::is_regular_file(path)) throw std::runtime_error("missing conformance test program: " + path.string());
     const auto formatAt = line.find('\t', separator + 1);
     if (formatAt == std::string::npos) throw std::runtime_error("missing test program format: " + manifest.string());
-    const auto format = line.substr(formatAt + 1);
+    const auto memoryAt = line.find('\t', formatAt + 1);
+    const auto format = line.substr(formatAt + 1, memoryAt == std::string::npos ? std::string::npos : memoryAt - formatAt - 1);
     if (format != "catch2" && format != "gtest" && format != "deqp" && format != "hecbench" && format != "cases")
       throw std::runtime_error("invalid test program format");
-    result.push_back({.name = std::move(name),
-                      .path = std::move(path),
-                      .timeoutSeconds = parseTimeout(std::string_view(line).substr(separator + 1, formatAt - separator - 1), manifest),
-                      .format = format});
+    result.push_back(
+        {.name = std::move(name),
+         .path = std::move(path),
+         .timeoutSeconds = parseTimeout(std::string_view(line).substr(separator + 1, formatAt - separator - 1), manifest),
+         .format = format,
+         .memoryMegabytes = memoryAt == std::string::npos ? 0 : parseMemory(std::string_view(line).substr(memoryAt + 1), manifest)});
   }
   if (result.empty()) throw std::runtime_error("artifact contains no test programs: " + artifact.string());
   std::erase_if(result, [&](const TestProgram &program) { return !programSelected(workload, program.name); });
@@ -757,7 +768,8 @@ std::vector<ScheduledCase> discoverCases(const RunOptions &configuration, const 
                        .index = index,
                        .count = count,
                        .discoveryFailure = std::nullopt,
-                       .group = std::move(group)});
+                       .group = std::move(group),
+                       .memoryMegabytes = program.memoryMegabytes});
     }
   }
   return tests;
@@ -1279,7 +1291,7 @@ void executeBatch(const ExecutionConfig &config, std::span<const ScheduledCase> 
   }
 }
 std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute,
-                                 const BatchExecutor &executeBatch) {
+                                 const BatchExecutor &executeBatch, uint64_t memoryBudgetMegabytes) {
   const Interruption interruption;
   const auto total = targets ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
   auto results = targets ^ map([](const TargetExecution &target) { return std::vector<std::optional<CaseResult>>(target.tests.size()); });
@@ -1295,6 +1307,12 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
   const auto available = [&](std::string_view device) {
     return device.empty() || (!busy.contains("unknown") && (device == "unknown" ? busy.empty() : !busy.contains(device)));
   };
+  // A case without a figure takes an even share, and one case always runs, so an oversized one cannot stall the run.
+  const auto memoryNeed = [&](const ScheduledCase &test) -> uint64_t {
+    return test.memoryMegabytes != 0 ? test.memoryMegabytes : memoryBudgetMegabytes / std::max<uint32_t>(1, jobs);
+  };
+  uint64_t reservedMemory = 0;
+  size_t activeClaims = 0;
   std::vector<size_t> next(targets.size(), 0);
   size_t cursor = 0;
   size_t started = 0;
@@ -1317,6 +1335,10 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
       if (next[index] == targets[index].tests.size() || !available(device)) continue;
       const bool exclusive = exclusiveHead(index);
       if (exclusive ? started != finished : exclusivePending) continue;
+      const auto need = memoryNeed(targets[index].tests[next[index]]);
+      if (memoryBudgetMegabytes != 0 && activeClaims != 0 && reservedMemory + need > memoryBudgetMegabytes) continue;
+      reservedMemory += need;
+      ++activeClaims;
       if (!device.empty()) busy.insert(device);
       cursor = index + 1;
       const auto &tests = targets[index].tests;
@@ -1397,6 +1419,8 @@ std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, ui
             publish(index, members.front(), std::move(result));
           }
           if (const auto device = resource(target); !device.empty()) busy.erase(device);
+          reservedMemory -= memoryNeed(target.tests[members.front()]);
+          --activeClaims;
           exclusiveActive = false;
           released.notify_all();
         }
@@ -1528,7 +1552,8 @@ int32_t run(RunOptions configuration) {
   if (prepared.empty()) throw std::runtime_error("conformance workload selected no tests: " + configuration.workload);
   warmUpJit(prepared, static_cast<uint32_t>(jobCount), configuration.timeoutScale, executeCase);
   const auto executed = std::chrono::steady_clock::now();
-  const auto results = runCases(prepared, static_cast<uint32_t>(jobCount), executeCase, executeBatch);
+  const auto results = runCases(prepared, static_cast<uint32_t>(jobCount), executeCase, executeBatch,
+                                positiveSetting(environment::MemoryBudgetMegabytes, 0));
   writeJunit(reports / "junit.xml", results);
   const auto total = prepared ^ fold_left(size_t{0}, [](size_t sum, const TargetExecution &target) { return sum + target.tests.size(); });
   const auto skips = results ^ count([](const CaseReport &report) { return skipped(report.result); });

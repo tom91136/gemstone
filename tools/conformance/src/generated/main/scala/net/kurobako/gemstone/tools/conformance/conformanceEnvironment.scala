@@ -12,6 +12,7 @@ object conformanceEnvironment {
   val InterpreterDirectory: String = "CONFORMANCE_INTERPRETER_DIRECTORY"
   val InterpreterOffline: String = "CONFORMANCE_INTERPRETER_OFFLINE"
   val JobCount: String = "CONFORMANCE_JOB_COUNT"
+  val MemoryBudgetMegabytes: String = "CONFORMANCE_MEMORY_BUDGET_MEGABYTES"
   val OpenclCtsAtomicIterationCount: String = "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATION_COUNT"
   val OpenclCtsAtomicThreadCount: String = "CONFORMANCE_OPENCL_CTS_ATOMIC_THREAD_COUNT"
   val OpenclCtsElementCount: String = "CONFORMANCE_OPENCL_CTS_ELEMENT_COUNT"

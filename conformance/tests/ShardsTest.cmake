@@ -60,6 +60,13 @@ foreach(entry IN LISTS conformance_cost_programs)
   endif()
 endforeach()
 
+get_cmake_property(variables VARIABLES)
+foreach(variable IN LISTS variables)
+  if(variable MATCHES "^conformance_memory_(.+)$" AND NOT CMAKE_MATCH_1 IN_LIST programs)
+    fail("memory entry ${variable} names no interpreter program")
+  endif()
+endforeach()
+
 shards("" run status error)
 if(NOT status EQUAL 0)
   fail("Shards.cmake failed: ${error}")

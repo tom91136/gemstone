@@ -585,7 +585,8 @@ TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") 
   const auto reports = directory.path / "reports";
   fs::create_directories(artifact);
   fs::create_directories(reports);
-  std::ofstream(artifact / "test-programs.txt") << "hecbench_demo\t2\thecbench\nhecbench_hang\t1\thecbench\nhecbench_args\t2\thecbench\n";
+  std::ofstream(artifact / "test-programs.txt")
+      << "hecbench_demo\t2\thecbench\t512\nhecbench_hang\t1\thecbench\nhecbench_args\t2\thecbench\n";
   for (const auto &[name, body] : std::vector<std::pair<std::string, std::string>>{
            {"hecbench_demo", "#!/bin/sh\necho PASS\n"},
            {"hecbench_hang", "#!/bin/sh\nsleep 5\n"},
@@ -603,6 +604,8 @@ TEST_CASE("hecbench programs expose one case and classify its run", "[driver]") 
   CHECK(tests[0].identity == "hecbench_demo");
   CHECK(tests[0].program == "hecbench_demo");
   CHECK(tests[0].timeoutSeconds == 2);
+  CHECK(tests[0].memoryMegabytes == 512);
+  CHECK(tests[1].memoryMegabytes == 0);
   CHECK(tests[1].identity == "hecbench_hang");
   CHECK(tests[2].identity == "hecbench_args");
 
@@ -869,6 +872,52 @@ TEST_CASE("cases on one physical device run one at a time while other devices ru
   CHECK(reports[18].result.status == SkipReturnCode);
   CHECK(reports[19].result.status == 2);
   CHECK(reports[19].result.output.contains("executor failure"));
+}
+
+TEST_CASE("cases run together only while their memory needs fit the budget", "[driver]") {
+  const auto target = [](std::string id, uint32_t megabytes, uint32_t count) {
+    TargetExecution result{.id = std::move(id), .config = {}, .tests = {}};
+    for (uint32_t index = 0; index < count; ++index)
+      result.tests.push_back({.identity = fmt::format("case{}", index),
+                              .program = "fixture",
+                              .timeoutSeconds = 10,
+                              .index = index,
+                              .count = count,
+                              .discoveryFailure = std::nullopt,
+                              .group = std::nullopt,
+                              .memoryMegabytes = megabytes});
+    return result;
+  };
+  const auto peakOf = [](const std::vector<TargetExecution> &targets, uint32_t jobs, uint64_t budget) {
+    std::mutex mutex;
+    int32_t running = 0;
+    int32_t peak = 0;
+    const auto reports = runCases(
+        targets, jobs,
+        [&](const ExecutionConfig &, const ScheduledCase &) {
+          {
+            const std::scoped_lock lock(mutex);
+            peak = std::max(peak, ++running);
+          }
+          std::this_thread::sleep_for(50ms);
+          {
+            const std::scoped_lock lock(mutex);
+            --running;
+          }
+          return CaseResult{.status = 0, .output = {}, .message = {}, .classification = {}};
+        },
+        {}, budget);
+    for (const auto &report : reports)
+      CHECK(report.result.status == 0);
+    return peak;
+  };
+  constexpr uint64_t budget = 8192;
+  CHECK(peakOf({target("julia", 4800, 4)}, 2, budget) == 1);
+  CHECK(peakOf({target("small", 2048, 4)}, 2, budget) == 2);
+  CHECK(peakOf({target("julia", 4800, 2), target("small", 2048, 2)}, 2, budget) == 2);
+  CHECK(peakOf({target("unsized", 0, 4)}, 2, budget) == 2);
+  CHECK(peakOf({target("oversized", 20000, 2)}, 2, budget) == 1);
+  CHECK(peakOf({target("julia", 4800, 4)}, 2, 0) == 2);
 }
 
 TEST_CASE("exclusive cases run with no other case running", "[driver]") {

@@ -213,6 +213,7 @@ sbt 'conformance/emulate [--profile <complete|machine>] [--workload <tier>] [--p
 | Variable | Effect |
 | --- | --- |
 | `CONFORMANCE_JOB_COUNT` | Concurrent emulated tests (default: half the thread count, at most 16) |
+| `CONFORMANCE_MEMORY_BUDGET_MEGABYTES` | Memory the running emulated tests may add up to; set by `emulate` from the host memory (default: unlimited) |
 | `CMAKE_BUILD_PARALLEL_LEVEL` | Job budget shared across artifact containers |
 | `CONFORMANCE_SYCL_SHARD_INDEX` | Build only this zero-based shard of the SYCL CTS, as `artifacts/sycl-shard-<n>` (CI only) |
 

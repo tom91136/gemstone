@@ -4,6 +4,12 @@
 #
 # A program has an entry here when its cases take long enough to size a shard: the interpreter programs and the HeCBench
 # programs of hecbench-bounded.toml. Every other case of a route is the base cost of its backend.
+#
+# conformance_memory_<program> is the resident memory in megabytes of one running case of a program, summed over its process
+# tree, as the CI memory samples of a cuda shard show it. The emulated run admits cases while their needs fit the memory the
+# server and the reserve leave; a program without an entry takes an even share. A Julia package test is a driver and a worker
+# process, and the CUDA.jl figure is the larger of two cases sampled together (2863 + 1927 MB); AMDGPU.jl and oneAPI.jl run
+# the same package test runner and take it unmeasured.
 set(conformance_shard_jobs 2)
 set(conformance_shard_wall_seconds 14400)
 
@@ -26,6 +32,11 @@ set(conformance_cost_hecbench_minimod 29)
 set(conformance_cost_hecbench_overlap 181)
 set(conformance_cost_hecbench_sdma 103)
 set(conformance_cost_hecbench_streamcluster 202)
+
+set(conformance_memory_python_numba 2048)
+set(conformance_memory_julia_tests_cuda 4800)
+set(conformance_memory_julia_tests_amdgpu 4800)
+set(conformance_memory_julia_tests_oneapi 4800)
 
 set(conformance_cost_base_cuda 1766)
 set(conformance_cost_base_openacc 111)

@@ -117,6 +117,8 @@ struct ScheduledCase {
   std::optional<DiscoveryFailure> discoveryFailure = std::nullopt;
   // Cases of one program with the same group run in one process.
   std::optional<std::string> group = std::nullopt;
+  // Memory the running case needs, in megabytes; 0 takes an even share of the run's budget.
+  uint32_t memoryMegabytes = 0;
 };
 struct TargetExecution {
   std::string id;
@@ -207,7 +209,7 @@ std::optional<TargetExecution> prepareTarget(const RunOptions &configuration, co
                                              const profile::ResolvedTarget &target, const std::filesystem::path &runDirectory);
 void warmUpJit(std::vector<TargetExecution> &targets, uint32_t jobs, double timeoutScale, const CaseExecutor &execute);
 std::vector<CaseReport> runCases(const std::vector<TargetExecution> &targets, uint32_t jobs, const CaseExecutor &execute,
-                                 const BatchExecutor &executeBatch = {});
+                                 const BatchExecutor &executeBatch = {}, uint64_t memoryBudgetMegabytes = 0);
 ProcessResult runProcess(const std::vector<std::string> &command, const std::filesystem::path &directory,
                          const std::map<std::string, std::string> &environment, std::chrono::milliseconds timeout,
                          const std::string &prefix = {}, bool captureOutput = false, std::ostream *outputLog = nullptr,

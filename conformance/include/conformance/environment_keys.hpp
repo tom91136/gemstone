@@ -17,6 +17,7 @@ inline constexpr char InterpreterArchiveDirectory[] = "CONFORMANCE_INTERPRETER_A
 inline constexpr char InterpreterDirectory[] = "CONFORMANCE_INTERPRETER_DIRECTORY";
 inline constexpr char InterpreterOffline[] = "CONFORMANCE_INTERPRETER_OFFLINE";
 inline constexpr char JobCount[] = "CONFORMANCE_JOB_COUNT";
+inline constexpr char MemoryBudgetMegabytes[] = "CONFORMANCE_MEMORY_BUDGET_MEGABYTES";
 inline constexpr char OpenclCtsAtomicIterationCount[] = "CONFORMANCE_OPENCL_CTS_ATOMIC_ITERATION_COUNT";
 inline constexpr char OpenclCtsAtomicThreadCount[] = "CONFORMANCE_OPENCL_CTS_ATOMIC_THREAD_COUNT";
 inline constexpr char OpenclCtsElementCount[] = "CONFORMANCE_OPENCL_CTS_ELEMENT_COUNT";

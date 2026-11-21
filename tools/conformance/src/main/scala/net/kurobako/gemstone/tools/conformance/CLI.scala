@@ -48,10 +48,10 @@ object CLI {
   private val RetainedRecordings = 5
   private val UnsafeAccess       = "--sun-misc-unsafe-memory-access=allow"
 
-  // the largest process tree of one running case, a Julia package test, and what the build JVM, the server's own
-  // overhead, and the OS need beside the server heap
+  // the process tree of one ordinary case, and what the build JVM (about 3 GB), the server's own overhead, and the OS
+  // need beside the server heap; cases that need more say so in the artifact manifest
   private[conformance] val CaseMegabytes        = 3584L
-  private[conformance] val ReservedMegabytes    = 3072L
+  private[conformance] val ReservedMegabytes    = 4096L
   private[conformance] val MinimumHeapMegabytes = 4096L
 
   private[conformance] def serverHeapMegabytes(jobs: Int, memory: Long): Long = {
@@ -59,6 +59,10 @@ object CLI {
     val available = (memory >> 20) - jobs.toLong * CaseMegabytes - ReservedMegabytes
     math.max(MinimumHeapMegabytes, math.min(sized, available))
   }
+
+  /** What the running cases may add up to: the memory left beside the server heap and the reserve. */
+  private[conformance] def memoryBudgetMegabytes(memory: Long, heap: Long): Long =
+    math.max(1L, math.min(Int.MaxValue.toLong, (memory >> 20) - heap - ReservedMegabytes))
 
   private def path(name: String, help: String): Opts[Path] = Opts.option[String](name, help).map(Path.of(_))
 
@@ -271,7 +275,14 @@ object CLI {
     val processors = positive(environment.ThreadCount, sys.runtime.availableProcessors())
     val jobs       = positive(conformanceEnvironment.JobCount, math.max(1, math.min(16, processors / 2)))
     val workers    = positive(environment.ExecutionThreadCount, math.max(1, math.min(64, processors / 2)))
-    val settings   = Map(
+    // the JVM reports the container's limit
+    val memory = ManagementFactory.getOperatingSystemMXBean match {
+      case system: OperatingSystemMXBean => system.getTotalMemorySize
+      case _                             => Long.MaxValue
+    }
+    val heapMegabytes = serverHeapMegabytes(jobs, memory)
+    val heap          = s"-Xmx${heapMegabytes}m"
+    val settings      = Map(
       conformanceEnvironment.OpenclCtsAtomicIterationCount -> "16",
       conformanceEnvironment.OpenclCtsAtomicThreadCount    -> "128",
       conformanceEnvironment.OpenclCtsElementCount         -> "256",
@@ -283,16 +294,11 @@ object CLI {
       "OMP_TEAMS_THREAD_LIMIT_DEV"                         -> "2",
       environment.ExecutionMaxInstructionCount             -> MaxInstructions
     ).map((key, default) => key -> sys.env.getOrElse(key, default)) ++ Map(
-      conformanceEnvironment.JobCount  -> s"$jobs",
-      environment.ExecutionThreadCount -> s"$workers",
-      environment.NativeDir            -> s"${emulation.server.native.toAbsolutePath}"
+      conformanceEnvironment.JobCount              -> s"$jobs",
+      conformanceEnvironment.MemoryBudgetMegabytes -> s"${memoryBudgetMegabytes(memory, heapMegabytes)}",
+      environment.ExecutionThreadCount             -> s"$workers",
+      environment.NativeDir                        -> s"${emulation.server.native.toAbsolutePath}"
     )
-    // the JVM reports the container's limit
-    val memory = ManagementFactory.getOperatingSystemMXBean match {
-      case system: OperatingSystemMXBean => system.getTotalMemorySize
-      case _                             => Long.MaxValue
-    }
-    val heap = s"-Xmx${serverHeapMegabytes(jobs, memory)}m"
     // a Unix socket path is limited to 107 bytes, which a deep checkout would exceed
     val session   = Files.createTempDirectory("gemstone-conformance-")
     val recording = emulation.server.jfr.map { jfr =>
