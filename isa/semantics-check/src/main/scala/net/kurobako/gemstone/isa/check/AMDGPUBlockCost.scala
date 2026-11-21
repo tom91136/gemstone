@@ -115,13 +115,10 @@ object AMDGPUBlockCost {
       values: Vec[Long]
   ): Either[String, ProfileStream] = for {
     metadata <- loaded.program.kernel(name).left.map(_.description.raw)
-    _        <- Either.cond(
-      metadata.parameters.size == values.size,
-      (),
-      s"$name takes ${metadata.parameters.size} arguments, not ${values.size}"
-    )
+    explicit = metadata.parameters.take(metadata.explicitParameterCount)
+    _ <- Either.cond(explicit.size == values.size, (), s"$name takes ${explicit.size} arguments, not ${values.size}")
     memory = ArrayMemory()
-    arguments <- each(metadata.parameters.zip(values))(argument(memory, _, _))
+    arguments <- each(explicit.zip(values))(argument(memory, _, _))
     run       <- ProgramRun.runWithArguments(
       loaded,
       name,

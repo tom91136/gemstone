@@ -109,6 +109,10 @@ class AMDGPUBlockCostSuite extends Suite {
     }
   }
 
+  test("a launch of a kernel with hidden arguments takes a value for each explicit parameter") {
+    assert(AMDGPUBlockCost.record(WindowFixtures.hidden, "hidden_args", 32, 1, Vec(4096L, 4096L, 5L)).isRight)
+  }
+
   test("a rewrite of a recorded loop costs what a launch of the rewritten kernel records") {
     val image          = WindowFixtures.stream
     val kernel         = WindowFixtures.streaming.raw
