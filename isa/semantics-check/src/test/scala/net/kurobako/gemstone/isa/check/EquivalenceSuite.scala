@@ -35,6 +35,9 @@ abstract class EquivalenceSuite[H, L <: Lookup](reference: Reference[H, L], case
         kase.definition.parameters.forall(parameter => register(parameter.tpe))
     ).getOrElse(fail(s"no $mnemonic with $arity register operands and one result"))
 
+  protected def matching(pattern: String): Case =
+    cases.find(_.instance.matches(pattern)).getOrElse(fail(s"no instance matching $pattern"))
+
   protected def exact(instance: String): Case =
     cases.find(_.instance == instance).getOrElse(fail(s"no instance $instance"))
 
@@ -166,6 +169,13 @@ class SASSEquivalenceSuite
 
   test("memory live-out is compared where memory is observed") {
     survives(Vec(sum("d", a, b)), Vec(sum("d", b, a)), LiveOut(Vec("d"), memory = true))
+  }
+
+  test("a carry out written on one of two defaulted predicates is the same whichever way round the sum is read") {
+    val carry                              = matching(raw"IADD3 R\d+, P\d+, R\d+, R\d+, R\d+")
+    val live                               = LiveOut(Vec("d", "p"), memory = false)
+    def add(left: Operand, right: Operand) = Vec(step(carry, Vec(left, right, Operand.Immediate(0L)), Vec("d", "p")))
+    survives(add(a, b), add(b, a), live)
   }
 }
 

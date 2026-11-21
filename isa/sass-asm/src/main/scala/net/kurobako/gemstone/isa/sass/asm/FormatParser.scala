@@ -109,7 +109,31 @@ object FormatParser {
       form: NVDisasm.Form,
       address: Int,
       text: String
-  ): Either[String, Map[String, BigInt]] = {
+  ): Either[String, Map[String, BigInt]] = candidates(database, form, address, text).flatMap { case (typed, defaults) =>
+    typed match {
+      case Vec(bindings) => Right(bindings)
+      case _             =>
+        // fields whose values print the same text read as their default
+        typed.filter(bindings =>
+          typed.forall(other =>
+            other.keySet.forall(key =>
+              other.get(key) == bindings.get(key) || bindings.get(key).exists(defaults.get(key).contains)
+            )
+          )
+        ) match {
+          case Vec(bindings) => Right(bindings)
+          case _             => Left(s"ambiguous ${form.name} FORMAT: ${typed.size} binding sets")
+        }
+    }
+  }
+
+  /** Every binding set that `text` reads as in `form`, with the defaults of its fields, or why it reads as none. */
+  def candidates(
+      database: NVDisasm.Database,
+      form: NVDisasm.Form,
+      address: Int,
+      text: String
+  ): Either[String, (Vec[Map[String, BigInt]], Map[String, BigInt])] = {
     val source      = normalise(text.stripSuffix(";"))
     val preparation = prepare(database, form)
     val encoding    = NVDisasm.Encoding(database, form)
@@ -135,23 +159,8 @@ object FormatParser {
         Left(s"${form.name} FORMAT is missing required bindings: ${missing.toVec.sorted.mkString(", ")}")
       } else
         if (legal.isEmpty) Left(bound.flatMap(legality(_).left.toOption).head.message)
-        else
-          typed match {
-            case Vec(bindings) => Right(bindings)
-            case Vec()         => Left(legal.flatMap(outsideDomain(encoding, preparation, _)).head)
-            case _             =>
-              // fields whose values print the same text read as their default
-              typed.filter(bindings =>
-                typed.forall(other =>
-                  other.keySet.forall(key =>
-                    other.get(key) == bindings.get(key) || bindings.get(key).exists(defaults.get(key).contains)
-                  )
-                )
-              ) match {
-                case Vec(bindings) => Right(bindings)
-                case _             => Left(s"ambiguous ${form.name} FORMAT: ${typed.size} binding sets")
-              }
-          }
+        else if (typed.isEmpty) Left(legal.flatMap(outsideDomain(encoding, preparation, _)).head)
+        else Right((typed, defaults))
     }
   }
 

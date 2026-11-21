@@ -130,6 +130,7 @@ object SASSModel extends Model {
   private val Ignored   = "(?s).*requires that (\\w+)==RZ.*".r
   private val Aligned   = "(?s).*\\b(\\w+) and (\\w+) need to be vector-aligned.*".r
   private val Ambiguous = "(?s)ambiguous .*".r
+  private val Predicate = "U?P(\\d+)".r
   private val Unicast   = "(?s).*: Invalid instruction combination".r
   private val Negative  = "(?s).*if (\\w+) is non negative.*".r
   private val Zero      = "(?s).*if (\\w+) is not RZ.*".r
@@ -154,17 +155,18 @@ object SASSModel extends Model {
 
   /** The operand text of a form's instances: registers four apart so no pair or quad overlaps the next, predicates
     * numbered in order, `0x1` immediates and constants of bank 3 at offsets `0x10`, `0x110` and on in operand order.
-    * Operands with a default keep it, but for predicates where `predicates` holds. Code addresses are `0x20`, the final
-    * instruction of the function an instance lowers in.
+    * Operands with a default keep it, but for the first `predicates` predicates among them. Code addresses are `0x20`,
+    * the final instruction of the function an instance lowers in.
     */
   private def spelling(
       database: NVDisasm.Database,
       form: NVDisasm.Form,
       fields: Vec[NVDisasm.Syntax.Field],
       mnemonic: String,
-      predicates: Boolean
+      predicates: Int
   ): Either[String, Spelling] = {
-    val counters = form.opcodes.exists(_.name.startsWith("CS2"))
+    val counters  = form.opcodes.exists(_.name.startsWith("CS2"))
+    val defaulted = fields.filter(field => field.category.isPredicateOperand && field.default.nonEmpty)
     fields.foldLeft[Either[String, Spelling]](
       Right(Spelling(Map.empty, Map.empty, Vec.empty, Vec.empty, 0, 0, Spelling.Bank.Outside))
     ) { (spelt, field) =>
@@ -189,8 +191,9 @@ object SASSModel extends Model {
           case NVDisasm.FieldKind.UniformRegister | NVDisasm.FieldKind.NonZeroUniformRegister =>
             Right(state.register(field, "UR"))
           case kind if kind.isRegister => Right(state.register(field, "R"))
-          case kind if kind.isPredicateOperand && field.default.nonEmpty && !predicates => Right(state)
-          case kind if kind.isPredicateOperand                                          =>
+          case kind if kind.isPredicateOperand && field.default.nonEmpty && defaulted.indexOf(field) >= predicates =>
+            Right(state)
+          case kind if kind.isPredicateOperand =>
             val prefix = if (kind == NVDisasm.FieldKind.UniformPredicate) "UP" else "P"
             val name   = s"$prefix${state.predicates}"
             Right(state.spell(field, name).copy(
@@ -247,6 +250,25 @@ object SASSModel extends Model {
     }
   }
 
+  /** The bindings `text` of `form` reads as. Text that reads as several, as a predicate written alone where two
+    * predicate operands default, takes the reading that binds each predicate `spelt` names to its number.
+    */
+  def decode(
+      database: NVDisasm.Database,
+      form: NVDisasm.Form,
+      text: String,
+      spelt: Map[NVDisasm.Syntax.Field, String]
+  ): Either[String, Map[String, BigInt]] = FormatParser.parse(database, form, 0, text).left.flatMap { failure =>
+    val wanted = spelt.toVec.collect {
+      case (field, Predicate(number)) if field.category.isPredicateOperand => field.binding -> BigInt(number)
+    }
+    Option.when(Ambiguous.matches(failure) && wanted.nonEmpty)(()).flatMap(_ =>
+      FormatParser.candidates(database, form, 0, text).toOption.map(_._1.filter(bound =>
+        wanted.forall((binding, value) => bound.get(binding).contains(value))
+      ))
+    ).collect { case Vec(bindings) => bindings }.toRight(failure)
+  }
+
   def immediate(field: NVDisasm.Syntax.Field): Boolean =
     field.category == NVDisasm.FieldKind.Immediate || field.category == NVDisasm.FieldKind.SignedImmediate
 
@@ -273,57 +295,79 @@ object SASSModel extends Model {
 
   /** Every instance of a form, under `mnemonic`: every opcode spelling and value of each required modifier together,
     * with one optional modifier where the encoding accepts none of those alone, then each value of each optional
-    * modifier alone, as far as the encoding accepts them and up to a bound, then the first of them again with every
-    * predicate that has a default written out. With `pairs`, instances also hold each pair of opcode and modifier
-    * values together, up to a bound. Or why none can be written.
+    * modifier alone, as far as the encoding accepts them and up to a bound, then the first of them again with the first
+    * predicate that has a default written out, and with every one. With `pairs`, instances also hold each pair of
+    * opcode and modifier values together, up to a bound. Or why none can be written.
     */
   def instances(
       name: Option[String],
       mnemonic: String,
       formName: String,
       pairs: Boolean = false
-  ): Either[String, Vec[Instance]] = for {
+  ): Either[String, Vec[Instance]] = report(name, mnemonic, formName, pairs).map(_.instances)
+
+  /** The [[instances]], the further rows written with a predicate that has a default, which stand in for an instance of
+    * the same opcode that does not lower, and the reason of each row the encoding refused.
+    */
+  def report(
+      name: Option[String],
+      mnemonic: String,
+      formName: String,
+      pairs: Boolean = false
+  ): Either[String, (instances: Vec[Instance], alternates: Vec[Instance], dropped: Vec[String])] = for {
     target <- target(name)
     database = target.database
     form <- database.byForm.get(formName).toRight(s"no form $formName")
     fields = NVDisasm.Syntax.fields(form.syntax)
-    spelt <- spelling(database, form, fields, mnemonic, predicates = false)
-    writing = Option.when(fields.exists(field => field.category.isPredicateOperand && field.default.nonEmpty))(
-      spelling(database, form, fields, mnemonic, predicates = true)
-    ).flatMap(_.toOption)
+    spelt <- spelling(database, form, fields, mnemonic, predicates = 0)
+    defaulted = fields.count(field => field.category.isPredicateOperand && field.default.nonEmpty)
+    writing   =
+      Vec.tabulate(defaulted)(index => spelling(database, form, fields, mnemonic, index + 1)).flatMap(_.toOption)
     opcodes  = form.opcodes.map(_.name).filter(_.takeWhile(_ != '.') == mnemonic).distinct
     choices  = SASSModifiers.of(database, fields)
     required = choices.filter(_.required)
     found <- {
-      def attempt(operands: Spelling): Either[Vec[String], Vec[(String, Written)]] = {
+      def attempt(operands: Spelling): Either[Vec[String], (Vec[(String, Written)], Vec[String])] = {
         val failures = mutable.LinkedHashSet.empty[String]
+        val dropped  = mutable.ArrayBuffer.empty[String]
         val written  = mutable.HashMap.empty[(String, Map[NVDisasm.Syntax.Field, String]), Option[(String, Written)]]
         // a combination whose encoding forces an immediate, such as a sparsity selector of zero, takes that value
         def render(
             opcode: String,
             chosen: Map[NVDisasm.Syntax.Field, String],
             operands: Spelling
-        ): Option[(String, Written)] = {
+        ): Either[String, (String, Written)] = {
           // a condition-code test is written on the CC operand, which otherwise keeps its default
           def spell(field: NVDisasm.Syntax.Field) = operands.text.get(field).orElse(chosen.get(field)).orElse(
             Option.when(field.kind == "CC" && field.default.nonEmpty && chosen.keys.exists(_.kind == "Test"))("CC")
           )
-          FormatParser.render(form, opcode, spell(_)).flatMap(FormatParser.parse(database, form, 0, _))
+          val spelt = fields.flatMap(field => spell(field).map(field -> _)).toMap
+          FormatParser.render(form, opcode, spell(_)).flatMap(decode(database, form, _, spelt))
             .flatMap(_ => FormatParser.render(form, opcode, spell(_), braced = false))
             .fold(
               failure =>
                 forced(form, fields, failure).filterNot((field, value) => operands.text.get(field).contains(value))
-                  .flatMap((field, value) => render(opcode, chosen, operands.spell(field, value)))
-                  .orElse {
+                  .map((field, value) => render(opcode, chosen, operands.spell(field, value)))
+                  .collectFirst { case found @ Right(_) => found }
+                  .getOrElse {
                     failures += failure
-                    None
+                    Left(failure)
                   },
               found =>
-                Some((found, Written(target.sm, formName, opcode, fields.map(spell(_).getOrElse("")))))
+                Right((found, Written(target.sm, formName, opcode, fields.map(spell(_).getOrElse("")))))
             )
         }
         def text(opcode: String, chosen: Map[NVDisasm.Syntax.Field, String]): Option[(String, Written)] =
-          written.getOrElseUpdate((opcode, chosen), render(opcode, chosen, operands))
+          written.getOrElseUpdate(
+            (opcode, chosen),
+            render(opcode, chosen, operands).fold(
+              failure => {
+                dropped += failure
+                None
+              },
+              Some(_)
+            )
+          )
         val combinations = required.foldLeft(LazyList(Map.empty[NVDisasm.Syntax.Field, String]))((partial, choice) =>
           partial.flatMap(chosen => choice.values.map(value => chosen.updated(choice.field, value)))
         )
@@ -386,7 +430,7 @@ object SASSModel extends Model {
           .fold(Vec.empty[(String, Written)])((opcode, chosen, _) => covering(opcode, chosen))
           .filterNot(found => single.exists(_._1 == found._1)).distinctBy(_._1)
         val found = single ++ paired
-        Either.cond(found.nonEmpty, found, Vec.from(failures))
+        Either.cond(found.nonEmpty, (found, Vec.from(dropped)), Vec.from(failures))
       }
       // An accumulating form writes the register one of its inputs reads.
       // Inputs count every written operand after the destination, immediates included.
@@ -477,21 +521,36 @@ object SASSModel extends Model {
         Vec(anchored(0), anchored(1)).flatten
       }
       // the first adjustment that leads to instances, or the failures of the deepest spelling the first one leads to
-      def search(current: Spelling, rounds: Int): Either[Vec[String], (Spelling, Vec[(String, Written)])] =
-        attempt(current).map(current -> _).left.flatMap { failures =>
+      def search(
+          current: Spelling,
+          rounds: Int
+      ): Either[Vec[String], (Spelling, Vec[(String, Written)], Vec[String])] =
+        attempt(current).map((found, dropped) => (current, found, dropped)).left.flatMap { failures =>
           val tried = LazyList.from(if (rounds > 0) adjusted(current, failures) else Vec.empty[Spelling])
             .map(search(_, rounds - 1))
           tried.collectFirst { case found @ Right(_) => found }.orElse(tried.headOption).getOrElse(Left(failures))
         }
-      search(spelt, 3).left.map(_.headOption.getOrElse(s"$formName has no opcode under $mnemonic")).map(base =>
-        Vec(base) ++ writing.flatMap(search(_, 3).toOption).map((operands, instances) =>
-          (operands, instances.take(1).filterNot(found => base._2.exists(_._1 == found._1)))
-        )
-      )
+      search(spelt, 3).left.map(_.headOption.getOrElse(s"$formName has no opcode under $mnemonic")).map { base =>
+        writing.flatMap(search(
+          _,
+          3
+        ).toOption).foldLeft(Vec((base._1, base._2, Vec.empty[(String, Written)], base._3))) {
+          (done, next) =>
+            def fresh(rows: Vec[(String, Written)]) =
+              rows.filterNot(found => done.exists(_._2.exists(_._1 == found._1)))
+            done :+ (next._1, fresh(next._2.take(1)), fresh(next._2.drop(1)), next._3)
+        }
+      }
     }
-  } yield found.flatMap((operands, instances) =>
-    instances.map((text, written) => (target.sm, text, operands.names, operands.order, operands.constants, written))
-  )
+  } yield {
+    def instance(operands: Spelling)(found: (String, Written)): Instance =
+      (target.sm, found._1, operands.names, operands.order, operands.constants, found._2)
+    (
+      instances = found.flatMap((operands, rows, _, _) => rows.map(instance(operands))),
+      alternates = found.flatMap((operands, _, rows, _) => rows.map(instance(operands))),
+      dropped = found.flatMap(_._4)
+    )
+  }
 
   /** The register and count of a condition that the register's index, URZ counting as one past it, is a multiple of the
     * count.
@@ -858,10 +917,11 @@ object SASSModel extends Model {
       database: NVDisasm.Database,
       form: NVDisasm.Form,
       text: String,
+      spelt: Map[NVDisasm.Syntax.Field, String],
       fields: Vec[String]
   ): (types: Map[String, Type], requirements: Vec[Term]) =
     if (fields.isEmpty) (Map.empty, Vec.empty)
-    else FormatParser.parse(database, form, 0, text).map(Legality.completeBindings(form, _)).fold(
+    else decode(database, form, text, spelt).map(Legality.completeBindings(form, _)).fold(
       _ => (Map.empty, Vec.empty),
       { bindings =>
         val parameters = fields.toSet
@@ -912,7 +972,13 @@ object SASSModel extends Model {
           .toRight(s"$text is not an instruction")
       } yield (target, selected, form, parsed)).left.map(Unrendered.Rejected(_))
       (target, selected, form, parsed) = found
-      fields                           = encoding(selected.database, form, text, constants.map(_.binding))
+      fields                           = encoding(
+        selected.database,
+        form,
+        text,
+        form.declared.zip(instance.written.texts).toMap,
+        constants.map(_.binding)
+      )
     } yield Lowering(
       target,
       parsed,

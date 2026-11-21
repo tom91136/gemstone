@@ -2,7 +2,6 @@ package net.kurobako.gemstone.isa.check
 
 import java.nio.charset.StandardCharsets
 import net.kurobako.gemstone.collection.*
-import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.semantics.render.*
 import scala.util.Using
@@ -19,29 +18,64 @@ object SASSGenerator {
 
   private[check] type Described = (found: SASSModel.Instance, mnemonic: String, form: String, kase: Case)
 
-  private def described(target: String, found: SASSModel.Instance, mnemonic: String, form: String): Option[Described] =
+  private def described(
+      target: String,
+      found: SASSModel.Instance,
+      mnemonic: String,
+      form: String
+  ): Either[String, Described] =
     // counters are never staged into a checked definition
-    SASSModel.definition(found, mnemonic, form).toOption.filter(described =>
-      NvidiaCases.global(described) && !counters.exists(found.text.contains)
-    ).map(described =>
-      (
-        found,
-        mnemonic,
-        form,
-        Case(found.text, Some(target), described, Lookup.Sass(found.operands, found.constants, found.written))
+    SASSModel.definition(found, mnemonic, form).left.map(_.message).flatMap(described =>
+      Either.cond(
+        NvidiaCases.global(described) && !counters.exists(found.text.contains),
+        (
+          found,
+          mnemonic,
+          form,
+          Case(found.text, Some(target), described, Lookup.Sass(found.operands, found.constants, found.written))
+        ),
+        "is not a plain access of global memory"
       )
     )
 
+  private val Digits = "\\d+".r
+
+  private def cause(reason: String): String = reason.substring(reason.lastIndexOf(": ") match {
+    case -1 => 0
+    case at => at + 2
+  })
+
   /** Every instance `target` describes, but those that access memory other than by plain loads and stores of global
-    * memory. Only the entries `included` holds are described.
+    * memory, with the reason of each row it could not write or describe. Only the entries `included` holds are
+    * described.
     */
-  private[check] def instances(target: String, included: String => Boolean): Vec[Described] =
-    SASSModel.entries(Some(target)).filter(entry => included(entry.mnemonic)).flatMap(entry =>
-      entry.forms.flatMap(form =>
-        SASSModel.instances(Some(target), entry.mnemonic, form.name, pairs = true).toOption.toVec.flatten
-          .flatMap(described(target, _, entry.mnemonic, form.name))
-      )
+  private[check] def sweep(
+      target: String,
+      included: String => Boolean
+  ): (instances: Vec[Described], dropped: Vec[String]) = {
+    val swept = SASSModel.entries(Some(target)).filter(entry => included(entry.mnemonic)).flatMap(entry =>
+      entry.forms.map { form =>
+        val (written, alternates, dropped) = SASSModel.report(Some(target), entry.mnemonic, form.name, pairs = true)
+          .getOrElse((Vec.empty[SASSModel.Instance], Vec.empty[SASSModel.Instance], Vec.empty[String]))
+        def describe(instances: Vec[SASSModel.Instance]) =
+          instances.map(described(target, _, entry.mnemonic, form.name))
+        val first   = describe(written)
+        val opcodes = first.flatMap(_.toOption).map(_.found.text.takeWhile(_ != ' ')).toSet
+        // an opcode no instance of lowers is tried again with its defaulted predicates written
+        val rest = describe(alternates.filterNot(found => opcodes(found.text.takeWhile(_ != ' '))))
+        val kept = rest.flatMap(_.toOption).distinctBy(_.found.text.takeWhile(_ != ' '))
+        (
+          first.flatMap(_.toOption) ++ kept,
+          (dropped.map(_.replace(form.name, "<form>")) ++ (first ++ rest).flatMap(_.left.toOption).map(cause(_)))
+            .map(Digits.replaceAllIn(_, "N"))
+        )
+      }
     )
+    (swept.flatMap(_._1), swept.flatMap(_._2))
+  }
+
+  private[check] def instances(target: String, included: String => Boolean): Vec[Described] =
+    sweep(target, included).instances
 
   /** Each definition `target` describes once, with the first of the [[instances]] that lowers to it. */
   private[check] def plain(target: String, included: String => Boolean): Vec[Described] =
@@ -60,7 +94,7 @@ object SASSGenerator {
             (found.sm, s"$spelt ${found.text}", found.operands, found.order, found.constants, found.written),
             mnemonic,
             name
-          )
+          ).toOption
         ).map(_.kase).filterNot(kase => NvidiaCases.product(kase.definition))
     }.nextOption()
 

@@ -187,21 +187,31 @@ class FormsSuite extends Suite {
 
   test("what is refused with no guard is refused under one for the same reason") {
     Vec(
-      "BRA 0x20"                 -> "has no rendering: lowers to Branch, with no staged semantics",
-      "CALL.REL.NOINC 0x10"      -> "has no rendering: lowers to Branch, with no staged semantics",
-      "RET.REL.NODEC R20, 0x0"   -> "has no rendering: lowers to Branch, with no staged semantics",
-      "BSSY B0, 0x20"            -> "has no rendering: lowers to Convergence, with no staged semantics",
-      "BSYNC B0"                 -> "has no rendering: lowers to Convergence, with no staged semantics",
-      "EXIT"                     -> "has no rendering: lowers to Return, with no staged semantics",
-      "LD.E R5, [R2.64]"         -> "is refused: Memory.load is not a plain memory access",
-      "UMOV UR4, 0x1"            -> "is refused: Warp.leader is not a plain memory access",
-      "LDC R5, c[0x3][R2]"       -> "reads a constant bank at an offset a register holds",
-      "IADD3 R2, P0, R4, R5, RZ" -> "has no checked case of"
+      "BRA 0x20"               -> "has no rendering: lowers to Branch, with no staged semantics",
+      "CALL.REL.NOINC 0x10"    -> "has no rendering: lowers to Branch, with no staged semantics",
+      "RET.REL.NODEC R20, 0x0" -> "has no rendering: lowers to Branch, with no staged semantics",
+      "BSSY B0, 0x20"          -> "has no rendering: lowers to Convergence, with no staged semantics",
+      "BSYNC B0"               -> "has no rendering: lowers to Convergence, with no staged semantics",
+      "EXIT"                   -> "has no rendering: lowers to Return, with no staged semantics",
+      "LD.E R5, [R2.64]"       -> "is refused: Memory.load is not a plain memory access",
+      "UMOV UR4, 0x1"          -> "is refused: Warp.leader is not a plain memory access",
+      "LDC R5, c[0x3][R2]"     -> "reads a constant bank at an offset a register holds"
     ).foreach { (text, reason) =>
       assert(written(text).left.exists(_.contains(reason)), written(text))
       assert(written(s"@P0 $text").left.exists(_.contains(reason)), written(s"@P0 $text"))
       assert(written(s"@!P0 $text").left.exists(_.contains(reason)), written(s"@!P0 $text"))
     }
+  }
+
+  test("a carry out written on one of two defaulted predicates is admitted, under a guard too") {
+    Vec("IADD3 R2, P0, R4, R5, RZ", "IADD3 R2, P0, R2, c[0x0][0x160], RZ").flatMap(text =>
+      Vec(text, s"@P1 $text", s"@!P1 $text")
+    ).foreach(text => assert(written(text).isRight, written(text)))
+  }
+
+  test("a predicate AND of a three-input logic operation is admitted") {
+    val text = "LOP3.LUT.PAND P1, R2, R4, R5, R6, 0xc0, P0"
+    assert(written(text).isRight, written(text))
   }
 
   test("a wide global access renders the check of its whole width beside its 32-bit elements, under a guard too") {

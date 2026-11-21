@@ -49,7 +49,7 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
           Option.when(SASSModel.immediate(field))(found.encodedBinding(field)).flatMap(offsets.get)
             .map(offset => s"0x${offset.toHexString}").orElse(spelt.get(field))
       )
-      _ <- FormatParser.parse(database, found, 0, text)
+      _ <- SASSModel.decode(database, found, text, spelt)
     } yield ()
 
     /** The factor the form scales the offset field `binding` by, which the field's value is a multiple of. */

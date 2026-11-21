@@ -7,13 +7,15 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.isa.sass.Instruction
 import net.kurobako.gemstone.isa.sass.fixtures.Fixture
+import scala.collection.concurrent.TrieMap
 
 /** Writes, for each architecture the committed fixtures compile for, every mnemonic, modifier combination and operand
   * kinds that the fixtures use or an instance has, as a TSV of target, opcode, kinds, state, fixture uses and an
   * example, to the file given: `covered` where an instance with that opcode and those kinds has a checked case, `case`
   * where only an instance does, and where only the fixtures do, `rides` where the instruction is admitted on the cases
-  * of its operand kinds alone, or `refused` with the reason it is not. Further arguments limit the architectures, as
-  * `sm_89`.
+  * of its operand kinds alone, or `refused` with the reason it is not. After them, a row of state `dropped` for each
+  * reason the model dropped rows of a mnemonic, with their number in place of the fixture uses. Further arguments limit
+  * the architectures, as `sm_89`.
   */
 object SASSModifierAudit {
 
@@ -42,10 +44,29 @@ object SASSModifierAudit {
     }
   }
 
-  /** The shapes of the instances of `mnemonic` on `target`, each checked in the case of its definition. */
-  def checked(target: String, mnemonic: String): Set[Shape] =
-    SASSGenerator.instances(target, _ == mnemonic).flatMap(found => SASSForms.parsed(found.kase.instance)).map(shape(_))
-      .toSet
+  /** The shapes of the instances of `mnemonic` on `target`, each checked in the case of its definition, and the reason
+    * of each row the model could not write or describe.
+    */
+  def checked(target: String, mnemonic: String): (shapes: Set[Shape], dropped: Vec[String]) =
+    swept.getOrElseUpdate(
+      (target, mnemonic), {
+        val (instances, dropped) = SASSGenerator.sweep(target, _ == mnemonic)
+        (instances.flatMap(found => SASSForms.parsed(found.kase.instance)).map(shape(_)).toSet, dropped)
+      }
+    )
+
+  private val swept = TrieMap.empty[(String, String), (shapes: Set[Shape], dropped: Vec[String])]
+
+  /** The number of rows dropped for each reason, by target and mnemonic, for the architectures `only` names, all where
+    * it is empty.
+    */
+  def dropped(only: Set[String]): Vec[(target: String, mnemonic: String, reason: String, count: Int)] =
+    used.filter(value => only.isEmpty || only(s"sm_${value.sm}"))
+      .map(value => (s"sm_${value.sm}", value.instruction.mnemonic.raw)).distinct.sorted.flatMap((target, mnemonic) =>
+        checked(target, mnemonic).dropped.groupBy(identity).toVec.map((reason, rows) =>
+          (target, mnemonic, reason, rows.size)
+        ).sortBy(_._3)
+      )
 
   /** The rows of the audit for the architectures `only` names, all where it is empty. */
   def rows(only: Set[String]): Vec[Vec[String]] = {
@@ -53,7 +74,7 @@ object SASSModifierAudit {
     found.groupBy(_.sm).toVec.sortBy(_._1).flatMap { (sm, instructions) =>
       val target = s"sm_$sm"
       instructions.groupBy(_.instruction.mnemonic.raw).toVec.sortBy(_._1).flatMap { (mnemonic, uses) =>
-        val cases   = checked(target, mnemonic)
+        val cases   = checked(target, mnemonic).shapes
         val counted = uses.groupBy(value => shape(value.instruction))
         val shapes  = (cases ++ counted.keySet).toVec.sortBy((opcode, kinds) => (opcode.mkString("."), kinds.mkString))
         shapes.map { form =>
@@ -78,7 +99,11 @@ object SASSModifierAudit {
   }
 
   def main(arguments: Array[String]): Unit = {
-    val table = rows(arguments.drop(1).toSet).map(_.map(_.replace('\t', ' ')).mkString("\t"))
-    val _     = Files.write(Paths.get(arguments(0)), table.mkString("", "\n", "\n").getBytes(StandardCharsets.UTF_8))
+    val only  = arguments.drop(1).toSet
+    val table =
+      (rows(only) ++ dropped(only).map((target, mnemonic, reason, count) =>
+        Vec(target, mnemonic, "", "dropped", count.toString, reason)
+      )).map(_.map(_.replace('\t', ' ')).mkString("\t"))
+    val _ = Files.write(Paths.get(arguments(0)), table.mkString("", "\n", "\n").getBytes(StandardCharsets.UTF_8))
   }
 }

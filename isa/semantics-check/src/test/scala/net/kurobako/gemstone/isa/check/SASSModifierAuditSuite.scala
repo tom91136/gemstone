@@ -32,4 +32,10 @@ class SASSModifierAuditSuite extends Suite {
   test("a pair of modifiers that the fixtures use has a case of its own") {
     assertEquals(states("ISETP.AND.GE.U32", "P P R I P"), Vec("covered"))
   }
+
+  test("the rows the model drops are counted by reason") {
+    val dropped = SASSModifierAudit.dropped(Set("sm_89"))
+    assert(dropped.nonEmpty && dropped.forall(_.count > 0), dropped.take(5))
+    assert(!dropped.exists(row => row.mnemonic == "IADD3" && row.reason.startsWith("ambiguous")), dropped.take(5))
+  }
 }
