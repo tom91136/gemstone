@@ -9,6 +9,8 @@
 #include "cuda/support.cuh"
 #include <catch2/catch_test_macros.hpp>
 
+#include <conformance/environment_keys.hpp>
+
 namespace {
 
 constexpr unsigned Blocks = 4;
@@ -70,10 +72,14 @@ struct Result {
   uint32_t status;
 };
 
-// the device runtime is not part of the artifact's runtime closure, so a run on another host names its own copy
+// the device runtime ships in the artifact's support closure, so a run on another host resolves it there
 std::string deviceRuntimeLibrary() {
-  const char *named = std::getenv("CONFORMANCE_CUDADEVRT_LIBRARY");
-  return named && *named ? named : UNIFIED_CUDADEVRT_LIBRARY;
+  if (const char *named = std::getenv(conformance::environment::CudadevrtLibrary); named && *named) return named;
+  if (const char *support = std::getenv(conformance::environment::SupportDir); support && *support) {
+    const std::filesystem::path shipped = std::filesystem::path(support) / "lib" / "libcudadevrt.a";
+    if (std::filesystem::is_regular_file(shipped)) return shipped.string();
+  }
+  return UNIFIED_CUDADEVRT_LIBRARY;
 }
 
 void checkLink(nvJitLinkResult result, std::string_view operation) {

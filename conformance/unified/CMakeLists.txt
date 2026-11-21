@@ -115,6 +115,7 @@ elseif(CONFORMANCE_BACKEND STREQUAL "cuda")
     if(TARGET CUDA::nvJitLink AND unified_cudadevrt)
       target_sources(unified PRIVATE src/cuda/cooperative.cpp)
       target_link_libraries(unified PRIVATE CUDA::nvJitLink)
+      install(FILES "${unified_cudadevrt}" DESTINATION lib COMPONENT support RENAME libcudadevrt.a)
       set_source_files_properties(src/cuda/cooperative.cpp PROPERTIES
         COMPILE_DEFINITIONS "UNIFIED_CUDADEVRT_LIBRARY=\"${unified_cudadevrt}\"")
     else()

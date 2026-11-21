@@ -297,6 +297,8 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterPrebuiltTest.cmake")
     add_test(NAME conformance_verify_relocation
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/VerifyRelocationTest.cmake")
+    add_test(NAME conformance_verify_cudadevrt
+      COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/VerifyCudadevrtTest.cmake")
     add_test(NAME conformance_numba_cases
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/NumbaCasesTest.cmake")
     add_test(NAME conformance_package_tests
