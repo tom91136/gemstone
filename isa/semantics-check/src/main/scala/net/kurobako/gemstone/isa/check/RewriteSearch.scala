@@ -4,7 +4,6 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.explorer.*
-import net.kurobako.gemstone.flow.Block
 import net.kurobako.gemstone.flow.Liveness
 import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.isa.amdgpu.*
@@ -65,6 +64,64 @@ object RewriteSearch {
 
   private case class Written(values: Map[String, Long], written: Set[String])
 
+  /** What the search takes of an instruction set: how it proves, names state and compares memory. */
+  private trait Isa[I, H, L <: Lookup] {
+    def reference: Reference[H, L]
+    def executor: (Case, Vec[Long], H) => Either[String, Vec[Long]]
+    def steps(sequence: Vec[I]): Either[String, Vec[Equivalence.Step]]
+    def text(sequence: Vec[I]): Vec[String]
+
+    /** The units a register of `width` is made of, as live-out sets name them. */
+    def units(name: String, width: Int): Vec[String]
+
+    /** The units a run holds at every one of its lanes. */
+    def active: Set[String]
+
+    /** The weighted count of memory locations on which two runs differ. */
+    def memory(expected: H, obtained: H): Long
+  }
+
+  /** A source of one-move candidates, which follows the sequence the walk has moved to. */
+  private trait Walker[I] {
+    def propose(seed: Long, limit: Int): Vec[Moves.Candidate[I]]
+    def from(sequence: Vec[I]): Option[Walker[I]]
+  }
+
+  /** The cycles of the region that holds a window once a sequence stands in the window's place. */
+  private type Costing[I] = (Window, Vec[I]) => Either[String, AMDGPUBlockCost.Cost]
+
+  private def changed[K, V](left: Map[K, V], right: Map[K, V])(using CanEqual[V, V]): Long =
+    (left.keySet ++ right.keySet).count(key => left.get(key) != right.get(key)).toLong
+
+  private final class AMDGPU(target: Target) extends Isa[Instruction, AMDGPUHarness, Lookup.Spellings] {
+    private val waveSize = TargetDefaults.waveSize(target)
+    private val masks    = Set(ImplicitState.Exec) ++ ImplicitState.of(OperandKind.`VCC`)
+
+    val reference: Reference[AMDGPUHarness, Lookup.Spellings]                   = AMDGPUReference
+    val executor: (Case, Vec[Long], AMDGPUHarness) => Either[String, Vec[Long]] = Equivalence.vm(AMDGPUReference)
+    val active: Set[String] = ImplicitState.units(ImplicitState.Exec, waveSize).toSet
+
+    def steps(sequence: Vec[Instruction]): Either[String, Vec[Equivalence.Step]] =
+      each(sequence)(AMDGPUForms.of(target, _))
+
+    def text(sequence: Vec[Instruction]): Vec[String] = sequence.map(Printer.render(_))
+
+    def units(name: String, width: Int): Vec[String] =
+      if (masks(name)) ImplicitState.units(name, waveSize) else Liveness.units(name, width)
+
+    def memory(expected: AMDGPUHarness, obtained: AMDGPUHarness): Long = {
+      val (expectedGlobal, expectedShared, expectedVectors) = expected.writes
+      val (obtainedGlobal, obtainedShared, obtainedVectors) = obtained.writes
+      8L * (changed(expectedGlobal, obtainedGlobal) + changed(expectedShared, obtainedShared)) +
+        32L * changed(expectedVectors, obtainedVectors)
+    }
+  }
+
+  private def walker(moves: AMDGPUMoves): Walker[Instruction] = new Walker[Instruction] {
+    def propose(seed: Long, limit: Int): Vec[Moves.Candidate[Instruction]] = moves.propose(seed, limit)
+    def from(sequence: Vec[Instruction]): Option[Walker[Instruction]]      = moves.from(sequence).toOption.map(walker)
+  }
+
   def amdgpu(
       image: Vec[Byte],
       function: String,
@@ -75,12 +132,14 @@ object RewriteSearch {
   ): Either[String, Report] = for {
     cost   <- AMDGPUBlockCost.of(image, function, targetName, launch)
     ready  <- search(image, function, targetName, window, config)
-    report <- ready.run(cost)
+    report <- ready.run((at, sequence) => cost.cost(at, ready.isa.text(sequence)))
   } yield report
 
   def prove(image: Vec[Byte], function: String, targetName: String, window: Window, candidate: Vec[String])
       : Either[String, Proof.Result] =
-    search(image, function, targetName, window, Config.default).flatMap(_.evidence(candidate))
+    search(image, function, targetName, window, Config.default).flatMap(ready =>
+      each(candidate)(instruction).flatMap(ready.evidence)
+    )
 
   def lines(label: String, window: Window, result: Either[String, Report]): Vec[String] = {
     val head = s"[rewrite] $label ${window.first}..${window.last}"
@@ -103,14 +162,19 @@ object RewriteSearch {
       targetName: String,
       window: Window,
       config: Config
-  ): Either[String, Search] = for {
+  ): Either[String, Search[Instruction, AMDGPUHarness, Lookup.Spellings]] = for {
     target <- targetName.refine[Target].left.map(_.raw)
     found  <- AMDGPUModel.staticCode(image, function)
     moves  <- AMDGPUMoves.of(image, function, targetName, window)
     parsed <- each(found._3.zip(found._2))((text, use) => instruction(text).map(_ -> use))
     block = found._1.blocks(window.block)
-    ready <- Search.of(target, window, block, parsed, moves, config)
-  } yield ready
+    _ <- Either.cond(
+      block.first <= window.first && window.last <= block.last,
+      (),
+      s"the window ${window.first}..${window.last} is not inside the block ${block.first}..${block.last}"
+    )
+    held = parsed.slice(window.first, window.last + 1)
+  } yield new Search(AMDGPU(target), window, held.map(_._1), held.map(_._2), walker(moves), config)
 
   private def instruction(text: String): Either[String, Instruction] =
     Parser.parse(text).left.map(_.diagnostic.raw).flatMap(_.statements match {
@@ -123,34 +187,17 @@ object RewriteSearch {
       found.flatMap(done => f(value).map(done :+ _))
     )
 
-  private final class Search(
-      target: Target,
+  private final class Search[I: ClassTag, H, L <: Lookup](
+      val isa: Isa[I, H, L],
       window: Window,
-      block: Block,
-      parsed: Vec[(Instruction, RegisterUse)],
-      moves: AMDGPUMoves,
+      original: Vec[I],
+      originalUses: Vec[RegisterUse],
+      moves: Walker[I],
       config: Config
   ) {
-    private val executor = Equivalence.vm(AMDGPUReference)
-    private val waveSize = TargetDefaults.waveSize(target)
-    private val at       = window.first - block.first
-    private val length   = window.last - window.first + 1
-
-    private val blockInstructions = parsed.slice(block.first, block.last + 1).map(_._1)
-    private val blockUses         = parsed.slice(block.first, block.last + 1).map(_._2)
-    private val original          = blockInstructions.slice(at, at + length)
-    private val originalUses      = blockUses.slice(at, at + length)
-
-    private val masks: Set[String] = Set(ImplicitState.Exec) ++ ImplicitState.of(OperandKind.`VCC`)
-
-    private def units(name: String, width: Int): Vec[String] =
-      if (masks(name)) ImplicitState.units(name, waveSize) else Liveness.units(name, width)
 
     private def units(use: RegisterUse, names: Vec[String]): Vec[String] =
-      names.flatMap(name => units(name, use.unitsOf(name)))
-
-    private def steps(sequence: Vec[Instruction]): Either[String, Vec[Equivalence.Step]] =
-      each(sequence)(AMDGPUForms.of(target, _))
+      names.flatMap(name => isa.units(name, use.unitsOf(name)))
 
     private def liveOut(steps: Vec[Equivalence.Step]): Equivalence.LiveOut = {
       val written = originalUses.flatMap(use => units(use, use.writes)).toSet
@@ -162,10 +209,8 @@ object RewriteSearch {
       )
     }
 
-    private val active = ImplicitState.units(ImplicitState.Exec, waveSize).toSet
-
     private def sample(name: String, tpe: Type, run: Int): Long =
-      if (active(name)) tpe.represent(-1L)
+      if (isa.active(name)) tpe.represent(-1L)
       else {
         val mixed = config.seed ^ (name.hashCode.toLong * 0x9e3779b97f4a7c15L) ^ run.toLong
         Edges.sample(tpe, Random(mixed))
@@ -175,28 +220,19 @@ object RewriteSearch {
         sequence: Vec[Equivalence.Step],
         initial: Map[String, Long],
         types: Map[String, Type],
-        harness: AMDGPUHarness
+        harness: H
     ): Either[String, Written] =
       sequence.foldLeft[Either[String, Written]](Right(Written(initial, Set.empty))) { (found, step) =>
         found.flatMap(known =>
-          executor(step.kase, step.inputs(known.values), harness).map { outputs =>
+          isa.executor(step.kase, step.inputs(known.values), harness).map { outputs =>
             val named = step.outputs(outputs).map((location, value) => location -> types(location).represent(value))
             Written(known.values ++ named, known.written ++ named.map(_._1))
           }
         )
       }
 
-    private def changed[K, V](left: Map[K, V], right: Map[K, V])(using CanEqual[V, V]): Long =
-      (left.keySet ++ right.keySet).count(key => left.get(key) != right.get(key)).toLong
-
-    private def memory(expected: AMDGPUHarness, obtained: AMDGPUHarness, liveOut: Equivalence.LiveOut): Long =
-      if (!liveOut.memory) 0L
-      else {
-        val (expectedGlobal, expectedShared, expectedVectors) = expected.writes
-        val (obtainedGlobal, obtainedShared, obtainedVectors) = obtained.writes
-        8L * (changed(expectedGlobal, obtainedGlobal) + changed(expectedShared, obtainedShared)) +
-          32L * changed(expectedVectors, obtainedVectors)
-      }
+    private def memory(expected: H, obtained: H, liveOut: Equivalence.LiveOut): Long =
+      if (!liveOut.memory) 0L else isa.memory(expected, obtained)
 
     private def differing(
         types: Map[String, Type],
@@ -229,8 +265,8 @@ object RewriteSearch {
             total.flatMap { sum =>
               val sampled = names.map(name => name -> sample(name, types(name), run)).toMap
 
-              val expectedHarness = AMDGPUReference.harness(run.toLong)
-              val obtainedHarness = AMDGPUReference.harness(run.toLong)
+              val expectedHarness = isa.reference.harness(run.toLong)
+              val obtainedHarness = isa.reference.harness(run.toLong)
               (execute(left, sampled, types, expectedHarness), execute(right, sampled, types, obtainedHarness)) match {
                 case (Right(expected), Right(obtained)) =>
                   Right(sum + differing(types, liveOut, expected, obtained) +
@@ -243,15 +279,12 @@ object RewriteSearch {
           runs.fold(Distance.Refused(_), Distance.Bits(_))
       }
 
-    private def text(sequence: Vec[Instruction]): Vec[String] = sequence.map(Printer.render(_))
-
-    private[check] def evidence(candidate: Vec[String]): Either[String, Proof.Result] = for {
-      originalSteps <- steps(original)
-      parsed        <- each(candidate)(instruction)
-      right         <- steps(parsed)
+    private[check] def evidence(candidate: Vec[I]): Either[String, Proof.Result] = for {
+      originalSteps <- isa.steps(original)
+      right         <- isa.steps(candidate)
     } yield Proof.prove(
-      AMDGPUReference,
-      executor,
+      isa.reference,
+      isa.executor,
       (originalSteps ++ right).flatMap(_.lane.cases),
       originalSteps,
       right,
@@ -259,16 +292,16 @@ object RewriteSearch {
     )
 
     private case class Walk(
-        state: Vec[Instruction],
-        moves: AMDGPUMoves,
+        state: Vec[I],
+        moves: Walker[I],
         cycles: Double,
         distance: Long,
         evaluated: Int
     )
 
-    def run(cost: AMDGPUBlockCost): Either[String, Report] = for {
-      originalSteps <- steps(original)
-      whole         <- cost.cost(window, text(original))
+    def run(cost: Costing[I]): Either[String, Report] = for {
+      originalSteps <- isa.steps(original)
+      whole         <- cost(window, original)
     } yield {
       val out     = liveOut(originalSteps)
       val idle    = out.locations.isEmpty && !out.memory
@@ -276,19 +309,19 @@ object RewriteSearch {
       val before  = Measure(whole.cycles, whole.source)
       val random  = Random(config.seed)
       val costs   = mutable.LinkedHashMap.empty[String, Either[String, AMDGPUBlockCost.Cost]]
-      val seen    = mutable.LinkedHashMap.empty[String, (Vec[Instruction], Long, AMDGPUBlockCost.Cost)]
-      val deleted = AMDGPUMoves.Candidate(AMDGPUMoves.Kind.Delete, Vec.empty, Vec.empty)
+      val seen    = mutable.LinkedHashMap.empty[String, (Vec[I], Long, AMDGPUBlockCost.Cost)]
+      val deleted = Moves.Candidate(Moves.Kind.Delete, Vec.empty[I], Vec.empty[RegisterUse])
 
-      def visit(walk: Walk, candidate: AMDGPUMoves.Candidate): Walk = {
-        val key   = text(candidate.instructions).mkString("; ")
+      def visit(walk: Walk, candidate: Moves.Candidate[I]): Walk = {
+        val key   = isa.text(candidate.instructions).mkString("; ")
         val found = for {
-          bits <- steps(candidate.instructions).flatMap(right =>
+          bits <- isa.steps(candidate.instructions).flatMap(right =>
             distance(originalSteps, right, out) match {
               case Distance.Bits(bits)   => Right(bits)
               case Distance.Refused(why) => Left(why)
             }
           ).toOption
-          after <- costs.getOrElseUpdate(key, cost.cost(window, text(candidate.instructions))).toOption
+          after <- costs.getOrElseUpdate(key, cost(window, candidate.instructions)).toOption
         } yield (bits, after)
         found.fold(walk.copy(evaluated = walk.evaluated + 1)) { (bits, after) =>
           if (!seen.contains(key)) seen.update(key, (candidate.instructions, bits, after))
@@ -314,7 +347,7 @@ object RewriteSearch {
           val pool       = current.moves.propose(random.nextLong(), config.limit)
           val considered =
             if (iteration == 0) pool :+ deleted
-            else if (pool.isEmpty) Vec.empty[AMDGPUMoves.Candidate]
+            else if (pool.isEmpty) Vec.empty[Moves.Candidate[I]]
             else Vec(pool(random.nextInt(pool.size)))
           walk(iteration + 1, considered.foldLeft(current)(visit))
         }
@@ -324,15 +357,22 @@ object RewriteSearch {
       val cheaper  = seen.values.filter((_, bits, after) => bits == 0L && after.cycles < before.cycles).toVec
       val lane     = originalSteps.flatMap(_.lane.cases)
       val rewrites = cheaper.flatMap { (sequence, _, after) =>
-        steps(sequence).toOption.flatMap { right =>
-          Proof.prove(AMDGPUReference, executor, lane ++ right.flatMap(_.lane.cases), originalSteps, right, out) match {
+        isa.steps(sequence).toOption.flatMap { right =>
+          Proof.prove(
+            isa.reference,
+            isa.executor,
+            lane ++ right.flatMap(_.lane.cases),
+            originalSteps,
+            right,
+            out
+          ) match {
             case Proof.Result.Proved(evidence) =>
               val source = Architecture.Source.weakest(before.source, after.source)
               Some(
                 Rewrite(
                   window,
-                  text(original),
-                  text(sequence),
+                  isa.text(original),
+                  isa.text(sequence),
                   before,
                   Measure(after.cycles, after.source),
                   source,
@@ -357,20 +397,5 @@ object RewriteSearch {
         costs.collect { case (candidate, Left(reason)) => (candidate = candidate, reason = reason) }.toVec
       )
     }
-  }
-
-  private object Search {
-    def of(
-        target: Target,
-        window: Window,
-        block: Block,
-        parsed: Vec[(Instruction, RegisterUse)],
-        moves: AMDGPUMoves,
-        config: Config
-    ): Either[String, Search] = Either.cond(
-      block.first <= window.first && window.last <= block.last,
-      new Search(target, window, block, parsed, moves, config),
-      s"the window ${window.first}..${window.last} is not inside the block ${block.first}..${block.last}"
-    )
   }
 }
