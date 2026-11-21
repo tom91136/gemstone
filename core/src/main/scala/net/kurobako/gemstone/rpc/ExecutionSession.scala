@@ -17,6 +17,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
+import scala.collection.immutable.Queue
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.runtime.LongRef
@@ -107,15 +108,23 @@ object ExecutionSession {
       nextAllocation: AllocationId,
       nextProgram: ProgramId,
       nextCompletion: CompletionId,
-      addresses: AllocationAddressIndex = AllocationAddressIndex.Empty
+      addresses: AllocationAddressIndex = AllocationAddressIndex.Empty,
+      released: Queue[AllocationId] = Queue.empty
   ) {
     def allocation(id: AllocationId): Option[StoredAllocation] = Option(addresses.entry(id)).map(_.allocation)
     def hasHostBackedAllocations: Boolean                      = addresses.hasHostBacked
 
     def withAllocation(id: AllocationId, allocation: StoredAllocation): State =
       copy(addresses = addresses.updated(id, allocation))
-    def withoutAllocation(id: AllocationId): State = copy(addresses = addresses.removed(id))
-    def withoutAllocations: State                  = copy(addresses = AllocationAddressIndex.Empty)
+    def withoutAllocation(id: AllocationId): State =
+      copy(addresses = addresses.removed(id), released = released.enqueue(id))
+    def withoutAllocations: State = copy(addresses = AllocationAddressIndex.Empty, released = Queue.empty)
+
+    /** A fresh window while the layout has one, then the longest released one. */
+    def window: Option[(AllocationId, State)] =
+      if (nextAllocation.raw <= SyntheticAllocationCapacity)
+        Some(nextAllocation -> copy(nextAllocation = nextAllocation.next))
+      else released.dequeueOption.map((id, rest) => id -> copy(released = rest))
 
     def loaded(id: ProgramId): Either[ExecutionFailure, ProgramEntry] =
       programs.get(id).filterNot(_.isUnloading).toRight(notLoaded(id))
@@ -176,13 +185,15 @@ class ExecutionSession(
 
   def registerAllocation(size: Int > 0): Either[ExecutionFailure, AllocationId] = stateLock.withLock {
     open.flatMap { current =>
-      val id = current.nextAllocation
-      if (id.raw > SyntheticAllocationCapacity)
-        Left(ExecutionFailure.OutOfResources(s"session exhausted its $SyntheticAllocationCapacity allocation windows"))
-      else {
-        val allocation = StoredAllocation(StoredAllocation.Storage(size), syntheticAddress(id))
-        state.set(current.withAllocation(id, allocation).copy(nextAllocation = id.next))
-        Right(id)
+      current.window match {
+        case None =>
+          Left(
+            ExecutionFailure.OutOfResources(s"session exhausted its $SyntheticAllocationCapacity allocation windows")
+          )
+        case Some((id, reserved)) =>
+          val allocation = StoredAllocation(StoredAllocation.Storage(size), syntheticAddress(id))
+          state.set(reserved.withAllocation(id, allocation))
+          Right(id)
       }
     }
   }

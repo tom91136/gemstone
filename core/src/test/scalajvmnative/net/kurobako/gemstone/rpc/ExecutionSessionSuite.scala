@@ -730,6 +730,19 @@ class ExecutionSessionSuite extends Suite {
     }
   }
 
+  test("released allocation windows are reused once the session has no fresh ones") {
+    val capacity = (AddressLayout.AllocationLimit - AddressLayout.AllocationBase) / AddressLayout.AllocationStride
+    Using.resource(ExecutionSession(List(TestBackend()))) { service =>
+      val ids = Vector.fill(capacity.toInt)(service.registerAllocation(1).toOption.get)
+      assert(service.registerAllocation(1).isLeft, "session handed out more windows than the layout holds")
+      assertEquals(service.releaseAllocation(ids(7)), Right(()))
+      assertEquals(service.releaseAllocation(ids(3)), Right(()))
+      val reused = Vector(service.registerAllocation(1), service.registerAllocation(1))
+      assertEquals(reused.flatMap(_.toOption).toSet, Set(ids(7), ids(3)))
+      assert(service.registerAllocation(1).isLeft, "session handed out more windows than were released")
+    }
+  }
+
   test("descriptor slots without a binding are rejected before dispatch") {
     val invoked = AtomicBoolean()
     val backend = TestBackend { (_, _, _) =>
