@@ -17,6 +17,11 @@ private[check] object BlockRegion {
     */
   case class Region(label: String, kind: BlockAnalysis.Kind, order: Vec[Int], paths: Boolean)
 
+  def each[A, B](values: Vec[A])(f: A => Either[String, B]): Either[String, Vec[B]] = {
+    val found = values.map(f(_))
+    found.collectFirst { case Left(reason) => reason }.toLeft(found.collect { case Right(value) => value })
+  }
+
   def innermost(graph: ControlFlowGraph, block: Int): Option[Loop] =
     Option.when(graph.reducible)(graph.loops.filter(_.body.contains(block)).minByOption(_.body.size)).flatten
 

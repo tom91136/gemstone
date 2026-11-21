@@ -40,15 +40,35 @@ object SASSBlockCost {
     target       <- Target.parse(targetName)
     architecture <- Architecture.named(targetName).filter(BlockRegion.calibrated(_))
       .toRight(s"no calibrated pipeline model for $targetName")
-    name   <- function.refine[NonEmpty[String]].left.map(_ => s"no SASS kernel '$function'")
-    module <- Cubin.decode(image).left.map(_.raw)
-    table  <- ControlWords.tables.get(s"sm_${module.sm}").toRight(s"no control word table for sm_${module.sm}")
-    lanes  <- launch match {
-      case AMDGPUBlockCost.Launch.Stated(lanes, shared, _) => Right((lanes, shared))
-      case AMDGPUBlockCost.Launch.Recorded(_, _) => Left("a recorded launch of an SASS kernel is not supported")
+    name      <- function.refine[NonEmpty[String]].left.map(_ => s"no SASS kernel '$function'")
+    module    <- Cubin.decode(image).left.map(_.raw)
+    table     <- ControlWords.tables.get(s"sm_${module.sm}").toRight(s"no control word table for sm_${module.sm}")
+    original  <- load(module, name, Map.empty)
+    resources <- launch match {
+      case AMDGPUBlockCost.Launch.Stated(lanes, shared, _) => staticResources(module, name, lanes, shared)
+      case AMDGPUBlockCost.Launch.Recorded(stream, _)      =>
+        val offsets = original.timing.map(_.offset)
+        for {
+          _ <- Either.cond(
+            stream.graphs.exists(graph => graph.kernel == function && graph.offsets == offsets),
+            (),
+            s"the recording is not a launch of this $function"
+          )
+          resources <- stream.resources.toRight("the recording holds no launch")
+        } yield resources
     }
-    original <- load(module, name, Map.empty)
-  } yield new SASSBlockCost(module, name, target, architecture, table, launch, lanes._1, lanes._2, original)
+  } yield new SASSBlockCost(module, name, target, architecture, table, launch, original, resources)
+
+  private def staticResources(
+      module: Cubin.Module,
+      name: NonEmpty[String],
+      lanes: Int > 0,
+      shared: Long >= 0
+  ): Either[String, KernelResources] = {
+    val program = LoadedProgram(module, Map.empty, Workgroups.Sequential, _ => None)
+    try program.staticResources(name, lanes, shared).left.map(_.message.raw)
+    finally program.close()
+  }
 
   private def load(
       module: Cubin.Module,
@@ -77,9 +97,8 @@ final class SASSBlockCost private (
     architecture: Architecture,
     table: ControlWords.Table,
     launch: AMDGPUBlockCost.Launch,
-    lanes: Int > 0,
-    shared: Long >= 0,
-    original: SASSBlockCost.Static
+    original: SASSBlockCost.Static,
+    resources: KernelResources
 ) {
   import SASSBlockCost.*
 
@@ -89,11 +108,13 @@ final class SASSBlockCost private (
   private def text(instruction: DecodedInstruction): String =
     Printer.print(instruction.operation).getOrElse(instruction.mnemonic.raw)
 
-  private def resources: Either[String, KernelResources] = {
-    val program = LoadedProgram(module, Map.empty, Workgroups.Sequential, _ => None)
-    try program.staticResources(name, lanes, shared).left.map(_.message.raw)
-    finally program.close()
-  }
+  private def code(static: Static): RecordedIssues.Code =
+    RecordedIssues.Code(
+      static.instructions.map(text),
+      static.timing.map(_.offset.toInt),
+      static.uses,
+      index => Right(static.timing(index).memory)
+    )
 
   /** The kernel with `window` replaced, laid out again by the assembler. */
   private def relaid(window: Window, replacement: Vec[DecodedInstruction]): Either[String, Vec[DecodedInstruction]] = {
@@ -152,7 +173,8 @@ final class SASSBlockCost private (
       laid: Static,
       anchor: Int,
       shift: Int,
-      original: Static
+      window: Window,
+      count: Int
   ): Either[String, AMDGPUBlockCost.Cost] = {
     val offsets = laid.timing.map(_.offset.toInt)
     val region  = BlockRegion.of(name.raw, laid.graph, offsets, anchor)
@@ -165,20 +187,29 @@ final class SASSBlockCost private (
         laid.uses(index)
       )
     )
-    val grown = registers(laid.uses) - registers(original.uses)
+    val grown    = registers(laid.uses) - registers(original.uses)
+    val occupied = resources.copy(registersPerLane =
+      resources.registersPerLane.map(count => (count.raw + grown).max(0).unsafe[Int >= 0])
+    )
+    val issued = launch match {
+      case AMDGPUBlockCost.Launch.Stated(_, _, _) =>
+        for {
+          _ <- Either.cond(
+            !region.paths,
+            (),
+            s"the loop at ${region.label} has more than one path and no recorded issue counts"
+          )
+          _ <- region.order.find(index => laid.timing(index).memory).toLeft(()).left.map(index =>
+            s"${rows(index).text} reaches memory, and a stated launch records no traffic"
+          )
+          stream <- StaticProfile.stream(name, laid.graph, rows, region.order, occupied)
+        } yield stream
+      case AMDGPUBlockCost.Launch.Recorded(recorded, _) =>
+        RecordedIssues.of(window, count, code(original), code(laid), Set.empty)
+          .flatMap(StaticProfile.replay(recorded, name, laid.graph, rows, _, occupied))
+    }
     for {
-      held <- resources
-      occupied =
-        held.copy(registersPerLane = held.registersPerLane.map(count => (count.raw + grown).max(0).unsafe[Int >= 0]))
-      _ <- Either.cond(
-        !region.paths,
-        (),
-        s"the loop at ${region.label} has more than one path and no recorded issue counts"
-      )
-      _ <- region.order.find(index => laid.timing(index).memory).toLeft(()).left.map(index =>
-        s"${rows(index).text} reaches memory, and a stated launch records no traffic"
-      )
-      stream <- StaticProfile.stream(name, laid.graph, rows, region.order, occupied)
+      stream <- issued
       timing <- BlockRegion.timing(stream, architecture, launch.placement, region.label)
     } yield AMDGPUBlockCost.Cost(timing.block.cyclesPerIteration, timing.block.source, shift)
   }
@@ -209,7 +240,7 @@ final class SASSBlockCost private (
       for {
         code  <- relaid(window, replacement)
         laid  <- scheduled(code)
-        found <- costed(laid, at, moved * 16, source)
+        found <- costed(laid, at, moved * 16, window, replacement.size)
       } yield found
     }
   }

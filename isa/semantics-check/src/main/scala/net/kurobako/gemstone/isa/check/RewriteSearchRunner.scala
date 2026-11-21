@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.isa.amdgpu.*
 import net.kurobako.gemstone.profile.PipelineSimulator
 
@@ -43,8 +44,7 @@ object RewriteSearchRunner {
       else target.refine[Target].left.map(_.raw).map(TargetDefaults.waveSize(_).raw)
       lanes  <- options.get("--lanes").fold(fallback)(_.toInt).refine[Int > 0].left.map(_.raw)
       stated <- options.get("--record") match {
-        case Some(_) if sass(target) => Left("--record is not supported for SASS")
-        case None                    =>
+        case None =>
           for {
             _      <- Either.cond(arguments.isEmpty, (), "--arguments needs --record")
             shared <- options.get("--shared").fold(0L)(_.toLong).refine[Long >= 0].left.map(_.raw)
@@ -53,7 +53,14 @@ object RewriteSearchRunner {
           for {
             _      <- Either.cond(!options.contains("--shared"), (), "--record takes the shared bytes the launch has")
             count  <- groups.toInt.refine[Int > 0].left.map(_.raw)
-            stream <- AMDGPUBlockCost.record(image, kernel, lanes, count, arguments.getOrElse(Vec.empty))
+            stream <- LaunchRecording.record(
+              if (sass(target)) Language.SASS else Language.AMDGPU,
+              image,
+              kernel,
+              lanes,
+              count,
+              arguments.getOrElse(Vec.empty)
+            )
           } yield AMDGPUBlockCost.Launch.Recorded(stream, placement)
       }
     } yield stated

@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream
 import java.nio.file.Files
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
+import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.profile.PipelineSimulator
 import net.kurobako.gemstone.semantics.render.Bitwuzla
 import net.kurobako.gemstone.testing.*
@@ -73,7 +74,14 @@ class RewriteSearchRunnerSuite extends Suite {
     WindowFixtures.stream,
     Array("--lanes", "32", "--placement", "1,0,0,0", "--record", "1", "--arguments", "4096,4096,5"),
     AMDGPUBlockCost.Launch.Recorded(
-      AMDGPUBlockCost.record(WindowFixtures.stream, WindowFixtures.streaming.raw, 32, 1, Vec(4096L, 4096L, 5L))
+      LaunchRecording.record(
+        Language.AMDGPU,
+        WindowFixtures.stream,
+        WindowFixtures.streaming.raw,
+        32,
+        1,
+        Vec(4096L, 4096L, 5L)
+      )
         .toOption.get,
       launch.placement
     )
@@ -105,6 +113,49 @@ class RewriteSearchRunnerSuite extends Suite {
           "fixtures",
           window,
           RewriteSearch.sass(SASSFixtures.arithmetic, kernel, SASSFixtures.target, window, SASSFixtures.launch, small)
+        )
+      )
+      assertEquals(output, expected)
+      assert(output.exists(line => line.contains(" from ") && line.contains("IADD3 R4")), output)
+    } finally {
+      Files.delete(file)
+      Files.delete(directory)
+    }
+  }
+
+  test("the runner records an SASS launch and searches the windows against it") {
+    installed()
+    val kernel    = SASSFixtures.kernel
+    val directory = Files.createTempDirectory("rewrite-search-runner")
+    val file      = directory.resolve("fixtures.cubin")
+    try {
+      Files.write(file, SASSFixtures.arithmetic.toArray)
+      val output = printed(
+        Array(
+          file.toString,
+          kernel,
+          SASSFixtures.target,
+          "--seed",
+          config.seed.toString,
+          "--budget",
+          "8",
+          "--lanes",
+          "32",
+          "--record",
+          "1",
+          "--arguments",
+          "4096,1,2,3"
+        )
+      )
+      val stream = LaunchRecording.record(Language.SASS, SASSFixtures.arithmetic, kernel, 32, 1, Vec(4096L, 1L, 2L, 3L))
+        .fold(fail(_), identity)
+      val recorded = AMDGPUBlockCost.Launch.Recorded(stream, None)
+      val small    = config.copy(budget = 8)
+      val expected = SASSWindows.of(SASSFixtures.arithmetic, kernel, SASSFixtures.target).toOption.get.flatMap(window =>
+        RewriteSearch.lines(
+          "fixtures",
+          window,
+          RewriteSearch.sass(SASSFixtures.arithmetic, kernel, SASSFixtures.target, window, recorded, small)
         )
       )
       assertEquals(output, expected)

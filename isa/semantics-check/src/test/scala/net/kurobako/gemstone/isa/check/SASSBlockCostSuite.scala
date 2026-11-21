@@ -6,6 +6,8 @@ import net.kurobako.gemstone.explorer.*
 import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.asm.*
+import net.kurobako.gemstone.profile.Architecture
+import net.kurobako.gemstone.profile.ProfileStream
 import net.kurobako.gemstone.testing.*
 
 class SASSBlockCostSuite extends Suite {
@@ -61,8 +63,75 @@ class SASSBlockCostSuite extends Suite {
     assert(result.left.exists(_.contains("reaches memory")), result)
   }
 
-  test("a recorded launch of an SASS kernel is refused") {
-    val recorded = AMDGPUBlockCost.Launch.Recorded(net.kurobako.gemstone.profile.ProfileRecorder().stream, None)
-    assert(SASSBlockCost.of(arithmetic, kernel, targetName, recorded).isLeft)
+  private val sum       = SASSFixtures.sum
+  private val loops     = SASSFixtures.cubin(SASSFixtures.loops)
+  private val trips     = 3L
+  private val arguments = Vec(4096L, 4096L, 4L + trips)
+
+  private def launched(image: Vec[Byte]): ProfileStream =
+    LaunchRecording.record(Language.SASS, image, sum, 32, 1, arguments).fold(fail(_), identity)
+
+  private def recorded(image: Vec[Byte]): AMDGPUBlockCost.Launch =
+    AMDGPUBlockCost.Launch.Recorded(launched(image), None)
+
+  private val tail = {
+    val (graph, _, _) = SASSModel.staticCode(loops, sum).fold(fail(_), identity)
+    val block         = graph.blocks.indexWhere(block => block.first <= 111 && 115 <= block.last)
+    Window(block, 111, 115, Set.empty, Set.empty)
+  }
+
+  private def body(image: Vec[Byte], window: Window): Vec[DecodedInstruction] =
+    SASSModel.staticCode(image, sum).fold(fail(_), _._3.slice(window.first, window.last + 1))
+
+  private def dynamic(image: Vec[Byte], window: Window): Double = {
+    val (graph, _, code) = SASSModel.staticCode(image, sum).fold(fail(_), identity)
+    val offsets          = code.map(_.address.raw.toInt)
+    val region           = BlockRegion.of(sum, graph, offsets, window.first)
+    BlockRegion.timing(launched(image), Architecture.named(targetName).get, None, region.label)
+      .fold(fail(_), _.block.cyclesPerIteration)
+  }
+
+  test("a recorded launch costs a loop that loads as the dynamic view of the launch does") {
+    val stated = SASSBlockCost.of(loops, sum, targetName, launch).flatMap(_.cost(tail, body(loops, tail)))
+    assert(stated.left.exists(_.contains("reaches memory")), stated)
+    val regenerated = SASSFixtures.rewritten(loops, sum, tail, body(loops, tail))
+    val cost        = SASSBlockCost.of(loops, sum, targetName, recorded(loops)).flatMap(_.cost(tail, body(loops, tail)))
+    assertEquals(cost.map(_.cycles), Right(dynamic(regenerated, tail)))
+    assertEquals(cost.map(_.shift), Right(0))
+  }
+
+  test("a rewrite of a recorded loop costs what a launch of the rewritten kernel records") {
+    val code = body(loops, tail)
+    val cost = SASSBlockCost.of(loops, sum, targetName, recorded(loops)).fold(fail(_), identity)
+    Vec(
+      "deleted"  -> (code.take(4), -16),
+      "changed"  -> (code.take(4) :+ instruction("FADD R5, R2, R5 ;"), 0),
+      "inserted" -> (code.take(2) ++ Vec(instruction("IADD3 R20, R5, 0x1, RZ ;")) ++ code.drop(2), 16)
+    ).foreach { case (kind, (replacement, shift)) =>
+      val image = SASSFixtures.rewritten(loops, sum, tail, replacement)
+      assertEquals(
+        cost.cost(tail, replacement).map(found => (found.cycles, found.shift)),
+        Right((dynamic(image, tail), shift)),
+        kind
+      )
+    }
+  }
+
+  test("a rewrite whose memory instructions the recorded launch does not cover is refused with the reason") {
+    val window = Window(tail.block, 108, 111, Set.empty, Set.empty)
+    val code   = body(loops, window)
+    val cost   = SASSBlockCost.of(loops, sum, targetName, recorded(loops)).fold(fail(_), identity)
+    val whole  = cost.cost(window, code)
+    assert(whole.isRight, whole)
+    val moved = cost.cost(window, instruction("MOV R2, UR5 ;") +: code.tail)
+    assert(moved.left.exists(_.contains("which the rewrite changes in the window 108..111")), moved)
+    val loaded = cost.cost(window, code.take(1) ++ Vec(instruction("LDG.E R20, [R2.64] ;")))
+    assert(loaded.left.exists(_.contains("no recorded memory traffic for LDG.E R20, [R2.64]")), loaded)
+  }
+
+  test("a recording of another kernel is refused") {
+    val other = LaunchRecording.record(Language.SASS, loops, "collatz", 32, 1, Vec(4096L, 5L)).fold(fail(_), identity)
+    val found = SASSBlockCost.of(loops, sum, targetName, AMDGPUBlockCost.Launch.Recorded(other, None))
+    assert(found.left.exists(_.contains("is not a launch of this sumloop")), found.map(_ => ()))
   }
 }

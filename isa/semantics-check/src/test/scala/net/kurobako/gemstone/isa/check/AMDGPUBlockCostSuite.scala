@@ -67,7 +67,7 @@ class AMDGPUBlockCostSuite extends Suite {
   private val trips = 5L
 
   private def launched(image: Vec[Byte], kernel: String, arguments: Vec[Long] = Vec.empty): ProfileStream =
-    AMDGPUBlockCost.record(image, kernel, 32, 1, arguments).fold(fail(_), identity)
+    LaunchRecording.record(Language.AMDGPU, image, kernel, 32, 1, arguments).fold(fail(_), identity)
 
   private def recorded(stream: ProfileStream): AMDGPUBlockCost.Launch =
     AMDGPUBlockCost.Launch.Recorded(stream, oneWave.placement)
@@ -110,7 +110,14 @@ class AMDGPUBlockCostSuite extends Suite {
   }
 
   test("a launch of a kernel with hidden arguments takes a value for each explicit parameter") {
-    assert(AMDGPUBlockCost.record(WindowFixtures.hidden, "hidden_args", 32, 1, Vec(4096L, 4096L, 5L)).isRight)
+    assert(LaunchRecording.record(
+      Language.AMDGPU,
+      WindowFixtures.hidden,
+      "hidden_args",
+      32,
+      1,
+      Vec(4096L, 4096L, 5L)
+    ).isRight)
   }
 
   test("a rewrite of a recorded loop costs what a launch of the rewritten kernel records") {
@@ -184,7 +191,7 @@ class AMDGPUBlockCostSuite extends Suite {
     val kernel    = "clover_flux"
     val image     = WindowFixtures.flux
     val arguments = Vec.fill(8)(1048576L) ++ Vec(256L, 16L, java.lang.Double.doubleToLongBits(1.0))
-    val stream    = AMDGPUBlockCost.record(image, kernel, 128, 2, arguments).fold(fail(_), identity)
+    val stream    = LaunchRecording.record(Language.AMDGPU, image, kernel, 128, 2, arguments).fold(fail(_), identity)
     val cost      = AMDGPUBlockCost.of(image, kernel, target, AMDGPUBlockCost.Launch.Recorded(stream, None))
       .fold(fail(_), identity)
     val region =

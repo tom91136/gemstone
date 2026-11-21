@@ -99,6 +99,9 @@ object StaticProfile {
     private val placed = recorded.map(instruction =>
       Option.when(instruction.kernel == kernel)(instruction.address).flatten.flatMap(address => sites.get(address.raw))
     )
+    private val unplaced = recorded.map(instruction =>
+      instruction.kernel == kernel && instruction.address.isEmpty
+    )
     private var issued                                            = 0L
     private var inheriting                                        = false
     private var trailing: Option[(ProfileStream.Issue, Vec[Int])] = None
@@ -120,7 +123,8 @@ object StaticProfile {
     override def issue(issue: ProfileStream.Issue): Unit = {
       flush()
       placed(issue.instruction) match {
-        case None =>
+        case None if unplaced(issue.instruction) => inheriting = false
+        case None                                =>
           inheriting = false
           if (failure.isEmpty)
             failure = Some(s"the recording issues ${recorded(issue.instruction).text} outside $kernel")
@@ -144,7 +148,8 @@ object StaticProfile {
   /** `recorded` as its launch would have recorded `kernel` holding `rows`. `sites` gives, by the address of each
     * instruction the launch issued, the rows every one of its issues becomes, for the same unit and lanes. The rows
     * after the one that takes an issue's accesses are issued before the next issue of the launch. Unit changes pass
-    * through without their place in the program.
+    * through without their place in the program. An issue of the kernel that has no address, such as the machine's own
+    * setup, belongs to no row and is dropped.
     */
   def replay(
       recorded: ProfileStream,
