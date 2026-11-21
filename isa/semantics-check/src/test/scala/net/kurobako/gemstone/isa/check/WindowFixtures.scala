@@ -66,6 +66,13 @@ object WindowFixtures {
     finally stream.close()
   }
 
+  /** `tools/benchmarks/fixtures/cloverleaf-flux.cu` as `search/compile.sh` builds it for gfx1036. */
+  lazy val flux: Vec[Byte] = {
+    val stream = getClass.getResourceAsStream("search/flux.gfx1036.hsaco")
+    try Vec.from(stream.readAllBytes())
+    finally stream.close()
+  }
+
   /** The compiled object with `source` as its `kernel`, which keeps the parameters the object gives that kernel. */
   def assembled(source: String, kernel: NonEmpty[String] = "window"): Vec[Byte] = {
     val code = AMDGPUModel.assemble(source, Some(calibrated)).flatMap(Hex.parse(_)).toOption.get

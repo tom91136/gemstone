@@ -7,6 +7,7 @@ import net.kurobako.gemstone.profile.Architecture
 import net.kurobako.gemstone.profile.BlockAnalysis
 import net.kurobako.gemstone.profile.PipelineSimulator
 import net.kurobako.gemstone.profile.ProfileStream
+import scala.annotation.tailrec
 
 /** The loop or block of a kernel that holds an instruction, and what [[BlockAnalysis]] says of it. */
 private[check] object BlockRegion {
@@ -47,6 +48,23 @@ private[check] object BlockRegion {
       case BlockAnalysis.Status.NotExecuted      => Left(s"$label is not executed")
     }
   } yield timing
+
+  /** The longest run of equal instructions `left` and `right` share in order, as their positions in each. */
+  def common(left: Vec[String], right: Vec[String]): Vec[(Int, Int)] = {
+    val length = Array.ofDim[Int](left.size + 1, right.size + 1)
+    for {
+      i <- left.indices.reverse
+      j <- right.indices.reverse
+    } length(i)(j) =
+      if (left(i) == right(j)) length(i + 1)(j + 1) + 1 else math.max(length(i + 1)(j), length(i)(j + 1))
+    @tailrec
+    def walk(i: Int, j: Int, found: List[(Int, Int)]): List[(Int, Int)] =
+      if (i == left.size || j == right.size) found
+      else if (left(i) == right(j)) walk(i + 1, j + 1, (i, j) :: found)
+      else if (length(i + 1)(j) >= length(i)(j + 1)) walk(i + 1, j, found)
+      else walk(i, j + 1, found)
+    Vec.from(walk(0, 0, Nil).reverse)
+  }
 
   /** Whether `architecture` has a probed model of its own. */
   def calibrated(architecture: Architecture): Boolean =

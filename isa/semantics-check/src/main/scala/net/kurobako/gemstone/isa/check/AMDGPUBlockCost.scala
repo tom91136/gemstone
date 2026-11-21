@@ -20,7 +20,6 @@ import net.kurobako.gemstone.vm.KernelTask
 import net.kurobako.gemstone.vm.LaunchGeometry
 import net.kurobako.gemstone.vm.RegisterUse
 import net.kurobako.gemstone.vm.Schedule
-import scala.annotation.tailrec
 import scala.util.Using
 
 /** Cycles per iteration of the loop or block of an AMDGPU kernel that holds a window, as
@@ -168,23 +167,6 @@ object AMDGPUBlockCost {
   private def units(use: RegisterUse, names: Vec[String]): Set[String] =
     names.flatMap(name => Liveness.units(name, use.unitsOf(name))).toSet
 
-  /** The longest run of equal instructions `left` and `right` share in order, as their positions in each. */
-  private def common(left: Vec[String], right: Vec[String]): Vec[(Int, Int)] = {
-    val length = Array.ofDim[Int](left.size + 1, right.size + 1)
-    for {
-      i <- left.indices.reverse
-      j <- right.indices.reverse
-    } length(i)(j) =
-      if (left(i) == right(j)) length(i + 1)(j + 1) + 1 else math.max(length(i + 1)(j), length(i)(j + 1))
-    @tailrec
-    def walk(i: Int, j: Int, found: List[(Int, Int)]): List[(Int, Int)] =
-      if (i == left.size || j == right.size) found
-      else if (left(i) == right(j)) walk(i + 1, j + 1, (i, j) :: found)
-      else if (length(i + 1)(j) >= length(i)(j + 1)) walk(i + 1, j, found)
-      else walk(i, j + 1, found)
-    Vec.from(walk(0, 0, Nil).reverse)
-  }
-
   private def vectors(uses: Vec[RegisterUse]): Int =
     uses.flatMap(use => (use.reads ++ use.writes).flatMap(name => Liveness.units(name, use.unitsOf(name))))
       .collect { case Lane(index) => index.toInt + 1 }.maxOption.getOrElse(0)
@@ -310,7 +292,7 @@ final class AMDGPUBlockCost private (
     */
   private def inherited(window: Window, count: Int, laid: Static): Either[String, Map[Long, StaticProfile.Site]] = {
     val length = window.last - window.first + 1
-    val kept   = common(
+    val kept   = BlockRegion.common(
       original.text.slice(window.first, window.last + 1),
       laid.text.slice(window.first, window.first + count)
     )

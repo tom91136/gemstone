@@ -89,7 +89,22 @@ object RewriteSearch {
   }
 
   /** The cycles of the region that holds a window once a sequence stands in the window's place. */
-  private type Costing[I] = (Window, Vec[I]) => Either[String, AMDGPUBlockCost.Cost]
+  private[check] type Costing[I] = (Window, Vec[I]) => Either[String, AMDGPUBlockCost.Cost]
+
+  /** `cost` with each candidate held to at least the cost of the instructions it shares with `original`: adding
+    * instructions cannot make a region cheaper.
+    */
+  private[check] def floored[I](text: Vec[I] => Vec[String], original: Vec[I])(cost: Costing[I]): Costing[I] =
+    (window, candidate) =>
+      cost(window, candidate).map { whole =>
+        val kept = BlockRegion.common(text(original), text(candidate)).map((_, at) => candidate(at))
+        if (kept.size == candidate.size) whole
+        else
+          cost(window, kept).fold(
+            _ => whole,
+            floor => if (floor.cycles > whole.cycles) floor.copy(shift = whole.shift) else whole
+          )
+      }
 
   private def changed[K, V](left: Map[K, V], right: Map[K, V])(using CanEqual[V, V]): Long =
     (left.keySet ++ right.keySet).count(key => left.get(key) != right.get(key)).toLong
@@ -341,7 +356,9 @@ object RewriteSearch {
         evaluated: Int
     )
 
-    def run(cost: Costing[I]): Either[String, Report] = for {
+    def run(priced: Costing[I]): Either[String, Report] = walked(floored(isa.text, original)(priced))
+
+    private def walked(cost: Costing[I]): Either[String, Report] = for {
       originalSteps <- isa.steps(original)
       whole         <- cost(window, original)
     } yield {

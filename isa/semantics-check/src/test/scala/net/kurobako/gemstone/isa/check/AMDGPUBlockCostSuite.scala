@@ -179,4 +179,24 @@ class AMDGPUBlockCostSuite extends Suite {
     assertEquals(within.shift, beyond.shift)
     assert(beyond.cycles > within.cycles, s"$within against $beyond")
   }
+
+  test("an instruction that does nothing never costs a block less") {
+    val kernel    = "clover_flux"
+    val image     = WindowFixtures.flux
+    val arguments = Vec.fill(8)(1048576L) ++ Vec(256L, 16L, java.lang.Double.doubleToLongBits(1.0))
+    val stream    = AMDGPUBlockCost.record(image, kernel, 128, 2, arguments).fold(fail(_), identity)
+    val cost      = AMDGPUBlockCost.of(image, kernel, target, AMDGPUBlockCost.Launch.Recorded(stream, None))
+      .fold(fail(_), identity)
+    val region =
+      AMDGPUWindows.of(image, kernel, target, 8).fold(fail(_), identity).find(w => w.first == 22 && w.last == 29)
+        .getOrElse(fail("no window"))
+    val code     = AMDGPUModel.staticCode(image, kernel).fold(fail(_), _._3.slice(region.first, region.last + 1))
+    val floored  = RewriteSearch.floored[String](identity, code)(cost.cost)
+    val original = floored(region, code).fold(fail(_), _.cycles)
+    (0 to code.size).foreach { at =>
+      val grown = floored(region, code.take(at) ++ Vec("s_cmp_ge_u32 s8, s14") ++ code.drop(at))
+        .fold(fail(_), _.cycles)
+      assert(grown >= original, s"a dead instruction at $at costs $grown against $original")
+    }
+  }
 }
