@@ -165,7 +165,8 @@ final class SASSMoves private (
     }
   }
 
-  private def inserted(random: Random, attempts: Int): Vec[Vec[DecodedInstruction]] = Vec.from(Iterator.continually {
+  private def inserted(random: Random, attempts: Int): Vec[Vec[DecodedInstruction]] = if (base.isEmpty) Vec.empty
+  else Vec.from(Iterator.continually {
     val at     = random.nextInt(base.size + 1)
     val source = base(random.nextInt(base.size))
     val pool = (defined(at) ++ writable).iterator.flatMap(_.stripPrefix("R").toIntOption).filter(_ < RZ).toVec.distinct

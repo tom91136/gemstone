@@ -108,4 +108,10 @@ class SASSMovesSuite extends SASSMovesChecks {
       candidates.foreach(candidate => assertEquals(accesses(candidate.instructions), kept, clue(sample, candidate)))
     )
   }
+
+  test("a window with every instruction deleted proposes no insertion") {
+    val sample = samples.head
+    val empty  = sample.moves.from(Vec.empty[DecodedInstruction]).toOption.get
+    assertEquals(empty.candidates(SASSMoves.Kind.Insert, scala.util.Random(1), limit), Vec.empty[SASSMoves.Candidate])
+  }
 }

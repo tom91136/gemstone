@@ -46,6 +46,40 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.measured(89, Rcp32), Some(Architecture.Sourced(28.0, probed)))
   }
 
+  private val probedS2r = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of an S2R or S2UR and its first consumer, bracket subtracted " +
+      "with a control run, median over 201 launches in each of 3 runs, 1 to 34 blocks of 1 to 128 threads",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  test("sm_89 special register reads are probed per register class") {
+    assertEquals(NvidiaLatency.measured(89, S2rThread), Some(Architecture.Sourced(23.0, probedS2r)))
+    assertEquals(NvidiaLatency.measured(89, S2rBlock), Some(Architecture.Sourced(26.0, probedS2r)))
+    assertEquals(NvidiaLatency.measured(89, S2ur), Some(Architecture.Sourced(36.0, probedS2r)))
+    assertEquals(NvidiaLatency.measured(90, S2rThread), None)
+  }
+
+  test("a special register read names its producer by the register it reads") {
+    assertEquals(NvidiaLatency.producer("S2R R0, SR_TID.X;"), Some(S2rThread))
+    assertEquals(NvidiaLatency.producer("S2R R2, SR_TID.Y;"), Some(S2rThread))
+    assertEquals(NvidiaLatency.producer("S2R R4, SR_TID.Z;"), Some(S2rThread))
+    assertEquals(NvidiaLatency.producer("S2R R4, SR_LANEID;"), Some(S2rThread))
+    assertEquals(NvidiaLatency.producer("S2R R3, SR_CTAID.X;"), Some(S2rBlock))
+    assertEquals(NvidiaLatency.producer("S2R R15, SR_CTAID.Y;"), Some(S2rBlock))
+    assertEquals(NvidiaLatency.producer("S2UR UR6, SR_CTAID.X;"), Some(S2ur))
+    assertEquals(NvidiaLatency.producer("S2UR UR5, SR_CTAID.Y;"), Some(S2ur))
+    assertEquals(NvidiaLatency.producer("@P0 S2R R3, SR_CTAID.X;"), Some(S2rBlock))
+  }
+
+  test("a special register that was not probed has no producer") {
+    assertEquals(NvidiaLatency.producer("S2R R0, SR_CLOCKLO;"), None)
+    assertEquals(NvidiaLatency.producer("S2R R0, SR_NTID.X;"), None)
+    assertEquals(NvidiaLatency.producer("S2UR UR4, SR_CLOCKLO;"), None)
+    assertEquals(NvidiaLatency.producer("S2R R0;"), None)
+  }
+
   test("probed latencies exist for sm_89 only") {
     assertEquals(NvidiaLatency.measured(90, Lds32), None)
     assertEquals(NvidiaLatency.measured(89, Fadd32), None)

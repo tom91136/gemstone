@@ -3,7 +3,8 @@ package net.kurobako.gemstone.profile
 object NvidiaLatency {
 
   enum Producer derives CanEqual {
-    case Fadd32, Fmul32, Ffma32, Iadd32, Imul32, Lop32, Shl32, I2f32, Fma64, Rcp32, Ldg32, Lds32, Isetp
+    case Fadd32, Fmul32, Ffma32, Iadd32, Imul32, Lop32, Shl32, I2f32, Fma64, Rcp32, Ldg32, Lds32, Isetp, S2rThread,
+      S2rBlock, S2ur
   }
 
   import Producer.*
@@ -82,10 +83,21 @@ object NvidiaLatency {
     "ISETP"    -> Isetp
   )
 
+  private val specials: Map[(String, String), Producer] = Map(
+    ("S2R", "SR_TID")    -> S2rThread,
+    ("S2R", "SR_LANEID") -> S2rThread,
+    ("S2R", "SR_CTAID")  -> S2rBlock,
+    ("S2UR", "SR_CTAID") -> S2ur
+  )
+
+  private val specialRegister = """\bSR_[A-Z]+""".r
+
   def producer(text: String): Option[Producer] = {
     val opcode = text.trim.split("\\s+").dropWhile(_.startsWith("@")).headOption.getOrElse("")
     val parts  = opcode.stripSuffix(";").split('.')
-    mnemonics.get(parts.take(2).mkString(".")).orElse(mnemonics.get(parts.head))
+    specialRegister.findFirstIn(text).flatMap(register => specials.get(parts.head -> register))
+      .orElse(mnemonics.get(parts.take(2).mkString(".")))
+      .orElse(mnemonics.get(parts.head))
   }
 
   def sm(architecture: Architecture): Option[Int] =
@@ -119,11 +131,22 @@ object NvidiaLatency {
     "CUDA 13.3"
   )
 
+  private val probedS2r = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of an S2R or S2UR and its first consumer, bracket subtracted " +
+      "with a control run, median over 201 launches in each of 3 runs, 1 to 34 blocks of 1 to 128 threads",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
   private val measured89: Map[Producer, Architecture.Sourced[Double]] = Map(
-    Lds32 -> Architecture.Sourced(24.00, probed),
-    Rcp32 -> Architecture.Sourced(28.00, probed),
-    Fma64 -> Architecture.Sourced(48.01, probedFma64),
-    Isetp -> Architecture.Sourced(13.00, probedIsetp)
+    Lds32     -> Architecture.Sourced(24.00, probed),
+    Rcp32     -> Architecture.Sourced(28.00, probed),
+    Fma64     -> Architecture.Sourced(48.01, probedFma64),
+    Isetp     -> Architecture.Sourced(13.00, probedIsetp),
+    S2rThread -> Architecture.Sourced(23.00, probedS2r),
+    S2rBlock  -> Architecture.Sourced(26.00, probedS2r),
+    S2ur      -> Architecture.Sourced(36.00, probedS2r)
   )
 
   def measured(sm: Int, producer: Producer): Option[Architecture.Sourced[Double]] =
