@@ -175,40 +175,57 @@ endif()
 foreach(package IN LISTS selected_packages)
   conformance_interpreter_environment_key("${package}" key)
   set(target "${CONFORMANCE_INTERPRETER_DIRECTORY}/${package}-${key}")
+  set(language "${conformance_interpreter_package_${package}_language}")
   if(EXISTS "${target}/.complete")
     message(STATUS "Reusing interpreter environment: ${package}-${key}")
-    continue()
+  else()
+    ensure_interpreter("${language}")
+
+    message(STATUS "Building interpreter environment: ${package}-${key}")
+    set(environment "${CMAKE_CURRENT_LIST_DIR}/${conformance_interpreter_package_${package}_environment}")
+    if(language STREQUAL "python")
+      execute_process(
+        COMMAND sh "${CMAKE_CURRENT_LIST_DIR}/install-python.sh"
+          "${CONFORMANCE_INTERPRETER_DIRECTORY}"
+          "${package}"
+          "${key}"
+          "${environment}"
+          "cpython-${conformance_python_release}"
+          "${offline}"
+        COMMAND_ERROR_IS_FATAL ANY
+      )
+    else()
+      set(warmup "${CMAKE_CURRENT_LIST_DIR}/julia/warmup-${package}.jl")
+      execute_process(
+        COMMAND sh "${CMAKE_CURRENT_LIST_DIR}/install-julia.sh"
+          "${CONFORMANCE_INTERPRETER_DIRECTORY}"
+          "${package}"
+          "${key}"
+          "${environment}"
+          "julia-${conformance_julia_release}"
+          "${offline}"
+          "${warmup}"
+        COMMAND_ERROR_IS_FATAL ANY
+      )
+    endif()
   endif()
 
-  set(language "${conformance_interpreter_package_${package}_language}")
-  ensure_interpreter("${language}")
-
-  message(STATUS "Building interpreter environment: ${package}-${key}")
-  set(environment "${CMAKE_CURRENT_LIST_DIR}/${conformance_interpreter_package_${package}_environment}")
-  if(language STREQUAL "python")
-    execute_process(
-      COMMAND sh "${CMAKE_CURRENT_LIST_DIR}/install-python.sh"
-        "${CONFORMANCE_INTERPRETER_DIRECTORY}"
-        "${package}"
-        "${key}"
-        "${environment}"
-        "cpython-${conformance_python_release}"
-        "${offline}"
-      COMMAND_ERROR_IS_FATAL ANY
-    )
-  else()
-    set(warmup "${CMAKE_CURRENT_LIST_DIR}/julia/warmup-${package}.jl")
-    execute_process(
-      COMMAND sh "${CMAKE_CURRENT_LIST_DIR}/install-julia.sh"
-        "${CONFORMANCE_INTERPRETER_DIRECTORY}"
-        "${package}"
-        "${key}"
-        "${environment}"
-        "julia-${conformance_julia_release}"
-        "${offline}"
-        "${warmup}"
-      COMMAND_ERROR_IS_FATAL ANY
-    )
+  set(minimum "${conformance_interpreter_package_${package}_minimum_capability}")
+  if(NOT "${minimum}" STREQUAL "")
+    set(script "${CMAKE_CURRENT_LIST_DIR}/${conformance_interpreter_package_${package}_capability_script}")
+    if(language STREQUAL "python")
+      set(command "${target}/bin/python" "${script}")
+    else()
+      set(command "${CMAKE_COMMAND}" -E env "JULIA_DEPOT_PATH=${target}"
+        "${CONFORMANCE_INTERPRETER_DIRECTORY}/julia-${conformance_julia_release}/bin/julia"
+        --startup-file=no "--project=${target}/environment/tests" "${script}")
+    endif()
+    execute_process(COMMAND ${command}
+      OUTPUT_VARIABLE reported OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
+    if(NOT "${reported}" STREQUAL "${minimum}")
+      message(FATAL_ERROR
+        "${package} supports compute capability ${reported} and above, but Packages.cmake declares ${minimum}")
+    endif()
   endif()
 endforeach()
 
