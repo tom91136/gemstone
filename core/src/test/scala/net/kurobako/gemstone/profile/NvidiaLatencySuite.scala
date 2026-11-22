@@ -61,6 +61,60 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.measured(90, S2rThread), None)
   }
 
+  private val probedLdgConstant = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a repeated LDG.E.CONSTANT of one address (L1 hit) and its " +
+      "first consumer, control run subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedShflDown = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a SHFL.DOWN of a full warp and its first consumer, control " +
+      "run subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedDmulDadd = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a DMUL or DADD and its first consumer, control run " +
+      "subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor (4 warps give 48 to 104)",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedRcp64H = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a MUFU.RCP64H and its first consumer, control run " +
+      "subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  test("sm_89 constant loads, shuffles and 64-bit arithmetic carry probed latencies") {
+    assertEquals(NvidiaLatency.measured(89, LdgConstant), Some(Architecture.Sourced(32.0, probedLdgConstant)))
+    assertEquals(NvidiaLatency.measured(89, ShflDown), Some(Architecture.Sourced(25.0, probedShflDown)))
+    assertEquals(NvidiaLatency.measured(89, Dmul64), Some(Architecture.Sourced(48.0, probedDmulDadd)))
+    assertEquals(NvidiaLatency.measured(89, Dadd64), Some(Architecture.Sourced(48.0, probedDmulDadd)))
+    assertEquals(NvidiaLatency.measured(89, Rcp64H), Some(Architecture.Sourced(17.0, probedRcp64H)))
+    assertEquals(NvidiaLatency.measured(90, LdgConstant), None)
+  }
+
+  test("a producer names the instruction form it measures, not the whole mnemonic family") {
+    assertEquals(NvidiaLatency.producer("LDG.E.CONSTANT R4, [R4.64];"), Some(LdgConstant))
+    assertEquals(NvidiaLatency.producer("@!P1 LDG.E.CONSTANT R6, [R6.64];"), Some(LdgConstant))
+    assertEquals(NvidiaLatency.producer("LDG.E.64.CONSTANT R2, [R2.64];"), Some(Ldg32))
+    assertEquals(NvidiaLatency.producer("LDG.E R4, [R4.64];"), Some(Ldg32))
+    assertEquals(NvidiaLatency.producer("SHFL.DOWN PT, R4, R7, 0x8, 0x1f;"), Some(ShflDown))
+    assertEquals(NvidiaLatency.producer("SHFL.IDX PT, R3, R0, R2, 0x1f;"), None)
+    assertEquals(NvidiaLatency.producer("DMUL R4, R4, R22;"), Some(Dmul64))
+    assertEquals(NvidiaLatency.producer("DADD R4, R8, -c[0][0x180];"), Some(Dadd64))
+    assertEquals(NvidiaLatency.producer("MUFU.RCP64H R17, R5;"), Some(Rcp64H))
+    assertEquals(NvidiaLatency.producer("MUFU.RCP R8, R8;"), Some(Rcp32))
+  }
+
   test("a special register read names its producer by the register it reads") {
     assertEquals(NvidiaLatency.producer("S2R R0, SR_TID.X;"), Some(S2rThread))
     assertEquals(NvidiaLatency.producer("S2R R2, SR_TID.Y;"), Some(S2rThread))

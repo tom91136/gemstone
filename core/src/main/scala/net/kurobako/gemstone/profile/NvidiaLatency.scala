@@ -4,7 +4,7 @@ object NvidiaLatency {
 
   enum Producer derives CanEqual {
     case Fadd32, Fmul32, Ffma32, Iadd32, Imul32, Lop32, Shl32, I2f32, Fma64, Rcp32, Ldg32, Lds32, Isetp, S2rThread,
-      S2rBlock, S2ur
+      S2rBlock, S2ur, LdgConstant, ShflDown, Dmul64, Dadd64, Rcp64H
   }
 
   import Producer.*
@@ -66,21 +66,26 @@ object NvidiaLatency {
   )
 
   private val mnemonics: Map[String, Producer] = Map(
-    "FADD"     -> Fadd32,
-    "FMUL"     -> Fmul32,
-    "FFMA"     -> Ffma32,
-    "IADD"     -> Iadd32,
-    "IADD3"    -> Iadd32,
-    "IMAD"     -> Imul32,
-    "LOP3"     -> Lop32,
-    "SHL"      -> Shl32,
-    "I2F"      -> I2f32,
-    "I2FP"     -> I2f32,
-    "DFMA"     -> Fma64,
-    "MUFU.RCP" -> Rcp32,
-    "LDG"      -> Ldg32,
-    "LDS"      -> Lds32,
-    "ISETP"    -> Isetp
+    "FADD"           -> Fadd32,
+    "FMUL"           -> Fmul32,
+    "FFMA"           -> Ffma32,
+    "IADD"           -> Iadd32,
+    "IADD3"          -> Iadd32,
+    "IMAD"           -> Imul32,
+    "LOP3"           -> Lop32,
+    "SHL"            -> Shl32,
+    "I2F"            -> I2f32,
+    "I2FP"           -> I2f32,
+    "DFMA"           -> Fma64,
+    "MUFU.RCP"       -> Rcp32,
+    "LDG"            -> Ldg32,
+    "LDS"            -> Lds32,
+    "ISETP"          -> Isetp,
+    "LDG.E.CONSTANT" -> LdgConstant,
+    "SHFL.DOWN"      -> ShflDown,
+    "DMUL"           -> Dmul64,
+    "DADD"           -> Dadd64,
+    "MUFU.RCP64H"    -> Rcp64H
   )
 
   private val specials: Map[(String, String), Producer] = Map(
@@ -96,6 +101,7 @@ object NvidiaLatency {
     val opcode = text.trim.split("\\s+").dropWhile(_.startsWith("@")).headOption.getOrElse("")
     val parts  = opcode.stripSuffix(";").split('.')
     specialRegister.findFirstIn(text).flatMap(register => specials.get(parts.head -> register))
+      .orElse(mnemonics.get(parts.take(3).mkString(".")))
       .orElse(mnemonics.get(parts.take(2).mkString(".")))
       .orElse(mnemonics.get(parts.head))
   }
@@ -139,14 +145,51 @@ object NvidiaLatency {
     "CUDA 11.6 cuda.h, cuModuleLoadData"
   )
 
+  private val probedLdgConstant = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a repeated LDG.E.CONSTANT of one address (L1 hit) and its " +
+      "first consumer, control run subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedShflDown = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a SHFL.DOWN of a full warp and its first consumer, control " +
+      "run subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedDmulDadd = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a DMUL or DADD and its first consumer, control run " +
+      "subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor (4 warps give 48 to 104)",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedRcp64H = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a MUFU.RCP64H and its first consumer, control run " +
+      "subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
   private val measured89: Map[Producer, Architecture.Sourced[Double]] = Map(
-    Lds32     -> Architecture.Sourced(24.00, probed),
-    Rcp32     -> Architecture.Sourced(28.00, probed),
-    Fma64     -> Architecture.Sourced(48.01, probedFma64),
-    Isetp     -> Architecture.Sourced(13.00, probedIsetp),
-    S2rThread -> Architecture.Sourced(23.00, probedS2r),
-    S2rBlock  -> Architecture.Sourced(26.00, probedS2r),
-    S2ur      -> Architecture.Sourced(36.00, probedS2r)
+    Lds32       -> Architecture.Sourced(24.00, probed),
+    Rcp32       -> Architecture.Sourced(28.00, probed),
+    Fma64       -> Architecture.Sourced(48.01, probedFma64),
+    Isetp       -> Architecture.Sourced(13.00, probedIsetp),
+    S2rThread   -> Architecture.Sourced(23.00, probedS2r),
+    S2rBlock    -> Architecture.Sourced(26.00, probedS2r),
+    S2ur        -> Architecture.Sourced(36.00, probedS2r),
+    LdgConstant -> Architecture.Sourced(32.00, probedLdgConstant),
+    ShflDown    -> Architecture.Sourced(25.00, probedShflDown),
+    Dmul64      -> Architecture.Sourced(48.00, probedDmulDadd),
+    Dadd64      -> Architecture.Sourced(48.00, probedDmulDadd),
+    Rcp64H      -> Architecture.Sourced(17.00, probedRcp64H)
   )
 
   def measured(sm: Int, producer: Producer): Option[Architecture.Sourced[Double]] =
