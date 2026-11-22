@@ -399,6 +399,9 @@ private[isa] object VMIR {
     case Free
     case AssertFail
     case LaunchDevice
+    case ParameterBufferV2
+    case LaunchDeviceV2
+    case StreamCreate
     case GridHandle
   }
 
@@ -1859,9 +1862,15 @@ private[isa] object VMIR {
       cluster: Option[Dimensions] = None,
       pairAllocationBarrier: Option[Long] = None,
       registersPerLane: Option[Int >= 0] = None,
-      staticSharedBytes: Long >= 0 = 0L
+      staticSharedBytes: Long >= 0 = 0L,
+      launchTargets: NonEmpty[String] => Either[Fault, Kernel] = name =>
+        Left(Fault.Backend(s"cudaLaunchDevice target is not a lowered entry: $name"))
   ) {
     def name: NonEmpty[String] = entry.name
+
+    /** The kernel a device-side launch names: an entry lowered with this one, or else one the program supplies. */
+    def launchTarget(target: NonEmpty[String]): Either[Fault, Kernel] =
+      entries.get(target).fold(launchTargets(target))(entry => Right(copy(entry = entry)))
   }
 
 }

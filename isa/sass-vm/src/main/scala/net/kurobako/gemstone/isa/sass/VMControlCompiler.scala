@@ -441,7 +441,8 @@ private object VMControlCompiler {
     val target = source(operands.head, 64)
     val next   = instruction.address.raw + generation.instructionBytes.raw
     val resume = addresses.contains(next)
-    Vec.from(Cubin.DriverFunctions).sortBy(_._2).foreach { (name, address) =>
+    // the cnp entry points are reached only by direct relocated calls, and read registers past a small kernel's bank
+    Vec.from(Cubin.DriverFunctions).filterNot(_._1.startsWith("cnp")).sortBy(_._2).foreach { (name, address) =>
       val reached = compare(Comparison.Equal, NumericFormat.Unsigned(64), target, Value.Immediate(address))
       val guard   = ExecutionPredicate(reached.slot, negated = false)
       driverCall(name, Some(guard))
@@ -493,7 +494,9 @@ private object VMControlCompiler {
   /** A call to the driver's device runtime: `malloc` and `free` on the device heap, `vprintf`, which prints the format
     * in R4 with the argument buffer in R6, and `__assertfail`, which fails the launch as a failed device assertion
     * does. Arguments and results are in R4 onwards. The cooperative-groups syscalls return the grid's handle in R4:R5,
-    * and wait for every thread of the grid at a barrier with the flags in R6.
+    * and wait for every thread of the grid at a barrier with the flags in R6. The device runtime's launch calls take
+    * the child's function descriptor in R4:R5, its grid in R6 to R8, its block in R9 to R11 and its dynamic shared
+    * bytes in R12, and run the child before returning.
     */
   private def driverCall(name: String, guard: Option[ExecutionPredicate])(using context: VMCompilationContext): Unit = {
     import context.*
@@ -532,7 +535,34 @@ private object VMControlCompiler {
       case "__cuda_syscall_CGS_sync" =>
         step(GridBarrier(source(Operand.Register(RegisterBank.R, 6), 32)))
         step(Move(register(4), Value.Immediate(0L), 32))
-      case _ => step(Trap)
+      case "cnpGetParameterBufferV2" =>
+        step(StoreParameter(argument, 0, source(Operand.Register(RegisterBank.R, 4), 64), 64))
+        for {
+          (parameter, first) <- Vec(buffer -> 6, Parameter(3) -> 9)
+          axis               <- 0 until 3
+        }
+          step(StoreParameter(
+            parameter,
+            (axis * 4).unsafe,
+            source(Operand.Register(RegisterBank.R, (first + axis).unsafe), 32),
+            32
+          ))
+        step(StoreParameter(Parameter(4), 0, source(Operand.Register(RegisterBank.R, 12), 32), 32))
+        step(CallBuiltin(Builtin.ParameterBufferV2, Vec(result), Vec(argument, buffer, Parameter(3), Parameter(4))))
+        step(LoadParameter(Vec(register(4)), result, 0, 32, signed = false))
+        step(LoadParameter(Vec(register(5)), result, 4, 32, signed = false))
+      case "cnpLaunchDeviceV2" =>
+        step(StoreParameter(argument, 0, source(Operand.Register(RegisterBank.R, 4), 64), 64))
+        step(CallBuiltin(Builtin.LaunchDeviceV2, Vec(result), Vec(argument)))
+        step(LoadParameter(Vec(register(4)), result, 0, 32, signed = false))
+      case "cnpStreamCreate" =>
+        step(StoreParameter(argument, 0, source(Operand.Register(RegisterBank.R, 4), 64), 64))
+        step(StoreParameter(buffer, 0, source(Operand.Register(RegisterBank.R, 6), 32), 32))
+        step(CallBuiltin(Builtin.StreamCreate, Vec(result), Vec(argument, buffer)))
+        step(LoadParameter(Vec(register(4)), result, 0, 32, signed = false))
+      case "cnpStreamDestroy" => step(Move(register(4), Value.Immediate(0L), 32))
+      case "cnpSetLastError"  => ()
+      case _                  => step(Trap)
     }
   }
 

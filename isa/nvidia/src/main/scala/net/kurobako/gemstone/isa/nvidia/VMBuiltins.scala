@@ -2,6 +2,8 @@ package net.kurobako.gemstone.isa.nvidia
 
 import VMIR.*
 import cats.syntax.all.*
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import net.kurobako.gemstone.binary.Widths.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
@@ -27,6 +29,11 @@ private object VMBuiltins {
   }
 
   private inline val GridScope = 1L
+
+  // device-side launches run where they are made, so every created stream is the same handle
+  private inline val StreamHandle      = 0x7fffffffffffeL
+  private inline val StreamNonBlocking = 1L
+  private inline val InvalidValue      = 1L
 
   // The driver's opaque handle to the grid of a cooperative launch.
   private inline val GridHandle = 0x7ffffffffffffL
@@ -66,9 +73,15 @@ private object VMBuiltins {
           parameter(2, 4),
           parameter(3)
         )))
-      case Builtin.Free         => heap(context).flatMap(ContextHeap.free(context.device.memory, _, parameter(0)))
-      case Builtin.LaunchDevice => launch(context, lane, parameters, parameter(_, _)).map(_ => returnValue(0L))
-      case Builtin.GridHandle   =>
+      case Builtin.Free              => heap(context).flatMap(ContextHeap.free(context.device.memory, _, parameter(0)))
+      case Builtin.LaunchDevice      => launch(context, lane, parameters, parameter(_, _)).map(_ => returnValue(0L))
+      case Builtin.ParameterBufferV2 =>
+        parameterBufferV2(context, storage, parameters, parameter(_, _)).map(returnValue(_))
+      case Builtin.StreamCreate =>
+        if (parameter(1, 4) != StreamNonBlocking) Right(returnValue(InvalidValue))
+        else VMMemoryAccess.storeGeneric(context, lane, parameter(0), 64, StreamHandle).map(_ => returnValue(0L))
+      case Builtin.LaunchDeviceV2 => launchV2(context, parameter(0)).map(_ => returnValue(0L))
+      case Builtin.GridHandle     =>
         Right(returnValue(if (parameter(0, 4) == GridScope && context.device.gridWorkspace != 0L) GridHandle else 0L))
     }
   }
@@ -111,11 +124,12 @@ private object VMBuiltins {
       Fault.Unsupported("device-side malloc needs the context's heap, which the launch lacks")
     )
 
+  private def positive(value: Long): Either[Fault, Int > 0] =
+    value.toInt.refine[Int > 0].left.map(_ => Fault.Backend(s"invalid launch dimension: $value"))
+
   private def dimensions(storage: VMLane, parameter: Parameter): Either[Fault, Dimensions] = {
-    def axis(index: Int): Either[Fault, Int > 0] = {
-      val value = storage.readParameter(parameter, (index * 4).unsafe[Int >= 0], 4)
-      value.toInt.refine[Int > 0].left.map(_ => Fault.Backend(s"invalid launch dimension: $value"))
-    }
+    def axis(index: Int): Either[Fault, Int > 0] =
+      positive(storage.readParameter(parameter, (index * 4).unsafe[Int >= 0], 4))
     (axis(0), axis(1), axis(2)).mapN(Dimensions(_, _, _))
   }
 
@@ -131,30 +145,103 @@ private object VMBuiltins {
       val target  = context.kernel.functionTable.name(parameter(0, 8))
       val storage = context.lane(lane)
       for {
-        child <- target.flatMap(context.kernel.entries.get).toRight(
-          Fault.Backend(s"cudaLaunchDevice target is not a lowered entry: ${target.getOrElse("<unknown>")}")
-        )
+        child <- target.toRight(Fault.Backend("cudaLaunchDevice target is not a lowered entry: <unknown>"))
+          .flatMap(context.kernel.launchTarget)
         buffer = parameter(1, 8)
         block <-
-          if (child.blockSize == 0) Right(Array.emptyByteArray)
-          else context.workgroup.bufferBytes(buffer, child.blockSize).toRight(
+          if (child.entry.blockSize == 0) Right(Array.emptyByteArray)
+          else context.workgroup.bufferBytes(buffer, child.entry.blockSize).toRight(
             Fault.Backend(
               s"cudaLaunchDevice parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
             )
           )
         groupCount <- dimensions(storage, parameters(2))
         groupSize  <- dimensions(storage, parameters(3))
-        geometry   <- LaunchGeometry.forLaunch(groupSize, groupCount).left.map(Fault.Backend(_))
-        shared     <- parameter(4, 4).toInt.refine[Int >= 0].left.map(_ =>
-          Fault.Backend("child dynamic shared size exceeds the supported range")
-        )
-        _ <- context.launch(
-          context.kernel.copy(entry = child),
-          geometry,
-          block,
-          context.device.copy(handler = event => { context.workgroup.prints += event; Right(()) }),
-          shared
-        )
+        _          <- run(context, child, block, groupCount, groupSize, parameter(4, 4))
       } yield ()
     }
+
+  private def run(
+      context: VMContext,
+      child: Kernel,
+      block: Array[Byte],
+      groupCount: Dimensions,
+      groupSize: Dimensions,
+      sharedBytes: Long
+  ): Either[Fault, Unit] =
+    for {
+      geometry <- LaunchGeometry.forLaunch(groupSize, groupCount).left.map(Fault.Backend(_))
+      shared   <- sharedBytes.toInt.refine[Int >= 0].left.map(_ =>
+        Fault.Backend("child dynamic shared size exceeds the supported range")
+      )
+      _ <- context.launch(
+        child,
+        geometry,
+        block,
+        context.device.copy(handler = event => { context.workgroup.prints += event; Right(()) }),
+        shared
+      )
+    } yield ()
+
+  // a V2 parameter buffer follows the launch it was requested for: function descriptor, grid, block and dynamic shared
+  private inline val RequestBytes = 64
+
+  private inline def parameterBufferV2(
+      context: VMContext,
+      storage: VMLane,
+      parameters: Vec[Parameter],
+      inline parameter: (Int, Int in 0 ~ 8) => Long
+  ): Either[Fault, Long] =
+    if (parameters.size < 4)
+      Left(Fault.Backend(s"cudaGetParameterBufferV2 expects four parameters, found ${parameters.size}"))
+    else {
+      val descriptor = parameter(0, 8)
+      for {
+        target <- context.kernel.functionTable.name(descriptor).toRight(
+          Fault.Backend(
+            s"cudaGetParameterBufferV2 target 0x${java.lang.Long.toUnsignedString(descriptor, 16)} is not a function"
+          )
+        )
+        child <- context.kernel.launchTarget(target)
+      } yield {
+        val request = ByteBuffer.allocate(RequestBytes + child.entry.blockSize).order(ByteOrder.LITTLE_ENDIAN)
+        request.putLong(0, descriptor)
+        for (axis <- 0 until 6)
+          request.putInt(
+            8 + axis * 4,
+            storage.readParameter(parameters(1 + axis / 3), ((axis % 3) * 4).unsafe[Int >= 0], 4).toInt
+          )
+        request.putInt(32, parameter(3, 4).toInt)
+        context.workgroup.allocateBuffer(request.array()) + RequestBytes
+      }
+    }
+
+  private def launchV2(context: VMContext, buffer: Long): Either[Fault, Unit] =
+    for {
+      request <- context.workgroup.bufferBytes(buffer - RequestBytes, RequestBytes).toRight(
+        Fault.Backend(
+          s"cudaLaunchDeviceV2 parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
+        )
+      )
+      header = ByteBuffer.wrap(request).order(ByteOrder.LITTLE_ENDIAN)
+      target <- context.kernel.functionTable.name(
+        header.getLong(0)
+      ).toRight(Fault.Backend("cudaLaunchDeviceV2 parameter buffer has no target"))
+      child <- context.kernel.launchTarget(target)
+      block <-
+        if (child.entry.blockSize == 0) Right(Array.emptyByteArray)
+        else context.workgroup.bufferBytes(buffer, child.entry.blockSize).toRight(
+          Fault.Backend(
+            s"cudaLaunchDeviceV2 parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
+          )
+        )
+      groupCount <-
+        (positive(header.getInt(8)), positive(header.getInt(12)), positive(header.getInt(16))).mapN(Dimensions(_, _, _))
+      groupSize <- (
+        positive(header.getInt(20)),
+        positive(header.getInt(24)),
+        positive(header.getInt(28))
+      ).mapN(Dimensions(_, _, _))
+      _ <- run(context, child, block, groupCount, groupSize, header.getInt(32).toLong)
+    } yield ()
 }

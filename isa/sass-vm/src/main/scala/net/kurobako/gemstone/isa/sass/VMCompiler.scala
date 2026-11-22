@@ -73,6 +73,11 @@ private object VMCompiler {
       layout: VMRegisters.Layout
   )
 
+  /** The function descriptors of a module's kernels, one table for every kernel so a child launch names its target the
+    * same way wherever it is requested.
+    */
+  private def functionTable(module: Cubin.Module): FunctionTable = FunctionTable(module.kernels.map(_.name).toSet)
+
   def compile(
       module: Cubin.Module,
       kernel: Cubin.Kernel,
@@ -111,6 +116,7 @@ private object VMCompiler {
           block.padTo(kernel.parameterExtent, 0.toByte)
         ),
         "SASS",
+        functionTable = functionTable(module),
         cluster = Option.when(kernel.requiredCluster != LaunchGeometry.Dimensions.One)(kernel.requiredCluster),
         registersPerLane = Some(kernel.registerCount),
         staticSharedBytes = module.sections.find(_.name == s".nv.shared.${kernel.name}")
@@ -148,8 +154,13 @@ private object VMCompiler {
     }
     Cubin.globalRelocations(module).left.foreach(error => fail(error.raw))
     val image       = functions.find(_.name == kernel.name).getOrElse(fail(s"missing SASS for ${kernel.name}"))
+    val descriptors = functionTable(module)
     val relocations = Cubin.TextRelocation.resolve(module, kernel, image, boundSymbols.keySet)
       .fold(error => fail(error.raw), identity)
+      .view.mapValues(relocation =>
+        if (relocation.descriptor) relocation.copy(addend = descriptors.address(relocation.symbol).getOrElse(0L))
+        else relocation
+      ).toMap
     val (linkedCalls, textRelocations) =
       relocations.partition((_, relocation) => relocation.call && relocation.symbol == kernel.name)
     val original = image.copy(instructions = image.instructions.map { instruction =>

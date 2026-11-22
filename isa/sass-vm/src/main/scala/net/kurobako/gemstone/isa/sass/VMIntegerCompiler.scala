@@ -725,7 +725,8 @@ private object VMIntegerCompiler {
         val bits: ScalarBitWidth = if (modifiers.contains(Modifier.`64`)) 64 else 32
         textRelocation match {
           case Some(relocation) =>
-            val address = Value.Immediate(boundSymbols.get(relocation.symbol).fold(0L)(_.raw) + relocation.addend)
+            val base    = if (relocation.descriptor) 0L else boundSymbols.get(relocation.symbol).fold(0L)(_.raw)
+            val address = Value.Immediate(base + relocation.addend)
             store(
               operands.head,
               if (relocation.high) binary(IntegerOperation.ShiftRightLogical, address, Value.Immediate(32L), 64)

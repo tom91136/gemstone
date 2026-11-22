@@ -218,8 +218,13 @@ class LoadedProgram(
               )
             case None => image.functions.get(name)(decodeFunctions(kernel)).flatMap(lowerBound(kernel, _))
           }
-      }.map(kernel => Option(compiled.putIfAbsent(name, kernel)).getOrElse(kernel))
+      }.map { kernel =>
+        val launching = kernel.copy(kernel = kernel.kernel.copy(launchTargets = launchTarget))
+        Option(compiled.putIfAbsent(name, launching)).getOrElse(launching)
+      }
     }(Right(_))
+
+  private def launchTarget(name: NonEmpty[String]): Either[Fault, VMIR.Kernel] = compile(name).map(_.kernel)
 
   override def close(): Unit = release()
 

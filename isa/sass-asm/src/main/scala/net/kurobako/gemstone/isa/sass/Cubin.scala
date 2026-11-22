@@ -61,19 +61,23 @@ object Cubin {
   case class GlobalRelocation(destination: NonEmpty[String], offset: Int >= 0, target: NonEmpty[String], addend: Long)
 
   private object RelocationKind {
-    val Address64             = 2L
-    val GenericAddress64      = 4L
-    val FunctionDescriptor64  = 0x23L
-    val KeplerImmediateLow32  = 0x0dL
-    val KeplerImmediateHigh32 = 0x0eL
-    val VoltaImmediateLow32   = 0x38L
-    val VoltaImmediateHigh32  = 0x39L
-    val ImmediateLow32        = 0x2bL
-    val ImmediateHigh32       = 0x2cL
-    val KeplerCall            = 0x0cL
-    val MaxwellCall           = 0x2aL
-    val VoltaCall             = 0x3aL
-    val HopperCall            = 0x4bL
+    val Address64                = 2L
+    val GenericAddress64         = 4L
+    val FunctionDescriptor64     = 0x23L
+    val KeplerImmediateLow32     = 0x0dL
+    val KeplerImmediateHigh32    = 0x0eL
+    val VoltaImmediateLow32      = 0x38L
+    val VoltaImmediateHigh32     = 0x39L
+    val ImmediateLow32           = 0x2bL
+    val ImmediateHigh32          = 0x2cL
+    val KeplerCall               = 0x0cL
+    val MaxwellCall              = 0x2aL
+    val VoltaCall                = 0x3aL
+    val HopperCall               = 0x4bL
+    val FunctionDescriptorLow32  = 0x3eL
+    val FunctionDescriptorHigh32 = 0x3fL
+
+    def isFunctionDescriptor(kind: Long): Boolean = kind == FunctionDescriptorLow32 || kind == FunctionDescriptorHigh32
   }
 
   /** CUDA device-runtime functions the driver links into a module, by the address the VM binds each to: an address no
@@ -86,7 +90,12 @@ object Cubin {
       "free",
       "__assertfail",
       "__cuda_syscall_CGS_get_intrinsic_handle",
-      "__cuda_syscall_CGS_sync"
+      "__cuda_syscall_CGS_sync",
+      "cnpGetParameterBufferV2",
+      "cnpLaunchDeviceV2",
+      "cnpSetLastError",
+      "cnpStreamCreate",
+      "cnpStreamDestroy"
     ).zipWithIndex
       .map((name, index) => name -> (0xffffff0000000000L | ((index + 1).toLong << 4))).toMap
 
@@ -152,7 +161,8 @@ object Cubin {
         if (entries.isEmpty) Right(Vec.empty[Int])
         else
           relocationSymbols(module, table).map(symbols =>
-            entries.flatMap(entry => Option.when(entry.symbol < symbols.size.toLong)(symbols(entry.symbol.toInt)))
+            entries.filterNot(entry => RelocationKind.isFunctionDescriptor(entry.kind))
+              .flatMap(entry => Option.when(entry.symbol < symbols.size.toLong)(symbols(entry.symbol.toInt)))
               .filter(symbol =>
                 symbol.kind.raw == SymbolKind.Function && symbol.section > 0 &&
                   module.sections.lift(symbol.section).exists(_.name.startsWith(".text."))
@@ -250,6 +260,19 @@ object Cubin {
                         DriverFunctions.contains(name) && calling(instruction),
                         s"calls to device function '$name' outside the kernel are not linked"
                       ).map(_ => TextRelocation(name, 0L, high = false, call = true))
+                    case Some((_, name))
+                        if RelocationKind.isFunctionDescriptor(relocation.kind) && generation == Generation.Modern =>
+                      for {
+                        _ <- check(
+                          module.kernels.exists(_.name == name) && move(instruction),
+                          s"cubin function descriptor of '$name' requires a kernel and an immediate 32-bit move"
+                        )
+                      } yield TextRelocation(
+                        name,
+                        0L,
+                        relocation.kind.raw == RelocationKind.FunctionDescriptorHigh32,
+                        descriptor = true
+                      )
                     case Some((found, _)) if inImage(found) =>
                       for {
                         upper <- high(relocation.kind)
@@ -284,9 +307,16 @@ object Cubin {
   }
 
   /** An address half of `symbol` plus `addend`, or with `call`, a call to the driver function `symbol`. A relocation of
-    * the kernel's own name names linked code, the combined image offset `addend`.
+    * the kernel's own name names linked code, the combined image offset `addend`. A `descriptor` half is of the kernel
+    * `symbol`'s function descriptor, which a device-side launch names its child by.
     */
-  case class TextRelocation(symbol: NonEmpty[String], addend: Long, high: Boolean, call: Boolean = false)
+  case class TextRelocation(
+      symbol: NonEmpty[String],
+      addend: Long,
+      high: Boolean,
+      call: Boolean = false,
+      descriptor: Boolean = false
+  )
 
   private val ConstantSection = "\\.nv\\.constant[1-9][0-9]*(?:\\..*)?".r
 
