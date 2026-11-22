@@ -776,3 +776,20 @@ TEST_CASE("CUDA tools context notify and version tables validate their context",
   CHECK(query(nullptr, 0x10, out, 0) == CUDA_ERROR_INVALID_CONTEXT);
   CHECK(query(context, 0x10, nullptr, 0) == CUDA_ERROR_UNKNOWN);
 }
+
+TEST_CASE("CUDA tools device modes report none on the emulated device", "[cuda][limits]") {
+  constexpr std::array<unsigned char, 16> id{0xf6, 0xd3, 0xf4, 0xd9, 0x2d, 0xe3, 0x80, 0x40,
+                                             0x9f, 0x0c, 0x05, 0x8c, 0xf1, 0xb2, 0x90, 0x6b};
+  createContext();
+  const auto *const table = toolsTable(id);
+  CHECK(reinterpret_cast<uintptr_t>(table[0]) == 24);
+  const auto query = toolsSlot<CUresult (*)(int, uint32_t *, uint32_t *)>(table, 2);
+  uint32_t first = 7;
+  uint32_t second = 7;
+  CHECK(query(0, &first, &second) == CUDA_SUCCESS);
+  CHECK(first == 0);
+  CHECK(second == 0);
+  CHECK(query(1, &first, &second) == CUDA_ERROR_INVALID_DEVICE);
+  CHECK(query(0, nullptr, &second) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(query(0, &first, nullptr) == CUDA_ERROR_INVALID_VALUE);
+}

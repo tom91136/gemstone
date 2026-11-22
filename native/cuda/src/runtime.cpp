@@ -2821,6 +2821,14 @@ CUresult toolsDeviceAttribute(int device, uint32_t key, int, ToolsAttribute *out
 
 CUresult toolsFeatureEnable(int) { return CUDA_SUCCESS; }
 
+CUresult toolsDeviceModes(int device, uint32_t *first, uint32_t *second) {
+  if (!first || !second) return CUDA_ERROR_INVALID_VALUE;
+  if (!validDevice(device)) return ToolsInvalidDevice;
+  *first = 0;
+  *second = 0;
+  return CUDA_SUCCESS;
+}
+
 constexpr uint32_t ToolsContextVersion = 0x000d0000;
 constexpr uint32_t ToolsContextVersionLevel = 2;
 
@@ -2900,6 +2908,7 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
       {8, slotFunction(toolsDevicePresent)},
       {21, slotFunction(toolsClearFlag)}}},
     {"35770f1b092e0348a48e056fc423968d", {{9, slotFunction(toolsFeatureEnable)}}},
+    {"f6d3f4d92de380409f0c058cf1b2906b", {{2, slotFunction(toolsDeviceModes)}}},
     {"41ae717d kind 4",
      {{4, slotFunction(toolsDeviceHandle)},
       {9, slotFunction(toolsDeviceInfo)},
