@@ -2643,6 +2643,59 @@ const std::array<const void *, ToolsSubscriberWords> ToolsSubscriberTable = [] {
   return table;
 }();
 
+std::array<unsigned char, 16> exportTableId(std::string_view hex) {
+  std::array<unsigned char, 16> id{};
+  for (size_t i = 0; i < id.size(); ++i)
+    std::from_chars(hex.data() + (2 * i), hex.data() + (2 * i) + 2, id[i], 16);
+  return id;
+}
+
+template <size_t Bytes> struct SlotlessTable {
+  std::array<unsigned char, 16> id;
+  std::array<const void *, Bytes / sizeof(void *)> slots{};
+
+  explicit SlotlessTable(std::string_view hex) : id(exportTableId(hex)) { slots[0] = reinterpret_cast<const void *>(Bytes); }
+};
+
+const SlotlessTable<56> ToolsTableFc58ac1a{"fc58ac1a057c444fa97772ee9aefdb89"};
+const SlotlessTable<272> ToolsTableB10541e1{"b10541e1f7c7c74a9f64f223be99f1e2"};
+const SlotlessTable<40> ToolsTableC98d1afa{"c98d1afaf2275b42b12dcd81b5f21ec1"};
+const SlotlessTable<744> ToolsTableC2db37e3{"c2db37e3c4754247b3a8a079f37202ec"};
+const SlotlessTable<48> ToolsTableB127870b{"b127870b49d29b44a1c1a118e26f1c14"};
+const SlotlessTable<88> ToolsTableB9fd5327{"b9fd53270628c24f87a9988cddf73089"};
+const SlotlessTable<80> ToolsTable35770f1b{"35770f1b092e0348a48e056fc423968d"};
+const SlotlessTable<16> ToolsTableFf9ab8ee{"ff9ab8ee28d40e4cb3b7fd724a6277a8"};
+const SlotlessTable<488> ToolsTableBfdb432d{"bfdb432dbf3c5a4a945eb34029e81e75"};
+const SlotlessTable<256> ToolsTableA6b1ff99{"a6b1ff99ecc4c94f92f91928663d5585"};
+const SlotlessTable<88> ToolsTable127d4831{"127d4831ee3357449742b8447b7a2364"};
+const SlotlessTable<96> ToolsTableC83963f6{"c83963f617f7e241a5749143314dff9f"};
+const SlotlessTable<184> ToolsTableCc529e94{"cc529e945c4e9d46837c9625868334e4"};
+const SlotlessTable<32> ToolsTable12458358{"12458358a7c21e592177ef3556188709"};
+const SlotlessTable<48> ToolsTable6fbd4b79{"6fbd4b79aa8c8e46baf3c103b6d18e3c"};
+const SlotlessTable<360> ToolsTable1406180d{"1406180d72d6cb47ab6eb963e51bf4c6"};
+const SlotlessTable<288> ToolsTable06ac4921{"06ac4921c9a9e61180f576304dec7eb7"};
+const SlotlessTable<160> ToolsTableA259cffb{"a259cffb1846e8488957bfc72ceb58b8"};
+const SlotlessTable<56> ToolsTableFe605bbf{"fe605bbf8542924ca91268bee10b29e7"};
+const SlotlessTable<7016> ToolsTableA5987389{"a5987389dd8f6b4bbddbc24bf650aa18"};
+const SlotlessTable<40> ToolsTable36b88960{"36b889606158f543bbd9ac633878b6b1"};
+const SlotlessTable<272> ToolsTableBd91fa4d{"bd91fa4d185f964a8b17f3805601413f"};
+const SlotlessTable<296> ToolsTable7a7125c2{"7a7125c2f716ea118d71362b9e155667"};
+const SlotlessTable<184> ToolsTable32683f42{"32683f42be9652459950838b1c3de155"};
+const SlotlessTable<152> ToolsTableDccdd908{"dccdd90889660045bb1f77598aca1133"};
+const SlotlessTable<144> ToolsTable5b618f5a{"5b618f5a1202684781e4a7765ac9f359"};
+const SlotlessTable<24> ToolsTableF6d3f4d9{"f6d3f4d92de380409f0c058cf1b2906b"};
+const SlotlessTable<48> ToolsTable0e7af9b3{"0e7af9b33460794470edf020433b7ef9"};
+const SlotlessTable<24> ToolsTableE9ff28a9{"e9ff28a90c61b4499c09e567201b05f0"};
+const SlotlessTable<40> ToolsTable1ad5eede{"1ad5eede0290c64eba8100f425b38aa5"};
+const SlotlessTable<32> ToolsTableE01b33ce{"e01b33cec3b7ce4dbe3caba233b1a9cc"};
+
+const std::array<unsigned char, 16> ToolsInterfaceId = exportTableId("41ae717da9eba64f999be3c27f3c140f");
+
+void *toolsInterfaceOfKind(int) { return nullptr; }
+
+const std::array<const void *, 2> ToolsInterfaceTable{reinterpret_cast<const void *>(2 * sizeof(void *)),
+                                                      reinterpret_cast<const void *>(toolsInterfaceOfKind)};
+
 struct ExportTable {
   const unsigned char *id = nullptr;
   const void *table = nullptr;
@@ -2662,6 +2715,38 @@ const std::array ExportTables{
     ExportTable{.id = ToolsDriverStateId, .table = ToolsDriverStateTable.data(), .refusedAfterTeardown = true},
     ExportTable{.id = ToolsCallbackRegistryId, .table = ToolsCallbackRegistryTable.data(), .refusedAfterTeardown = true},
     ExportTable{.id = ToolsSubscriberId, .table = ToolsSubscriberTable.data()},
+    ExportTable{.id = ToolsInterfaceId.data(), .table = ToolsInterfaceTable.data()},
+    ExportTable{.id = ToolsTable36b88960.id.data(), .table = ToolsTable36b88960.slots.data()},
+    ExportTable{.id = ToolsTableBd91fa4d.id.data(), .table = ToolsTableBd91fa4d.slots.data()},
+    ExportTable{.id = ToolsTable7a7125c2.id.data(), .table = ToolsTable7a7125c2.slots.data()},
+    ExportTable{.id = ToolsTable32683f42.id.data(), .table = ToolsTable32683f42.slots.data()},
+    ExportTable{.id = ToolsTableDccdd908.id.data(), .table = ToolsTableDccdd908.slots.data()},
+    ExportTable{.id = ToolsTable5b618f5a.id.data(), .table = ToolsTable5b618f5a.slots.data()},
+    ExportTable{.id = ToolsTableF6d3f4d9.id.data(), .table = ToolsTableF6d3f4d9.slots.data()},
+    ExportTable{.id = ToolsTable0e7af9b3.id.data(), .table = ToolsTable0e7af9b3.slots.data()},
+    ExportTable{.id = ToolsTableE9ff28a9.id.data(), .table = ToolsTableE9ff28a9.slots.data()},
+    ExportTable{.id = ToolsTable1ad5eede.id.data(), .table = ToolsTable1ad5eede.slots.data()},
+    ExportTable{.id = ToolsTableE01b33ce.id.data(), .table = ToolsTableE01b33ce.slots.data()},
+    ExportTable{.id = ToolsTableFc58ac1a.id.data(), .table = ToolsTableFc58ac1a.slots.data()},
+    ExportTable{.id = ToolsTableB10541e1.id.data(), .table = ToolsTableB10541e1.slots.data()},
+    ExportTable{.id = ToolsTableC98d1afa.id.data(), .table = ToolsTableC98d1afa.slots.data()},
+    ExportTable{.id = ToolsTableC2db37e3.id.data(), .table = ToolsTableC2db37e3.slots.data()},
+    ExportTable{.id = ToolsTableB127870b.id.data(), .table = ToolsTableB127870b.slots.data()},
+    ExportTable{.id = ToolsTableB9fd5327.id.data(), .table = ToolsTableB9fd5327.slots.data()},
+    ExportTable{.id = ToolsTable35770f1b.id.data(), .table = ToolsTable35770f1b.slots.data()},
+    ExportTable{.id = ToolsTableFf9ab8ee.id.data(), .table = ToolsTableFf9ab8ee.slots.data()},
+    ExportTable{.id = ToolsTableBfdb432d.id.data(), .table = ToolsTableBfdb432d.slots.data()},
+    ExportTable{.id = ToolsTableA6b1ff99.id.data(), .table = ToolsTableA6b1ff99.slots.data()},
+    ExportTable{.id = ToolsTable127d4831.id.data(), .table = ToolsTable127d4831.slots.data()},
+    ExportTable{.id = ToolsTableC83963f6.id.data(), .table = ToolsTableC83963f6.slots.data()},
+    ExportTable{.id = ToolsTableCc529e94.id.data(), .table = ToolsTableCc529e94.slots.data()},
+    ExportTable{.id = ToolsTable12458358.id.data(), .table = ToolsTable12458358.slots.data()},
+    ExportTable{.id = ToolsTable6fbd4b79.id.data(), .table = ToolsTable6fbd4b79.slots.data()},
+    ExportTable{.id = ToolsTable1406180d.id.data(), .table = ToolsTable1406180d.slots.data()},
+    ExportTable{.id = ToolsTable06ac4921.id.data(), .table = ToolsTable06ac4921.slots.data()},
+    ExportTable{.id = ToolsTableA259cffb.id.data(), .table = ToolsTableA259cffb.slots.data()},
+    ExportTable{.id = ToolsTableFe605bbf.id.data(), .table = ToolsTableFe605bbf.slots.data()},
+    ExportTable{.id = ToolsTableA5987389.id.data(), .table = ToolsTableA5987389.slots.data()},
 };
 
 void *libraryHandle() {
