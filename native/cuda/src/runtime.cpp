@@ -2163,8 +2163,6 @@ const unsigned char ToolsTlsId[16] = {0x42, 0xd8, 0x5a, 0x81, 0x23, 0xf6, 0xcb, 
 const unsigned char ContextLocalStorageId[16] = {0xc6, 0x93, 0x33, 0x6e, 0x11, 0x21, 0xdf, 0x11,
                                                  0xa8, 0xc3, 0x68, 0xf3, 0x55, 0xd8, 0x95, 0x93};
 const unsigned char ContextChecksId[16] = {0x26, 0x3e, 0x88, 0x60, 0x7c, 0xd2, 0x61, 0x43, 0x92, 0xf6, 0xbb, 0xd5, 0x00, 0x6d, 0xfa, 0x7e};
-const unsigned char ModuleEnumerationId[16] = {0x6e, 0x16, 0x3f, 0xbe, 0xb9, 0x58, 0x44, 0x4d,
-                                               0x83, 0x5c, 0xe1, 0x82, 0xaf, 0xf1, 0x99, 0x1e};
 
 // Buffer sizes are fixed by the CUDA tools-runtime callback ABI.
 constexpr size_t ToolsRuntimeCallbackBuffer1Words = 1024;
@@ -2469,15 +2467,6 @@ int moduleEnumerateFunctions(const void *, CUmodule module, ModuleEnumerationCal
   }
 }
 
-const void *moduleEnumerationTable[8] = {reinterpret_cast<const void *>(static_cast<uintptr_t>(8 * sizeof(void *))),
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         nullptr,
-                                         reinterpret_cast<const void *>(moduleEnumerateFunctions)};
-
 constexpr int ToolsDriverInitialised = 0;
 constexpr int ToolsDriverDeinitialised = 1;
 constexpr int ToolsDriverUninitialised = 2;
@@ -2607,6 +2596,7 @@ struct ToolsTableSpec {
 
 constexpr std::array ToolsTableSpecs{
     ToolsTableSpec{.id = "2c8e0ad80710ab4e90dd54719fe5f74b", .bytes = 96},
+    ToolsTableSpec{.id = "6e163fbeb958444d835ce182aff1991e", .bytes = 968},
     ToolsTableSpec{.id = "d7bd8af8e7acca4abdbcfb1f1b3fcf33", .bytes = 112, .refusedAfterTeardown = true},
     ToolsTableSpec{.id = "7cb63f9b9ca48e42a484beb66e6aed7f", .bytes = 560, .refusedAfterTeardown = true},
     ToolsTableSpec{.id = "21318c60971432488ca641ff7324c8f2", .bytes = 768},
@@ -2890,6 +2880,7 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
     {"d7bd8af8e7acca4abdbcfb1f1b3fcf33",
      {{2, slotFunction(toolsDriverVersion)}, {3, slotFunction(toolsDriverState)}, {4, slotFunction(toolsDriverRun)}}},
     {"7cb63f9b9ca48e42a484beb66e6aed7f", {{67, slotFunction(toolsCallbackSlot)}}},
+    {"6e163fbeb958444d835ce182aff1991e", {{7, slotFunction(moduleEnumerateFunctions)}}},
     {"21318c60971432488ca641ff7324c8f2",
      {{3, slotFunction(toolsContextDevice)},
       {4, slotFunction(driverMetadataQuery)},
@@ -2976,7 +2967,6 @@ const std::vector<ExportTable> &exportTables = *new const std::vector<ExportTabl
       ExportTable{.id = ToolsTlsId, .table = toolsTlsTable},
       ExportTable{.id = ContextLocalStorageId, .table = contextLocalStorageTable},
       ExportTable{.id = ContextChecksId, .table = contextChecksTable},
-      ExportTable{.id = ModuleEnumerationId, .table = moduleEnumerationTable},
   };
   for (size_t i = 0; i < toolsTables.size(); ++i)
     if (ToolsTableSpecs[i].exported)
