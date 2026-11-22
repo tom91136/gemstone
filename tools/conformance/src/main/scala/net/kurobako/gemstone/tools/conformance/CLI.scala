@@ -43,7 +43,7 @@ object CLI {
   )
 
   private val MainClass          = "net.kurobako.gemstone.server.CLI"
-  private val MaxInstructions    = "100000000000"
+  private val MaxInstructions    = "200000000000"
   private val RetainedRecordings = 5
   private val UnsafeAccess       = "--sun-misc-unsafe-memory-access=allow"
 
