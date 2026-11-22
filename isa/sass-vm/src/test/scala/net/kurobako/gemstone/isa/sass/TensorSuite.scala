@@ -317,6 +317,23 @@ class TensorSuite extends Suite {
     assertEquals(kernel.launch(32)(Arg.zeros(512)).words(argument = 0, width = 8), expected)
   }
 
+  for (
+    (operands, productSign, addendSign) <- Vec(("-R2, R4, R8", -1, 1), ("R2, -R4, R8", -1, 1), ("R2, R4, -R8", 1, -1))
+  )
+    test(s"compiler DMMA.884 negates the source in DMMA.884 R4, $operands") {
+      val listing  = Fixture.listing("dmmaSm80").replace("DMMA.884 R4, R2, R4, R8", s"DMMA.884 R4, $operands")
+      val kernel   = load(80, listing, "double_mma")
+      val expected = Vec.tabulate(32) { lane =>
+        Vec.tabulate(2) { item =>
+          val (row, column) = (lane / 4, 2 * (lane % 4) + item)
+          val product       = (0 until 4).map(k => (4 * row + k + 1) * (2 * (4 * column + k) + 1)).sum
+          java.lang.Double.doubleToRawLongBits(productSign * product.toDouble +
+            addendSign * (if (item == 0) 5.0 else -7.0))
+        }
+      }.flatten
+      assertEquals(kernel.launch(32)(Arg.zeros(512)).words(argument = 0, width = 8), expected)
+    }
+
   for (variant <- Vec("ldsmSm89", "ldsmUniformSm89Patched"))
     test(s"sm_89 LDSM $variant preserves x1/x2/x4 and transpose lane layouts") {
       val expected = Vec.tabulate(32) { lane =>

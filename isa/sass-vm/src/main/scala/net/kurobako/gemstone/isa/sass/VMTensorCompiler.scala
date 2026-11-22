@@ -194,12 +194,19 @@ private object VMTensorCompiler {
     val left   = Fragment(matrix, Role.A, Element.F64, wmma = false)
     val right  = Fragment(matrix, Role.B, Element.F64, wmma = false, columnMajor = true)
     val addend = Fragment(matrix, Role.C, Element.F64, wmma = false)
-    def pairs(operand: Operand, count: Int): Vec[Value] = Vec.tabulate(count) { index =>
-      if (OperandQueries.isZero(operand)) {
-        val zero = temp()
-        emit(Move(zero.slot, Value.Immediate(0L), 64))
-        zero
-      } else source(offsetRegister(operand, index * 2), 64)
+    def pairs(operand: Operand, count: Int): Vec[Value] = {
+      val positive = OperandQueries.positive(operand)
+      Vec.tabulate(count) { index =>
+        val value =
+          if (OperandQueries.isZero(positive)) {
+            val zero = temp()
+            emit(Move(zero.slot, Value.Immediate(0L), 64))
+            zero
+          } else source(offsetRegister(positive, index * 2), 64)
+        if (OperandQueries.negative(operand))
+          binary(IntegerOperation.BitwiseXor, value, Value.Immediate(Long.MinValue), 64)
+        else value
+      }
     }
     emit(Tensor(Operation.Multiply(
       left,
