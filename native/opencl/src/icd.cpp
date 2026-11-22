@@ -552,12 +552,12 @@ cl_int releaseAllocation(const std::shared_ptr<Allocation> &allocation, bool rel
 cl_int writeAllocation(const std::shared_ptr<Allocation> &allocation, size_t offset, const void *bytes, size_t size) {
   if (!validRange(allocation, offset, size) || (size != 0 && !bytes)) return CL_INVALID_VALUE;
   invalidatePointerRelocations(allocation, offset, size);
-  if (size != 0) std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, bytes, size);
   auto &state = remote;
-  if (state.ready() && size != 0 && !allocation->hostBacked) {
-    std::scoped_lock const lock(remoteMutex);
-    if (!writeRemote(*state.client(), allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
-  }
+  const bool uploaded = state.ready() && size != 0 && !allocation->hostBacked;
+  std::unique_lock lock(remoteMutex, std::defer_lock);
+  if (uploaded) lock.lock();
+  if (size != 0) std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, bytes, size);
+  if (uploaded && !writeRemote(*state.client(), allocation->id, offset, bytes, size)) return CL_OUT_OF_RESOURCES;
   return CL_SUCCESS;
 }
 
@@ -606,19 +606,20 @@ cl_int writeAllocationRectangle(const std::shared_ptr<Allocation> &allocation, c
                                 size_t hostRowPitch, size_t hostSlicePitch) {
   if (!validRectangle(allocation, rectangle) || !host) return CL_INVALID_VALUE;
   const auto *source = static_cast<const uint8_t *>(host);
+  auto &state = remote;
+  const bool uploaded = state.ready() && !allocation->hostBacked;
+  std::unique_lock lock(remoteMutex, std::defer_lock);
+  if (uploaded) lock.lock();
   forEachRectangleRow(rectangle, [&](uint64_t offset, size_t slice, size_t row) {
     invalidatePointerRelocations(allocation, offset, rectangle.rowBytes);
     std::memcpy(static_cast<uint8_t *>(allocation->data()) + offset, source + (slice * hostSlicePitch) + (row * hostRowPitch),
                 rectangle.rowBytes);
     return true;
   });
-  auto &state = remote;
-  if (state.ready() && !allocation->hostBacked) {
-    std::scoped_lock const lock(remoteMutex);
-    if (!uploadRectangle(*state.client(), AllocationId{static_cast<int64_t>(allocation->id)}, rectangle, host, hostRowPitch, hostSlicePitch,
-                         MaximumPayload / 2))
-      return CL_OUT_OF_RESOURCES;
-  }
+  if (uploaded
+      && !uploadRectangle(*state.client(), AllocationId{static_cast<int64_t>(allocation->id)}, rectangle, host, hostRowPitch,
+                          hostSlicePitch, MaximumPayload / 2))
+    return CL_OUT_OF_RESOURCES;
   return CL_SUCCESS;
 }
 
@@ -629,8 +630,9 @@ cl_int readAllocationRectangle(const std::shared_ptr<Allocation> &allocation, co
   auto *mirror = static_cast<uint8_t *>(allocation->data());
   auto &state = remote;
   const bool fetched = state.ready() && !allocation->hostBacked;
+  std::unique_lock lock(remoteMutex, std::defer_lock);
   if (fetched) {
-    std::scoped_lock const lock(remoteMutex);
+    lock.lock();
     if (!downloadRectangle(*state.client(), AllocationId{static_cast<int64_t>(allocation->id)}, rectangle, host, hostRowPitch,
                            hostSlicePitch, MaximumPayload / 2))
       return CL_OUT_OF_RESOURCES;
