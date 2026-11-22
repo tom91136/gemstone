@@ -85,7 +85,11 @@ class ExecutionSessionSuite extends Suite {
       val completion = service.launch(program, task("write", KernelTask.Argument.Memory(allocation, tail))).toOption.get
       assertEquals(service.awaitCompletion(completion), Right(()))
       assertEquals(service.read(AllocationRange(allocation, tail, 2)), Right(Vec[Byte](42, 2)))
-      assertEquals(service.completionDirtyRanges(completion, 0, 8), Right(Vec(DirtyRange(allocation, tail, 1))))
+      val granule = (tail.raw / Completion.DirtyGranuleBytes.raw * Completion.DirtyGranuleBytes.raw).unsafe[Long >= 0]
+      assertEquals(
+        service.completionDirtyRanges(completion, 0, 8),
+        Right(Vec(DirtyRange(allocation, granule, (size - granule.raw).toInt.unsafe[Int > 0])))
+      )
     }
   }
 
@@ -464,25 +468,27 @@ class ExecutionSessionSuite extends Suite {
       assertEquals(service.completionPrints(completion), Right("done 42"))
       assertEquals(
         service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
-        Right(Vec(DirtyRange(allocation, 2L, 1)))
+        Right(Vec(DirtyRange(allocation, 0L, 8)))
       )
     }
     assert(backend.programClosed.get())
   }
 
-  test("sparse writeback pages preserve every written byte and exclude unwritten gaps") {
+  test("sparse writeback pages preserve every written granule and exclude unwritten gaps") {
     val count   = ExecutionRPC.MaximumElements.raw + 3
+    val granule = Completion.DirtyGranuleBytes.raw.toLong
+    val pitch   = 2L * granule
     val backend = TestBackend((task, memory, _) =>
       task.arguments.headOption match {
         case Some(KernelTask.Argument.Memory(region, _, _)) =>
           (0 until count).foldLeft[Either[Fault, Unit]](Right(())) { (result, index) =>
-            result.flatMap(_ => memory.write(region, (index.toLong * 2).unsafe[Long >= 0], Vec[Byte](42)))
+            result.flatMap(_ => memory.write(region, (index.toLong * pitch).unsafe[Long >= 0], Vec[Byte](42)))
           }
         case _ => Left(Fault.InvalidRequest("memory argument is required"))
       }
     )
     Using.resource(ExecutionSession(List(backend))) { service =>
-      val allocation = service.registerAllocation((count * 2).toLong.unsafe[Long > 0]).toOption.get
+      val allocation = service.registerAllocation((count * pitch).unsafe[Long > 0]).toOption.get
       val program    = service.load(encoding, Vec[Byte](1)).toOption.get
       val completion = service.launch(program, task("write", KernelTask.Argument.Memory(allocation, 0L))).toOption.get
       assertEquals(service.awaitCompletion(completion), Right(()))
@@ -521,19 +527,25 @@ class ExecutionSessionSuite extends Suite {
         service.completionDirtyRanges(id = completion, offset = 1, limit = Int.MaxValue),
         Right(ranges.drop(1))
       )
-      assertEquals(ranges.map(_.offset.raw), Vec.from(0 until count).map(_.toLong * 2))
-      assert(ranges.forall(range => range.allocation == allocation && range.size == 1))
+      assertEquals(ranges.map(_.offset.raw), Vec.from(0 until count).map(_.toLong * pitch))
+      assert(ranges.forall(range => range.allocation == allocation && range.size.raw.toLong == granule))
       val operation = ExecutionRPC.Operation.CompletionDirtyRanges(completion, 0)
       for (page <- Vec(first, second))
         assert(operation.replyCodec.encode(page, ExecutionRPC.Limits).isRight)
-      val bytes = service.read(AllocationRange(allocation, 0L, (count * 2).unsafe[Int >= 0])).toOption.get
-      assertEquals(bytes, Vec.from(0 until count * 2).map(index => if (index % 2 == 0) 42.toByte else 0.toByte))
+      for (index <- 0 until count) {
+        val at = (index.toLong * pitch).unsafe[Long >= 0]
+        assertEquals(service.read(AllocationRange(allocation, at, 1)), Right(Vec[Byte](42)))
+        assertEquals(
+          service.read(AllocationRange(allocation, (at.raw + granule).unsafe[Long >= 0], 1)),
+          Right(Vec[Byte](0))
+        )
+      }
       assertEquals(service.releaseCompletion(completion), Right(()))
       assert(service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements).isLeft)
     }
   }
 
-  test("parallel sparse writes and cross-stripe atomics retain exact writeback") {
+  test("parallel sparse writes and cross-stripe atomics publish every touched granule") {
     Using.resource(WorkerPool(4)) { workers =>
       val backend = TestBackend { (task, memory, _) =>
         val KernelTask.Argument.Memory(region, _, _) = task.arguments.head: @unchecked
@@ -552,12 +564,9 @@ class ExecutionSessionSuite extends Suite {
           service.launch(program, task("parallel", KernelTask.Argument.Memory(allocation, 0L))).toOption.get
         assertEquals(service.awaitCompletion(completion), Right(()))
         assertEquals(service.readValue(AllocationScalar(allocation, 4095L, 8)), Right(128L))
-        val expected =
-          Vec.from(0 until 128).map(index => DirtyRange(allocation, (index.toLong * 16L).unsafe[Long >= 0], 8))
-            .appended(DirtyRange(allocation, 4095L, 8))
         assertEquals(
           service.completionDirtyRanges(id = completion, offset = 0, limit = ExecutionRPC.MaximumElements),
-          Right(expected)
+          Right(Vec(DirtyRange(allocation, 0L, 8192)))
         )
         (0 until 128).foreach { index =>
           val offset = ((index.toLong * 31L % 128L) * 16L).unsafe[Long >= 0]

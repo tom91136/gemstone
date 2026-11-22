@@ -4,8 +4,25 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import scala.collection.mutable
 
+/** Written bytes of one allocation, reported as transfer chunks. */
+trait WrittenExtent {
+  def add(offset: Long >= 0, size: Int >= 0): Unit
+  def chunks(maxChunkSize: Int > 0): Vec[(Long >= 0, Int > 0)]
+
+  /** An empty extent of the same kind and shape. */
+  def fresh: WrittenExtent
+
+  /** Heap bytes this extent holds. */
+  def retainedBytes: Long
+}
+
+object WrittenRanges {
+  // A TreeMap entry and its two boxed keys.
+  private val IntervalBytes = 88L
+}
+
 /** Exact byte intervals. Adjacent writes merge; unwritten gaps never enter writeback. */
-class WrittenRanges {
+class WrittenRanges extends WrittenExtent {
   private val intervals = java.util.TreeMap[Long >= 0, Long >= 0]()
   // Intervals only grow by merging, so the last one touched keeps covering what it covered.
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -16,7 +33,11 @@ class WrittenRanges {
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private var lastNext: Long >= 0 = 0L
 
-  def add(offset: Long >= 0, size: Int >= 0): Unit =
+  override def fresh: WrittenExtent = WrittenRanges()
+
+  override def retainedBytes: Long = intervals.size.toLong * WrittenRanges.IntervalBytes
+
+  override def add(offset: Long >= 0, size: Int >= 0): Unit =
     if (size > 0) {
       val limit = java.lang.Math.addExact(offset, size.toLong).unsafe[Long >= 0]
       if (offset >= lastStart && limit <= lastEnd) ()
@@ -56,7 +77,7 @@ class WrittenRanges {
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def chunks(maxChunkSize: Int > 0): Vec[(Long >= 0, Int > 0)] = {
+  override def chunks(maxChunkSize: Int > 0): Vec[(Long >= 0, Int > 0)] = {
     val result = mutable.ArrayBuffer.empty[(Long >= 0, Int > 0)]
     intervals.forEach { (begin, end) =>
       var offset: Long = begin

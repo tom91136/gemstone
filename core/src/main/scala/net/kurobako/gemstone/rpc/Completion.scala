@@ -8,6 +8,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
 import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
+import scala.jdk.CollectionConverters.*
 
 private object Completion {
   type Execute = TaskContext => Either[Fault, Option[GraphicsStatistics]]
@@ -38,18 +39,25 @@ private object Completion {
   }
 
   private val DirtyChunkBytes: Int > 0 = 65536
+  val DirtyGranuleBytes: Int > 0       = 4096
 
-  /** One worker's written intervals. Consecutive writes usually target the same allocation. */
+  private def tracking(entry: AllocationAddressIndex.Entry): WrittenExtent =
+    if (entry.allocation.hostBacked) WrittenRanges() else WrittenGranules(entry.size, DirtyGranuleBytes)
+
+  /** One worker's written extents, exact for host-visible allocations (a republished byte the kernel did not write
+    * could overwrite a newer host value) and one bit per granule for device-only ones. Consecutive writes usually
+    * target the same allocation.
+    */
   private class DirtyWrites {
-    val ranges: mutable.HashMap[AllocationId, WrittenRanges] = mutable.HashMap.empty
+    val extents: mutable.HashMap[AllocationId, WrittenExtent] = mutable.HashMap.empty
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-    private var last: Option[(AllocationId, WrittenRanges)] = None
+    private var last: Option[(AllocationId, WrittenExtent)] = None
 
-    def add(id: AllocationId, offset: Long >= 0, size: Int >= 0): Unit = last match {
-      case Some((lastId, target)) if lastId == id => target.add(offset, size)
-      case _                                      =>
-        val selected = ranges.getOrElseUpdate(id, WrittenRanges())
-        last = Some(id -> selected)
+    def add(entry: AllocationAddressIndex.Entry, offset: Long >= 0, size: Int >= 0): Unit = last match {
+      case Some((lastId, target)) if lastId == entry.id => target.add(offset, size)
+      case _                                            =>
+        val selected = extents.getOrElseUpdate(entry.id, tracking(entry))
+        last = Some(entry.id -> selected)
         selected.add(offset, size)
     }
   }
@@ -122,8 +130,11 @@ private class Completion(
     readWaiters -= 1
   }
 
-  def markDirty(id: AllocationId, offset: Long >= 0, size: Int >= 0): Unit =
-    workerWrites().add(id, offset, size)
+  def markDirty(entry: AllocationAddressIndex.Entry, offset: Long >= 0, size: Int >= 0): Unit =
+    workerWrites().add(entry, offset, size)
+
+  def dirtyBytesRetained: Long =
+    dirtyWrites.values().asScala.iterator.flatMap(_.extents.values).map(_.retainedBytes).sum
 
   // A plain lookup first: computeIfAbsent locks the bin whenever the key is not its first node.
   @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -134,10 +145,10 @@ private class Completion(
   }
 
   private lazy val allDirtyRanges: Vec[DirtyRange] = {
-    val merged = mutable.HashMap.empty[AllocationId, WrittenRanges]
+    val merged = mutable.HashMap.empty[AllocationId, WrittenExtent]
     dirtyWrites.values().forEach { writes =>
-      writes.ranges.foreach { (id, ranges) =>
-        val target = merged.getOrElseUpdate(id, WrittenRanges())
+      writes.extents.foreach { (id, ranges) =>
+        val target = merged.getOrElseUpdate(id, ranges.fresh)
         ranges.chunks(Completion.DirtyChunkBytes).foreach((offset, size) => target.add(offset, size))
       }
     }

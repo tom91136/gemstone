@@ -488,7 +488,7 @@ class ExecutionSession(
         if (!live) Left(unregistered(entry.id))
         else {
           storage.copyFrom(offset, bytes)
-          if (bytes.nonEmpty) completion.markDirty(entry.id, offset, bytes.nonNegativeSize)
+          if (bytes.nonEmpty) completion.markDirty(entry, offset, bytes.nonNegativeSize)
           Written
         }
       }
@@ -506,7 +506,7 @@ class ExecutionSession(
         if (!live) Left(unregistered(entry.id))
         else {
           storage.encode(offset, value, size.widen[Int in 0 ~ 8])
-          completion.markDirty(entry.id, offset, size)
+          completion.markDirty(entry, offset, size)
           Written
         }
       }
@@ -525,7 +525,7 @@ class ExecutionSession(
           val width    = size.widen[Int in 0 ~ 8]
           val previous = storage.decode(offset, width)
           storage.encode(offset, update(previous), width)
-          completion.markDirty(entry.id, offset, size)
+          completion.markDirty(entry, offset, size)
           Right(previous)
         }
       }
