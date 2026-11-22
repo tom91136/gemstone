@@ -205,6 +205,37 @@ bool resolvedEntryPointsBehave() {
 using ExportTableQuery = CUresult (*)(const void **, const void *);
 using DriverStateQuery = CUresult (*)(int *);
 using CallbackSlotQuery = CUresult (*)(void **, void **, unsigned, unsigned);
+using DriverVersionQuery = CUresult (*)(int *);
+
+struct ToolsContextInfo {
+  uint64_t size;
+  CUcontext context;
+  uint64_t reserved;
+};
+
+struct ToolsRunRequest {
+  uint64_t first;
+  int (*function)(void *, const ToolsContextInfo *);
+  void *argument;
+  uint64_t second;
+  uint64_t third;
+  uint64_t status;
+};
+
+using ToolsRun = CUresult (*)(ToolsRunRequest *);
+
+struct ToolsRunObservation {
+  int calls = 0;
+  ToolsContextInfo info{};
+};
+
+int observeToolsRun(void *argument, const ToolsContextInfo *info) {
+  auto &observation = *static_cast<ToolsRunObservation *>(argument);
+  observation.calls++;
+  observation.info = *info;
+  return 7;
+}
+
 using ToolsWordsQuery = CUresult (*)(uint64_t *, uint64_t *, unsigned);
 using ToolsCountQuery = CUresult (*)(uint64_t *, void **, unsigned);
 using ToolsLimitQuery = CUresult (*)(uint32_t *);
@@ -393,4 +424,44 @@ TEST_CASE("CUDA tools subscriber table admits one subscriber and validates its e
   CHECK((subscribe(&other, callback, nullptr) == CUDA_SUCCESS));
   CHECK((other == 1));
   CHECK((release(other) == CUDA_SUCCESS));
+}
+
+TEST_CASE("CUDA tools driver-state table reports the driver version", "[cuda]") {
+  const auto *const table = toolsTable(ToolsDriverStateId);
+  REQUIRE((table != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(table[0]) == 112));
+  const auto version = tableEntry<DriverVersionQuery>(table, 2);
+  REQUIRE((version != nullptr));
+  int expected = 0;
+  REQUIRE((cuDriverGetVersion(&expected) == CUDA_SUCCESS));
+  int reported = 0;
+  CHECK((version(&reported) == CUDA_SUCCESS));
+  CHECK((reported == expected));
+  CHECK((version(nullptr) == CUDA_ERROR_INVALID_VALUE));
+}
+
+TEST_CASE("CUDA tools driver-state run slot calls back with the current context", "[cuda]") {
+  const auto *const table = toolsTable(ToolsDriverStateId);
+  REQUIRE((table != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(table[0]) == 112));
+  const auto run = tableEntry<ToolsRun>(table, 4);
+  REQUIRE((run != nullptr));
+  ToolsRunObservation observation;
+  ToolsRunRequest request{};
+  request.function = observeToolsRun;
+  request.argument = &observation;
+  request.status = 0x55;
+  CHECK((run(nullptr) == CUDA_ERROR_INVALID_VALUE));
+  ToolsRunRequest missing{};
+  CHECK((run(&missing) == CUDA_ERROR_INVALID_VALUE));
+
+  CUcontext context = nullptr;
+  REQUIRE((cuCtxCreate(&context, nullptr, 0, 0) == CUDA_SUCCESS));
+  CHECK((run(&request) == CUDA_SUCCESS));
+  CHECK((observation.calls == 1));
+  CHECK((observation.info.size == 0x18));
+  CHECK((observation.info.context == context));
+  CHECK((observation.info.reserved == 0));
+  CHECK((request.status == 0x55));
+  REQUIRE((cuCtxDestroy(context) == CUDA_SUCCESS));
 }

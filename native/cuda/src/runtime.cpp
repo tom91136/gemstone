@@ -2506,11 +2506,39 @@ CUresult toolsDriverState(int *state) {
   return CUDA_SUCCESS;
 }
 
+struct ToolsContextInfo {
+  uint64_t size;
+  CUcontext context;
+  uint64_t reserved;
+};
+
+struct ToolsRunRequest {
+  uint64_t first;
+  int (*function)(void *, const ToolsContextInfo *);
+  void *argument;
+  uint64_t second;
+  uint64_t third;
+  uint64_t status;
+};
+
+CUresult toolsDriverVersion(int *version) { return cuDriverGetVersion(version); }
+
+CUresult toolsDriverRun(ToolsRunRequest *request) {
+  if (!request || !request->function) return CUDA_ERROR_INVALID_VALUE;
+  if (auto *const context = activeContext()) {
+    const ToolsContextInfo info{.size = sizeof(ToolsContextInfo), .context = context, .reserved = 0};
+    request->function(request->argument, &info);
+  }
+  return CUDA_SUCCESS;
+}
+
 constexpr size_t ToolsDriverStateWords = 14;
 const std::array<const void *, ToolsDriverStateWords> ToolsDriverStateTable = [] {
   std::array<const void *, ToolsDriverStateWords> table{};
   table[0] = reinterpret_cast<const void *>(ToolsDriverStateWords * sizeof(void *));
+  table[2] = reinterpret_cast<const void *>(toolsDriverVersion);
   table[3] = reinterpret_cast<const void *>(toolsDriverState);
+  table[4] = reinterpret_cast<const void *>(toolsDriverRun);
   return table;
 }();
 
