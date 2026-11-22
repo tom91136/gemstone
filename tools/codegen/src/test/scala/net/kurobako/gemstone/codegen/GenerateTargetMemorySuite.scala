@@ -11,11 +11,20 @@ class GenerateTargetMemorySuite extends Suite {
     assert(
       rendered.contains(
         """if (target == "sm_89") return TargetMemory{.busWidthBits = 128, .l2Bytes = 33554432, """ +
-          """.persistingL2Bytes = 23068672, .persistingL2DefaultBytes = 6291456, .l2FetchBytes = 64};"""
+          """.persistingL2Bytes = 23068672, .persistingL2DefaultBytes = 6291456, .l2FetchBytes = 64, """ +
+          """.architectureId = 400, .chipImplementation = 6, .chipRevision = 161};"""
       )
     )
     assert(!rendered.contains("gfx1036"))
     assert(rendered.contains("return std::nullopt;"))
+  }
+
+  test("the silicon identity is rendered only for the targets that carry one") {
+    val rendered = GenerateTargetMemory.render(Architecture.all)
+    assertEquals(rendered.split("\\.architectureId = ", -1).length - 1, 1)
+    assert(rendered.contains("std::optional<int32_t> architectureId = std::nullopt;"))
+    assert(rendered.contains("std::optional<int32_t> chipImplementation = std::nullopt;"))
+    assert(rendered.contains("std::optional<int32_t> chipRevision = std::nullopt;"))
   }
 
   test("L2 controls are rendered only for the targets that carry them") {

@@ -128,6 +128,14 @@ object Architecture {
   /** The device memory of the reference card a target's values describe, as the device reports it. */
   case class Memory(busWidthBits: Sourced[Int], l2Bytes: Sourced[Long], l2Control: Option[L2Control]) derives CanEqual
 
+  /** The ids a driver reports for the silicon of the reference card: the architecture family, the chip implementation
+    * within it, and the chip revision. The chip id is the family and the implementation together.
+    */
+  case class Identity(architectureId: Sourced[Int], implementation: Sourced[Int], revision: Sourced[Int])
+      derives CanEqual {
+    def chipId: Int = architectureId.value | implementation.value
+  }
+
   enum WorkgroupCap derives CanEqual {
     case AllWorkgroups, MultiSubgroupWorkgroups
   }
@@ -562,6 +570,12 @@ object Architecture {
     "NVIDIA 615.78.08",
     "CUDA 13.3, ncu 2026.2.1"
   )
+  private val adaIdentity = Source.Probed(
+    "driver tools device-info request (table 41ae717d kind 4, slot 9) and CUPTI private attributes 0x20000001 and 0x20000002",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.5, CUPTI 2026.3.1"
+  )
   private val cudaGuide89        = Source.Documented("CUDA C++ Programming Guide 13, technical specifications for 8.9")
   private val cudaBestPractice89 =
     Source.Documented("CUDA C++ Best Practices Guide 13, coalesced access to global memory")
@@ -683,7 +697,7 @@ object Architecture {
         Sourced(64, adaL2)
       )
     )
-  )
+  ).copy(identity = Some(Identity(Sourced(0x190, adaIdentity), Sourced(0x6, adaIdentity), Sourced(0xa1, adaIdentity))))
 
   val sm86: Architecture = sm89
     .derived(
@@ -1609,7 +1623,8 @@ case class Architecture(
     /** Ops a pipe holds in its input queue besides the one it runs. A queued op starts when the pipe frees and its
       * result counts from then. The wave's next op for a vector pipe waits one cycle short of the pipe's interval.
       */
-    pipeQueue: Map[Pipe, Architecture.Sourced[Int]] = Map.empty
+    pipeQueue: Map[Pipe, Architecture.Sourced[Int]] = Map.empty,
+    identity: Option[Architecture.Identity] = None
 ) derives CanEqual {
 
   /** The same architecture under `name`, every value carried over from this one for the reason in `basis`. */

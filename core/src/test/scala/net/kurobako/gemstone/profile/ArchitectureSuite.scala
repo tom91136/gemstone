@@ -15,6 +15,17 @@ class ArchitectureSuite extends Suite {
 
   private def known(name: String): Architecture = Architecture.named(name).getOrElse(fail(s"no architecture $name"))
 
+  test("the probed RTX 4060 Ti reports the architecture, implementation and revision of its silicon") {
+    val identity = Architecture.sm89.identity.getOrElse(fail("no identity"))
+    assertEquals(
+      (identity.architectureId.value, identity.implementation.value, identity.revision.value),
+      (0x190, 6, 0xa1)
+    )
+    assertEquals(identity.chipId, 0x196)
+    assertEquals(identity.implementation.source.kind, Source.Probed("", "", "", "").kind)
+    assertEquals(Architecture.sm86.identity, None)
+  }
+
   test("a target with a card of its own silicon reports its memory and DRAM rate per multiprocessor clock") {
     val sm89   = known("sm_89")
     val memory = sm89.memory.getOrElse(fail("no memory"))
@@ -108,7 +119,11 @@ class ArchitectureSuite extends Suite {
         Source.Estimate(Architecture.sm89.latency.dram.source.detail)
       )
     )
-    val withoutCard = Architecture.sm89.copy(throughput = Architecture.sm89.throughput.copy(dram = None), memory = None)
+    val withoutCard = Architecture.sm89.copy(
+      throughput = Architecture.sm89.throughput.copy(dram = None),
+      memory = None,
+      identity = None
+    )
     assertEquals(
       ArchitectureChecks.values(derived).map(_.value),
       ArchitectureChecks.values(withoutCard).map(_.value)
