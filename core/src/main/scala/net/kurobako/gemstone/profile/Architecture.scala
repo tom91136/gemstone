@@ -149,6 +149,7 @@ object Architecture {
       registerGranule: Sourced[Int],
       laneRegisters: Sourced[Int],
       workgroupRegisters: Option[Sourced[Int]],
+      clusterLaunch: Option[Sourced[Boolean]],
       shared: Sourced[Int],
       workgroupShared: Sourced[Int],
       reservedShared: Sourced[Int],
@@ -182,6 +183,9 @@ object Architecture {
   )
   private val noTensor =
     Source.Documented("CUDA C++ Programming Guide 13: matrix units first appear at compute capability 7.0")
+  private val clusterGuide = Source.Documented(
+    "CUDA C++ Programming Guide 13, thread block clusters: compute capability 9.0 and higher"
+  )
 
   private def limits(
       cc: String,
@@ -206,6 +210,7 @@ object Architecture {
       registerGranule = Sourced(256, occupancyHeader),
       laneRegisters = Sourced(255, guide),
       workgroupRegisters = Some(Sourced(blockRegisters, guide)),
+      clusterLaunch = Some(Sourced(cc.toDouble >= 9.0, clusterGuide)),
       shared = Sourced(shared, guide),
       workgroupShared = Sourced(blockShared, guide),
       reservedShared = Sourced(reserved, if (reserved == 0) occupancyHeader else guide),
@@ -904,6 +909,7 @@ object Architecture {
     registerGranule = Sourced(granule, llvm("getVGPRAllocGranule times the wavefront size")),
     laneRegisters = Sourced(registers / 64, llvm("getAddressableNumVGPRs")),
     workgroupRegisters = None,
+    clusterLaunch = None,
     shared = Sourced(lds, ldsSource),
     workgroupShared = Sourced(lds, ldsSource),
     reservedShared = Sourced(0, llvm("no per-workgroup LDS reservation")),
@@ -1167,6 +1173,7 @@ object Architecture {
     registerGranule = Sourced(granule, llvm(s"getVGPRAllocGranule times the wave32 size, $generation")),
     laneRegisters = Sourced(256, llvm("getAddressableNumVGPRs")),
     workgroupRegisters = None,
+    clusterLaunch = None,
     shared = Sourced(131072, llvm("getLocalMemorySize, 131072 in WGP mode, lines 1172-1182")),
     workgroupShared = Sourced(65536, llvm("getAddressableLocalMemorySize")),
     reservedShared = Sourced(0, llvm("no per-workgroup LDS reservation")),
@@ -1446,6 +1453,7 @@ object Architecture {
         registerGranule = Sourced(512, llvm("getVGPRAllocGranule times the wave32 size")),
         laneRegisters = Sourced(1024, amdgpuTd("Feature1024AddressableVGPRs in the gfx125x set, line 2165")),
         workgroupRegisters = None,
+        clusterLaunch = None,
         shared = Sourced(327680, llvm("FeatureAddressableLocalMemorySize327680")),
         workgroupShared = Sourced(327680, llvm("FeatureAddressableLocalMemorySize327680")),
         reservedShared = Sourced(0, llvm("no per-workgroup LDS reservation")),
@@ -1616,6 +1624,7 @@ case class Architecture(
         registerGranule = inherit(limits.registerGranule),
         laneRegisters = inherit(limits.laneRegisters),
         workgroupRegisters = limits.workgroupRegisters.map(inherit(_)),
+        clusterLaunch = limits.clusterLaunch.map(inherit(_)),
         shared = inherit(limits.shared),
         workgroupShared = inherit(limits.workgroupShared),
         reservedShared = inherit(limits.reservedShared),

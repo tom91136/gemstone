@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -99,6 +100,21 @@ constexpr char ConstUnreferenced[] = R"PTX(.version 8.4
 }
 )PTX";
 
+// measured on an RTX 4060 Ti (sm_89); the rule behind these values is undocumented
+struct RegisterBlockLimit {
+  int registers;
+  int threads;
+};
+
+constexpr RegisterBlockLimit RegisterBlockLimits[] = {
+    {.registers = 22, .threads = 1024}, {.registers = 40, .threads = 1024}, {.registers = 72, .threads = 896},
+    {.registers = 72, .threads = 896},  {.registers = 73, .threads = 768},  {.registers = 77, .threads = 768},
+    {.registers = 81, .threads = 640},  {.registers = 96, .threads = 640},  {.registers = 105, .threads = 512},
+    {.registers = 113, .threads = 512}, {.registers = 121, .threads = 512}, {.registers = 128, .threads = 512},
+    {.registers = 137, .threads = 384}, {.registers = 168, .threads = 384}, {.registers = 168, .threads = 384},
+    {.registers = 169, .threads = 256}, {.registers = 254, .threads = 256},
+};
+
 CUcontext createContext() {
   REQUIRE(cuInit(0) == CUDA_SUCCESS);
   CUcontext context = nullptr;
@@ -192,6 +208,46 @@ TEST_CASE("CUDA kernel launch bounds limit the reported block size and the launc
   CHECK(cuLaunchKernel(bounded, 1, 1, 1, 16, 32, 1, 0, nullptr, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE);
   CHECK(fixture.launches.load() == launches);
   fixture.kernelLaunchBound(std::nullopt);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA function attributes limit the block size by the register count", "[cuda][function-attributes]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  for (const auto [registers, threads] : RegisterBlockLimits) {
+    CAPTURE(registers);
+    fixture.kernelResources({
+        .registerCount = registers,
+        .sharedSizeBytes = std::nullopt,
+        .constSizeBytes = std::nullopt,
+        .localSizeBytes = std::nullopt,
+    });
+    CHECK(functionAttribute(loadKernel(ConstReferenced80, "k_const80"), CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK) == threads);
+  }
+  fixture.kernelResources({});
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA kernel launch rejects a block past the register limit as out of resources", "[cuda][function-attributes]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  fixture.kernelResources({
+      .registerCount = 254,
+      .sharedSizeBytes = std::nullopt,
+      .constSizeBytes = std::nullopt,
+      .localSizeBytes = std::nullopt,
+  });
+  auto *const function = loadKernel(ConstReferenced80, "k_const80");
+  CUdeviceptr allocation = 0;
+  REQUIRE(cuMemAlloc_v2(&allocation, 1024) == CUDA_SUCCESS);
+  uint32_t seed = 0;
+  void *arguments[]{&allocation, &seed};
+  fixture.expect({.local = 256, .groups = 1, .global = 256, .offset = 0, .seed = 0});
+  CHECK(cuLaunchKernel(function, 1, 1, 1, 256, 1, 1, 0, nullptr, arguments, nullptr) == CUDA_SUCCESS);
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(cuLaunchKernel(function, 1, 1, 1, 257, 1, 1, 0, nullptr, arguments, nullptr) == CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES);
+  fixture.kernelResources({});
+  CHECK(cuMemFree_v2(allocation) == CUDA_SUCCESS);
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 

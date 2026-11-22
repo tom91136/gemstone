@@ -1923,6 +1923,7 @@ gemstone::TargetLimits activeTargetLimits() {
       .maxSharedMemoryPerBlock = 49152,
       .reservedSharedMemoryPerBlock = 0,
       .sharedMemoryGranule = 256,
+      .clusterLaunch = false,
   };
 }
 
@@ -1934,6 +1935,27 @@ CUresult occupancyMaxBlocks(int *blocks, int blockSize) {
   if (blockSize > limits.maxThreadsPerBlock) return CUDA_ERROR_INVALID_VALUE;
   const int warps = (blockSize + 31) / 32;
   *blocks = std::max(1, std::min(limits.maxBlocksPerMultiprocessor, limits.maxWarpsPerMultiprocessor / warps));
+  return CUDA_SUCCESS;
+}
+
+int64_t registerAllocationPerSubgroup(const gemstone::TargetLimits &limits, int registers) {
+  const int64_t bytes = static_cast<int64_t>(registers) * device_limits::WarpSize;
+  return ((bytes + limits.registerGranule - 1) / limits.registerGranule) * limits.registerGranule;
+}
+
+int registerBlockLimit(const gemstone::TargetLimits &limits, int registers) {
+  if (registers <= 0) return limits.maxThreadsPerBlock;
+  const int64_t warps = limits.maxRegistersPerBlock / registerAllocationPerSubgroup(limits, registers);
+  const int64_t aligned = warps / limits.partitions * limits.partitions;
+  return static_cast<int>(std::min<int64_t>(limits.maxThreadsPerBlock, aligned * device_limits::WarpSize));
+}
+
+CUresult functionMaxThreads(const void *function, int *value) {
+  int registers = 0;
+  int maxThreads = 0;
+  if (const auto status = functionField(function, &Function::registerCount, &registers); status != CUDA_SUCCESS) return status;
+  if (const auto status = functionField(function, &Function::maxThreadsPerBlock, &maxThreads); status != CUDA_SUCCESS) return status;
+  *value = std::min(maxThreads, registerBlockLimit(activeTargetLimits(), registers));
   return CUDA_SUCCESS;
 }
 
@@ -4870,7 +4892,7 @@ CUresult cuFuncGetAttribute(int *value, CUfunction_attribute attribute, CUfuncti
   if (!value || !function) return CUDA_ERROR_INVALID_VALUE;
   switch (attribute) {
     case CU_FUNC_ATTRIBUTE_NUM_REGS: return functionField(function, &Function::registerCount, value);
-    case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: return functionField(function, &Function::maxThreadsPerBlock, value);
+    case CU_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK: return functionMaxThreads(function, value);
     case CU_FUNC_ATTRIBUTE_PTX_VERSION:
     case CU_FUNC_ATTRIBUTE_BINARY_VERSION: {
       const auto version = registeredPtxVersion(function);
@@ -4903,7 +4925,7 @@ CUresult cuFuncSetAttribute(CUfunction function, CUfunction_attribute attribute,
     case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_HEIGHT:
     case CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_DEPTH:
       if (value < 0) return CUDA_ERROR_INVALID_VALUE;
-      if (value > 16) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
+      if (value > 16 && activeTargetLimits().clusterLaunch) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
       return functionClusterAttribute(function, attribute, &value, true);
     default: return CUDA_SUCCESS;
   }
@@ -4935,8 +4957,7 @@ CUresult occupancyActiveBlocks(int *blocks, CUfunction function, int blockSize, 
 
   int64_t byRegisters = std::numeric_limits<int64_t>::max();
   if (numRegs > 0) {
-    const int64_t perSubgroup =
-        ((((static_cast<int64_t>(numRegs) * subgroupSize) + limits.registerGranule) - 1) / limits.registerGranule) * limits.registerGranule;
+    const int64_t perSubgroup = registerAllocationPerSubgroup(limits, numRegs);
     const int64_t warpsAligned = (((perWorkgroup + limits.partitions) - 1) / limits.partitions) * limits.partitions;
     const bool tooMany =
         (perSubgroup * warpsAligned > limits.maxRegistersPerBlock) || (perSubgroup * perWorkgroup > limits.maxRegistersPerBlock);
@@ -5099,6 +5120,7 @@ CUresult cuOccupancyMaxActiveClusters(int *clusters, CUfunction function, const 
     dimensions = requested;
   }
   if (!dimensions) return CUDA_ERROR_INVALID_VALUE;
+  if (!limits.clusterLaunch) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
   const std::array grid{config->gridDimX, config->gridDimY, config->gridDimZ};
   for (size_t axis = 0; axis < grid.size(); ++axis)
     if (grid[axis] == 0 || (*dimensions)[axis] == 0 || grid[axis] % (*dimensions)[axis] != 0) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
@@ -5150,6 +5172,8 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
     const auto [entry, required] = findLaunchFunction(function);
     if (!entry) return CUDA_ERROR_INVALID_VALUE;
     if (static_cast<uint64_t>(blockX) * blockY * blockZ > static_cast<uint64_t>(entry->maxThreadsPerBlock)) return CUDA_ERROR_INVALID_VALUE;
+    const auto registerThreads = registerBlockLimit(activeTargetLimits(), entry->registerCount);
+    if (static_cast<uint64_t>(blockX) * blockY * blockZ > static_cast<uint64_t>(registerThreads)) return CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES;
     std::vector<void *> packedParameters;
     if (extra) {
       uint8_t *buffer = nullptr;
@@ -5258,6 +5282,7 @@ CUresult cuLaunchKernelEx(const CUlaunchConfig *config, CUfunction function, voi
       // A preferred shape is a scheduling hint over the required one, which the VM always honours.
       case CU_LAUNCH_ATTRIBUTE_PREFERRED_CLUSTER_DIMENSION: break;
       case CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION: {
+        if (!activeTargetLimits().clusterLaunch) return CUDA_ERROR_INVALID_CLUSTER_SIZE;
         const auto [x, y, z] = clusterDimension(attribute);
         if (x == 0 || y == 0 || z == 0 || config->gridDimX % x != 0 || config->gridDimY % y != 0 || config->gridDimZ % z != 0)
           return CUDA_ERROR_INVALID_VALUE;
@@ -6116,7 +6141,7 @@ cudaError_t cudaGetDeviceProperties(cudaDeviceProp *properties, int device) {
 cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attributes, const void *function) {
   if (!attributes || !function) return cudaErrorInvalidValue;
   std::memset(attributes, 0, offsetof(cudaFuncAttributes, preferredShmemCarveout) + sizeof(attributes->preferredShmemCarveout));
-  if (const auto status = functionField(function, &Function::maxThreadsPerBlock, &attributes->maxThreadsPerBlock); status != CUDA_SUCCESS)
+  if (const auto status = functionMaxThreads(function, &attributes->maxThreadsPerBlock); status != CUDA_SUCCESS)
     return runtimeStatus(status);
   if (const auto status = functionField(function, &Function::registerCount, &attributes->numRegs); status != CUDA_SUCCESS)
     return runtimeStatus(status);

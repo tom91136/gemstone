@@ -43,6 +43,7 @@ class ProfileCostSuite extends Suite {
     registerGranule = Sourced(256, documented),
     laneRegisters = Sourced(255, documented),
     workgroupRegisters = Some(Sourced(65536, documented)),
+    clusterLaunch = None,
     shared = Sourced(102400, documented),
     workgroupShared = Sourced(49152, documented),
     reservedShared = Sourced(1024, documented),

@@ -23,7 +23,8 @@ object GenerateTargetLimits {
          |    .maxSharedMemoryPerMultiprocessor = ${l.shared.value},
          |    .maxSharedMemoryPerBlock = ${l.workgroupShared.value},
          |    .reservedSharedMemoryPerBlock = ${l.reservedShared.value},
-         |    .sharedMemoryGranule = ${l.sharedGranule.value}
+         |    .sharedMemoryGranule = ${l.sharedGranule.value},
+         |    .clusterLaunch = ${l.clusterLaunch.fold(false)(_.value)}
          |  };""".stripMargin
     }
     GeneratedHeader.cpp("from the Architecture table") +
@@ -46,6 +47,7 @@ object GenerateTargetLimits {
          |  int32_t maxSharedMemoryPerBlock;
          |  int32_t reservedSharedMemoryPerBlock;
          |  int32_t sharedMemoryGranule;
+         |  bool clusterLaunch;
          |};
          |
          |inline std::optional<TargetLimits> targetLimits(std::string_view target) noexcept {

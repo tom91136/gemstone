@@ -470,7 +470,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   REQUIRE((cuModuleLoadData(&module, ptx.c_str()) == CUDA_SUCCESS));
   CUfunction clustered = nullptr;
   REQUIRE((cuModuleGetFunction(&clustered, module, "probe") == CUDA_SUCCESS));
-  CHECK((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 17) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
+  CHECK((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 17) == CUDA_SUCCESS));
   CHECK((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 2) == CUDA_SUCCESS));
   REQUIRE((cuFuncSetAttribute(clustered, CU_FUNC_ATTRIBUTE_REQUIRED_CLUSTER_WIDTH, 1) == CUDA_SUCCESS));
   int clusterWidth = -1;
@@ -492,7 +492,7 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   CHECK((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForOne, clustered, 0, 256) == CUDA_ERROR_INVALID_VALUE));
   CHECK((cuOccupancyAvailableDynamicSMemPerBlock(&sharedForOne, clustered, 2, 1024) == CUDA_ERROR_INVALID_VALUE));
   config.gridDimX = 3;
-  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
   attribute.value.clusterDim = {.x = 17, .y = 1, .z = 1};
   config.gridDimX = 17;
   CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
@@ -503,15 +503,13 @@ TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin 
   config.blockDimX = 128;
   config.sharedMemBytes = 98304; // Exact cuBLAS Hopper catalogue capacity probe.
   int activeClusters = -1;
-  REQUIRE((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_SUCCESS));
-  CHECK(activeClusters > 0);
+  CHECK((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
   attribute.value.clusterDim = {.x = 1, .y = 1, .z = 1};
-  REQUIRE((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_SUCCESS));
-  CHECK(activeClusters > 0);
+  CHECK((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
   attribute.value.clusterDim = {.x = 2, .y = 1, .z = 1};
   CHECK((cuOccupancyMaxActiveClusters(&activeClusters, clustered, &config) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
   attribute.value.clusterDim = {.x = 0, .y = 1, .z = 1};
-  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_CLUSTER_SIZE));
   config.attrs = nullptr;
   CHECK((cuLaunchKernelEx(&config, clustered, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
   REQUIRE((cuModuleUnload(module) == CUDA_SUCCESS));
