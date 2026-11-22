@@ -12,7 +12,7 @@ object RewriteSearchRunner {
 
   private val usage =
     "usage: RewriteSearchRunner <code-object> <kernel> <target> [--seed n] [--budget n] [--temperature t] " +
-      "[--window n] [--lanes n] [--shared bytes] [--placement n,n,...] [--record groups [--arguments n,n,...]]"
+      "[--window n] [--lanes n] [--shared bytes] [--placement n,n,...] [--record groups [--arguments arg,arg,...]]"
 
   private val flags = Set(
     "--seed",
@@ -27,8 +27,7 @@ object RewriteSearchRunner {
   )
 
   /** The launch the flags state. `--record` has the VM launch that many workgroups of `--lanes` lanes of the kernel and
-    * costs from what it records, with one value of `--arguments` for each kernel parameter: a scalar's value, or the
-    * size in bytes of a zeroed buffer.
+    * costs from what it records, with one [[LaunchArgument]] of `--arguments` for each kernel parameter.
     */
   private def launch(
       image: Vec[Byte],
@@ -38,9 +37,9 @@ object RewriteSearchRunner {
   ): Either[String, AMDGPUBlockCost.Launch] = {
     val placement =
       options.get("--placement").map(text => PipelineSimulator.Placement(Vec.from(text.split(',').map(_.toInt))))
-    val arguments = options.get("--arguments").map(text => Vec.from(text.split(',').map(_.toLong)))
     for {
-      fallback <- if (sass(target)) Right(SASSLanes)
+      arguments <- options.get("--arguments").fold(Right(None))(LaunchArgument.parse(_).map(Some(_)))
+      fallback  <- if (sass(target)) Right(SASSLanes)
       else target.refine[Target].left.map(_.raw).map(TargetDefaults.waveSize(_).raw)
       lanes  <- options.get("--lanes").fold(fallback)(_.toInt).refine[Int > 0].left.map(_.raw)
       stated <- options.get("--record") match {

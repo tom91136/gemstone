@@ -122,7 +122,7 @@ class LoadedProgram(
             KernelMetadata.Parameter(
               parameter.size,
               parameter.offset,
-              KernelMetadata.ParameterKind.Scalar,
+              if (parameter.pointer) KernelMetadata.ParameterKind.Allocation else KernelMetadata.ParameterKind.Scalar,
               containsPointers = true
             )
           ),

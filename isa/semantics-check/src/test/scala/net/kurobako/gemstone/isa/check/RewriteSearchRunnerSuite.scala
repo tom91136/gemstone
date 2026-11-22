@@ -72,7 +72,7 @@ class RewriteSearchRunnerSuite extends Suite {
   fixture(
     WindowFixtures.streaming.raw,
     WindowFixtures.stream,
-    Array("--lanes", "32", "--placement", "1,0,0,0", "--record", "1", "--arguments", "4096,4096,5"),
+    Array("--lanes", "32", "--placement", "1,0,0,0", "--record", "1", "--arguments", "buffer:4096,buffer:4096,i32:5"),
     AMDGPUBlockCost.Launch.Recorded(
       LaunchRecording.record(
         Language.AMDGPU,
@@ -80,7 +80,7 @@ class RewriteSearchRunnerSuite extends Suite {
         WindowFixtures.streaming.raw,
         32,
         1,
-        Vec(4096L, 4096L, 5L)
+        LaunchFixtures.arguments("buffer:4096,buffer:4096,i32:5")
       )
         .toOption.get,
       launch.placement
@@ -144,10 +144,17 @@ class RewriteSearchRunnerSuite extends Suite {
           "--record",
           "1",
           "--arguments",
-          "4096,1,2,3"
+          "buffer:4096,i32:1,i32:2,i32:3"
         )
       )
-      val stream = LaunchRecording.record(Language.SASS, SASSFixtures.arithmetic, kernel, 32, 1, Vec(4096L, 1L, 2L, 3L))
+      val stream = LaunchRecording.record(
+        Language.SASS,
+        SASSFixtures.arithmetic,
+        kernel,
+        32,
+        1,
+        LaunchFixtures.arguments("buffer:4096,i32:1,i32:2,i32:3")
+      )
         .fold(fail(_), identity)
       val recorded = AMDGPUBlockCost.Launch.Recorded(stream, None)
       val small    = config.copy(budget = 8)

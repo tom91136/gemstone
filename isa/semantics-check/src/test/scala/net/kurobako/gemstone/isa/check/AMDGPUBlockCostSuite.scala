@@ -66,7 +66,7 @@ class AMDGPUBlockCostSuite extends Suite {
 
   private val trips = 5L
 
-  private def launched(image: Vec[Byte], kernel: String, arguments: Vec[Long] = Vec.empty): ProfileStream =
+  private def launched(image: Vec[Byte], kernel: String, arguments: Vec[LaunchArgument] = Vec.empty): ProfileStream =
     LaunchRecording.record(Language.AMDGPU, image, kernel, 32, 1, arguments).fold(fail(_), identity)
 
   private def recorded(stream: ProfileStream): AMDGPUBlockCost.Launch =
@@ -95,7 +95,7 @@ class AMDGPUBlockCostSuite extends Suite {
   test("a recorded launch costs an unmodified loop that loads and stores as the dynamic view of the launch does") {
     val image            = WindowFixtures.stream
     val kernel           = WindowFixtures.streaming.raw
-    val stream           = launched(image, kernel, Vec(4096L, 4096L, trips))
+    val stream           = launched(image, kernel, LaunchFixtures.arguments(s"buffer:4096,buffer:4096,i32:$trips"))
     val (window, code)   = spanning(image, kernel, "v_fma_f32", "v_mov_b32 v7")
     val (region, status) = looped(stream)
     assertEquals(region.members.map(_.issues).distinct, Vec(trips))
@@ -116,14 +116,14 @@ class AMDGPUBlockCostSuite extends Suite {
       "hidden_args",
       32,
       1,
-      Vec(4096L, 4096L, 5L)
+      LaunchFixtures.arguments("buffer:4096,buffer:4096,i32:5")
     ).isRight)
   }
 
   test("a rewrite of a recorded loop costs what a launch of the rewritten kernel records") {
     val image          = WindowFixtures.stream
     val kernel         = WindowFixtures.streaming.raw
-    val arguments      = Vec(4096L, 4096L, trips)
+    val arguments      = LaunchFixtures.arguments(s"buffer:4096,buffer:4096,i32:$trips")
     val (window, code) = spanning(image, kernel, "v_fma_f32", "v_mov_b32 v7")
     val cost           =
       AMDGPUBlockCost.of(image, kernel, target, recorded(launched(image, kernel, arguments))).fold(fail(_), identity)
@@ -144,7 +144,7 @@ class AMDGPUBlockCostSuite extends Suite {
   test("a rewrite whose memory instructions the recorded launch does not cover is refused with the reason") {
     val image          = WindowFixtures.stream
     val kernel         = WindowFixtures.streaming.raw
-    val stream         = launched(image, kernel, Vec(4096L, 4096L, trips))
+    val stream         = launched(image, kernel, LaunchFixtures.arguments(s"buffer:4096,buffer:4096,i32:$trips"))
     val (window, code) = spanning(image, kernel, "s_add_u32 s0", "s_load_dword s9")
     val cost           = AMDGPUBlockCost.of(image, kernel, target, recorded(stream)).fold(fail(_), identity)
     val whole          = cost.cost(window, code)
@@ -190,7 +190,7 @@ class AMDGPUBlockCostSuite extends Suite {
   test("an instruction that does nothing never costs a block less") {
     val kernel    = "clover_flux"
     val image     = WindowFixtures.flux
-    val arguments = Vec.fill(8)(1048576L) ++ Vec(256L, 16L, java.lang.Double.doubleToLongBits(1.0))
+    val arguments = LaunchFixtures.arguments(Vec.fill(8)("buffer:1048576").mkString(",") + ",i32:256,i32:16,f64:1.0")
     val stream    = LaunchRecording.record(Language.AMDGPU, image, kernel, 128, 2, arguments).fold(fail(_), identity)
     val cost      = AMDGPUBlockCost.of(image, kernel, target, AMDGPUBlockCost.Launch.Recorded(stream, None))
       .fold(fail(_), identity)

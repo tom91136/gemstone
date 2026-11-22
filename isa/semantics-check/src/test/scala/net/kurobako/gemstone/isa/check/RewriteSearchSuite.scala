@@ -110,7 +110,14 @@ class RewriteSearchSuite extends Suite {
     val stated = RewriteSearch.amdgpu(image, function, target, window, oneWave)
     assert(stated.left.exists(_.startsWith("no recorded memory traffic for ")), stated)
     def recorded(of: Vec[Byte]) =
-      LaunchRecording.record(Language.AMDGPU, of, function, 32, 1, Vec(4096L, 4096L, 5L)).fold(fail(_), identity)
+      LaunchRecording.record(
+        Language.AMDGPU,
+        of,
+        function,
+        32,
+        1,
+        LaunchFixtures.arguments("buffer:4096,buffer:4096,i32:5")
+      ).fold(fail(_), identity)
     val launch   = AMDGPUBlockCost.Launch.Recorded(recorded(image), oneWave.placement)
     val report   = RewriteSearch.amdgpu(image, function, target, window, launch).fold(fail(_), identity)
     val kept     = Vec.from(window.first to window.last).map(text(_)).filterNot(_.startsWith("v_mov_b32"))
@@ -133,7 +140,14 @@ class RewriteSearchSuite extends Suite {
 
   private def recording(image: Vec[Byte], function: String) =
     AMDGPUBlockCost.Launch.Recorded(
-      LaunchRecording.record(Language.AMDGPU, image, function, 32, 1, Vec(4096L, 4096L, 5L)).fold(fail(_), identity),
+      LaunchRecording.record(
+        Language.AMDGPU,
+        image,
+        function,
+        32,
+        1,
+        LaunchFixtures.arguments("buffer:4096,buffer:4096,i32:5")
+      ).fold(fail(_), identity),
       oneWave.placement
     )
 

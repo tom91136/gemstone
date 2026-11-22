@@ -17,6 +17,15 @@ object SASSFixtures {
       getClass.getResourceAsStream(s"/net/kurobako/gemstone/isa/sass/controlwords/$name").readAllBytes()
     )
 
+  /** `search/typed.c` as `search/compile.sh` builds it: `scale(float *out, const float *in, const int *count, double
+    * factor)`, whose cubin marks its pointers.
+    */
+  lazy val typed: Vec[Byte] = {
+    val stream = getClass.getResourceAsStream("search/typed.sm_89.cubin")
+    try Vec.from(stream.readAllBytes())
+    finally stream.close()
+  }
+
   private val source =
     """IADD3 R2, R2, 0x1, RZ ;
       |IADD3 R4, R2, 0x2, RZ ;

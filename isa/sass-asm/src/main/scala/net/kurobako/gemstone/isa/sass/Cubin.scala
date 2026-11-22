@@ -26,7 +26,7 @@ object Cubin {
   ) {
     def isRelocation: Boolean = kind == SectionType.RelocationWithAddend || kind == SectionType.Relocation
   }
-  case class Parameter(ordinal: Int >= 0, offset: Int >= 0, size: Int > 0)
+  case class Parameter(ordinal: Int >= 0, offset: Int >= 0, size: Int > 0, pointer: Boolean = false)
   case class Kernel(
       name: NonEmpty[String],
       section: Int >= 0,
@@ -770,7 +770,8 @@ object Cubin {
         } yield Parameter(
           LittleEndian.decodeUInt16(value, 4).widen[Int >= 0],
           LittleEndian.decodeUInt16(value, 6).widen[Int >= 0],
-          size
+          size,
+          ((LittleEndian.decodeInt32(value, 8) >>> 8) & 0xf) != 0
         )
       }.sequence.map(_.sortBy(_.ordinal))
       bank <- attrs.collectFirst { case (0x0a, value) =>

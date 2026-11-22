@@ -66,7 +66,7 @@ class SASSBlockCostSuite extends Suite {
   private val sum       = SASSFixtures.sum
   private val loops     = SASSFixtures.cubin(SASSFixtures.loops)
   private val trips     = 3L
-  private val arguments = Vec(4096L, 4096L, 4L + trips)
+  private val arguments = LaunchFixtures.arguments(s"buffer:4096,buffer:4096,i32:${4L + trips}")
 
   private def launched(image: Vec[Byte]): ProfileStream =
     LaunchRecording.record(Language.SASS, image, sum, 32, 1, arguments).fold(fail(_), identity)
@@ -130,7 +130,14 @@ class SASSBlockCostSuite extends Suite {
   }
 
   test("a recording of another kernel is refused") {
-    val other = LaunchRecording.record(Language.SASS, loops, "collatz", 32, 1, Vec(4096L, 5L)).fold(fail(_), identity)
+    val other = LaunchRecording.record(
+      Language.SASS,
+      loops,
+      "collatz",
+      32,
+      1,
+      LaunchFixtures.arguments("buffer:4096,i32:5")
+    ).fold(fail(_), identity)
     val found = SASSBlockCost.of(loops, sum, targetName, AMDGPUBlockCost.Launch.Recorded(other, None))
     assert(found.left.exists(_.contains("is not a launch of this sumloop")), found.map(_ => ()))
   }
