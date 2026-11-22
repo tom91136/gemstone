@@ -1,4 +1,7 @@
+#include <array>
+#include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <limits>
 #include <string>
@@ -453,4 +456,160 @@ TEST_CASE("CUDA occupancy calculator scales grid size with selected device prese
   CHECK(minGridSize % 84 == 0);
   REQUIRE(cuModuleUnload(module) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+namespace {
+
+constexpr std::array<unsigned char, 16> ToolsInterfaceId{0x41, 0xae, 0x71, 0x7d, 0xa9, 0xeb, 0xa6, 0x4f,
+                                                         0x99, 0x9b, 0xe3, 0xc2, 0x7f, 0x3c, 0x14, 0x0f};
+
+using ToolsRequest = CUresult (*)(void *);
+
+struct ToolsDeviceInfo {
+  uint32_t size = 0;
+  uint32_t architecture = 0;
+  uint32_t implementation = 0;
+  uint32_t revision = 0;
+  uint32_t major = 0;
+  uint32_t minor = 0;
+  uint32_t reserved = 0;
+  uint32_t token = 0;
+};
+
+struct ToolsDeviceInfoRequest {
+  uint32_t size = 0;
+  uint32_t token = 0;
+  uint64_t reserved = 0;
+  ToolsDeviceInfo *info = nullptr;
+};
+
+struct ToolsHandleRequest {
+  uint32_t size = 0;
+  uint32_t device = 0;
+  uint64_t reserved[2] = {};
+  uint64_t handle = 0;
+};
+
+struct ToolsClockRequest {
+  uint32_t size = 0;
+  uint32_t kind = 0;
+  uint64_t *times = nullptr;
+  uint64_t count = 0;
+  uint64_t handle = 0;
+};
+
+const void *const *toolsDeviceInterface() {
+  const void *table = nullptr;
+  REQUIRE(cuGetExportTable(&table, reinterpret_cast<const CUuuid *>(ToolsInterfaceId.data())) == CUDA_SUCCESS);
+  const auto *const slots = static_cast<const void *const *>(table);
+  CHECK(reinterpret_cast<uintptr_t>(slots[0]) == 16);
+  const auto lookup = reinterpret_cast<void *(*)(int)>(reinterpret_cast<uintptr_t>(slots[1]));
+  for (int kind = 0; kind <= 8; ++kind)
+    if (kind != 4) CHECK(lookup(kind) == nullptr);
+  return static_cast<const void *const *>(lookup(4));
+}
+
+template <class Request> CUresult toolsCall(const void *const *interface, size_t slot, Request &request) {
+  return reinterpret_cast<ToolsRequest>(reinterpret_cast<uintptr_t>(interface[slot]))(&request);
+}
+
+} // namespace
+
+TEST_CASE("CUDA tools device interface is a 768-byte version 4 table that refuses what it does not implement", "[cuda][limits]") {
+  const auto *const interface = toolsDeviceInterface();
+  REQUIRE(interface != nullptr);
+  CHECK(reinterpret_cast<uintptr_t>(interface[0]) == 0x0000000400000300);
+  for (size_t slot = 1; slot < 96; ++slot)
+    CHECK(interface[slot] != nullptr);
+  const auto refused = reinterpret_cast<CUresult (*)()>(reinterpret_cast<uintptr_t>(interface[1]));
+  CHECK(refused() == CUDA_ERROR_NOT_SUPPORTED);
+}
+
+TEST_CASE("CUDA tools device info reports the silicon identity of the target", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  createContext();
+  const auto *const interface = toolsDeviceInterface();
+  REQUIRE(interface != nullptr);
+  ToolsDeviceInfo info{.size = 0x20};
+  ToolsDeviceInfoRequest request{.size = 0x20, .token = 0x100, .info = &info};
+  CHECK(toolsCall(interface, 9, request) == CUDA_SUCCESS);
+  CHECK(info.size == 0x20);
+  CHECK(info.architecture == 0x190);
+  CHECK(info.implementation == 6);
+  CHECK(info.revision == 0xa1);
+  CHECK(info.major == 8);
+  CHECK(info.minor == 9);
+  CHECK(info.reserved == 0);
+  CHECK(info.token == 0x100);
+
+  ToolsDeviceInfo untouched{.size = 0x20};
+  ToolsDeviceInfoRequest shortRequest{.size = 0x10, .token = 0x100, .info = &untouched};
+  CHECK(toolsCall(interface, 9, shortRequest) == 5);
+  ToolsDeviceInfoRequest wrongToken{.size = 0x20, .token = 0x101, .info = &untouched};
+  CHECK(toolsCall(interface, 9, wrongToken) == 2);
+  ToolsDeviceInfo shortInfo{.size = 0x10};
+  ToolsDeviceInfoRequest shortOutput{.size = 0x20, .token = 0x100, .info = &shortInfo};
+  CHECK(toolsCall(interface, 9, shortOutput) == 5);
+  CHECK(untouched.architecture == 0);
+}
+
+TEST_CASE("CUDA tools device info refuses a target without a chip identity", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_75");
+  createContext();
+  const auto *const interface = toolsDeviceInterface();
+  REQUIRE(interface != nullptr);
+  ToolsDeviceInfo info{.size = 0x20};
+  ToolsDeviceInfoRequest request{.size = 0x20, .token = 0x100, .info = &info};
+  CHECK(toolsCall(interface, 9, request) == CUDA_ERROR_NOT_SUPPORTED);
+  CHECK(info.architecture == 0);
+}
+
+TEST_CASE("CUDA tools device handles are distinct per request and reject unknown devices", "[cuda][limits]") {
+  createContext();
+  const auto *const interface = toolsDeviceInterface();
+  REQUIRE(interface != nullptr);
+  ToolsHandleRequest first{.size = 0x20};
+  ToolsHandleRequest second{.size = 0x20};
+  CHECK(toolsCall(interface, 4, first) == CUDA_SUCCESS);
+  CHECK(toolsCall(interface, 4, second) == CUDA_SUCCESS);
+  CHECK(first.handle != 0);
+  CHECK(first.handle != second.handle);
+  ToolsHandleRequest missing{.size = 0x20, .device = 77};
+  CHECK(toolsCall(interface, 4, missing) == 7);
+  CHECK(missing.handle == 0);
+}
+
+TEST_CASE("CUDA tools clock reports a device time and the host time", "[cuda][limits]") {
+  createContext();
+  const auto *const interface = toolsDeviceInterface();
+  REQUIRE(interface != nullptr);
+  ToolsHandleRequest handle{.size = 0x20};
+  REQUIRE(toolsCall(interface, 4, handle) == CUDA_SUCCESS);
+  const auto before = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  uint64_t times[2] = {0, 0};
+  ToolsClockRequest request{.size = 0x20, .kind = 2, .times = times, .count = 1, .handle = handle.handle};
+  CHECK(toolsCall(interface, 29, request) == CUDA_SUCCESS);
+  const auto after = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  CHECK(times[0] != 0);
+  CHECK(static_cast<int64_t>(times[1]) >= before);
+  CHECK(static_cast<int64_t>(times[1]) <= after);
+  uint64_t later[2] = {0, 0};
+  request.times = later;
+  CHECK(toolsCall(interface, 29, request) == CUDA_SUCCESS);
+  CHECK(later[0] >= times[0]);
+  request.kind = 3;
+  CHECK(toolsCall(interface, 29, request) == CUDA_ERROR_NOT_SUPPORTED);
+  request.times = nullptr;
+  CHECK(toolsCall(interface, 29, request) == CUDA_ERROR_INVALID_VALUE);
+}
+
+TEST_CASE("CUDA tools device interface accepts its bookkeeping requests and reports the unsupported one", "[cuda][limits]") {
+  createContext();
+  const auto *const interface = toolsDeviceInterface();
+  REQUIRE(interface != nullptr);
+  ToolsHandleRequest handle{.size = 0x20};
+  REQUIRE(toolsCall(interface, 4, handle) == CUDA_SUCCESS);
+  for (const size_t slot : {size_t{62}, size_t{65}, size_t{72}})
+    CHECK(toolsCall(interface, slot, handle) == CUDA_SUCCESS);
+  CHECK(toolsCall(interface, 12, handle) == 12);
 }

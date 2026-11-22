@@ -2596,6 +2596,13 @@ struct ToolsTableSpec {
   std::string_view id;
   size_t bytes;
   bool refusedAfterTeardown = false;
+  const char *label = nullptr;
+  uint64_t header = 0;
+  bool exported = true;
+
+  [[nodiscard]] constexpr std::string_view name() const { return label ? std::string_view{label} : id.substr(0, 8); }
+  [[nodiscard]] constexpr std::string_view key() const { return label ? std::string_view{label} : id; }
+  [[nodiscard]] constexpr uint64_t firstWord() const { return header ? header : bytes; }
 };
 
 constexpr std::array ToolsTableSpecs{
@@ -2604,6 +2611,11 @@ constexpr std::array ToolsTableSpecs{
     ToolsTableSpec{.id = "7cb63f9b9ca48e42a484beb66e6aed7f", .bytes = 560, .refusedAfterTeardown = true},
     ToolsTableSpec{.id = "21318c60971432488ca641ff7324c8f2", .bytes = 768},
     ToolsTableSpec{.id = "41ae717da9eba64f999be3c27f3c140f", .bytes = 16},
+    ToolsTableSpec{.id = "41ae717da9eba64f999be3c27f3c140f",
+                   .bytes = 768,
+                   .label = "41ae717d kind 4",
+                   .header = 0x0000000400000300,
+                   .exported = false},
     ToolsTableSpec{.id = "fc58ac1a057c444fa97772ee9aefdb89", .bytes = 56},
     ToolsTableSpec{.id = "b10541e1f7c7c74a9f64f223be99f1e2", .bytes = 272},
     ToolsTableSpec{.id = "c98d1afaf2275b42b12dcd81b5f21ec1", .bytes = 40},
@@ -2644,7 +2656,97 @@ std::array<unsigned char, 16> exportTableId(std::string_view hex) {
   return id;
 }
 
-void *toolsInterfaceOfKind(int) { return nullptr; }
+const void *toolsInterfaceOfKind(int kind);
+
+constexpr uint32_t ToolsRequestSize = 0x20;
+constexpr uint32_t ToolsDeviceToken = 0x100;
+constexpr CUresult ToolsStatusBadToken = static_cast<CUresult>(2);
+constexpr CUresult ToolsStatusBadSize = static_cast<CUresult>(5);
+constexpr CUresult ToolsStatusBadDevice = static_cast<CUresult>(7);
+constexpr CUresult ToolsStatusUnsupported = static_cast<CUresult>(12);
+constexpr uint32_t ToolsClockKind = 2;
+
+struct ToolsDeviceInfo {
+  uint32_t size;
+  uint32_t architecture;
+  uint32_t implementation;
+  uint32_t revision;
+  uint32_t major;
+  uint32_t minor;
+  uint32_t reserved;
+  uint32_t token;
+};
+
+struct ToolsDeviceInfoRequest {
+  uint32_t size;
+  uint32_t token;
+  uint64_t reserved;
+  ToolsDeviceInfo *info;
+};
+
+struct ToolsHandleRequest {
+  uint32_t size;
+  uint32_t device;
+  uint64_t reserved[2];
+  uint64_t handle;
+};
+
+struct ToolsClockRequest {
+  uint32_t size;
+  uint32_t kind;
+  uint64_t *times;
+  uint64_t count;
+  uint64_t handle;
+};
+
+CUresult toolsDeviceInfo(ToolsDeviceInfoRequest *request) {
+  if (!request) return CUDA_ERROR_INVALID_VALUE;
+  if (request->size < ToolsRequestSize) return ToolsStatusBadSize;
+  if (request->token < ToolsDeviceToken || !validDevice(static_cast<int>(request->token - ToolsDeviceToken))) return ToolsStatusBadToken;
+  auto *const info = request->info;
+  if (!info) return CUDA_SUCCESS;
+  if (info->size < sizeof(ToolsDeviceInfo)) return ToolsStatusBadSize;
+  const auto memory = describedTargetMemory();
+  const auto capability = computeCapability();
+  if (!memory || !memory->architectureId || !memory->chipImplementation || !memory->chipRevision || !capability)
+    return reportFailure(CUDA_ERROR_NOT_SUPPORTED, "tools device info of a target without a chip identity");
+  *info = {.size = info->size,
+           .architecture = static_cast<uint32_t>(*memory->architectureId),
+           .implementation = static_cast<uint32_t>(*memory->chipImplementation),
+           .revision = static_cast<uint32_t>(*memory->chipRevision),
+           .major = static_cast<uint32_t>(capability->first),
+           .minor = static_cast<uint32_t>(capability->second),
+           .reserved = 0,
+           .token = request->token};
+  return CUDA_SUCCESS;
+}
+
+std::mutex toolsHandleMutex;
+std::deque<uint64_t> toolsHandles;
+
+CUresult toolsDeviceHandle(ToolsHandleRequest *request) {
+  if (!request) return CUDA_ERROR_INVALID_VALUE;
+  if (!validDevice(static_cast<int>(request->device))) return ToolsStatusBadDevice;
+  std::scoped_lock const lock{toolsHandleMutex};
+  request->handle = reinterpret_cast<uintptr_t>(&toolsHandles.emplace_back(toolsHandles.size()));
+  return CUDA_SUCCESS;
+}
+
+template <class Clock> uint64_t nanoseconds() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch()).count());
+}
+
+CUresult toolsClock(ToolsClockRequest *request) {
+  if (!request || !request->times) return CUDA_ERROR_INVALID_VALUE;
+  if (request->kind != ToolsClockKind) return reportFailure(CUDA_ERROR_NOT_SUPPORTED, "tools clock request of an unobserved kind");
+  request->times[0] = nanoseconds<std::chrono::steady_clock>();
+  request->times[1] = nanoseconds<std::chrono::system_clock>();
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsRequestAccepted(void *) { return CUDA_SUCCESS; }
+
+CUresult toolsRequestUnsupported(void *) { return ToolsStatusUnsupported; }
 
 template <class Function> const void *slotFunction(Function function) { return reinterpret_cast<const void *>(function); }
 
@@ -2665,15 +2767,23 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
     {"21318c60971432488ca641ff7324c8f2",
      {{4, slotFunction(driverMetadataQuery)}, {39, slotFunction(driverStreamId)}, {51, slotFunction(driverStreamHandle)}}},
     {"41ae717da9eba64f999be3c27f3c140f", {{1, slotFunction(toolsInterfaceOfKind)}}},
+    {"41ae717d kind 4",
+     {{4, slotFunction(toolsDeviceHandle)},
+      {9, slotFunction(toolsDeviceInfo)},
+      {12, slotFunction(toolsRequestUnsupported)},
+      {29, slotFunction(toolsClock)},
+      {62, slotFunction(toolsRequestAccepted)},
+      {65, slotFunction(toolsRequestAccepted)},
+      {72, slotFunction(toolsRequestAccepted)}}},
 };
 
 template <size_t Table, size_t Slot> CUresult refusedToolsSlot() {
-  const std::string where = "tools table " + std::string{ToolsTableSpecs[Table].id.substr(0, 8)} + " slot " + std::to_string(Slot);
+  const std::string where = "tools table " + std::string{ToolsTableSpecs[Table].name()} + " slot " + std::to_string(Slot);
   return reportFailure(CUDA_ERROR_NOT_SUPPORTED, where.c_str());
 }
 
 template <size_t Table, size_t... Slots> std::vector<const void *> refusingSlots(std::index_sequence<Slots...>) {
-  return {reinterpret_cast<const void *>(ToolsTableSpecs[Table].bytes),
+  return {reinterpret_cast<const void *>(ToolsTableSpecs[Table].firstWord()),
           reinterpret_cast<const void *>(&refusedToolsSlot<Table, Slots + 1>)...};
 }
 
@@ -2688,7 +2798,7 @@ template <size_t... Tables> std::vector<ToolsTable> buildToolsTables(std::index_
                      .slots = refusingSlots<Tables>(std::make_index_sequence<(ToolsTableSpecs[Tables].bytes / sizeof(void *)) - 1>{})}),
    ...);
   for (size_t i = 0; i < tables.size(); ++i)
-    if (const auto found = ToolsSlotOverrides.find(ToolsTableSpecs[i].id); found != ToolsSlotOverrides.end())
+    if (const auto found = ToolsSlotOverrides.find(ToolsTableSpecs[i].key()); found != ToolsSlotOverrides.end())
       for (const auto &[slot, function] : found->second)
         tables[i].slots[slot] = function;
   return tables;
@@ -2696,6 +2806,18 @@ template <size_t... Tables> std::vector<ToolsTable> buildToolsTables(std::index_
 
 const std::vector<ToolsTable> &toolsTables =
     *new const std::vector<ToolsTable>(buildToolsTables(std::make_index_sequence<ToolsTableSpecs.size()>{}));
+
+constexpr size_t toolsTableIndex(std::string_view key) {
+  size_t index = 0;
+  while (ToolsTableSpecs[index].key() != key)
+    ++index;
+  return index;
+}
+
+const void *toolsInterfaceOfKind(int kind) {
+  constexpr auto device = toolsTableIndex("41ae717d kind 4");
+  return kind == 4 ? toolsTables[device].slots.data() : nullptr;
+}
 
 struct ExportTable {
   const unsigned char *id = nullptr;
@@ -2715,9 +2837,10 @@ const std::vector<ExportTable> &exportTables = *new const std::vector<ExportTabl
       ExportTable{.id = ModuleEnumerationId, .table = moduleEnumerationTable},
   };
   for (size_t i = 0; i < toolsTables.size(); ++i)
-    tables.push_back({.id = toolsTables[i].id.data(),
-                      .table = toolsTables[i].slots.data(),
-                      .refusedAfterTeardown = ToolsTableSpecs[i].refusedAfterTeardown});
+    if (ToolsTableSpecs[i].exported)
+      tables.push_back({.id = toolsTables[i].id.data(),
+                        .table = toolsTables[i].slots.data(),
+                        .refusedAfterTeardown = ToolsTableSpecs[i].refusedAfterTeardown});
   return tables;
 }());
 

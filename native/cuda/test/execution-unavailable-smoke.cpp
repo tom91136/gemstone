@@ -501,14 +501,14 @@ TEST_CASE("CUDA tools tables CUPTI looks up are served at the size the driver re
   }
 }
 
-TEST_CASE("CUDA tools interface table offers no versioned interface", "[cuda]") {
+TEST_CASE("CUDA tools interface table offers the version 4 interface only", "[cuda]") {
   const auto *const table = toolsTable(ToolsInterfaceId);
   REQUIRE((table != nullptr));
   CHECK((reinterpret_cast<uintptr_t>(table[0]) == 16));
   const auto interfaceOfKind = tableEntry<ToolsInterfaceQuery>(table, 1);
   REQUIRE((interfaceOfKind != nullptr));
   for (int kind = 0; kind <= 8; ++kind)
-    CHECK((interfaceOfKind(kind) == nullptr));
+    CHECK(((interfaceOfKind(kind) != nullptr) == (kind == 4)));
 }
 
 TEST_CASE("CUDA tools tables refuse the slots they do not implement", "[cuda]") {
