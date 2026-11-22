@@ -473,19 +473,20 @@ TEST_CASE("CUDA tools driver-state run slot calls back with the current context"
 
 TEST_CASE("CUDA tools tables CUPTI looks up are served at the size the driver reports", "[cuda]") {
   using ToolsTableSize = std::pair<std::string_view, size_t>;
-  constexpr std::array<ToolsTableSize, 32> expected{{
-      {"fc58ac1a057c444fa97772ee9aefdb89", 56},  {"b10541e1f7c7c74a9f64f223be99f1e2", 272},  {"c98d1afaf2275b42b12dcd81b5f21ec1", 40},
-      {"c2db37e3c4754247b3a8a079f37202ec", 744}, {"b127870b49d29b44a1c1a118e26f1c14", 48},   {"b9fd53270628c24f87a9988cddf73089", 88},
-      {"35770f1b092e0348a48e056fc423968d", 80},  {"ff9ab8ee28d40e4cb3b7fd724a6277a8", 16},   {"bfdb432dbf3c5a4a945eb34029e81e75", 488},
-      {"a6b1ff99ecc4c94f92f91928663d5585", 256}, {"127d4831ee3357449742b8447b7a2364", 88},   {"c83963f617f7e241a5749143314dff9f", 96},
-      {"6fbd4b79aa8c8e46baf3c103b6d18e3c", 48},  {"1406180d72d6cb47ab6eb963e51bf4c6", 360},  {"06ac4921c9a9e61180f576304dec7eb7", 288},
-      {"a259cffb1846e8488957bfc72ceb58b8", 160}, {"fe605bbf8542924ca91268bee10b29e7", 56},   {"cc529e945c4e9d46837c9625868334e4", 184},
-      {"12458358a7c21e592177ef3556188709", 32},  {"a5987389dd8f6b4bbddbc24bf650aa18", 7016},
+  constexpr std::array<ToolsTableSize, 36> expected{{
+      {"2c8e0ad80710ab4e90dd54719fe5f74b", 96},  {"d7bd8af8e7acca4abdbcfb1f1b3fcf33", 112}, {"7cb63f9b9ca48e42a484beb66e6aed7f", 560},
+      {"21318c60971432488ca641ff7324c8f2", 768}, {"fc58ac1a057c444fa97772ee9aefdb89", 56},  {"b10541e1f7c7c74a9f64f223be99f1e2", 272},
+      {"c98d1afaf2275b42b12dcd81b5f21ec1", 40},  {"c2db37e3c4754247b3a8a079f37202ec", 744}, {"b127870b49d29b44a1c1a118e26f1c14", 48},
+      {"b9fd53270628c24f87a9988cddf73089", 88},  {"35770f1b092e0348a48e056fc423968d", 80},  {"ff9ab8ee28d40e4cb3b7fd724a6277a8", 16},
+      {"bfdb432dbf3c5a4a945eb34029e81e75", 488}, {"a6b1ff99ecc4c94f92f91928663d5585", 256}, {"127d4831ee3357449742b8447b7a2364", 88},
+      {"c83963f617f7e241a5749143314dff9f", 96},  {"6fbd4b79aa8c8e46baf3c103b6d18e3c", 48},  {"1406180d72d6cb47ab6eb963e51bf4c6", 360},
+      {"06ac4921c9a9e61180f576304dec7eb7", 288}, {"a259cffb1846e8488957bfc72ceb58b8", 160}, {"fe605bbf8542924ca91268bee10b29e7", 56},
+      {"cc529e945c4e9d46837c9625868334e4", 184}, {"12458358a7c21e592177ef3556188709", 32},  {"a5987389dd8f6b4bbddbc24bf650aa18", 7016},
 
-      {"41ae717da9eba64f999be3c27f3c140f", 16},  {"36b889606158f543bbd9ac633878b6b1", 40},   {"bd91fa4d185f964a8b17f3805601413f", 272},
-      {"7a7125c2f716ea118d71362b9e155667", 296}, {"32683f42be9652459950838b1c3de155", 184},  {"dccdd90889660045bb1f77598aca1133", 152},
-      {"5b618f5a1202684781e4a7765ac9f359", 144}, {"f6d3f4d92de380409f0c058cf1b2906b", 24},   {"0e7af9b33460794470edf020433b7ef9", 48},
-      {"e9ff28a90c61b4499c09e567201b05f0", 24},  {"1ad5eede0290c64eba8100f425b38aa5", 40},   {"e01b33cec3b7ce4dbe3caba233b1a9cc", 32},
+      {"41ae717da9eba64f999be3c27f3c140f", 16},  {"36b889606158f543bbd9ac633878b6b1", 40},  {"bd91fa4d185f964a8b17f3805601413f", 272},
+      {"7a7125c2f716ea118d71362b9e155667", 296}, {"32683f42be9652459950838b1c3de155", 184}, {"dccdd90889660045bb1f77598aca1133", 152},
+      {"5b618f5a1202684781e4a7765ac9f359", 144}, {"f6d3f4d92de380409f0c058cf1b2906b", 24},  {"0e7af9b33460794470edf020433b7ef9", 48},
+      {"e9ff28a90c61b4499c09e567201b05f0", 24},  {"1ad5eede0290c64eba8100f425b38aa5", 40},  {"e01b33cec3b7ce4dbe3caba233b1a9cc", 32},
   }};
   for (const auto &[hex, bytes] : expected) {
     std::array<unsigned char, 16> id{};
@@ -495,6 +496,8 @@ TEST_CASE("CUDA tools tables CUPTI looks up are served at the size the driver re
     const auto *const table = toolsTable(id);
     REQUIRE((table != nullptr));
     CHECK((reinterpret_cast<uintptr_t>(table[0]) == bytes));
+    for (size_t slot = 1; slot < bytes / sizeof(void *); ++slot)
+      CHECK((table[slot] != nullptr));
   }
 }
 
@@ -506,4 +509,20 @@ TEST_CASE("CUDA tools interface table offers no versioned interface", "[cuda]") 
   REQUIRE((interfaceOfKind != nullptr));
   for (int kind = 0; kind <= 8; ++kind)
     CHECK((interfaceOfKind(kind) == nullptr));
+}
+
+TEST_CASE("CUDA tools tables refuse the slots they do not implement", "[cuda]") {
+  using Refused = CUresult (*)();
+  constexpr std::array<unsigned char, 16> placeholder{0xfc, 0x58, 0xac, 0x1a, 0x05, 0x7c, 0x44, 0x4f,
+                                                      0xa9, 0x77, 0x72, 0xee, 0x9a, 0xef, 0xdb, 0x89};
+  const auto *const unserved = toolsTable(placeholder);
+  REQUIRE((unserved != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(unserved[0]) == 56));
+  for (size_t slot = 1; slot < 7; ++slot)
+    CHECK((tableEntry<Refused>(unserved, slot)() == CUDA_ERROR_NOT_SUPPORTED));
+  const auto *const partial = toolsTable(ToolsSubscriberId);
+  REQUIRE((partial != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(partial[0]) == 96));
+  CHECK((tableEntry<Refused>(partial, 3)() == CUDA_ERROR_NOT_SUPPORTED));
+  CHECK((tableEntry<Refused>(partial, 5)() == CUDA_ERROR_NOT_SUPPORTED));
 }

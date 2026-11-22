@@ -2163,16 +2163,8 @@ const unsigned char ToolsTlsId[16] = {0x42, 0xd8, 0x5a, 0x81, 0x23, 0xf6, 0xcb, 
 const unsigned char ContextLocalStorageId[16] = {0xc6, 0x93, 0x33, 0x6e, 0x11, 0x21, 0xdf, 0x11,
                                                  0xa8, 0xc3, 0x68, 0xf3, 0x55, 0xd8, 0x95, 0x93};
 const unsigned char ContextChecksId[16] = {0x26, 0x3e, 0x88, 0x60, 0x7c, 0xd2, 0x61, 0x43, 0x92, 0xf6, 0xbb, 0xd5, 0x00, 0x6d, 0xfa, 0x7e};
-const unsigned char DriverMetadataInterfaceId[16] = {0x21, 0x31, 0x8c, 0x60, 0x97, 0x14, 0x32, 0x48,
-                                                     0x8c, 0xa6, 0x41, 0xff, 0x73, 0x24, 0xc8, 0xf2};
 const unsigned char ModuleEnumerationId[16] = {0x6e, 0x16, 0x3f, 0xbe, 0xb9, 0x58, 0x44, 0x4d,
                                                0x83, 0x5c, 0xe1, 0x82, 0xaf, 0xf1, 0x99, 0x1e};
-const unsigned char ToolsDriverStateId[16] = {0xd7, 0xbd, 0x8a, 0xf8, 0xe7, 0xac, 0xca, 0x4a,
-                                              0xbd, 0xbc, 0xfb, 0x1f, 0x1b, 0x3f, 0xcf, 0x33};
-const unsigned char ToolsSubscriberId[16] = {0x2c, 0x8e, 0x0a, 0xd8, 0x07, 0x10, 0xab, 0x4e,
-                                             0x90, 0xdd, 0x54, 0x71, 0x9f, 0xe5, 0xf7, 0x4b};
-const unsigned char ToolsCallbackRegistryId[16] = {0x7c, 0xb6, 0x3f, 0x9b, 0x9c, 0xa4, 0x8e, 0x42,
-                                                   0xa4, 0x84, 0xbe, 0xb6, 0x6e, 0x6a, 0xed, 0x7f};
 
 // Buffer sizes are fixed by the CUDA tools-runtime callback ABI.
 constexpr size_t ToolsRuntimeCallbackBuffer1Words = 1024;
@@ -2248,15 +2240,6 @@ CUresult driverStreamId(void *, CUstream stream, uint64_t *result) {
   else *result = reinterpret_cast<uintptr_t>(stream);
   return CUDA_SUCCESS;
 }
-
-const std::array<const void *, 96> DriverMetadataInterfaceTable = [] {
-  std::array<const void *, 96> table{};
-  table[0] = reinterpret_cast<const void *>(uintptr_t{0x300});
-  table[4] = reinterpret_cast<const void *>(driverMetadataQuery);
-  table[39] = reinterpret_cast<const void *>(driverStreamId);
-  table[51] = reinterpret_cast<const void *>(driverStreamHandle);
-  return table;
-}();
 
 // libcudart's private export-table handshake is an ABI compatibility transform, not a security mechanism.
 const uint8_t CudartHandshakeMixingTable[256] = {
@@ -2532,16 +2515,6 @@ CUresult toolsDriverRun(ToolsRunRequest *request) {
   return CUDA_SUCCESS;
 }
 
-constexpr size_t ToolsDriverStateWords = 14;
-const std::array<const void *, ToolsDriverStateWords> ToolsDriverStateTable = [] {
-  std::array<const void *, ToolsDriverStateWords> table{};
-  table[0] = reinterpret_cast<const void *>(ToolsDriverStateWords * sizeof(void *));
-  table[2] = reinterpret_cast<const void *>(toolsDriverVersion);
-  table[3] = reinterpret_cast<const void *>(toolsDriverState);
-  table[4] = reinterpret_cast<const void *>(toolsDriverRun);
-  return table;
-}();
-
 std::mutex toolsCallbackRegistryMutex;
 void **toolsCallbacks = nullptr;
 unsigned toolsCallbackCount = 0;
@@ -2558,14 +2531,6 @@ CUresult toolsCallbackSlot(void **callback, void **callbacks, unsigned index, un
   *callback = present ? toolsCallbacks[index] : nullptr;
   return present ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
 }
-
-constexpr size_t ToolsCallbackRegistryWords = 70;
-const std::array<const void *, ToolsCallbackRegistryWords> ToolsCallbackRegistryTable = [] {
-  std::array<const void *, ToolsCallbackRegistryWords> table{};
-  table[0] = reinterpret_cast<const void *>(ToolsCallbackRegistryWords * sizeof(void *));
-  table[67] = reinterpret_cast<const void *>(toolsCallbackSlot);
-  return table;
-}();
 
 constexpr CUresult ToolsSubscriberLimitReached = static_cast<CUresult>(210);
 constexpr uint32_t ToolsSubscriberFeatureCount = 23;
@@ -2627,21 +2592,50 @@ CUresult toolsSubscriberEnableFeature(int, uint32_t id, uint32_t feature) {
   return feature < ToolsSubscriberFeatureCount ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
 }
 
-constexpr size_t ToolsSubscriberWords = 12;
-const std::array<const void *, ToolsSubscriberWords> ToolsSubscriberTable = [] {
-  std::array<const void *, ToolsSubscriberWords> table{};
-  table[0] = reinterpret_cast<const void *>(ToolsSubscriberWords * sizeof(void *));
-  table[1] = reinterpret_cast<const void *>(toolsSubscriberWords);
-  table[2] = reinterpret_cast<const void *>(toolsSubscriberCallbackCount);
-  table[4] = reinterpret_cast<const void *>(toolsSubscriberRelease);
-  table[6] = reinterpret_cast<const void *>(toolsSubscriberEnableCallback);
-  table[7] = reinterpret_cast<const void *>(toolsSubscriberEnableDomain);
-  table[8] = reinterpret_cast<const void *>(toolsSubscriberEnableAll);
-  table[9] = reinterpret_cast<const void *>(toolsSubscriberEnableFeature);
-  table[10] = reinterpret_cast<const void *>(toolsSubscriberFeatureLimit);
-  table[11] = reinterpret_cast<const void *>(toolsSubscriberRegister);
-  return table;
-}();
+struct ToolsTableSpec {
+  std::string_view id;
+  size_t bytes;
+  bool refusedAfterTeardown = false;
+};
+
+constexpr std::array ToolsTableSpecs{
+    ToolsTableSpec{.id = "2c8e0ad80710ab4e90dd54719fe5f74b", .bytes = 96},
+    ToolsTableSpec{.id = "d7bd8af8e7acca4abdbcfb1f1b3fcf33", .bytes = 112, .refusedAfterTeardown = true},
+    ToolsTableSpec{.id = "7cb63f9b9ca48e42a484beb66e6aed7f", .bytes = 560, .refusedAfterTeardown = true},
+    ToolsTableSpec{.id = "21318c60971432488ca641ff7324c8f2", .bytes = 768},
+    ToolsTableSpec{.id = "41ae717da9eba64f999be3c27f3c140f", .bytes = 16},
+    ToolsTableSpec{.id = "fc58ac1a057c444fa97772ee9aefdb89", .bytes = 56},
+    ToolsTableSpec{.id = "b10541e1f7c7c74a9f64f223be99f1e2", .bytes = 272},
+    ToolsTableSpec{.id = "c98d1afaf2275b42b12dcd81b5f21ec1", .bytes = 40},
+    ToolsTableSpec{.id = "c2db37e3c4754247b3a8a079f37202ec", .bytes = 744},
+    ToolsTableSpec{.id = "b127870b49d29b44a1c1a118e26f1c14", .bytes = 48},
+    ToolsTableSpec{.id = "b9fd53270628c24f87a9988cddf73089", .bytes = 88},
+    ToolsTableSpec{.id = "35770f1b092e0348a48e056fc423968d", .bytes = 80},
+    ToolsTableSpec{.id = "ff9ab8ee28d40e4cb3b7fd724a6277a8", .bytes = 16},
+    ToolsTableSpec{.id = "bfdb432dbf3c5a4a945eb34029e81e75", .bytes = 488},
+    ToolsTableSpec{.id = "a6b1ff99ecc4c94f92f91928663d5585", .bytes = 256},
+    ToolsTableSpec{.id = "127d4831ee3357449742b8447b7a2364", .bytes = 88},
+    ToolsTableSpec{.id = "c83963f617f7e241a5749143314dff9f", .bytes = 96},
+    ToolsTableSpec{.id = "cc529e945c4e9d46837c9625868334e4", .bytes = 184},
+    ToolsTableSpec{.id = "12458358a7c21e592177ef3556188709", .bytes = 32},
+    ToolsTableSpec{.id = "6fbd4b79aa8c8e46baf3c103b6d18e3c", .bytes = 48},
+    ToolsTableSpec{.id = "1406180d72d6cb47ab6eb963e51bf4c6", .bytes = 360},
+    ToolsTableSpec{.id = "06ac4921c9a9e61180f576304dec7eb7", .bytes = 288},
+    ToolsTableSpec{.id = "a259cffb1846e8488957bfc72ceb58b8", .bytes = 160},
+    ToolsTableSpec{.id = "fe605bbf8542924ca91268bee10b29e7", .bytes = 56},
+    ToolsTableSpec{.id = "a5987389dd8f6b4bbddbc24bf650aa18", .bytes = 7016},
+    ToolsTableSpec{.id = "36b889606158f543bbd9ac633878b6b1", .bytes = 40},
+    ToolsTableSpec{.id = "bd91fa4d185f964a8b17f3805601413f", .bytes = 272},
+    ToolsTableSpec{.id = "7a7125c2f716ea118d71362b9e155667", .bytes = 296},
+    ToolsTableSpec{.id = "32683f42be9652459950838b1c3de155", .bytes = 184},
+    ToolsTableSpec{.id = "dccdd90889660045bb1f77598aca1133", .bytes = 152},
+    ToolsTableSpec{.id = "5b618f5a1202684781e4a7765ac9f359", .bytes = 144},
+    ToolsTableSpec{.id = "f6d3f4d92de380409f0c058cf1b2906b", .bytes = 24},
+    ToolsTableSpec{.id = "0e7af9b33460794470edf020433b7ef9", .bytes = 48},
+    ToolsTableSpec{.id = "e9ff28a90c61b4499c09e567201b05f0", .bytes = 24},
+    ToolsTableSpec{.id = "1ad5eede0290c64eba8100f425b38aa5", .bytes = 40},
+    ToolsTableSpec{.id = "e01b33cec3b7ce4dbe3caba233b1a9cc", .bytes = 32},
+};
 
 std::array<unsigned char, 16> exportTableId(std::string_view hex) {
   std::array<unsigned char, 16> id{};
@@ -2650,51 +2644,58 @@ std::array<unsigned char, 16> exportTableId(std::string_view hex) {
   return id;
 }
 
-template <size_t Bytes> struct SlotlessTable {
-  std::array<unsigned char, 16> id;
-  std::array<const void *, Bytes / sizeof(void *)> slots{};
-
-  explicit SlotlessTable(std::string_view hex) : id(exportTableId(hex)) { slots[0] = reinterpret_cast<const void *>(Bytes); }
-};
-
-const SlotlessTable<56> ToolsTableFc58ac1a{"fc58ac1a057c444fa97772ee9aefdb89"};
-const SlotlessTable<272> ToolsTableB10541e1{"b10541e1f7c7c74a9f64f223be99f1e2"};
-const SlotlessTable<40> ToolsTableC98d1afa{"c98d1afaf2275b42b12dcd81b5f21ec1"};
-const SlotlessTable<744> ToolsTableC2db37e3{"c2db37e3c4754247b3a8a079f37202ec"};
-const SlotlessTable<48> ToolsTableB127870b{"b127870b49d29b44a1c1a118e26f1c14"};
-const SlotlessTable<88> ToolsTableB9fd5327{"b9fd53270628c24f87a9988cddf73089"};
-const SlotlessTable<80> ToolsTable35770f1b{"35770f1b092e0348a48e056fc423968d"};
-const SlotlessTable<16> ToolsTableFf9ab8ee{"ff9ab8ee28d40e4cb3b7fd724a6277a8"};
-const SlotlessTable<488> ToolsTableBfdb432d{"bfdb432dbf3c5a4a945eb34029e81e75"};
-const SlotlessTable<256> ToolsTableA6b1ff99{"a6b1ff99ecc4c94f92f91928663d5585"};
-const SlotlessTable<88> ToolsTable127d4831{"127d4831ee3357449742b8447b7a2364"};
-const SlotlessTable<96> ToolsTableC83963f6{"c83963f617f7e241a5749143314dff9f"};
-const SlotlessTable<184> ToolsTableCc529e94{"cc529e945c4e9d46837c9625868334e4"};
-const SlotlessTable<32> ToolsTable12458358{"12458358a7c21e592177ef3556188709"};
-const SlotlessTable<48> ToolsTable6fbd4b79{"6fbd4b79aa8c8e46baf3c103b6d18e3c"};
-const SlotlessTable<360> ToolsTable1406180d{"1406180d72d6cb47ab6eb963e51bf4c6"};
-const SlotlessTable<288> ToolsTable06ac4921{"06ac4921c9a9e61180f576304dec7eb7"};
-const SlotlessTable<160> ToolsTableA259cffb{"a259cffb1846e8488957bfc72ceb58b8"};
-const SlotlessTable<56> ToolsTableFe605bbf{"fe605bbf8542924ca91268bee10b29e7"};
-const SlotlessTable<7016> ToolsTableA5987389{"a5987389dd8f6b4bbddbc24bf650aa18"};
-const SlotlessTable<40> ToolsTable36b88960{"36b889606158f543bbd9ac633878b6b1"};
-const SlotlessTable<272> ToolsTableBd91fa4d{"bd91fa4d185f964a8b17f3805601413f"};
-const SlotlessTable<296> ToolsTable7a7125c2{"7a7125c2f716ea118d71362b9e155667"};
-const SlotlessTable<184> ToolsTable32683f42{"32683f42be9652459950838b1c3de155"};
-const SlotlessTable<152> ToolsTableDccdd908{"dccdd90889660045bb1f77598aca1133"};
-const SlotlessTable<144> ToolsTable5b618f5a{"5b618f5a1202684781e4a7765ac9f359"};
-const SlotlessTable<24> ToolsTableF6d3f4d9{"f6d3f4d92de380409f0c058cf1b2906b"};
-const SlotlessTable<48> ToolsTable0e7af9b3{"0e7af9b33460794470edf020433b7ef9"};
-const SlotlessTable<24> ToolsTableE9ff28a9{"e9ff28a90c61b4499c09e567201b05f0"};
-const SlotlessTable<40> ToolsTable1ad5eede{"1ad5eede0290c64eba8100f425b38aa5"};
-const SlotlessTable<32> ToolsTableE01b33ce{"e01b33cec3b7ce4dbe3caba233b1a9cc"};
-
-const std::array<unsigned char, 16> ToolsInterfaceId = exportTableId("41ae717da9eba64f999be3c27f3c140f");
-
 void *toolsInterfaceOfKind(int) { return nullptr; }
 
-const std::array<const void *, 2> ToolsInterfaceTable{reinterpret_cast<const void *>(2 * sizeof(void *)),
-                                                      reinterpret_cast<const void *>(toolsInterfaceOfKind)};
+template <class Function> const void *slotFunction(Function function) { return reinterpret_cast<const void *>(function); }
+
+const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> ToolsSlotOverrides{
+    {"2c8e0ad80710ab4e90dd54719fe5f74b",
+     {{1, slotFunction(toolsSubscriberWords)},
+      {2, slotFunction(toolsSubscriberCallbackCount)},
+      {4, slotFunction(toolsSubscriberRelease)},
+      {6, slotFunction(toolsSubscriberEnableCallback)},
+      {7, slotFunction(toolsSubscriberEnableDomain)},
+      {8, slotFunction(toolsSubscriberEnableAll)},
+      {9, slotFunction(toolsSubscriberEnableFeature)},
+      {10, slotFunction(toolsSubscriberFeatureLimit)},
+      {11, slotFunction(toolsSubscriberRegister)}}},
+    {"d7bd8af8e7acca4abdbcfb1f1b3fcf33",
+     {{2, slotFunction(toolsDriverVersion)}, {3, slotFunction(toolsDriverState)}, {4, slotFunction(toolsDriverRun)}}},
+    {"7cb63f9b9ca48e42a484beb66e6aed7f", {{67, slotFunction(toolsCallbackSlot)}}},
+    {"21318c60971432488ca641ff7324c8f2",
+     {{4, slotFunction(driverMetadataQuery)}, {39, slotFunction(driverStreamId)}, {51, slotFunction(driverStreamHandle)}}},
+    {"41ae717da9eba64f999be3c27f3c140f", {{1, slotFunction(toolsInterfaceOfKind)}}},
+};
+
+template <size_t Table, size_t Slot> CUresult refusedToolsSlot() {
+  const std::string where = "tools table " + std::string{ToolsTableSpecs[Table].id.substr(0, 8)} + " slot " + std::to_string(Slot);
+  return reportFailure(CUDA_ERROR_NOT_SUPPORTED, where.c_str());
+}
+
+template <size_t Table, size_t... Slots> std::vector<const void *> refusingSlots(std::index_sequence<Slots...>) {
+  return {reinterpret_cast<const void *>(ToolsTableSpecs[Table].bytes),
+          reinterpret_cast<const void *>(&refusedToolsSlot<Table, Slots + 1>)...};
+}
+
+struct ToolsTable {
+  std::array<unsigned char, 16> id;
+  std::vector<const void *> slots;
+};
+
+template <size_t... Tables> std::vector<ToolsTable> buildToolsTables(std::index_sequence<Tables...>) {
+  std::vector<ToolsTable> tables;
+  (tables.push_back({.id = exportTableId(ToolsTableSpecs[Tables].id),
+                     .slots = refusingSlots<Tables>(std::make_index_sequence<(ToolsTableSpecs[Tables].bytes / sizeof(void *)) - 1>{})}),
+   ...);
+  for (size_t i = 0; i < tables.size(); ++i)
+    if (const auto found = ToolsSlotOverrides.find(ToolsTableSpecs[i].id); found != ToolsSlotOverrides.end())
+      for (const auto &[slot, function] : found->second)
+        tables[i].slots[slot] = function;
+  return tables;
+}
+
+const std::vector<ToolsTable> &toolsTables =
+    *new const std::vector<ToolsTable>(buildToolsTables(std::make_index_sequence<ToolsTableSpecs.size()>{}));
 
 struct ExportTable {
   const unsigned char *id = nullptr;
@@ -2702,52 +2703,23 @@ struct ExportTable {
   bool refusedAfterTeardown = false;
 };
 
-const std::array ExportTables{
-    ExportTable{.id = CudartLoggingId, .table = cudartLoggingTable},
-    ExportTable{.id = CudartInterfaceId, .table = cudartInterfaceTable},
-    ExportTable{.id = CudartHandshakeCheckId, .table = cudartHandshakeCheckTable},
-    ExportTable{.id = ToolsRuntimeCallbackHooksId, .table = toolsRuntimeCallbackHooksTable},
-    ExportTable{.id = ToolsTlsId, .table = toolsTlsTable},
-    ExportTable{.id = ContextLocalStorageId, .table = contextLocalStorageTable},
-    ExportTable{.id = ContextChecksId, .table = contextChecksTable},
-    ExportTable{.id = DriverMetadataInterfaceId, .table = DriverMetadataInterfaceTable.data()},
-    ExportTable{.id = ModuleEnumerationId, .table = moduleEnumerationTable},
-    ExportTable{.id = ToolsDriverStateId, .table = ToolsDriverStateTable.data(), .refusedAfterTeardown = true},
-    ExportTable{.id = ToolsCallbackRegistryId, .table = ToolsCallbackRegistryTable.data(), .refusedAfterTeardown = true},
-    ExportTable{.id = ToolsSubscriberId, .table = ToolsSubscriberTable.data()},
-    ExportTable{.id = ToolsInterfaceId.data(), .table = ToolsInterfaceTable.data()},
-    ExportTable{.id = ToolsTable36b88960.id.data(), .table = ToolsTable36b88960.slots.data()},
-    ExportTable{.id = ToolsTableBd91fa4d.id.data(), .table = ToolsTableBd91fa4d.slots.data()},
-    ExportTable{.id = ToolsTable7a7125c2.id.data(), .table = ToolsTable7a7125c2.slots.data()},
-    ExportTable{.id = ToolsTable32683f42.id.data(), .table = ToolsTable32683f42.slots.data()},
-    ExportTable{.id = ToolsTableDccdd908.id.data(), .table = ToolsTableDccdd908.slots.data()},
-    ExportTable{.id = ToolsTable5b618f5a.id.data(), .table = ToolsTable5b618f5a.slots.data()},
-    ExportTable{.id = ToolsTableF6d3f4d9.id.data(), .table = ToolsTableF6d3f4d9.slots.data()},
-    ExportTable{.id = ToolsTable0e7af9b3.id.data(), .table = ToolsTable0e7af9b3.slots.data()},
-    ExportTable{.id = ToolsTableE9ff28a9.id.data(), .table = ToolsTableE9ff28a9.slots.data()},
-    ExportTable{.id = ToolsTable1ad5eede.id.data(), .table = ToolsTable1ad5eede.slots.data()},
-    ExportTable{.id = ToolsTableE01b33ce.id.data(), .table = ToolsTableE01b33ce.slots.data()},
-    ExportTable{.id = ToolsTableFc58ac1a.id.data(), .table = ToolsTableFc58ac1a.slots.data()},
-    ExportTable{.id = ToolsTableB10541e1.id.data(), .table = ToolsTableB10541e1.slots.data()},
-    ExportTable{.id = ToolsTableC98d1afa.id.data(), .table = ToolsTableC98d1afa.slots.data()},
-    ExportTable{.id = ToolsTableC2db37e3.id.data(), .table = ToolsTableC2db37e3.slots.data()},
-    ExportTable{.id = ToolsTableB127870b.id.data(), .table = ToolsTableB127870b.slots.data()},
-    ExportTable{.id = ToolsTableB9fd5327.id.data(), .table = ToolsTableB9fd5327.slots.data()},
-    ExportTable{.id = ToolsTable35770f1b.id.data(), .table = ToolsTable35770f1b.slots.data()},
-    ExportTable{.id = ToolsTableFf9ab8ee.id.data(), .table = ToolsTableFf9ab8ee.slots.data()},
-    ExportTable{.id = ToolsTableBfdb432d.id.data(), .table = ToolsTableBfdb432d.slots.data()},
-    ExportTable{.id = ToolsTableA6b1ff99.id.data(), .table = ToolsTableA6b1ff99.slots.data()},
-    ExportTable{.id = ToolsTable127d4831.id.data(), .table = ToolsTable127d4831.slots.data()},
-    ExportTable{.id = ToolsTableC83963f6.id.data(), .table = ToolsTableC83963f6.slots.data()},
-    ExportTable{.id = ToolsTableCc529e94.id.data(), .table = ToolsTableCc529e94.slots.data()},
-    ExportTable{.id = ToolsTable12458358.id.data(), .table = ToolsTable12458358.slots.data()},
-    ExportTable{.id = ToolsTable6fbd4b79.id.data(), .table = ToolsTable6fbd4b79.slots.data()},
-    ExportTable{.id = ToolsTable1406180d.id.data(), .table = ToolsTable1406180d.slots.data()},
-    ExportTable{.id = ToolsTable06ac4921.id.data(), .table = ToolsTable06ac4921.slots.data()},
-    ExportTable{.id = ToolsTableA259cffb.id.data(), .table = ToolsTableA259cffb.slots.data()},
-    ExportTable{.id = ToolsTableFe605bbf.id.data(), .table = ToolsTableFe605bbf.slots.data()},
-    ExportTable{.id = ToolsTableA5987389.id.data(), .table = ToolsTableA5987389.slots.data()},
-};
+const std::vector<ExportTable> &exportTables = *new const std::vector<ExportTable>([] {
+  std::vector<ExportTable> tables{
+      ExportTable{.id = CudartLoggingId, .table = cudartLoggingTable},
+      ExportTable{.id = CudartInterfaceId, .table = cudartInterfaceTable},
+      ExportTable{.id = CudartHandshakeCheckId, .table = cudartHandshakeCheckTable},
+      ExportTable{.id = ToolsRuntimeCallbackHooksId, .table = toolsRuntimeCallbackHooksTable},
+      ExportTable{.id = ToolsTlsId, .table = toolsTlsTable},
+      ExportTable{.id = ContextLocalStorageId, .table = contextLocalStorageTable},
+      ExportTable{.id = ContextChecksId, .table = contextChecksTable},
+      ExportTable{.id = ModuleEnumerationId, .table = moduleEnumerationTable},
+  };
+  for (size_t i = 0; i < toolsTables.size(); ++i)
+    tables.push_back({.id = toolsTables[i].id.data(),
+                      .table = toolsTables[i].slots.data(),
+                      .refusedAfterTeardown = ToolsTableSpecs[i].refusedAfterTeardown});
+  return tables;
+}());
 
 void *libraryHandle() {
   static void *const handle = [] {
@@ -6094,7 +6066,7 @@ CUresult cuGetErrorName(CUresult status, const char **name) { return describeErr
 
 CUresult cuGetExportTable(const void **table, const CUuuid *id) {
   if (!table || !id) return CUDA_ERROR_INVALID_VALUE;
-  for (const auto &entry : ExportTables)
+  for (const auto &entry : exportTables)
     if (std::memcmp(id, entry.id, sizeof(CUuuid)) == 0) {
       if (entry.refusedAfterTeardown && executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
       *table = entry.table;
