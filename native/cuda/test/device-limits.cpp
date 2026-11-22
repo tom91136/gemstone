@@ -1,6 +1,8 @@
 #include <cstddef>
 #include <iterator>
+#include <limits>
 #include <string>
+#include <utility>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cuda.h>
@@ -36,6 +38,75 @@ size_t limit(CUlimit id) {
 }
 
 size_t heapLimit() { return limit(CU_LIMIT_MALLOC_HEAP_SIZE); }
+
+constexpr size_t MiB = size_t{1} << 20;
+constexpr size_t MaxPersistingL2Bytes = 23068672;
+constexpr size_t MaxPendingLaunchCount = 599186;
+constexpr size_t SizeMax = std::numeric_limits<size_t>::max();
+
+struct LimitRow {
+  size_t requested;
+  CUresult status;
+  size_t readBack;
+};
+
+template <size_t N> void checkLimitSweep(CUlimit id, const LimitRow (&rows)[N]) {
+  for (const auto &row : rows) {
+    CHECK(cuCtxSetLimit(id, row.requested) == row.status);
+    CHECK(limit(id) == row.readBack);
+  }
+}
+
+constexpr LimitRow PersistingL2Probe[] = {
+    {.requested = 0, .status = CUDA_SUCCESS, .readBack = 0},
+    {.requested = 1, .status = CUDA_SUCCESS, .readBack = 2 * MiB},
+    {.requested = 4096, .status = CUDA_SUCCESS, .readBack = 2 * MiB},
+    {.requested = 1 * MiB, .status = CUDA_SUCCESS, .readBack = 2 * MiB},
+    {.requested = MaxPersistingL2Bytes, .status = CUDA_SUCCESS, .readBack = MaxPersistingL2Bytes},
+    {.requested = MaxPersistingL2Bytes + 1, .status = CUDA_ERROR_INVALID_VALUE, .readBack = MaxPersistingL2Bytes},
+    {.requested = 2 * MaxPersistingL2Bytes, .status = CUDA_ERROR_INVALID_VALUE, .readBack = MaxPersistingL2Bytes},
+    {.requested = 32 * MiB, .status = CUDA_ERROR_INVALID_VALUE, .readBack = MaxPersistingL2Bytes},
+    {.requested = SizeMax, .status = CUDA_ERROR_INVALID_VALUE, .readBack = MaxPersistingL2Bytes},
+};
+
+constexpr LimitRow PersistingL2Steps[] = {
+    {.requested = 2 * MiB, .status = CUDA_SUCCESS, .readBack = 2 * MiB},
+    {.requested = (2 * MiB) + 1, .status = CUDA_SUCCESS, .readBack = 4 * MiB},
+    {.requested = (2 * MiB) + 4096, .status = CUDA_SUCCESS, .readBack = 4 * MiB},
+    {.requested = 3 * MiB, .status = CUDA_SUCCESS, .readBack = 4 * MiB},
+    {.requested = (3 * MiB) + 1, .status = CUDA_SUCCESS, .readBack = 4 * MiB},
+    {.requested = 4 * MiB, .status = CUDA_SUCCESS, .readBack = 4 * MiB},
+    {.requested = (4 * MiB) - 1, .status = CUDA_SUCCESS, .readBack = 4 * MiB},
+    {.requested = 5 * MiB, .status = CUDA_SUCCESS, .readBack = 6 * MiB},
+    {.requested = 6 * MiB, .status = CUDA_SUCCESS, .readBack = 6 * MiB},
+    {.requested = 7 * MiB, .status = CUDA_SUCCESS, .readBack = 8 * MiB},
+    {.requested = 8 * MiB, .status = CUDA_SUCCESS, .readBack = 8 * MiB},
+    {.requested = 9 * MiB, .status = CUDA_SUCCESS, .readBack = 10 * MiB},
+    {.requested = 10 * MiB, .status = CUDA_SUCCESS, .readBack = 10 * MiB},
+    {.requested = 16 * MiB, .status = CUDA_SUCCESS, .readBack = 16 * MiB},
+    {.requested = 21 * MiB, .status = CUDA_SUCCESS, .readBack = 22 * MiB},
+    {.requested = (22 * MiB) - 1, .status = CUDA_SUCCESS, .readBack = 22 * MiB},
+    {.requested = 22 * MiB, .status = CUDA_SUCCESS, .readBack = 22 * MiB},
+};
+
+constexpr LimitRow PendingLaunchProbe[] = {
+    {.requested = 0, .status = CUDA_SUCCESS, .readBack = 32},
+    {.requested = 1, .status = CUDA_SUCCESS, .readBack = 32},
+    {.requested = 31, .status = CUDA_SUCCESS, .readBack = 32},
+    {.requested = 32, .status = CUDA_SUCCESS, .readBack = 32},
+    {.requested = 33, .status = CUDA_SUCCESS, .readBack = 33},
+    {.requested = 2048, .status = CUDA_SUCCESS, .readBack = 2048},
+    {.requested = 2049, .status = CUDA_SUCCESS, .readBack = 2049},
+    {.requested = 1 << 16, .status = CUDA_SUCCESS, .readBack = 1 << 16},
+    {.requested = MaxPendingLaunchCount - 1, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount - 1},
+    {.requested = MaxPendingLaunchCount, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount},
+    {.requested = MaxPendingLaunchCount + 1, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount},
+    {.requested = 1 << 20, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount},
+    {.requested = 1 << 24, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount},
+    {.requested = 1 << 30, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount},
+    {.requested = size_t{1} << 31, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount},
+    {.requested = SizeMax, .status = CUDA_SUCCESS, .readBack = MaxPendingLaunchCount},
+};
 
 CUfunc_cache cacheConfig() {
   auto config = static_cast<CUfunc_cache>(-1);
@@ -207,6 +278,32 @@ TEST_CASE("CUDA context limits replay the probe's shared memory and pending laun
   REQUIRE(cuCtxSetLimit(CU_LIMIT_STACK_SIZE, 1024) == CUDA_SUCCESS);
   REQUIRE(cuCtxSetLimit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT, 1) == CUDA_SUCCESS);
   CHECK(limit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT) == 32);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA persisting L2 limit rounds to 2 MiB and rejects sizes above the card's maximum", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  int maximum = 0;
+  REQUIRE(cudaDeviceGetAttribute(&maximum, cudaDevAttrMaxPersistingL2CacheSize, 0) == cudaSuccess);
+  CHECK(std::cmp_equal(maximum, MaxPersistingL2Bytes));
+  auto *const context = createContext();
+  CHECK(limit(CU_LIMIT_PERSISTING_L2_CACHE_SIZE) == 6291456);
+  checkLimitSweep(CU_LIMIT_PERSISTING_L2_CACHE_SIZE, PersistingL2Probe);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA persisting L2 limit rounds each request up to the next 2 MiB step", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  checkLimitSweep(CU_LIMIT_PERSISTING_L2_CACHE_SIZE, PersistingL2Steps);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("CUDA pending launch count clamps to the driver's maximum without an error", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  CHECK(limit(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT) == 2048);
+  checkLimitSweep(CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT, PendingLaunchProbe);
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 

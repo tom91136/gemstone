@@ -627,6 +627,14 @@ object Architecture {
     "CUDA UMD 13.5"
   )
 
+  private val adaPersistingL2 = Source.Probed(
+    "cuDeviceGetAttribute of CU_DEVICE_ATTRIBUTE_MAX_PERSISTING_L2_CACHE_SIZE, confirmed by the cuCtxSetLimit " +
+      "and cuCtxGetLimit sweep of that limit on fresh contexts",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA UMD 13.5"
+  )
+
   val sm89: Architecture = Architecture(
     "sm_89",
     Global(Sourced(32, cudaBestPractice89), Sourced(128, cudaBestPractice89)),
@@ -670,7 +678,7 @@ object Architecture {
     Card("GeForce RTX 4060 Ti", 128, 32768L, Some(288.0), Some(34), Some(2535)),
     Some(
       L2Control(
-        Sourced(4194304L, Source.Estimate("persisting L2 maximum, not probed on the device")),
+        Sourced(23068672L, adaPersistingL2),
         Sourced(6291456L, adaL2),
         Sourced(64, adaL2)
       )

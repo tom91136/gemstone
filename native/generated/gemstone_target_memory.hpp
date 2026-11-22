@@ -30,7 +30,7 @@ inline std::optional<TargetMemory> targetMemory(std::string_view target) noexcep
   if (target == "sm_61") return TargetMemory{.busWidthBits = 256, .l2Bytes = 2097152};
   if (target == "sm_70") return TargetMemory{.busWidthBits = 4096, .l2Bytes = 6291456};
   if (target == "sm_75") return TargetMemory{.busWidthBits = 256, .l2Bytes = 4194304};
-  if (target == "sm_89") return TargetMemory{.busWidthBits = 128, .l2Bytes = 33554432, .persistingL2Bytes = 4194304, .persistingL2DefaultBytes = 6291456, .l2FetchBytes = 64};
+  if (target == "sm_89") return TargetMemory{.busWidthBits = 128, .l2Bytes = 33554432, .persistingL2Bytes = 23068672, .persistingL2DefaultBytes = 6291456, .l2FetchBytes = 64};
   return std::nullopt;
 }
 } // namespace gemstone

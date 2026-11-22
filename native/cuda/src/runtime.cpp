@@ -128,8 +128,10 @@ constexpr int32_t ClockRateKhz = 1500000;
 constexpr int32_t MemoryClockRateKhz = 1500000;
 constexpr int32_t GlobalMemoryBusWidth = 128;
 constexpr int32_t L2CacheSize = 4194304;
-constexpr int32_t MaxPersistingL2CacheSize = 4194304;
+constexpr int32_t MaxPersistingL2CacheSize = L2CacheSize;
+constexpr size_t PersistingL2CacheGranularity = size_t{2} << 20;
 constexpr size_t MinDevicePendingLaunchCount = 32;
+constexpr size_t MaxDevicePendingLaunchCount = 599186;
 constexpr int32_t MaxAccessPolicyWindowSize = 4096;
 constexpr int32_t TextureAlignment = 256;
 constexpr int32_t TexturePitchAlignment = 32;
@@ -3314,7 +3316,16 @@ CUresult cuCtxSetLimit(CUlimit limit, size_t value) {
     std::scoped_lock const lock{contextMutex};
     auto *const field = contextLimitField(contextLimitsOf(context), limit);
     if (!field) return rejectedLimit(limit);
-    *field = limit == CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT ? std::max(value, device_limits::MinDevicePendingLaunchCount) : value;
+    if (limit == CU_LIMIT_PERSISTING_L2_CACHE_SIZE) {
+      const auto maximum = static_cast<size_t>(targetMemory().persistingL2Bytes.value_or(device_limits::MaxPersistingL2CacheSize));
+      if (value > maximum) return CUDA_ERROR_INVALID_VALUE;
+      const auto granularity = device_limits::PersistingL2CacheGranularity;
+      *field = value == 0 ? 0 : (value + granularity - 1) / granularity * granularity;
+      return CUDA_SUCCESS;
+    }
+    *field = limit == CU_LIMIT_DEV_RUNTIME_PENDING_LAUNCH_COUNT
+                 ? std::clamp(value, device_limits::MinDevicePendingLaunchCount, device_limits::MaxDevicePendingLaunchCount)
+                 : value;
     return CUDA_SUCCESS;
   }
   if (value > DeviceHeapMaximumLimit) return CUDA_ERROR_OUT_OF_MEMORY;

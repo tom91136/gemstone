@@ -11,7 +11,7 @@ class GenerateTargetMemorySuite extends Suite {
     assert(
       rendered.contains(
         """if (target == "sm_89") return TargetMemory{.busWidthBits = 128, .l2Bytes = 33554432, """ +
-          """.persistingL2Bytes = 4194304, .persistingL2DefaultBytes = 6291456, .l2FetchBytes = 64};"""
+          """.persistingL2Bytes = 23068672, .persistingL2DefaultBytes = 6291456, .l2FetchBytes = 64};"""
       )
     )
     assert(!rendered.contains("gfx1036"))
