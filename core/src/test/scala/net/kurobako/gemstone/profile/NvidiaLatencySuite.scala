@@ -102,6 +102,21 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.measured(90, LdgConstant), None)
   }
 
+  private val probedF2i = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of the F2I of bitPackKernel at 0x2e0 and its first consumer, " +
+      "control run subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  test("sm_89 float-to-integer conversion carries a probed latency") {
+    assertEquals(NvidiaLatency.measured(89, F2i32), Some(Architecture.Sourced(17.0, probedF2i)))
+    assertEquals(NvidiaLatency.measured(90, F2i32), None)
+    assertEquals(NvidiaLatency.producer("F2I.FTZ.U32.TRUNC.NTZ R13, R12;"), Some(F2i32))
+    assertEquals(NvidiaLatency.producer("F2I.S32.SAT R4, R5;"), Some(F2i32))
+  }
+
   test("a producer names the instruction form it measures, not the whole mnemonic family") {
     assertEquals(NvidiaLatency.producer("LDG.E.CONSTANT R4, [R4.64];"), Some(LdgConstant))
     assertEquals(NvidiaLatency.producer("@!P1 LDG.E.CONSTANT R6, [R6.64];"), Some(LdgConstant))
