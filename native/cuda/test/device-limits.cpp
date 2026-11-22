@@ -710,3 +710,69 @@ TEST_CASE("CUDA tools feature table accepts the enable request", "[cuda][limits]
   CHECK(reinterpret_cast<uintptr_t>(table[0]) == 80);
   CHECK(toolsSlot<CUresult (*)(int)>(table, 9)(1) == CUDA_SUCCESS);
 }
+
+namespace {
+
+constexpr std::array<unsigned char, 16> ToolsContextQueryId{0x21, 0x31, 0x8c, 0x60, 0x97, 0x14, 0x32, 0x48,
+                                                            0x8c, 0xa6, 0x41, 0xff, 0x73, 0x24, 0xc8, 0xf2};
+constexpr std::array<unsigned char, 16> ToolsContextNotifyId{0xc9, 0x8d, 0x1a, 0xfa, 0xf2, 0x27, 0x5b, 0x42,
+                                                             0xb1, 0x2d, 0xcd, 0x81, 0xb5, 0xf2, 0x1e, 0xc1};
+constexpr std::array<unsigned char, 16> ToolsContextVersionId{0xbf, 0xdb, 0x43, 0x2d, 0xbf, 0x3c, 0x5a, 0x4a,
+                                                              0x94, 0x5e, 0xb3, 0x40, 0x29, 0xe8, 0x1e, 0x75};
+
+} // namespace
+
+TEST_CASE("CUDA tools context queries report the context, its device, and fixed levels", "[cuda][limits]") {
+  auto *const context = createContext();
+  const auto *const table = toolsTable(ToolsContextQueryId);
+  CHECK(reinterpret_cast<uintptr_t>(table[0]) == 0x300);
+  const auto self = toolsSlot<CUresult (*)(CUcontext, CUcontext *)>(table, 82);
+  CUcontext reported = nullptr;
+  CHECK(self(context, &reported) == CUDA_SUCCESS);
+  CHECK(reported == context);
+  CHECK(self(context, nullptr) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(self(nullptr, &reported) == CUDA_ERROR_INVALID_CONTEXT);
+  CHECK(self(reinterpret_cast<CUcontext>(0x1234), &reported) == CUDA_ERROR_INVALID_CONTEXT);
+
+  const auto device = toolsSlot<CUresult (*)(CUcontext, uint32_t *)>(table, 3);
+  uint32_t ordinal = 77;
+  CHECK(device(context, &ordinal) == CUDA_SUCCESS);
+  CHECK(ordinal == 0);
+  CHECK(device(nullptr, &ordinal) == CUDA_ERROR_INVALID_CONTEXT);
+
+  const auto level = toolsSlot<uint32_t (*)(CUcontext, uint32_t *)>(table, 8);
+  uint32_t value = 0;
+  CHECK(level(context, &value) == 1);
+  CHECK(value == 1);
+
+  const auto reserved = toolsSlot<CUresult (*)(CUcontext, uint64_t *)>(table, 40);
+  uint64_t word = 77;
+  CHECK(reserved(context, &word) == CUDA_SUCCESS);
+  CHECK(word == 0);
+  CHECK(reserved(context, nullptr) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(reserved(nullptr, &word) == CUDA_ERROR_INVALID_VALUE);
+}
+
+TEST_CASE("CUDA tools context notify and version tables validate their context", "[cuda][limits]") {
+  auto *const context = createContext();
+  const auto *const notify = toolsTable(ToolsContextNotifyId);
+  CHECK(reinterpret_cast<uintptr_t>(notify[0]) == 40);
+  const auto call = toolsSlot<CUresult (*)(CUcontext, void *)>(notify, 1);
+  uint64_t target = 0;
+  CHECK(call(context, &target) == CUDA_SUCCESS);
+  CHECK(call(nullptr, &target) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(call(context, nullptr) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(call(reinterpret_cast<CUcontext>(0x1234), &target) == CUDA_ERROR_INVALID_CONTEXT);
+
+  const auto *const version = toolsTable(ToolsContextVersionId);
+  CHECK(reinterpret_cast<uintptr_t>(version[0]) == 488);
+  const auto query = toolsSlot<CUresult (*)(CUcontext, uint32_t, uint32_t *, uint32_t)>(version, 10);
+  uint32_t out[2] = {77, 77};
+  for (const uint32_t key : {0U, 0x10U, 0x100U}) {
+    CHECK(query(context, key, out, 0) == CUDA_SUCCESS);
+    CHECK(out[0] == 0x000d0000);
+    CHECK(out[1] == 2);
+  }
+  CHECK(query(nullptr, 0x10, out, 0) == CUDA_ERROR_INVALID_CONTEXT);
+  CHECK(query(context, 0x10, nullptr, 0) == CUDA_ERROR_UNKNOWN);
+}

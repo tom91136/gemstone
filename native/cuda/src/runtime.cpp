@@ -2821,6 +2821,51 @@ CUresult toolsDeviceAttribute(int device, uint32_t key, int, ToolsAttribute *out
 
 CUresult toolsFeatureEnable(int) { return CUDA_SUCCESS; }
 
+constexpr uint32_t ToolsContextVersion = 0x000d0000;
+constexpr uint32_t ToolsContextVersionLevel = 2;
+
+CUresult toolsContextCheck(CUcontext context) { return contextIsLive(context) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_CONTEXT; }
+
+CUresult toolsContextSelf(CUcontext context, CUcontext *out) {
+  if (!context) return CUDA_ERROR_INVALID_CONTEXT;
+  if (!out) return CUDA_ERROR_INVALID_VALUE;
+  if (const auto status = toolsContextCheck(context); status != CUDA_SUCCESS) return status;
+  *out = context;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsContextDevice(CUcontext context, uint32_t *device) {
+  if (const auto status = toolsContextCheck(context); status != CUDA_SUCCESS) return status;
+  if (!device) return CUDA_ERROR_INVALID_VALUE;
+  *device = static_cast<uint32_t>(contextDevice(context));
+  return CUDA_SUCCESS;
+}
+
+uint32_t toolsContextLevel(CUcontext, uint32_t *level) {
+  if (level) *level = 1;
+  return 1;
+}
+
+CUresult toolsContextReserved(CUcontext context, uint64_t *reserved) {
+  if (!context || !reserved) return CUDA_ERROR_INVALID_VALUE;
+  *reserved = 0;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsContextNotify(CUcontext context, void *target) {
+  if (!context || !target) return CUDA_ERROR_INVALID_VALUE;
+  return toolsContextCheck(context);
+}
+
+CUresult toolsContextVersion(CUcontext context, uint32_t, uint32_t *version, uint32_t) {
+  if (!context) return CUDA_ERROR_INVALID_CONTEXT;
+  if (!version) return CUDA_ERROR_UNKNOWN;
+  if (const auto status = toolsContextCheck(context); status != CUDA_SUCCESS) return status;
+  version[0] = ToolsContextVersion;
+  version[1] = ToolsContextVersionLevel;
+  return CUDA_SUCCESS;
+}
+
 template <class Function> const void *slotFunction(Function function) { return reinterpret_cast<const void *>(function); }
 
 const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> ToolsSlotOverrides{
@@ -2838,7 +2883,15 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
      {{2, slotFunction(toolsDriverVersion)}, {3, slotFunction(toolsDriverState)}, {4, slotFunction(toolsDriverRun)}}},
     {"7cb63f9b9ca48e42a484beb66e6aed7f", {{67, slotFunction(toolsCallbackSlot)}}},
     {"21318c60971432488ca641ff7324c8f2",
-     {{4, slotFunction(driverMetadataQuery)}, {39, slotFunction(driverStreamId)}, {51, slotFunction(driverStreamHandle)}}},
+     {{3, slotFunction(toolsContextDevice)},
+      {4, slotFunction(driverMetadataQuery)},
+      {8, slotFunction(toolsContextLevel)},
+      {39, slotFunction(driverStreamId)},
+      {40, slotFunction(toolsContextReserved)},
+      {51, slotFunction(driverStreamHandle)},
+      {82, slotFunction(toolsContextSelf)}}},
+    {"c98d1afaf2275b42b12dcd81b5f21ec1", {{1, slotFunction(toolsContextNotify)}}},
+    {"bfdb432dbf3c5a4a945eb34029e81e75", {{10, slotFunction(toolsContextVersion)}}},
     {"41ae717da9eba64f999be3c27f3c140f", {{1, slotFunction(toolsInterfaceOfKind)}}},
     {"b10541e1f7c7c74a9f64f223be99f1e2",
      {{2, slotFunction(toolsDeviceCount)},
