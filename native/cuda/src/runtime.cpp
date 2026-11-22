@@ -2748,6 +2748,79 @@ CUresult toolsRequestAccepted(void *) { return CUDA_SUCCESS; }
 
 CUresult toolsRequestUnsupported(void *) { return ToolsStatusUnsupported; }
 
+constexpr CUresult ToolsInvalidDevice = CUDA_ERROR_INVALID_DEVICE;
+constexpr uint32_t ToolsAttributeLastDriver = 0x7f;
+
+enum class ToolsAttributeType : uint32_t { Int = 1, Word = 2, Double = 4 };
+
+struct ToolsAttribute {
+  ToolsAttributeType type;
+  uint32_t reserved;
+  uint64_t value;
+};
+
+CUresult toolsDeviceCount(uint32_t *count) {
+  if (!count) return CUDA_ERROR_INVALID_VALUE;
+  *count = static_cast<uint32_t>(deviceCountValue());
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsDeviceToken(uint32_t *token, int device) {
+  if (!token) return CUDA_ERROR_INVALID_VALUE;
+  if (!validDevice(device)) return ToolsInvalidDevice;
+  *token = ToolsDeviceToken + static_cast<uint32_t>(device);
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsDevicePresent(uint32_t *present, int device) {
+  if (!present) return CUDA_ERROR_INVALID_VALUE;
+  if (!validDevice(device)) return ToolsInvalidDevice;
+  *present = 1;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsClearFlag(uint32_t *flag) {
+  if (!flag) return CUDA_ERROR_UNKNOWN;
+  *flag = 0;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsDeviceAttribute(int device, uint32_t key, int, ToolsAttribute *out) {
+  if (!out) return CUDA_ERROR_INVALID_VALUE;
+  if (!validDevice(device)) return ToolsInvalidDevice;
+  const auto word = [out](uint64_t value) {
+    *out = {.type = ToolsAttributeType::Word, .reserved = 0, .value = value};
+    return CUDA_SUCCESS;
+  };
+  const auto identity = describedTargetMemory();
+  const auto unavailable = [] { return reportFailure(CUDA_ERROR_NOT_SUPPORTED, "tools attribute of a target without a chip identity"); };
+  switch (key) {
+    case 0x10000001:
+    case 0x10000002: {
+      const auto capability = computeCapability();
+      if (!capability) return CUDA_ERROR_INVALID_VALUE;
+      return word(key == 0x10000001 ? capability->first : capability->second);
+    }
+    case 0x10000003: return word(deviceSpec().totalGlobalMemoryBytes);
+    case 0x20000001: return identity && identity->architectureId ? word(*identity->architectureId) : unavailable();
+    case 0x20000002:
+      return identity && identity->architectureId && identity->chipImplementation
+                 ? word(*identity->architectureId | *identity->chipImplementation)
+                 : unavailable();
+    case 0x2000000c: *out = {.type = ToolsAttributeType::Double, .reserved = 0, .value = 0}; return CUDA_SUCCESS;
+    case 0x2000000d:
+    case 0x2000000e: return word(0);
+    default: break;
+  }
+  if (key == 0 || key > ToolsAttributeLastDriver) return CUDA_ERROR_INVALID_VALUE;
+  int value = 0;
+  if (cuDeviceGetAttribute(&value, static_cast<CUdevice_attribute>(key), device) != CUDA_SUCCESS) return CUDA_ERROR_INVALID_VALUE;
+  *out = {.type = ToolsAttributeType::Int, .reserved = 0, .value = static_cast<uint32_t>(value)};
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsFeatureEnable(int) { return CUDA_SUCCESS; }
+
 template <class Function> const void *slotFunction(Function function) { return reinterpret_cast<const void *>(function); }
 
 const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> ToolsSlotOverrides{
@@ -2767,6 +2840,13 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
     {"21318c60971432488ca641ff7324c8f2",
      {{4, slotFunction(driverMetadataQuery)}, {39, slotFunction(driverStreamId)}, {51, slotFunction(driverStreamHandle)}}},
     {"41ae717da9eba64f999be3c27f3c140f", {{1, slotFunction(toolsInterfaceOfKind)}}},
+    {"b10541e1f7c7c74a9f64f223be99f1e2",
+     {{2, slotFunction(toolsDeviceCount)},
+      {5, slotFunction(toolsDeviceAttribute)},
+      {7, slotFunction(toolsDeviceToken)},
+      {8, slotFunction(toolsDevicePresent)},
+      {21, slotFunction(toolsClearFlag)}}},
+    {"35770f1b092e0348a48e056fc423968d", {{9, slotFunction(toolsFeatureEnable)}}},
     {"41ae717d kind 4",
      {{4, slotFunction(toolsDeviceHandle)},
       {9, slotFunction(toolsDeviceInfo)},

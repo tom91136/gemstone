@@ -613,3 +613,100 @@ TEST_CASE("CUDA tools device interface accepts its bookkeeping requests and repo
     CHECK(toolsCall(interface, slot, handle) == CUDA_SUCCESS);
   CHECK(toolsCall(interface, 12, handle) == 12);
 }
+
+namespace {
+
+constexpr std::array<unsigned char, 16> ToolsAttributeId{0xb1, 0x05, 0x41, 0xe1, 0xf7, 0xc7, 0xc7, 0x4a,
+                                                         0x9f, 0x64, 0xf2, 0x23, 0xbe, 0x99, 0xf1, 0xe2};
+constexpr std::array<unsigned char, 16> ToolsFeatureId{0x35, 0x77, 0x0f, 0x1b, 0x09, 0x2e, 0x03, 0x48,
+                                                       0xa4, 0x8e, 0x05, 0x6f, 0xc4, 0x23, 0x96, 0x8d};
+
+struct ToolsAttribute {
+  uint32_t type;
+  uint32_t reserved;
+  uint64_t value;
+};
+
+using ToolsDeviceQuery = CUresult (*)(uint32_t *, int);
+using ToolsAttributeQuery = CUresult (*)(int, uint32_t, int, ToolsAttribute *);
+
+const void *const *toolsTable(const std::array<unsigned char, 16> &id) {
+  const void *table = nullptr;
+  REQUIRE(cuGetExportTable(&table, reinterpret_cast<const CUuuid *>(id.data())) == CUDA_SUCCESS);
+  return static_cast<const void *const *>(table);
+}
+
+template <class Function> Function toolsSlot(const void *const *table, size_t slot) {
+  return reinterpret_cast<Function>(reinterpret_cast<uintptr_t>(table[slot]));
+}
+
+} // namespace
+
+TEST_CASE("CUDA tools attribute table reports the device count, token, and presence", "[cuda][limits]") {
+  createContext();
+  const auto *const table = toolsTable(ToolsAttributeId);
+  CHECK(reinterpret_cast<uintptr_t>(table[0]) == 272);
+  uint32_t count = 0;
+  CHECK(toolsSlot<CUresult (*)(uint32_t *)>(table, 2)(&count) == CUDA_SUCCESS);
+  CHECK(count == 1);
+  CHECK(toolsSlot<CUresult (*)(uint32_t *)>(table, 2)(nullptr) == CUDA_ERROR_INVALID_VALUE);
+  for (const size_t slot : {size_t{7}, size_t{8}}) {
+    uint32_t value = 0;
+    CHECK(toolsSlot<ToolsDeviceQuery>(table, slot)(&value, 0) == CUDA_SUCCESS);
+    CHECK(value == (slot == 7 ? 0x100U : 1U));
+    CHECK(toolsSlot<ToolsDeviceQuery>(table, slot)(&value, 1) == CUDA_ERROR_INVALID_DEVICE);
+    CHECK(toolsSlot<ToolsDeviceQuery>(table, slot)(nullptr, 0) == CUDA_ERROR_INVALID_VALUE);
+  }
+  uint32_t flag = 1;
+  CHECK(toolsSlot<CUresult (*)(uint32_t *)>(table, 21)(&flag) == CUDA_SUCCESS);
+  CHECK(flag == 0);
+  CHECK(toolsSlot<CUresult (*)(uint32_t *)>(table, 21)(nullptr) == CUDA_ERROR_UNKNOWN);
+}
+
+TEST_CASE("CUDA tools attribute table reports device attributes and the silicon identity", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  createContext();
+  const auto *const table = toolsTable(ToolsAttributeId);
+  const auto query = toolsSlot<ToolsAttributeQuery>(table, 5);
+  const auto word = [&](uint32_t key) {
+    ToolsAttribute out{};
+    REQUIRE(query(0, key, 0, &out) == CUDA_SUCCESS);
+    CHECK(out.type == 2);
+    return out.value;
+  };
+  CHECK(word(0x10000001) == 8);
+  CHECK(word(0x10000002) == 9);
+  CHECK(word(0x10000003) > 0);
+  CHECK(word(0x20000001) == 0x190);
+  CHECK(word(0x20000002) == 0x196);
+  CHECK(word(0x2000000d) == 0);
+  CHECK(word(0x2000000e) == 0);
+  ToolsAttribute out{};
+  CHECK(query(0, 0x2000000c, 0, &out) == CUDA_SUCCESS);
+  CHECK(out.type == 4);
+  CHECK(out.value == 0);
+  int multiprocessors = 0;
+  REQUIRE(cuDeviceGetAttribute(&multiprocessors, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT, 0) == CUDA_SUCCESS);
+  CHECK(query(0, 0x10, 0, &out) == CUDA_SUCCESS);
+  CHECK(out.type == 1);
+  CHECK(out.value == static_cast<uint32_t>(multiprocessors));
+  CHECK(query(0, 0, 0, &out) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(query(0, 0x1000, 0, &out) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(query(1, 0x10, 0, &out) == CUDA_ERROR_INVALID_DEVICE);
+  CHECK(query(0, 0x10, 0, nullptr) == CUDA_ERROR_INVALID_VALUE);
+}
+
+TEST_CASE("CUDA tools attribute table refuses the chip identity of a target without one", "[cuda][limits]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_75");
+  createContext();
+  const auto query = toolsSlot<ToolsAttributeQuery>(toolsTable(ToolsAttributeId), 5);
+  ToolsAttribute out{};
+  CHECK(query(0, 0x20000001, 0, &out) == CUDA_ERROR_NOT_SUPPORTED);
+  CHECK(query(0, 0x20000002, 0, &out) == CUDA_ERROR_NOT_SUPPORTED);
+}
+
+TEST_CASE("CUDA tools feature table accepts the enable request", "[cuda][limits]") {
+  const auto *const table = toolsTable(ToolsFeatureId);
+  CHECK(reinterpret_cast<uintptr_t>(table[0]) == 80);
+  CHECK(toolsSlot<CUresult (*)(int)>(table, 9)(1) == CUDA_SUCCESS);
+}
