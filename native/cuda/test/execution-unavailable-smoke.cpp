@@ -205,9 +205,19 @@ bool resolvedEntryPointsBehave() {
 using ExportTableQuery = CUresult (*)(const void **, const void *);
 using DriverStateQuery = CUresult (*)(int *);
 using CallbackSlotQuery = CUresult (*)(void **, void **, unsigned, unsigned);
+using ToolsWordsQuery = CUresult (*)(uint64_t *, uint64_t *, unsigned);
+using ToolsCountQuery = CUresult (*)(uint64_t *, void **, unsigned);
+using ToolsLimitQuery = CUresult (*)(uint32_t *);
+using ToolsSubscribe = CUresult (*)(uint32_t *, void *, void *);
+using ToolsRelease = CUresult (*)(uint32_t);
+using ToolsEnableAll = CUresult (*)(int, uint32_t);
+using ToolsEnableDomain = CUresult (*)(int, uint32_t, uint32_t);
+using ToolsEnableCallback = CUresult (*)(int, uint32_t, uint32_t, uint32_t);
 
 constexpr std::array<unsigned char, 16> ToolsDriverStateId{0xd7, 0xbd, 0x8a, 0xf8, 0xe7, 0xac, 0xca, 0x4a,
                                                            0xbd, 0xbc, 0xfb, 0x1f, 0x1b, 0x3f, 0xcf, 0x33};
+constexpr std::array<unsigned char, 16> ToolsSubscriberId{0x2c, 0x8e, 0x0a, 0xd8, 0x07, 0x10, 0xab, 0x4e,
+                                                          0x90, 0xdd, 0x54, 0x71, 0x9f, 0xe5, 0xf7, 0x4b};
 constexpr std::array<unsigned char, 16> ToolsCallbackRegistryId{0x7c, 0xb6, 0x3f, 0x9b, 0x9c, 0xa4, 0x8e, 0x42,
                                                                 0xa4, 0x84, 0xbe, 0xb6, 0x6e, 0x6a, 0xed, 0x7f};
 
@@ -297,4 +307,90 @@ TEST_CASE("CUDA tools callback registry keeps the first table and bounds-checks 
   CHECK((out == reinterpret_cast<void *>(0xa3)));
   CHECK((slot(&out, second, 4, 2) == CUDA_ERROR_INVALID_VALUE));
   CHECK((out == nullptr));
+}
+
+TEST_CASE("CUDA tools subscriber table reports interface constants and rejects null outputs", "[cuda]") {
+  const auto *const table = toolsTable(ToolsSubscriberId);
+  REQUIRE((table != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(table[0]) == 96));
+  const auto words = tableEntry<ToolsWordsQuery>(table, 1);
+  const auto counts = tableEntry<ToolsCountQuery>(table, 2);
+  const auto limit = tableEntry<ToolsLimitQuery>(table, 10);
+  REQUIRE((words != nullptr && counts != nullptr && limit != nullptr));
+  uint64_t first = 0xdeadbeef;
+  uint64_t second = 0xdeadbeef;
+  CHECK((words(&first, &second, 0xf) == CUDA_SUCCESS));
+  CHECK((first == 0x21 && second == 0));
+  CHECK((words(nullptr, &second, 0xf) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((words(&first, nullptr, 0xf) == CUDA_ERROR_INVALID_VALUE));
+  uint32_t features = 0;
+  CHECK((limit(&features) == CUDA_SUCCESS));
+  CHECK((features == 23));
+  CHECK((limit(nullptr) == CUDA_ERROR_INVALID_VALUE));
+  uint64_t count = 0xdeadbeef;
+  void *list = nullptr;
+  CHECK((counts(nullptr, &list, 2) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((counts(&count, nullptr, 2) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((counts(&count, &list, 2) == CUDA_SUCCESS));
+  CHECK((count == 105));
+  CHECK((counts(&count, &list, 6) == CUDA_SUCCESS));
+  CHECK((count == 877));
+  CHECK((counts(&count, &list, 32) == CUDA_SUCCESS));
+  CHECK((count == 2));
+  CHECK((counts(&count, &list, 0) == CUDA_SUCCESS));
+  CHECK((count == 0));
+  CHECK((counts(&count, &list, 33) == CUDA_SUCCESS));
+  CHECK((count == 0));
+}
+
+TEST_CASE("CUDA tools subscriber table admits one subscriber and validates its enables", "[cuda]") {
+  const auto *const table = toolsTable(ToolsSubscriberId);
+  REQUIRE((table != nullptr));
+  CHECK((reinterpret_cast<uintptr_t>(table[0]) == 96));
+  const auto subscribe = tableEntry<ToolsSubscribe>(table, 11);
+  const auto release = tableEntry<ToolsRelease>(table, 4);
+  const auto enableAll = tableEntry<ToolsEnableAll>(table, 8);
+  const auto enableDomain = tableEntry<ToolsEnableDomain>(table, 7);
+  const auto enableCallback = tableEntry<ToolsEnableCallback>(table, 6);
+  const auto enableFeature = tableEntry<ToolsEnableDomain>(table, 9);
+  REQUIRE((subscribe && release && enableAll && enableDomain && enableCallback && enableFeature));
+  auto *const callback = reinterpret_cast<void *>(0x1000);
+
+  CHECK((release(1) == CUDA_ERROR_UNKNOWN));
+
+  uint32_t id = 0;
+  CHECK((subscribe(nullptr, callback, nullptr) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((subscribe(&id, nullptr, nullptr) == CUDA_ERROR_INVALID_VALUE));
+  REQUIRE((subscribe(&id, callback, nullptr) == CUDA_SUCCESS));
+  CHECK((id == 1));
+  uint32_t other = 0;
+  CHECK((subscribe(&other, callback, nullptr) == 210));
+  CHECK((other == 0));
+
+  CHECK((enableAll(1, id) == CUDA_SUCCESS));
+  CHECK((enableAll(0, id) == CUDA_SUCCESS));
+  CHECK((enableAll(1, 0) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableAll(1, 2) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableDomain(1, id, 0) == CUDA_SUCCESS));
+  CHECK((enableDomain(1, id, 32) == CUDA_SUCCESS));
+  CHECK((enableDomain(1, id, 33) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableDomain(1, 2, 2) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableCallback(1, id, 2, 0) == CUDA_SUCCESS));
+  CHECK((enableCallback(1, id, 2, 104) == CUDA_SUCCESS));
+  CHECK((enableCallback(1, id, 2, 105) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableCallback(1, id, 7, 1023) == CUDA_SUCCESS));
+  CHECK((enableCallback(1, id, 7, 1024) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableCallback(1, id, 0, 1) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableCallback(1, id, 33, 1) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableCallback(1, 2, 2, 1) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableFeature(1, id, 22) == CUDA_SUCCESS));
+  CHECK((enableFeature(1, id, 23) == CUDA_ERROR_INVALID_VALUE));
+  CHECK((enableFeature(1, 2, 0) == CUDA_ERROR_INVALID_HANDLE));
+
+  CHECK((release(2) == CUDA_ERROR_UNKNOWN));
+  CHECK((release(id) == CUDA_SUCCESS));
+  CHECK((release(id) == CUDA_ERROR_UNKNOWN));
+  CHECK((subscribe(&other, callback, nullptr) == CUDA_SUCCESS));
+  CHECK((other == 1));
+  CHECK((release(other) == CUDA_SUCCESS));
 }

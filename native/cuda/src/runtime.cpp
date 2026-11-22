@@ -2169,6 +2169,8 @@ const unsigned char ModuleEnumerationId[16] = {0x6e, 0x16, 0x3f, 0xbe, 0xb9, 0x5
                                                0x83, 0x5c, 0xe1, 0x82, 0xaf, 0xf1, 0x99, 0x1e};
 const unsigned char ToolsDriverStateId[16] = {0xd7, 0xbd, 0x8a, 0xf8, 0xe7, 0xac, 0xca, 0x4a,
                                               0xbd, 0xbc, 0xfb, 0x1f, 0x1b, 0x3f, 0xcf, 0x33};
+const unsigned char ToolsSubscriberId[16] = {0x2c, 0x8e, 0x0a, 0xd8, 0x07, 0x10, 0xab, 0x4e,
+                                             0x90, 0xdd, 0x54, 0x71, 0x9f, 0xe5, 0xf7, 0x4b};
 const unsigned char ToolsCallbackRegistryId[16] = {0x7c, 0xb6, 0x3f, 0x9b, 0x9c, 0xa4, 0x8e, 0x42,
                                                    0xa4, 0x84, 0xbe, 0xb6, 0x6e, 0x6a, 0xed, 0x7f};
 
@@ -2537,6 +2539,82 @@ const std::array<const void *, ToolsCallbackRegistryWords> ToolsCallbackRegistry
   return table;
 }();
 
+constexpr CUresult ToolsSubscriberLimitReached = static_cast<CUresult>(210);
+constexpr uint32_t ToolsSubscriberFeatureCount = 23;
+constexpr uint32_t ToolsSubscriberFirstId = 1;
+constexpr std::array<uint16_t, 33> ToolsDomainCallbackCounts{0, 8,  105, 18, 5,  5, 877, 1024, 13, 4, 3,  4, 8, 11, 3,  14, 7,
+                                                             5, 11, 30,  6,  22, 4, 2,   13,   4,  4, 10, 7, 5, 2,  15, 2};
+
+std::mutex toolsSubscriberMutex;
+bool toolsSubscriberActive = false;
+
+CUresult toolsSubscriberWords(uint64_t *first, uint64_t *second, unsigned) {
+  if (!first || !second) return CUDA_ERROR_INVALID_VALUE;
+  *first = 0x21;
+  *second = 0;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubscriberCallbackCount(uint64_t *count, void **list, unsigned domain) {
+  if (!count || !list) return CUDA_ERROR_INVALID_VALUE;
+  *count = domain < ToolsDomainCallbackCounts.size() ? ToolsDomainCallbackCounts[domain] : 0;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubscriberFeatureLimit(uint32_t *count) {
+  if (!count) return CUDA_ERROR_INVALID_VALUE;
+  *count = ToolsSubscriberFeatureCount;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubscriberRegister(uint32_t *id, void *callback, void *) {
+  if (!id || !callback) return CUDA_ERROR_INVALID_VALUE;
+  std::scoped_lock const lock{toolsSubscriberMutex};
+  if (toolsSubscriberActive) return ToolsSubscriberLimitReached;
+  toolsSubscriberActive = true;
+  *id = ToolsSubscriberFirstId;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubscriberRelease(uint32_t id) {
+  std::scoped_lock const lock{toolsSubscriberMutex};
+  if (!toolsSubscriberActive || id != ToolsSubscriberFirstId) return CUDA_ERROR_UNKNOWN;
+  toolsSubscriberActive = false;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubscriberEnableAll(int, uint32_t id) { return id == ToolsSubscriberFirstId ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
+
+CUresult toolsSubscriberEnableDomain(int, uint32_t id, uint32_t domain) {
+  return id == ToolsSubscriberFirstId && domain < ToolsDomainCallbackCounts.size() ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+}
+
+CUresult toolsSubscriberEnableCallback(int, uint32_t id, uint32_t domain, uint32_t callback) {
+  const bool known = domain >= 1 && domain < ToolsDomainCallbackCounts.size() && callback < ToolsDomainCallbackCounts[domain];
+  return id == ToolsSubscriberFirstId && known ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+}
+
+CUresult toolsSubscriberEnableFeature(int, uint32_t id, uint32_t feature) {
+  if (id != ToolsSubscriberFirstId) return CUDA_ERROR_INVALID_HANDLE;
+  return feature < ToolsSubscriberFeatureCount ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+}
+
+constexpr size_t ToolsSubscriberWords = 12;
+const std::array<const void *, ToolsSubscriberWords> ToolsSubscriberTable = [] {
+  std::array<const void *, ToolsSubscriberWords> table{};
+  table[0] = reinterpret_cast<const void *>(ToolsSubscriberWords * sizeof(void *));
+  table[1] = reinterpret_cast<const void *>(toolsSubscriberWords);
+  table[2] = reinterpret_cast<const void *>(toolsSubscriberCallbackCount);
+  table[4] = reinterpret_cast<const void *>(toolsSubscriberRelease);
+  table[6] = reinterpret_cast<const void *>(toolsSubscriberEnableCallback);
+  table[7] = reinterpret_cast<const void *>(toolsSubscriberEnableDomain);
+  table[8] = reinterpret_cast<const void *>(toolsSubscriberEnableAll);
+  table[9] = reinterpret_cast<const void *>(toolsSubscriberEnableFeature);
+  table[10] = reinterpret_cast<const void *>(toolsSubscriberFeatureLimit);
+  table[11] = reinterpret_cast<const void *>(toolsSubscriberRegister);
+  return table;
+}();
+
 struct ExportTable {
   const unsigned char *id = nullptr;
   const void *table = nullptr;
@@ -2555,6 +2633,7 @@ const std::array ExportTables{
     ExportTable{.id = ModuleEnumerationId, .table = moduleEnumerationTable},
     ExportTable{.id = ToolsDriverStateId, .table = ToolsDriverStateTable.data(), .refusedAfterTeardown = true},
     ExportTable{.id = ToolsCallbackRegistryId, .table = ToolsCallbackRegistryTable.data(), .refusedAfterTeardown = true},
+    ExportTable{.id = ToolsSubscriberId, .table = ToolsSubscriberTable.data()},
 };
 
 void *libraryHandle() {
