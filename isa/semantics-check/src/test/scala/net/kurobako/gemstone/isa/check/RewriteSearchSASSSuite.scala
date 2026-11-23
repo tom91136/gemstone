@@ -17,14 +17,9 @@ class RewriteSearchSASSSuite extends Suite {
       .fold(fail(_), identity)
   }
 
-  test("the instruction whose result nothing reads is proved removable and costed lower") {
-    val dead = report.rewrites.filter(_.original.exists(_.startsWith("IADD3 R4")))
-    assert(dead.nonEmpty, report)
-    dead.foreach { rewrite =>
-      assert(!rewrite.rewrite.exists(_.startsWith("IADD3 R4")), rewrite)
-      assert(rewrite.after.cycles < rewrite.before.cycles, rewrite)
-    }
-    assert(dead.exists(rewrite => rewrite.rewrite.size == rewrite.original.size - 1), dead)
+  test("the dead instruction is withheld when its gain is inside the measured uncertainty of the mean") {
+    assert(report.before.noise > 0.0, report)
+    assert(report.rewrites.isEmpty, report)
   }
 
   test("every reported rewrite is cheaper than the window") {

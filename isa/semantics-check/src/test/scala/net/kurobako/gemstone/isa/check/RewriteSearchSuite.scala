@@ -28,6 +28,22 @@ class RewriteSearchSuite extends Suite {
   private def installed(): Unit =
     assume(Bitwuzla.executable.isDefined, "no bitwuzla binary on GEMSTONE_BITWUZLA_EXE or PATH")
 
+  private def measure(cycles: Double, noise: Double) =
+    RewriteSearch.Measure(cycles, Architecture.Source.Estimate("a test"), noise)
+
+  test("a cost difference inside the measured uncertainty of the mean is not a gain") {
+    // The noises are those the simulator measures for these blocks on the typed sm_89 launch.
+    assert(!RewriteSearch.gain(measure(13.25, 0.875), measure(13.06, 0.875)), "jacobi_step's MOV deletion")
+    assert(!RewriteSearch.gain(measure(6.90, 2.60), measure(6.80, 2.60)), "bitPackKernel's VABSDIFF replacement")
+    assert(!RewriteSearch.gain(measure(3.00, 0.25), measure(2.90, 0.25)), "a one-pass block with close finishes")
+    assert(!RewriteSearch.gain(measure(3.50, 0.0833), measure(3.45, 0.25)), "the larger noise bounds the difference")
+  }
+
+  test("a deleted instruction on the critical path survives the margin") {
+    assert(RewriteSearch.gain(measure(3.50, 0.0833), measure(3.25, 0.0833)), "div_kernel's MOV deletion")
+    assert(RewriteSearch.gain(measure(30.0, 0.0), measure(29.0, 0.0)))
+  }
+
   private def windows(image: Vec[Byte], size: Int, function: String = kernel): Vec[Window] =
     AMDGPUWindows.of(image, function, target, size).fold(fail(_), identity)
 

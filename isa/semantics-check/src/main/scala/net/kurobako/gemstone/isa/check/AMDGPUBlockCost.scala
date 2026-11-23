@@ -37,7 +37,7 @@ object AMDGPUBlockCost {
   }
 
   /** `shift` is how many bytes the code after the window moves, which the cost of its own region does not include. */
-  case class Cost(cycles: Double, source: Architecture.Source, shift: Int)
+  case class Cost(cycles: Double, source: Architecture.Source, shift: Int, noise: Double = 0.0)
 
   private case class Static(
       graph: ControlFlowGraph,
@@ -227,7 +227,7 @@ final class AMDGPUBlockCost private (
     for {
       stream <- issued
       timing <- BlockRegion.timing(stream, architecture, launch.placement, region.label)
-    } yield Cost(timing.block.cyclesPerIteration, timing.block.source, shift)
+    } yield Cost(timing.block.cyclesPerIteration, timing.block.source, shift, timing.block.noise)
   }
 
   /** The cost of the region holding `window` once `replacement` stands in the window's place. A region that the

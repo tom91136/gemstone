@@ -75,7 +75,8 @@ object PipelineSimulator {
       binding: ProfileReport.Binding,
       pressure: Vec[(ProfileReport.Binding, Double)],
       source: Architecture.Source,
-      steady: Boolean
+      steady: Boolean,
+      noise: Double
   )
 
   object Placement {
@@ -113,7 +114,13 @@ object PipelineSimulator {
 
   private case class Mark(time: Long, positions: Vec[Long], busy: Map[ProfileReport.Binding, Long], issued: Long)
 
-  private case class Window(length: Long, passes: Long, busy: Map[ProfileReport.Binding, Long], issued: Long)
+  private case class Window(
+      length: Long,
+      passes: Long,
+      busy: Map[ProfileReport.Binding, Long],
+      issued: Long,
+      from: Long
+  )
 
   private case class Claim(resource: ProfileReport.Binding, cycles: Long, sources: Vec[Architecture.Source])
 
@@ -170,7 +177,8 @@ object PipelineSimulator {
         cyclesPerIteration = steady.cyclesPerIteration,
         binding = steady.binding,
         pressure = steady.pressure,
-        source = steady.source
+        source = steady.source,
+        noise = steady.noise
       )
     }
   }
@@ -360,7 +368,7 @@ object PipelineSimulator {
 
     @tailrec
     def settle(t: Long, start: Int): Window = stream.period match {
-      case Some(_) if t > limit => Window(0L, 0L, Map.empty, 0L)
+      case Some(_) if t > limit => Window(0L, 0L, Map.empty, 0L, -1L)
       case Some(p)              =>
         val key = (
           start,
@@ -385,7 +393,8 @@ object PipelineSimulator {
               passes = warps.zip(mark.positions).map((warp, before) => (warp.position - before) / p).sum,
               busy =
                 busyCycles.toMap.map((resource, cycles) => resource -> (cycles - mark.busy.getOrElse(resource, 0L))),
-              issued = issuedSlots - mark.issued
+              issued = issuedSlots - mark.issued,
+              from = mark.time
             )
           case None =>
             marks(key) = Mark(t, warps.map(_.position), busyCycles.toMap, issuedSlots)
@@ -397,7 +406,8 @@ object PipelineSimulator {
           length = (timeline.map(_.retire) ++ busyUntil.values).maxOption.getOrElse(0L),
           passes = count.toLong,
           busy = busyCycles.toMap,
-          issued = issuedSlots
+          issued = issuedSlots,
+          from = -1L
         )
       case None =>
         val next = cycle(t, start)
@@ -412,6 +422,24 @@ object PipelineSimulator {
       (ProfileReport.Binding.Issue, window.issued / (slots * length)) +: Vec.from(resources).map(resource =>
         (resource, window.busy(resource) / length)
       )
+    val noise =
+      if (count * active == 0) 0.0
+      else if (window.from < 0L) {
+        val finishes = warps.indices
+          .map(w => timeline.filter(_.warp == w).map(_.retire).maxOption.getOrElse(0L)).sorted
+        if (finishes.size < 2) 0.0 else (finishes.last - finishes(finishes.size - 2)).toDouble / count / active
+      } else {
+        val starts = timeline.filter(entry => entry.issue >= window.from && entry.index == 0)
+          .map(_.issue).toVector.sorted
+        val half = starts.size / 2
+        if (half == 0 || half == starts.size) 0.0
+        else {
+          val end   = window.from + window.length
+          val left  = (starts(half) - window.from).toDouble / half / active
+          val right = (end - starts(half)).toDouble / (starts.size - half) / active
+          math.abs(left - right)
+        }
+      }
     val (top, peak) = pressure.maxBy(_._2)
     Block(
       entries = Vec.from(timeline),
@@ -419,7 +447,8 @@ object PipelineSimulator {
       binding = if (peak >= Saturated) top else ProfileReport.Binding.Path,
       pressure = pressure,
       source = sources.max,
-      steady = stream.period.isDefined
+      steady = stream.period.isDefined,
+      noise = noise
     )
   }
 }

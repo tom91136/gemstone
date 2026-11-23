@@ -211,7 +211,7 @@ final class SASSBlockCost private (
     for {
       stream <- issued
       timing <- BlockRegion.timing(stream, architecture, launch.placement, region.label)
-    } yield AMDGPUBlockCost.Cost(timing.block.cyclesPerIteration, timing.block.source, shift)
+    } yield AMDGPUBlockCost.Cost(timing.block.cyclesPerIteration, timing.block.source, shift, timing.block.noise)
   }
 
   /** The cost of the region holding `window` once `replacement` stands in the window's place. A region that the
