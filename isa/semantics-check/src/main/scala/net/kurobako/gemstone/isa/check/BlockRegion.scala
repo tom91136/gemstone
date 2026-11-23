@@ -44,15 +44,12 @@ private[check] object BlockRegion {
       architecture: Architecture,
       placement: Option[PipelineSimulator.Placement],
       label: String
-  ): Either[String, BlockAnalysis.Timing] = for {
-    analysis <- BlockAnalysis.of(stream, architecture, placement)
-    regions  <- analysis.select(Some(label))
-    timing   <- regions.head.status match {
+  ): Either[String, BlockAnalysis.Timing] =
+    BlockAnalysis.region(stream, architecture, placement, label).flatMap(_.status match {
       case BlockAnalysis.Status.Executed(timing) => Right(timing)
       case BlockAnalysis.Status.Withheld(reason) => Left(s"$label is withheld: $reason")
       case BlockAnalysis.Status.NotExecuted      => Left(s"$label is not executed")
-    }
-  } yield timing
+    })
 
   /** The longest run of equal instructions `left` and `right` share in order, as their positions in each. */
   def common(left: Vec[String], right: Vec[String]): Vec[(Int, Int)] = {

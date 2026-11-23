@@ -184,6 +184,29 @@ class BlockAnalysisSuite extends Suite {
     }
   }
 
+  test("a region analysed on its own costs what the full analysis gives") {
+    Vec(
+      "uneven" -> recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 2, 3 -> 2, 4 -> 4, 5 -> 1), branchGraph),
+      "even"   -> record(Vec(0, 1, 2, 3))
+    ).foreach { (kind, stream) =>
+      val full = BlockAnalysis.of(stream, Architecture.sm89).fold(fail(_), identity)
+      full.regions.foreach { found =>
+        val alone = BlockAnalysis.region(stream, Architecture.sm89, None, found.label)
+        assertEquals(alone, Right(found), kind)
+      }
+    }
+  }
+
+  test("only the region asked for is analysed") {
+    val stream = recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 2, 3 -> 2, 4 -> 4, 5 -> 1), branchGraph)
+    val full   = BlockAnalysis.of(stream, Architecture.sm89).fold(fail(_), identity)
+    assert(full.regions.size > 1, full.regions.map(_.label))
+    assertEquals(
+      BlockAnalysis.region(stream, Architecture.sm89, None, "k/loop@0x18").map(_.label),
+      Right("k/loop@0x18")
+    )
+  }
+
   test("a stream without control flow graphs is rejected") {
     val recorder = ProfileRecorder()
     assertEquals(recorder.instruction(at(0x10L), State(0L, "op")), Right(()))

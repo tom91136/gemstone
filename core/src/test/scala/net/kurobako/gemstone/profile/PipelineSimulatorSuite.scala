@@ -294,4 +294,10 @@ class PipelineSimulatorSuite extends Suite {
       assertEquals(block.binding, cost.binds)
     }
   }
+
+  test("a stream that has not repeated its state within the bound has no steady state") {
+    val block =
+      PipelineSimulator.simulate(Architecture.sm89, occupancy(48), Stream.repeat(Vec.fill(64)(op())), None, 100L)
+    assert(block.cyclesPerIteration.isNaN, block.cyclesPerIteration)
+  }
 }

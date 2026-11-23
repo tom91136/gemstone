@@ -144,6 +144,11 @@ object PipelineSimulator {
     Residency(resident.maxOption.getOrElse(1), active, if (active == 1) order else Architecture.IssueOrder.RoundRobin)
   }
 
+  /** Cycles of one settle before it gives up: a stream whose state has not repeated by then has no steady state to
+    * report, and its marks would grow without bound.
+    */
+  val SettleLimit: Long = 1200000L
+
   /** The cycles per iteration of a stream that waves run once. Waves in lockstep through one pipe finish in an order
     * that one more instruction can change, so with several of them the cost is the steady state of waves that follow
     * one another, which depends only on what the pipes and the dependencies allow. The entries stay those of one pass.
@@ -152,14 +157,15 @@ object PipelineSimulator {
       architecture: Architecture,
       occupancy: Option[Occupancy],
       stream: Stream,
-      placement: Option[Placement] = None
+      placement: Option[Placement] = None,
+      limit: Long = SettleLimit
   ): Block = {
-    val block   = pass(architecture, occupancy, stream, placement)
+    val block   = pass(architecture, occupancy, stream, placement, limit)
     val waves   = residency(architecture, occupancy, placement)
     val overlap = stream.period.isEmpty && waves.count > 1 && waves.scheduled == Architecture.IssueOrder.RoundRobin
     if (!overlap) block
     else {
-      val steady = pass(architecture, occupancy, stream.overlapped, placement)
+      val steady = pass(architecture, occupancy, stream.overlapped, placement, limit)
       block.copy(
         cyclesPerIteration = steady.cyclesPerIteration,
         binding = steady.binding,
@@ -174,7 +180,8 @@ object PipelineSimulator {
       architecture: Architecture,
       occupancy: Option[Occupancy],
       stream: Stream,
-      placement: Option[Placement]
+      placement: Option[Placement],
+      limit: Long
   ): Block = {
     val rates      = architecture.throughput
     val partitions = architecture.limits.partitions.value
@@ -353,7 +360,8 @@ object PipelineSimulator {
 
     @tailrec
     def settle(t: Long, start: Int): Window = stream.period match {
-      case Some(p) =>
+      case Some(_) if t > limit => Window(0L, 0L, Map.empty, 0L)
+      case Some(p)              =>
         val key = (
           start,
           warps.map(warp =>

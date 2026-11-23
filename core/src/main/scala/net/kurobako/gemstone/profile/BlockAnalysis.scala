@@ -2,6 +2,7 @@ package net.kurobako.gemstone.profile
 
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.flow.ControlFlowGraph
 import net.kurobako.gemstone.profile.PipelineSimulator.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
@@ -43,30 +44,59 @@ object BlockAnalysis {
       architecture: Architecture,
       placement: Option[PipelineSimulator.Placement] = None
   ): Either[String, BlockAnalysis] =
+    prepared(stream, architecture).map((profile, lookup) =>
+      BlockAnalysis(stream.graphs.flatMap(graph => regionsOf(profile, lookup, graph, placement)))
+    )
+
+  /** The region of `stream` named `label`, simulated without the other regions. A region's timing depends only on that
+    * region's instructions and issue counts, so leaving the rest unanalysed gives the same result for less work.
+    */
+  def region(
+      stream: ProfileStream,
+      architecture: Architecture,
+      placement: Option[PipelineSimulator.Placement],
+      label: String
+  ): Either[String, Region] =
+    prepared(stream, architecture).flatMap { (profile, lookup) =>
+      val spans = stream.graphs.flatMap(graph => spansOf(graph.graph).map(span => (graph, span)))
+      spans.find((graph, span) => labelOf(graph, span) == label) match {
+        case Some((graph, span)) => Right(regionOf(profile, lookup, graph, span, placement))
+        case None                =>
+          val known = spans.map((graph, span) => labelOf(graph, span)).mkString(", ")
+          Left(s"no region $label, known regions: $known")
+      }
+    }
+
+  private def prepared(stream: ProfileStream, architecture: Architecture): Either[String, (Profile, Lookup)] =
     if (stream.graphs.isEmpty) Left("stream has no control flow graphs, so there are no blocks to analyse")
     else {
       val profile        = Profiler.run(stream, architecture)
       val lookup: Lookup = profile.instructions.flatMap { case (instruction, counters) =>
         instruction.address.map(address => (instruction.kernel.raw, address.raw) -> (instruction, counters))
       }.toMap
-      Right(BlockAnalysis(stream.graphs.flatMap(graph => regionsOf(profile, lookup, graph, placement))))
+      Right((profile, lookup))
     }
 
-  private def regionsOf(
-      profile: Profile,
-      lookup: Lookup,
-      graph: ProfileStream.Graph,
-      placement: Option[PipelineSimulator.Placement]
-  ): Vec[Region] = {
-    val cfg   = graph.graph
+  private def spansOf(cfg: ControlFlowGraph): Vec[Span] = {
     val loops =
       if (cfg.reducible) cfg.loops.map(loop => Span(Kind.Loop, loop.header, loop.body.sorted, loop.latches))
       else Vec.empty[Span]
     val inLoop   = loops.flatMap(_.blocks).toSet
     val unlooped = cfg.blocks.indices.filterNot(inLoop.contains)
     val straight = Vec.from(unlooped.map(block => Span(Kind.Block, block, Vec(block), Vec.empty)))
-    (loops ++ straight).sortBy(_.header).map(span => regionOf(profile, lookup, graph, span, placement))
+    (loops ++ straight).sortBy(_.header)
   }
+
+  private def labelOf(graph: ProfileStream.Graph, span: Span): String =
+    s"${graph.kernel}/${span.kind.name}@${hex(graph.offsets(graph.graph.blocks(span.header).first))}"
+
+  private def regionsOf(
+      profile: Profile,
+      lookup: Lookup,
+      graph: ProfileStream.Graph,
+      placement: Option[PipelineSimulator.Placement]
+  ): Vec[Region] =
+    spansOf(graph.graph).map(span => regionOf(profile, lookup, graph, span, placement))
 
   private def regionOf(
       profile: Profile,
@@ -85,7 +115,7 @@ object BlockAnalysis {
       Member(address, entry.map(_._1.text), entry.fold(0L)(_._2.issues))
     }
     val closing = span.latches.map(block => graph.offsets(cfg.blocks(block).last)).toSet
-    val label   = s"${graph.kernel}/${span.kind.name}@${hex(graph.offsets(cfg.blocks(span.header).first))}"
+    val label   = labelOf(graph, span)
     val nested  = cfg.loops.exists(loop =>
       loop.body.toSet != span.blocks.toSet && loop.body.toSet.subsetOf(span.blocks.toSet)
     )
@@ -154,11 +184,14 @@ object BlockAnalysis {
               }
               runs.zip(weights).map((result, weight) => result.cyclesPerIteration * weight).sum
             }
-          Either.cond(
-            cycles.isFinite && cycles > 0.0,
-            runs.last.copy(cyclesPerIteration = cycles),
-            "no finite positive cycle count"
-          )
+          if (cycles.isNaN)
+            Left(s"the steady state did not settle within ${PipelineSimulator.SettleLimit} cycles")
+          else
+            Either.cond(
+              cycles.isFinite && cycles > 0.0,
+              runs.last.copy(cyclesPerIteration = cycles),
+              "no finite positive cycle count"
+            )
       }
   }
 
