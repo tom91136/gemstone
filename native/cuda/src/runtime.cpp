@@ -5518,6 +5518,8 @@ CUresult cuFuncSetAttribute(CUfunction function, CUfunction_attribute attribute,
 
 CUresult cuFuncSetCacheConfig(CUfunction function, CUfunc_cache) { return function ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
 
+CUresult cuKernelSetCacheConfig(CUkernel kernel, CUfunc_cache, CUdevice) { return kernel ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
+
 CUresult cuFuncSetSharedMemConfig(CUfunction function, CUsharedconfig) { return function ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
 
 CUresult occupancyActiveBlocks(int *blocks, CUfunction function, int blockSize, size_t dynamicSMemSize) {

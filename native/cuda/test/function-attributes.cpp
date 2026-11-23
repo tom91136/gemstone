@@ -282,3 +282,14 @@ TEST_CASE("CUDA cuLinkAddFile reports a missing input file as file not found", "
   CHECK(cuLinkDestroy(state) == CUDA_SUCCESS);
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+TEST_CASE("CUDA kernel cache config accepts each preference", "[cuda][function-attributes]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  auto *const kernel = reinterpret_cast<CUkernel>(loadKernel(ConstReferenced80, "k_const80"));
+  for (const auto config : {CU_FUNC_CACHE_PREFER_NONE, CU_FUNC_CACHE_PREFER_SHARED, CU_FUNC_CACHE_PREFER_L1, CU_FUNC_CACHE_PREFER_EQUAL}) {
+    CHECK(cuKernelSetCacheConfig(kernel, config, 0) == CUDA_SUCCESS);
+  }
+  CHECK(cuKernelSetCacheConfig(nullptr, CU_FUNC_CACHE_PREFER_NONE, 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
