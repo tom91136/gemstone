@@ -113,8 +113,6 @@ class NvidiaLatencySuite extends Suite {
   test("sm_89 float-to-integer conversion carries a probed latency") {
     assertEquals(NvidiaLatency.measured(89, F2i32), Some(Architecture.Sourced(17.0, probedF2i)))
     assertEquals(NvidiaLatency.measured(90, F2i32), None)
-    assertEquals(NvidiaLatency.producer("F2I.FTZ.U32.TRUNC.NTZ R13, R12;"), Some(F2i32))
-    assertEquals(NvidiaLatency.producer("F2I.S32.SAT R4, R5;"), Some(F2i32))
   }
 
   test("a producer names the instruction form it measures, not the whole mnemonic family") {
@@ -128,6 +126,11 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.producer("DADD R4, R8, -c[0][0x180];"), Some(Dadd64))
     assertEquals(NvidiaLatency.producer("MUFU.RCP64H R17, R5;"), Some(Rcp64H))
     assertEquals(NvidiaLatency.producer("MUFU.RCP R8, R8;"), Some(Rcp32))
+    assertEquals(NvidiaLatency.producer("F2I.FTZ.U32.TRUNC.NTZ R13, R12;"), Some(F2i32))
+    assertEquals(NvidiaLatency.producer("F2I.TRUNC.NTZ R0, R2;"), Some(F2i32))
+    assertEquals(NvidiaLatency.producer("F2I.F64.TRUNC R4, R2;"), None)
+    assertEquals(NvidiaLatency.producer("F2I.U64.TRUNC R4, R2;"), None)
+    assertEquals(NvidiaLatency.producer("F2I.S64.F64.TRUNC R4, R2;"), None)
   }
 
   test("a special register read names its producer by the register it reads") {

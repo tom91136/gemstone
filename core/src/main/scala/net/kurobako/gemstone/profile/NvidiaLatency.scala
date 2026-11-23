@@ -76,7 +76,6 @@ object NvidiaLatency {
     "SHL"            -> Shl32,
     "I2F"            -> I2f32,
     "I2FP"           -> I2f32,
-    "F2I"            -> F2i32,
     "DFMA"           -> Fma64,
     "MUFU.RCP"       -> Rcp32,
     "LDG"            -> Ldg32,
@@ -98,12 +97,15 @@ object NvidiaLatency {
 
   private val specialRegister = """\bSR_[A-Z]+""".r
 
+  private val wideF2i = Set("F64", "S64", "U64")
+
   def producer(text: String): Option[Producer] = {
     val opcode = text.trim.split("\\s+").dropWhile(_.startsWith("@")).headOption.getOrElse("")
     val parts  = opcode.stripSuffix(";").split('.')
     specialRegister.findFirstIn(text).flatMap(register => specials.get(parts.head -> register))
       .orElse(mnemonics.get(parts.take(3).mkString(".")))
       .orElse(mnemonics.get(parts.take(2).mkString(".")))
+      .orElse(Option.when(parts.head == "F2I" && !parts.exists(wideF2i))(F2i32))
       .orElse(mnemonics.get(parts.head))
   }
 
