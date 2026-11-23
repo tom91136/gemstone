@@ -293,6 +293,24 @@ class ConditionCodeSuite extends Suite {
     }
   }
 
+  // ptxas saves the whole nibble with P2R around the code that clobbers it: zero in bit 0, sign in bit 1, carry and
+  // overflow clear.
+  for (sm <- Vec(50, 60))
+    test(s"sm$sm a set's condition-code destination defines the whole nibble for P2R") {
+      def run(setup: String, instruction: String, expected: Int): Unit =
+        check(
+          sm,
+          s"$setup; $instruction; P2R R6, CC, RZ, 0xf; LDC.64 R2, c[0x0][0x160]; STG.E [R2.64], R6; EXIT",
+          Vec(expected)
+        )
+      run("MOV R4, 5", "ISET.EQ.AND RZ.CC, R4, 5, PT", 0x2)
+      run("MOV R4, 5", "ISET.EQ.AND RZ.CC, R4, 6, PT", 0x1)
+      run("MOV R4, 0x3f800000; MOV R5, 0x40000000", "FSET.GT.AND RZ.CC, R4, R5, PT", 0x1)
+      run("MOV R4, 0x3f800000; MOV R5, 0x40000000", "FSET.GT.AND RZ.CC, R5, R4, PT", 0x2)
+      run("MOV R2, 0; MOV R3, 0x3ff00000; MOV R4, 0; MOV R5, 0x40000000", "DSET.LT.AND RZ.CC, R2, R4, PT", 0x2)
+      run("MOV R2, 0; MOV R3, 0x3ff00000; MOV R4, 0; MOV R5, 0x40000000", "DSET.LT.AND RZ.CC, R4, R2, PT", 0x1)
+    }
+
   test("sm35 FSET.GTU.CC drives CC.NEU for numeric, unordered, predicate-masked, and overwritten flags") {
     def run(
         a: String,

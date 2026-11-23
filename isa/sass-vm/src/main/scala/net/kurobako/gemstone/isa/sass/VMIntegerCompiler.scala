@@ -1008,7 +1008,7 @@ private object VMIntegerCompiler {
     val combined = combine(combineOp.getOrElse(Modifier.AND).predicateOperation, extended, predicateSource(values(3)))
     val result   = select(if (mods(Modifier.BF)) Value.Immediate(0x3f800000L) else Low32, Value.Immediate(0L), combined)
     store(operands.head, result)
-    if (OperandQueries.has(operands.head, OperandSelector.CC)) setZeroFlag(result)
+    if (OperandQueries.has(operands.head, OperandSelector.CC)) setMaskFlags(result)
   }
 
   private def halfSelected(operand: Operand): Boolean =

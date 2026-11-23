@@ -269,11 +269,22 @@ private trait VMCompilationContext {
     select(sign, value, compare(Comparison.LessThan, NumericFormat.Unsigned(32), magnitude, Value.Immediate(0x800000L)))
   }
 
-  final def setZeroFlag(value: Value): Unit =
+  /** A legacy set's `.CC` destination defines the whole condition-code nibble: zero and sign from the mask it leaves,
+    * with carry and overflow clear. ptxas saves the nibble with `P2R` across the code that clobbers it and restores it
+    * later, so every bit must be defined.
+    */
+  final def setMaskFlags(value: Value): Unit = {
     emit(WriteConditionFlag(
       VMConditionCodes.Flag.Zero,
       compare(Comparison.Equal, NumericFormat.Unsigned(32), value, Value.Immediate(0L))
     ))
+    emit(WriteConditionFlag(
+      VMConditionCodes.Flag.Sign,
+      compare(Comparison.LessThan, NumericFormat.Signed(32), value, Value.Immediate(0L))
+    ))
+    emit(WriteConditionFlag(VMConditionCodes.Flag.Carry, Value.Predicate(VMRegisters.Predicate.False.slot)))
+    emit(WriteConditionFlag(VMConditionCodes.Flag.Overflow, Value.Predicate(VMRegisters.Predicate.False.slot)))
+  }
 
   /** The carry produced by the preceding add-with-carry, as 0 or 1. */
   final def carryOut(): Value.Register = {

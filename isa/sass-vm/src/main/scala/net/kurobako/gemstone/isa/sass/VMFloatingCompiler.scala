@@ -651,13 +651,12 @@ private object VMFloatingCompiler {
       case None             => unsupported(s"${operation.mnemonic.raw} requires a comparison")
     }
     val result = combiner.fold(holds)(found => combine(found.predicateOperation, holds, predicateSource(operands(3))))
-    // The observed consumer reads the zero flag, clear when the masked comparison is true.
-    if (zeroFlag) emit(PredicateUnary(VMRegisters.Predicate.Zero.slot, result.slot))
+    val truth  = if (modifiers.contains(Modifier.BF)) 0x3f800000L else 0xffffffffL
+    val mask   = select(Value.Immediate(truth), Value.Immediate(0L), result)
+    if (zeroFlag) setMaskFlags(mask)
     else {
-      val truth = if (modifiers.contains(Modifier.BF)) 0x3f800000L else 0xffffffffL
-      val mask  = select(Value.Immediate(truth), Value.Immediate(0L), result)
       store(operands.head, mask)
-      if (registerFlag) setZeroFlag(mask)
+      if (registerFlag) setMaskFlags(mask)
     }
   }
 

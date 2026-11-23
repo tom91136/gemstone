@@ -105,7 +105,8 @@ private object VMConditionCodeForms {
     if (ccFlagsSupported) {
       writeConditionFlags()
       flags ++= VMConditionCodes.Flag.values
-    } else if (zeroFlag) write(VMConditionCodes.Flag.Zero, Value.Predicate(VMRegisters.Predicate.Zero.slot))
+    } else if (zeroFlag && !flags.contains(VMConditionCodes.Flag.Zero))
+      write(VMConditionCodes.Flag.Zero, Value.Predicate(VMRegisters.Predicate.Zero.slot))
     if (!ccFlagsSupported && (integer || OperandQueries.is[Form.Imad](operation)))
       write(VMConditionCodes.Flag.Carry, carryOut())
     if (!ccFlagsSupported && integer) {
