@@ -51,6 +51,9 @@ private object VMSequenceCompiler {
     def has(modifier: Modifier): Boolean = modifiers.contains(modifier)
     def are(values: Modifier*): Boolean  = modifiers.toSet == values.toSet && modifiers.size == values.size
     instruction.form match {
+      case Form.Call(Some(returns), Operand.Symbol(name), Some(arguments), None)
+          if name.raw == "cudaCGSynchronize" =>
+        Some(gridSynchronise(returns, arguments))
       case Form.Cvt(destination, Operand.VectorLiteral(Vec(a, b, e, f)), Some(bits), None)
           if has(Modifier.Rs) =>
         Some(stochasticQuad(instruction, modifiers, destination, Vec(a, b, e, f), bits))
@@ -742,6 +745,35 @@ private object VMSequenceCompiler {
     ) ++ inverse.toVec.map(VMIR.Instruction.PredicateUnary(_, q)) :+
       VMIR.Instruction.PredicateBinary(operation, combined, nonzero, inverse.getOrElse(q))
   }
+
+  /** `cudaCGSynchronize`: the device runtime's grid synchronisation, which returns 999 for the zero handle and
+    * otherwise waits for every resident workgroup at the launch's grid barrier.
+    */
+  private def gridSynchronise(returns: Operand, arguments: Operand)(using scope: Scope): Lowered =
+    for {
+      returned <- scope.callParameters(returns).flatMap(
+        _.headOption.toRight(Error.Invalid("cudaCGSynchronize has no return parameter"))
+      )
+      parameters <- scope.callParameters(arguments)
+      _          <- Either.cond(parameters.size == 2, (), Error.Invalid("cudaCGSynchronize takes a handle and flags"))
+      handle     <- temporary("grid handle")
+      flags      <- temporary("grid flags")
+      status     <- temporary("grid status")
+      absent     <- temporaryPredicate("grid handle is zero")
+    } yield Vec(
+      VMIR.Instruction.LoadParameter(Vec(handle), parameters(0), 0, 64, signed = false),
+      VMIR.Instruction.LoadParameter(Vec(flags), parameters(1), 0, 32, signed = false),
+      VMIR.Instruction.SetPredicate(
+        absent,
+        Comparison.Equal,
+        NumericFormat.Unsigned(64),
+        Value.Register(handle),
+        Value.Immediate(0L)
+      ),
+      VMIR.Instruction.Select(status, Value.Immediate(999L), Value.Immediate(0L), absent, 32),
+      VMIR.Instruction.StoreParameter(returned, 0, Value.Register(status), 32),
+      VMIR.Instruction.GridBarrier(Value.Register(flags), Some(Value.Register(handle)))
+    )
 
   private enum MatchKind derives CanEqual { case Any, All }
 

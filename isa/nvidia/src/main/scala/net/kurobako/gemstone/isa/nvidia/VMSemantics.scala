@@ -211,9 +211,18 @@ private object VMSemantics {
         MachineSemantics.mbarrierPending(Execute, machine)(destination, token)
       case Instruction.WarpBarrier(memberMask, exclusive) =>
         if (exclusive) machine.warpPartition(memberMask) else machine.warpSync(memberMask)
-      case Instruction.ClusterBarrier(arrive) => machine.clusterBarrier(arrive)
-      case Instruction.GridBarrier(flags)     => machine.gridBarrier(flags)
+      case Instruction.ClusterBarrier(arrive)     => machine.clusterBarrier(arrive)
+      case Instruction.GridBarrier(flags, handle) =>
+        if (handle.exists(value => absent(context, value))) machine.advance else machine.gridBarrier(flags)
     }
+  }
+
+  /** Whether no active lane holds a non-zero `value`. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def absent(context: VMContext, value: Value): Boolean = {
+    var empty = true
+    context.active.foreachLane(lane => if (context.read(lane, value) != 0L) empty = false)
+    empty
   }
 
   private def executeWorkgroupBarrier(instruction: Instruction, context: VMContext): Either[Fault, Step] = {

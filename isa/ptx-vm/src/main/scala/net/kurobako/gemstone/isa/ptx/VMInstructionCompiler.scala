@@ -77,6 +77,7 @@ private object VMInstructionCompiler {
 
   private val builtins: Map[String, Builtin] = Map(
     "cudaGetDevice"                                               -> Builtin.GetDevice,
+    "cudaCGGetIntrinsicHandle"                                    -> Builtin.GridHandle,
     "cudaDeviceGetAttribute"                                      -> Builtin.DeviceAttribute,
     "cudaOccupancyMaxActiveBlocksPerMultiprocessor"               -> Builtin.Occupancy,
     "cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags"      -> Builtin.Occupancy,

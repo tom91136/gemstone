@@ -49,9 +49,8 @@ PTX modifier domains, operand types and value limits are already checked (`isa/p
 
 ## 11. Cooperative-groups syscalls beyond sm_89 and PTX mode
 
-The SASS path provides `__cuda_syscall_CGS_get_intrinsic_handle` and `__cuda_syscall_CGS_sync` (a grid-wide `GridBarrier` over the resident workgroups of a cooperative launch). Two parts are open:
+The SASS path provides `__cuda_syscall_CGS_get_intrinsic_handle` and `__cuda_syscall_CGS_sync` (a grid-wide `GridBarrier` over the resident workgroups of a cooperative launch). One part is open:
 
 - Recheck the `libcudadevrt` wrapper ABI before any sm_90 or later work: handle in R4:R5, flags in R6, result in R4 were read from the sm_80 (CUDA 11.6) and sm_89 (CUDA 13.3) members. Disassemble the sm_90, sm_100 and sm_120 members first; ptxas may bind the syscalls through bank 4 there, which the relocation change covers but no test exercises.
-- PTX mode lowers neither `cudaCGGetIntrinsicHandle` nor `cudaCGSynchronize`; a PTX program calling them fails with `unknown function`. Map the handle to `Builtin.GridHandle` and give the synchronisation a lowering that writes the return value (0, or 999 for a zero handle).
 
-`CGS_get_size`, `CGS_get_rank` and the multi-grid scope stay unsupported, and a grid synchronisation with flag bit 0 (`cudaCGSynchronizeGrid`) faults.
+PTX mode lowers `cudaCGGetIntrinsicHandle` to `Builtin.GridHandle` and `cudaCGSynchronize` to a load of its arguments, the 0 or 999 return, and the same `GridBarrier`; the `ptxVm` suite runs the conformance fixture's program on a cooperative launch and returns 999 for the zero handle. `CGS_get_size`, `CGS_get_rank` and the multi-grid scope stay unsupported, and a grid synchronisation with flag bit 0 (`cudaCGSynchronizeGrid`) faults.

@@ -352,8 +352,8 @@ object RegisterUses {
         writeRegister(destination); readValue(address)
       case Instruction.ClusterBarrier(_) =>
         ()
-      case Instruction.GridBarrier(flags) =>
-        readValue(flags)
+      case Instruction.GridBarrier(flags, handle) =>
+        readValue(flags); handle.foreach(readValue)
       case Instruction.ClusterTryCancel(response, barrier, _) =>
         readValues(Vec(response, barrier))
       case Instruction.ClusterCancelStatus(destination, response) =>

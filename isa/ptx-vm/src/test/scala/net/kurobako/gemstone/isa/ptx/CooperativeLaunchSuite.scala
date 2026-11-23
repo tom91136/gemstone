@@ -143,4 +143,121 @@ class CooperativeLaunchSuite extends Suite {
   test("the grid workspace ends at 256 bytes") {
     assert(probeWorkspace(256)._1.left.exists(_.message.contains("outside every allocation")))
   }
+
+  // the device runtime's cooperative-groups calls, as Numba and CUDA.jl emit them
+  private val runtimeGridSync = """.version 8.0
+    |.target sm_70
+    |.address_size 64
+    |.extern .func (.param .b64 r) cudaCGGetIntrinsicHandle(.param .b32 s);
+    |.extern .func (.param .b32 r) cudaCGSynchronize(.param .b64 h, .param .b32 f);
+    |.visible .entry grid_sync(.param .u64 data_p, .param .u64 out_p) {
+    |  .reg .b32 %r<12>;
+    |  .reg .b64 %rd<12>;
+    |  .param .b64 rh;
+    |  .param .b32 sc;
+    |  .param .b32 rs;
+    |  .param .b64 ah;
+    |  .param .b32 af;
+    |  ld.param.u64 %rd0, [data_p];
+    |  ld.param.u64 %rd1, [out_p];
+    |  mov.u32 %r0, %tid.x;
+    |  mov.u32 %r1, %ctaid.x;
+    |  mov.u32 %r2, %ntid.x;
+    |  mad.lo.u32 %r3, %r1, %r2, %r0;
+    |  mul.wide.u32 %rd2, %r3, 4;
+    |  add.u64 %rd3, %rd0, %rd2;
+    |  add.u32 %r4, %r3, 1;
+    |  st.global.u32 [%rd3], %r4;
+    |  mov.u32 %r5, 1;
+    |  st.param.b32 [sc], %r5;
+    |  call.uni (rh), cudaCGGetIntrinsicHandle, (sc);
+    |  ld.param.b64 %rd4, [rh];
+    |  mov.u32 %r6, 0;
+    |  st.param.b64 [ah], %rd4;
+    |  st.param.b32 [af], %r6;
+    |  call.uni (rs), cudaCGSynchronize, (ah, af);
+    |  ld.param.b32 %r7, [rs];
+    |  xor.b32 %r8, %r3, %r2;
+    |  mul.wide.u32 %rd5, %r8, 4;
+    |  add.u64 %rd6, %rd0, %rd5;
+    |  ld.global.u32 %r9, [%rd6];
+    |  mul.wide.u32 %rd7, %r3, 16;
+    |  add.u64 %rd8, %rd1, %rd7;
+    |  st.global.u64 [%rd8], %rd4;
+    |  st.global.u32 [%rd8+8], %r9;
+    |  st.global.u32 [%rd8+12], %r7;
+    |  ret;
+    |}
+    |""".stripMargin
+
+  private val runtimeZeroHandle = """.version 8.0
+    |.target sm_70
+    |.address_size 64
+    |.extern .func (.param .b32 r) cudaCGSynchronize(.param .b64 h, .param .b32 f);
+    |.visible .entry zero_handle(.param .u64 out_p) {
+    |  .reg .b32 %r<8>;
+    |  .reg .b64 %rd<8>;
+    |  .param .b64 ah;
+    |  .param .b32 af;
+    |  .param .b32 rs;
+    |  ld.param.u64 %rd0, [out_p];
+    |  mov.u32 %r0, %tid.x;
+    |  mov.u32 %r1, %ctaid.x;
+    |  mov.u32 %r2, %ntid.x;
+    |  mad.lo.u32 %r3, %r1, %r2, %r0;
+    |  mul.wide.u32 %rd2, %r3, 4;
+    |  add.u64 %rd3, %rd0, %rd2;
+    |  mov.u64 %rd1, 0;
+    |  st.param.b64 [ah], %rd1;
+    |  mov.u32 %r4, 0;
+    |  st.param.b32 [af], %r4;
+    |  call.uni (rs), cudaCGSynchronize, (ah, af);
+    |  ld.param.b32 %r5, [rs];
+    |  st.global.u32 [%rd3], %r5;
+    |  ret;
+    |}
+    |""".stripMargin
+
+  private val RuntimeHandle           = 0x7ffffffffffffL
+  private val RuntimeBlocks: Int > 0  = 4
+  private val RuntimeThreads: Int > 0 = 32
+
+  test("the device runtime's grid handle and sync publish every block") {
+    val kernel = compileKernel(runtimeGridSync)
+    val total  = (RuntimeBlocks * RuntimeThreads).raw
+    val memory = DeviceMemory((total * 4 + total * 16).unsafe[Int >= 0])
+    val result = execute(
+      kernel,
+      RuntimeBlocks,
+      RuntimeThreads,
+      Map(
+        ("data_p": NonEmpty[String]) -> Argument.fromLong(memory.start.raw),
+        ("out_p": NonEmpty[String])  -> Argument.fromLong(memory.start.raw + total * 4L)
+      ),
+      memory,
+      cooperative = true
+    )
+    assertEquals(result, Right(()))
+    for (gid <- 0 until total) {
+      val out = total * 4L + gid * 16L
+      assertEquals(memory.readLittleEndian(memory.start.offset(out), 8).toOption.get, RuntimeHandle)
+      assertEquals(memory.readInt32(memory.start.offset(out + 8L)), Right((gid ^ RuntimeThreads.raw) + 1))
+      assertEquals(memory.readInt32(memory.start.offset(out + 12L)), Right(0))
+    }
+  }
+
+  test("a sync with the zero handle returns 999 without waiting for the grid") {
+    val kernel = compileKernel(runtimeZeroHandle)
+    val total  = (RuntimeBlocks * RuntimeThreads).raw
+    val memory = DeviceMemory((total * 4).unsafe[Int >= 0])
+    val result = execute(
+      kernel,
+      RuntimeBlocks,
+      RuntimeThreads,
+      Map(("out_p": NonEmpty[String]) -> Argument.fromLong(memory.start.raw)),
+      memory
+    )
+    assertEquals(result, Right(()))
+    assertEquals(memory.words(0, total), Vec.fill(total)(999L))
+  }
 }
