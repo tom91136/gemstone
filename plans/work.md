@@ -9,7 +9,7 @@ Small and medium items, in priority order. Larger efforts have their own plans, 
 | 3 | Launch connection reuse | Every NDRange launch opens a new RPC connection (thread start, ~92 KB Hello); 150k to 570k per conformance shard | `native/rpc/completion.hpp` `launchAndCollect` | S | | done |
 | 4 | Image programs back in `short` | Copy, fill and read/write image programs were excluded from the short workload for per-row RPC cost, now gone | `conformance/workloads/short.toml` | XS | a full CI conformance run | open |
 | 5 | PTX register-declaration typing | Tables 26 to 28 of the PTX ISA are in `operand-domains.json` but not applied to register operands | `isa/ptx-asm/.../ptx/Validation.scala` | M | | done |
-| 6 | Parked SPIR-V and NV renders | Explorer renders for the SPIR-V image level and descriptor logic, device enqueue and event forms, and the NV tensor layouts and views | `isa/spirv-vm`, `isa/nvidia` render instances | M | | open |
+| 6 | Parked SPIR-V and NV renders | Explorer renders for the SPIR-V image level and descriptor logic, device enqueue and event forms, and the NV tensor layouts and views | `isa/spirv-vm`, `isa/nvidia` render instances | M | VM semantics for the parked forms | audited, blocked |
 | 7 | nvidia barrier cohort queue | Waiters are already queued per barrier key; the remaining release and arrival scans cost about 2% of samples in a 1024-thread barrier loop (32 warps at most), so nothing is worth landing. The whole-build `bonsaiAnalyse` runs out of heap, so the two findings could not be re-checked | `isa/nvidia/.../VMInterpreter.scala` | M | | measured, no change |
 | 8 | AMDGPU gfx1250 and gfx1251 | About 1025 forms are NotImplemented and need hardware evidence | `explorer/src/test/resources/coverage/policy.tsv` | L | hardware access | blocked |
 | 9 | Conformance coverage verification | Code items are closed; the `all` tier, emulated release samples and remaining container builds are not yet run | `conformance-coverage.md` | L | | open |
@@ -46,6 +46,16 @@ Once a full CI run reports the times, move `opencl_cts_cl_copy_images`, `opencl_
 ## 5. PTX register-declaration typing
 
 Done. `Validation` collects the `.reg` declarations in scope for each entry, function and block, and the new `RegisterTypes` checks every register operand whose instruction type the matched syntax form or the operand type table fixes. Table 26 decides exact operands; packed and alternate instruction types accept the register declaration the type table gives them (`.f16x2` takes `.b32`, `.bf16` takes `.b16`). Tables 27 and 28 decide the data operands of `ld`, `st` and `cvt`, so a wider source is chopped and a wider destination is extended, while a narrower operand or a floating-point/integer mix the tables mark `inv` is rejected. `mul.wide` and `mad.wide` take a new `wide` row of the operand type table, which resolves the destination, and the `mad` accumulator, to twice the source width. Operands whose type the instruction prose fixes but the syntax does not name, such as the `vote` predicate or the `mbarrier` count, are left unchecked rather than guessed. `RegisterTypesSuite` covers the four rule kinds and block scoping; 15 ptxas 11.6 cases agree with its accepted and rejected examples. The execution path is unchanged because `PTXBackend` admits programs on availability only (`forms = false`).
+
+## 6. Parked SPIR-V and NV renders
+
+The core forms of the three areas already render: `SPIRVMachineRender.image`, `deviceEnqueue` and `tensorAddressing`,
+fed by `MachineSemantics.imageForms`, `deviceForms` and `tensorForms`. The forms still parked in the coverage policy
+are extension forms with no VM implementation: 38 image and descriptor forms (15 rows), and 22 work-graph, task-sequence
+and blocking-pipe forms (5 rows). The NV tensor layout and view forms are not parked; the only no-rendering stubs in
+`isa/nvidia` are `tensorText` and `valueText`, whose results reach only fault details that the renderer does not emit.
+Rendering the parked forms needs VM semantics for sparse residency and bindless handles, and a work graph or data graph
+pipeline; see `/var/tmp/gs/t191/report.md` for the per-form audit.
 
 ## 11. Cooperative-groups syscalls beyond sm_89 and PTX mode
 
