@@ -1507,7 +1507,13 @@ struct Global {
   size_t size{};
 };
 
+std::atomic<uint32_t> moduleSerials{0};
+
 struct Module {
+  CUcontext context = activeContext();
+  uint32_t serial = ++moduleSerials;
+  bool loadedByTools = false;
+  std::vector<std::string> deviceFunctions;
   uint64_t program{};
   ProgramEncoding encoding = ProgramEncoding::PTXText;
   const void *deferredImage = nullptr;
@@ -1527,6 +1533,7 @@ struct Function {
   std::array<int, 3> clusterDimensions{};
   Module *module{};
   std::string name;
+  bool device = false;
   std::vector<Parameter> parameters;
   std::atomic<bool> built{false};
 };
@@ -2467,6 +2474,145 @@ int moduleEnumerateFunctions(const void *, CUmodule module, ModuleEnumerationCal
   }
 }
 
+constexpr uint32_t ToolsModuleOriginDriver = 0;
+constexpr uint32_t ToolsModuleOriginTools = 5;
+constexpr uint32_t ToolsModuleFlavour = 2;
+constexpr uint32_t ToolsModuleInfoSize = 0x28;
+constexpr uint32_t ToolsModuleInfoVersion = 2;
+
+class ContextBinding {
+  CUcontext previous = currentContext;
+
+public:
+  explicit ContextBinding(CUcontext context) { currentContext = context; }
+  ContextBinding(const ContextBinding &) = delete;
+  ContextBinding &operator=(const ContextBinding &) = delete;
+  ~ContextBinding() { currentContext = previous; }
+};
+
+std::vector<std::string> cubinFunctionNames(const void *image) {
+  std::vector<std::string> names;
+  if (!cubinImageSize(image)) return names;
+  const auto header = readNative<Elf64_Ehdr>(image);
+  const auto section = [&](uint64_t index) { return readNative<Elf64_Shdr>(image, header.e_shoff + (index * header.e_shentsize)); };
+  for (uint16_t index = 0; index < header.e_shnum; ++index) {
+    const auto table = section(index);
+    if (table.sh_type != SHT_SYMTAB || table.sh_link >= header.e_shnum || table.sh_entsize < sizeof(Elf64_Sym)) continue;
+    const auto strings = section(table.sh_link);
+    for (uint64_t offset = 0; offset + sizeof(Elf64_Sym) <= table.sh_size; offset += table.sh_entsize) {
+      const auto symbol = readNative<Elf64_Sym>(image, table.sh_offset + offset);
+      if (ELF64_ST_TYPE(symbol.st_info) != STT_FUNC || symbol.st_name >= strings.sh_size) continue;
+      const std::string_view text{static_cast<const char *>(image) + strings.sh_offset + symbol.st_name,
+                                  static_cast<size_t>(strings.sh_size - symbol.st_name)};
+      names.emplace_back(text.substr(0, text.find('\0')));
+    }
+  }
+  return names;
+}
+
+CUresult toolsModuleLoad(CUcontext context, CUmodule *module, const void *image, uint64_t, uint64_t, uint64_t) {
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  if (!module) return CUDA_ERROR_INVALID_VALUE;
+  if (!image) return CUDA_ERROR_INVALID_IMAGE;
+  const ContextBinding binding(context);
+  if (const auto status = loadModuleImage(module, image); status != CUDA_SUCCESS) return status;
+  auto *const loaded = findModule(*module);
+  loaded->loadedByTools = true;
+  loaded->deviceFunctions = cubinFunctionNames(image);
+  return CUDA_SUCCESS;
+}
+
+CUfunction deviceFunction(Module &owner, const std::string &name) {
+  const std::scoped_lock lock(stateMutex);
+  if (const auto existing =
+          functions | find_cref([&](const auto &entry) { return entry->module == &owner && entry->name == name && entry->device; }))
+    return reinterpret_cast<CUfunction>(existing->get().get());
+  auto entry = std::make_unique<Function>();
+  entry->module = &owner;
+  entry->name = name;
+  entry->device = true;
+  auto *const handle = reinterpret_cast<CUfunction>(entry.get());
+  functions.push_back(std::move(entry));
+  return handle;
+}
+
+CUresult toolsModuleFunction(CUcontext, CUmodule module, const char *name, CUfunction *function) {
+  if (!module || !name || !function) return CUDA_ERROR_INVALID_VALUE;
+  *function = nullptr;
+  const auto status = cuModuleGetFunction(function, module, name);
+  auto *const owner = findModule(module);
+  if (status != CUDA_ERROR_NOT_FOUND || !owner) return status;
+  const auto &declared = owner->deviceFunctions;
+  if (std::find(declared.begin(), declared.end(), name) == declared.end()) return status;
+  *function = deviceFunction(*owner, name);
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsFunctionAddress(CUfunction function, uint64_t *address) {
+  if (!address) return CUDA_ERROR_INVALID_VALUE;
+  if (!findFunction(function)) return CUDA_ERROR_INVALID_HANDLE;
+  *address = reinterpret_cast<uintptr_t>(function);
+  return CUDA_SUCCESS;
+}
+
+template <class Read> CUresult toolsModuleWord(CUmodule module, uint32_t *word, CUresult failure, Read read) {
+  const auto *const found = findModule(module);
+  if (!found || !word) return failure;
+  *word = read(*found);
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsModuleOrigin(CUmodule module, uint32_t *origin) {
+  return toolsModuleWord(module, origin, CUDA_ERROR_INVALID_VALUE,
+                         [](const Module &found) { return found.loadedByTools ? ToolsModuleOriginTools : ToolsModuleOriginDriver; });
+}
+
+CUresult toolsModuleSerial(CUmodule module, uint32_t *serial) {
+  return toolsModuleWord(module, serial, CUDA_ERROR_UNKNOWN, [](const Module &found) { return found.serial; });
+}
+
+CUresult toolsModuleFlavour(CUmodule module, uint32_t *flavour) {
+  return toolsModuleWord(module, flavour, CUDA_ERROR_UNKNOWN, [](const Module &) { return ToolsModuleFlavour; });
+}
+
+struct ToolsModuleInfo {
+  uint32_t size;
+  uint32_t version;
+  CUmodule module;
+  const void *image;
+  uint64_t imageBytes;
+  uint64_t reserved;
+};
+
+struct ToolsModuleVisit {
+  uint64_t reserved;
+  CUcontext context;
+  void (*callback)(void *argument, const ToolsModuleInfo *info);
+  void *argument;
+};
+
+CUresult toolsContextModules(ToolsModuleVisit *visit) {
+  if (!visit) return CUDA_ERROR_INVALID_VALUE;
+  if (!contextIsLive(visit->context)) return CUDA_ERROR_INVALID_CONTEXT;
+  std::vector<CUmodule> owned;
+  {
+    const std::scoped_lock lock(stateMutex);
+    for (auto module = modules.rbegin(); module != modules.rend(); ++module)
+      if ((*module)->context == visit->context) owned.push_back(reinterpret_cast<CUmodule>(module->get()));
+  }
+  if (visit->callback)
+    for (auto *const module : owned) {
+      const ToolsModuleInfo info{.size = ToolsModuleInfoSize,
+                                 .version = ToolsModuleInfoVersion,
+                                 .module = module,
+                                 .image = nullptr,
+                                 .imageBytes = 0,
+                                 .reserved = 0};
+      visit->callback(visit->argument, &info);
+    }
+  return CUDA_SUCCESS;
+}
+
 constexpr int ToolsDriverInitialised = 0;
 constexpr int ToolsDriverDeinitialised = 1;
 constexpr int ToolsDriverUninitialised = 2;
@@ -2880,11 +3026,19 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
     {"d7bd8af8e7acca4abdbcfb1f1b3fcf33",
      {{2, slotFunction(toolsDriverVersion)}, {3, slotFunction(toolsDriverState)}, {4, slotFunction(toolsDriverRun)}}},
     {"7cb63f9b9ca48e42a484beb66e6aed7f", {{67, slotFunction(toolsCallbackSlot)}}},
-    {"6e163fbeb958444d835ce182aff1991e", {{7, slotFunction(moduleEnumerateFunctions)}}},
+    {"6e163fbeb958444d835ce182aff1991e",
+     {{6, slotFunction(toolsModuleFunction)},
+      {7, slotFunction(moduleEnumerateFunctions)},
+      {11, slotFunction(toolsModuleSerial)},
+      {27, slotFunction(toolsModuleFlavour)},
+      {28, slotFunction(toolsModuleLoad)},
+      {39, slotFunction(toolsFunctionAddress)},
+      {65, slotFunction(toolsModuleOrigin)}}},
     {"21318c60971432488ca641ff7324c8f2",
      {{3, slotFunction(toolsContextDevice)},
       {4, slotFunction(driverMetadataQuery)},
       {8, slotFunction(toolsContextLevel)},
+      {35, slotFunction(toolsContextModules)},
       {39, slotFunction(driverStreamId)},
       {40, slotFunction(toolsContextReserved)},
       {51, slotFunction(driverStreamHandle)},
@@ -5026,8 +5180,9 @@ CUresult cuModuleGetFunction(CUfunction *function, CUmodule module, const char *
     if (const auto status = materialiseModule(module, *owner); status != CUDA_SUCCESS) return status;
     {
       const std::scoped_lock lock(stateMutex);
-      const auto existing =
-          functions | find_cref([owner, name](const auto &entry) { return entry->module == owner && entry->name == name; });
+      const auto existing = functions | find_cref([owner, name](const auto &entry) {
+                              return entry->module == owner && entry->name == name && !entry->device;
+                            });
       if (existing) {
         *function = reinterpret_cast<CUfunction>(existing->get().get());
         return CUDA_SUCCESS;

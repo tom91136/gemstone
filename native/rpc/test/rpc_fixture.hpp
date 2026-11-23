@@ -241,6 +241,10 @@ public:
     std::scoped_lock const lock(stateMutex);
     kernelResourceCounts = resources;
   }
+  void missingKernel(std::string name) {
+    std::scoped_lock const lock(stateMutex);
+    missingKernels.insert(std::move(name));
+  }
   void kernelLaunchBound(std::optional<uint32_t> maxThreads) {
     std::scoped_lock const lock(stateMutex);
     kernelMaxThreads = maxThreads;
@@ -732,8 +736,14 @@ private:
       } else if (operationTag == operation::DescribeKernel) {
         const auto request = decodePayload<DescribeKernel>(payload);
         GEMSTONE_RPC_REQUIRE(livePrograms.contains(request.program.value) && !request.name.value.empty());
-        describedKernels.push_back(request.name.value);
-        appendKernelMetadata(result);
+        if (missingKernels.contains(request.name.value)) {
+          failed = true;
+          failure = "kernel '" + request.name.value + "' is not present";
+          failureKind = FailureKind::NotFound;
+        } else {
+          describedKernels.push_back(request.name.value);
+          appendKernelMetadata(result);
+        }
       } else if (operationTag == operation::DescribeImage) {
         const auto request = decodePayload<DescribeImage>(payload);
         GEMSTONE_RPC_REQUIRE(!request.name.value.empty());
@@ -1149,6 +1159,7 @@ private:
   std::vector<std::vector<uint8_t>> linkInputs;
   std::vector<LinkedKernel> linkKernels;
   std::vector<std::string> describedKernels;
+  std::set<std::string> missingKernels;
   std::map<uint32_t, uint32_t> specializationSizes;
   std::vector<std::pair<uint32_t, std::vector<uint8_t>>> specialization;
   std::map<uint64_t, uint64_t> allocationAddresses;
