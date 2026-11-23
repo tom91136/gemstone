@@ -159,7 +159,7 @@ class AMDGPUBlockCostSuite extends Suite {
     assert(deleted.isRight, deleted)
   }
 
-  test("a loop with two paths is costed when the recorded launch issues its blocks evenly, and withheld otherwise") {
+  test("a loop with two paths is costed whether the recorded launch issues its blocks evenly or unevenly") {
     val kernel                                                   = "window"
     def costOf(image: Vec[Byte], launch: AMDGPUBlockCost.Launch) = {
       val (window, code) = spanning(image, kernel, "v_fma_f32", "v_fma_f32")
@@ -174,9 +174,9 @@ class AMDGPUBlockCostSuite extends Suite {
         assertEquals(costOf(even, recorded(stream)).map(_.cycles), Right(timing.block.cyclesPerIteration))
       case other => fail(s"the loop is not executed: $other")
     }
-    val uneven   = WindowFixtures.branching(trips = 6, skipped = 2)
-    val withheld = costOf(uneven, recorded(launched(uneven, kernel)))
-    assert(withheld.left.exists(_.contains("is withheld: uneven issue counts at ")), withheld)
+    val uneven     = WindowFixtures.branching(trips = 6, skipped = 2)
+    val unevenCost = costOf(uneven, recorded(launched(uneven, kernel)))
+    assert(unevenCost.isRight, unevenCost)
   }
 
   test("a rewrite that needs more registers is costed at the residency they leave") {

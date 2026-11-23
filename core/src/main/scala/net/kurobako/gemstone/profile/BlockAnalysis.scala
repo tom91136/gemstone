@@ -84,12 +84,16 @@ object BlockAnalysis {
     val members = slots.map { case (address, entry, _) =>
       Member(address, entry.map(_._1.text), entry.fold(0L)(_._2.issues))
     }
-    val closing        = span.latches.map(block => graph.offsets(cfg.blocks(block).last)).toSet
-    val label          = s"${graph.kernel}/${span.kind.name}@${hex(graph.offsets(cfg.blocks(span.header).first))}"
+    val closing = span.latches.map(block => graph.offsets(cfg.blocks(block).last)).toSet
+    val label   = s"${graph.kernel}/${span.kind.name}@${hex(graph.offsets(cfg.blocks(span.header).first))}"
+    val nested  = cfg.loops.exists(loop =>
+      loop.body.toSet != span.blocks.toSet && loop.body.toSet.subsetOf(span.blocks.toSet)
+    )
     val status: Status =
       if (!members.exists(_.issues > 0L)) Status.NotExecuted
       else if (!cfg.reducible) Status.Withheld("irreducible control flow")
-      else timing(profile, span.kind, slots, members, closing, placement).fold(Status.Withheld(_), Status.Executed(_))
+      else timing(profile, span.kind, slots, members, closing, nested, placement)
+        .fold(Status.Withheld(_), Status.Executed(_))
     Region(label, span.kind, graph.kernel, members, status)
   }
 
@@ -99,6 +103,7 @@ object BlockAnalysis {
       slots: Vec[Slot],
       members: Vec[Member],
       closing: Set[Long],
+      nested: Boolean,
       placement: Option[PipelineSimulator.Placement]
   ): Either[String, Timing] = {
     val lowered = slots.map { case (address, entry, extent) =>
@@ -106,30 +111,55 @@ object BlockAnalysis {
     }
     for {
       _     <- lowered.collectFirst { case Left(reason) => reason }.toLeft(())
-      _     <- unevenAt(members).toLeft(())
-      block <- simulated(profile, kind, lowered.collect { case Right(op) => op }, placement)
+      block <- simulated(profile, kind, members, lowered.collect { case Right(op) => op }, nested, placement)
     } yield Timing(
       block,
       slots.zip(lowered).collect { case ((address, _, _), Right(op)) if op.pipe.isEmpty => address }
     )
   }
 
-  private def unevenAt(members: Vec[Member]): Option[String] =
-    members.find(_.issues != members.head.issues).map(member => s"uneven issue counts at ${hex(member.address)}")
-
+  /** The cost of an uneven region is the weighted sum of the steady states of the streams that keep the instructions
+    * issued at least `count` times. The weights telescope from the recorded counts, so an instruction issued in a
+    * fraction `f` of the entries adds `f` of its cost; an even region has one stream and keeps its old cost.
+    */
   private def simulated(
       profile: Profile,
       kind: Kind,
+      members: Vec[Member],
       ops: Vec[Op],
+      nested: Boolean,
       placement: Option[PipelineSimulator.Placement]
   ): Either[String, PipelineSimulator.Block] = {
-    val stream = kind match {
-      case Kind.Block => PipelineSimulator.Stream.once(ops)
-      case Kind.Loop  => PipelineSimulator.Stream.repeat(ops)
-    }
-    val block  = PipelineSimulator.simulate(profile.architecture, profile.occupancy, stream, placement)
-    val cycles = block.cyclesPerIteration
-    Either.cond(cycles.isFinite && cycles > 0.0, block, "no finite positive cycle count")
+    val counts = members.map(_.issues)
+    val entry  = counts.head
+    if (nested) Left("inner loop in region")
+    else
+      members.zip(counts).find(_._2 > entry) match {
+        case Some((member, count)) => Left(s"issue count $count above entry $entry at ${hex(member.address)}")
+        case None                  =>
+          def run(kept: Vec[Op]): PipelineSimulator.Block = {
+            val stream = kind match {
+              case Kind.Block => PipelineSimulator.Stream.once(kept)
+              case Kind.Loop  => PipelineSimulator.Stream.repeat(kept)
+            }
+            PipelineSimulator.simulate(profile.architecture, profile.occupancy, stream, placement)
+          }
+          val levels = counts.distinct.sorted.reverse
+          val runs   = levels.map(level => run(ops.zip(counts).collect { case (op, count) if count >= level => op }))
+          val cycles =
+            if (levels.size == 1) runs.head.cyclesPerIteration
+            else {
+              val weights = levels.zip(levels.tail :+ 0L).map { case (high, low) =>
+                (high - low).toDouble / entry.toDouble
+              }
+              runs.zip(weights).map((result, weight) => result.cyclesPerIteration * weight).sum
+            }
+          Either.cond(
+            cycles.isFinite && cycles > 0.0,
+            runs.last.copy(cyclesPerIteration = cycles),
+            "no finite positive cycle count"
+          )
+      }
   }
 
   private def opOf(

@@ -48,11 +48,53 @@ class BlockAnalysisSuite extends Suite {
     recorder.stream
   }
 
+  private val branchAddresses = Vec[Long](0x10L, 0x18L, 0x20L, 0x28L, 0x30L, 0x38L)
+  private val branchGraph     = ControlFlowGraph(
+    Vec(Some(Vec(1)), Some(Vec(2, 3)), Some(Vec(4)), Some(Vec(4)), Some(Vec(1, 5)), None),
+    0
+  )
+  private val plainGraph = ControlFlowGraph(
+    Vec(Some(Vec(1)), Some(Vec(3)), None, Some(Vec(4)), Some(Vec(1, 5)), None),
+    0
+  )
+  private val nestedGraph = ControlFlowGraph(
+    Vec(Some(Vec(1)), Some(Vec(2, 3)), Some(Vec(2, 4)), Some(Vec(4)), Some(Vec(1, 5)), None),
+    0
+  )
+  private val branchLatencies = Vec(1, 1, 20, 1, 1, 1)
+  private val branchUses      = Vec(
+    RegisterUse(Vec.empty, Vec("r0")),
+    RegisterUse(Vec("r0"), Vec("r1")),
+    RegisterUse(Vec("r1"), Vec("r2")),
+    RegisterUse(Vec("r1"), Vec("r2")),
+    RegisterUse(Vec("r2"), Vec("r0")),
+    RegisterUse(Vec("r0"), Vec.empty)
+  )
+
+  private def recordCounts(counts: Vec[(Int, Int)], cfg: ControlFlowGraph): ProfileStream = {
+    val recorder = ProfileRecorder()
+    recorder.controlFlow("k", cfg, branchAddresses)
+    counts.flatMap { case (index, count) => Vec.fill(count)(index) }.zipWithIndex.foreach { (index, issued) =>
+      val state = State(issued.toLong, s"op$index", estimatedAt(branchLatencies(index)))
+      assertEquals(recorder.instruction(at(branchAddresses(index)), state), Right(()))
+      recorder.registers(issued.toLong, branchUses(index))
+    }
+    recorder.stream
+  }
+
+  private def estimatedAt(cycles: Int): Option[Schedule] = Some(Schedule.Estimated(cycles.unsafe[Int >= 0]))
+
   private def report(stream: ProfileStream): ujson.Value =
     BlockAnalysis.of(stream, Architecture.sm89).fold(fail(_), analysis => BlockAnalysisReport.json(analysis.regions))
 
   private def region(json: ujson.Value, label: String): ujson.Value =
     json.arr.find(_("label").str == label).getOrElse(fail(s"no region $label"))
+
+  private def loopCycles(stream: ProfileStream): Double = {
+    val loop = region(report(stream), "k/loop@0x18")
+    assertEquals(loop("status").str, "executed")
+    loop("cyclesPerIteration").num
+  }
 
   test("a loop and a straight block report the cycles of their simulated streams") {
     val json     = report(record(Vec(0, 1, 2, 3)))
@@ -66,6 +108,32 @@ class BlockAnalysisSuite extends Suite {
     assertEquals(loop("status").str, "executed")
     assertEqualsDouble(loop("cyclesPerIteration").num, expected = 14.0, delta = 1e-9)
     assertEquals(loop("binding").str, "path")
+  }
+
+  test("a conditional block taken on some iterations costs between never and always") {
+    val without = loopCycles(recordCounts(Vec(0 -> 4, 1 -> 4, 3 -> 4, 4 -> 4, 5 -> 1), plainGraph))
+    val uneven  = loopCycles(recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 2, 3 -> 2, 4 -> 4, 5 -> 1), branchGraph))
+    val always  = loopCycles(recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 4, 3 -> 4, 4 -> 4, 5 -> 1), branchGraph))
+    assert(without < uneven, s"$without should be below $uneven")
+    assert(uneven < always, s"$uneven should be below $always")
+  }
+
+  test("an inner loop in a region is refused instead of being weighted") {
+    val loop = region(
+      report(recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 8, 3 -> 2, 4 -> 4, 5 -> 1), nestedGraph)),
+      "k/loop@0x18"
+    )
+    assertEquals(loop("status").str, "withheld")
+    assert(loop("reason").str.contains("inner loop"), loop("reason").str)
+  }
+
+  test("a count above the region entry is refused") {
+    val loop = region(
+      report(recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 6, 3 -> 2, 4 -> 4, 5 -> 1), branchGraph)),
+      "k/loop@0x18"
+    )
+    assertEquals(loop("status").str, "withheld")
+    assert(loop("reason").str.contains("entry"), loop("reason").str)
   }
 
   test("a block that never executed is listed without timing") {
