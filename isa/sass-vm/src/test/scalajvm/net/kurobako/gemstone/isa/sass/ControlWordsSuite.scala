@@ -89,6 +89,26 @@ class ControlWordsSuite extends Suite {
     )
   }
 
+  /** The kind of use a latency row key names: a guard predicate, the high word of a wide read, or a register slot. */
+  private def useOf(key: String): String = {
+    val kind = key.drop(key.lastIndexOf('/') + 1)
+    if (kind.endsWith("h")) "h" else if (kind == "g" || kind == "?") kind else ""
+  }
+
+  test("a register's distance does not depend on the operand slot that reads it") {
+    val uses = table.latency.toVector.flatMap { (producer, row) =>
+      row.keys.groupBy(key => key.take(key.lastIndexOf('/') + 1) + useOf(key)).toVector.sortBy(_._1).map {
+        case (use, keys) =>
+          (producer, use, keys.toVector.sorted.map(key => (key, table.distance(producer, key))))
+      }
+    }
+    val differing = uses.filter((_, _, found) => found.map(_._2).distinct.size != 1)
+    assert(
+      differing.isEmpty,
+      differing.take(8).map((producer, use, found) => s"$producer -> $use: ${found.mkString(", ")}").mkString("; ")
+    )
+  }
+
   test("every path regenerates to a schedule that meets the table") {
     corpus.foreach(unit =>
       assertEquals(ControlWords.violations(table, unit.path, regenerated(unit)), Vec.empty[(Int, String)], unit.name)

@@ -52,12 +52,14 @@ object ControlWords {
 
   case class Path(first: Int, steps: Vec[Step])
 
-  /** `latency` is keyed by producer form, bank and ordinal of the written register, then by consumer form and use.
-    * `settle` is the least distance from a barrier's setter to its first waiter, with the forms that set a write
-    * barrier as its keys and `/r` after a form for its read barrier. `late` holds the forms that set a read barrier.
-    * `spacing` is the least distance between the latest instruction of one form and a later instruction of another,
-    * whatever their registers, for pairs seen `Sampled` times and never one cycle apart. `idle` is the stall between
-    * two adjacent forms that no register explains. An unseen pair of `latency` or `idle` takes its row's maximum.
+  /** `latency` is keyed by producer form, bank and ordinal of the written register, then by consumer form and use, with
+    * a use's operand slot not a latency of its own: a lookup takes the least distance the row holds for the consumer
+    * form's slots, and keeps a guard, a high word and an unknown use apart. `settle` is the least distance from a
+    * barrier's setter to its first waiter, with the forms that set a write barrier as its keys and `/r` after a form
+    * for its read barrier. `late` holds the forms that set a read barrier. `spacing` is the least distance between the
+    * latest instruction of one form and a later instruction of another, whatever their registers, for pairs seen
+    * `Sampled` times and never one cycle apart. `idle` is the stall between two adjacent forms that no register
+    * explains. An unseen pair of `latency` or `idle` takes its row's maximum.
     */
   case class Table(
       target: String,
@@ -70,15 +72,22 @@ object ControlWords {
       spacing: Map[String, Map[String, Int]],
       idle: Map[String, Map[String, Int]]
   ) derives ReadWriter {
+    private def least(row: Map[String, Int]): Map[String, Int] =
+      row.foldLeft(Map.empty[String, Int]) { (found, entry) =>
+        val key = useKey(entry._1)
+        found.updated(key, math.min(entry._2, found.getOrElse(key, entry._2)))
+      }
+
     private val rows: Map[String, Int]     = latency.map((producer, row) => producer -> row.values.max)
     private val worst: Int                 = (rows.values ++ Seq(1)).max
+    private val uses                       = latency.map((producer, row) => producer -> least(row))
     private val idleRows: Map[String, Int] = idle.map((form, row) => form -> row.values.max)
     private val idleWorst: Int             = (idleRows.values ++ Seq(1)).max
 
     def rowMaximum(producer: String): Int = math.min(MaxStall, rows.getOrElse(producer, worst))
 
     def distance(producer: String, consumer: String): Int =
-      math.min(MaxStall, latency.get(producer).fold(worst)(row => row.getOrElse(consumer, rows(producer))))
+      math.min(MaxStall, uses.get(producer).fold(worst)(row => row.getOrElse(useKey(consumer), rows(producer))))
 
     def spaced(form: String, later: String): Int = spacing.get(form).flatMap(_.get(later)).getOrElse(0)
 
@@ -175,6 +184,16 @@ object ControlWords {
   }
 
   private def idleKey(step: Step): String = if (step.entry) s"${step.form}@entry" else step.form
+
+  /** The class of a latency row's use: a guard, an unknown use, the high word of a wide read, or a register slot. A
+    * register is read at the same latency whichever slot names it, so the slots of a consumer form share one distance.
+    */
+  private def useKey(consumer: String): String = {
+    val slash = consumer.lastIndexOf('/')
+    val kind  = consumer.drop(slash + 1)
+    val use   = if (kind.endsWith("h")) "h" else if (kind == "g" || kind == "?") kind else ""
+    s"${consumer.take(slash + 1)}$use"
+  }
 
   private def bank(register: String): String = register.takeWhile(!_.isDigit)
 
