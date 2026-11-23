@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.ptx
 import Metadata.*
 import Program.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import scala.annotation.tailrec
@@ -14,6 +15,7 @@ object Validation {
     case InvalidOperands(opcode: NonEmpty[String], detail: NonEmpty[String])
     case InvalidModifiers(opcode: NonEmpty[String], detail: NonEmpty[String])
     case InvalidOperandValue(opcode: NonEmpty[String], position: Int, violation: OperandViolation)
+    case InvalidOperandType(opcode: NonEmpty[String], position: Int, violation: RegisterViolation)
     case Incomplete(detail: NonEmpty[String])
 
     def message: NonEmpty[String] = this match {
@@ -24,12 +26,17 @@ object Validation {
       case InvalidModifiers(opcode, detail)                 => s"$opcode: $detail"
       case InvalidOperandValue(opcode, position, violation) =>
         s"$opcode: operand ${position + 1}: ${violation.message}"
+      case InvalidOperandType(opcode, position, violation) =>
+        s"$opcode: operand ${position + 1}: ${violation.message}"
       case Incomplete(detail) => detail
     }
   }
 
   /** One `.version`-delimited module with the ISA version and target it declares. */
-  case class Module(version: Option[Version], target: Option[Target], instructions: Vec[Instruction])
+  case class Module(version: Option[Version], target: Option[Target], chunks: Vec[Chunk])
+
+  /** The instructions of one block with the register declarations in scope there. */
+  case class Chunk(registers: RegisterTypes.Scope, instructions: Vec[Instruction])
 
   def modules(program: Program): Vec[Module] = {
     val starts = program.statements.indices.filter(index =>
@@ -44,9 +51,47 @@ object Validation {
       Module(
         declared(statements, "version")(version(_)),
         declared(statements, "target")(target(_)),
-        instructions(statements)
+        chunks(statements, Map.empty)
       )
     }
+  }
+
+  private def chunks(statements: Vec[Statement], outer: RegisterTypes.Scope): Vec[Chunk] = {
+    val scope  = outer ++ declarations(statements)
+    val direct = statements.collect { case Statement.Instruction(value) => value }
+    val nested = statements.flatMap {
+      case Statement.Block(body)                 => chunks(body, scope)
+      case Statement.Entry(body = Some(body))    => chunks(body, Map.empty)
+      case Statement.Function(body = Some(body)) => chunks(body, Map.empty)
+      case _                                     => Vec.empty[Chunk]
+    }
+    (if (direct.isEmpty) Vec.empty[Chunk] else Vec(Chunk(scope, direct))) ++ nested
+  }
+
+  /** The `.reg` declarations directly in `statements`, with their ranges expanded. */
+  private def declarations(statements: Vec[Statement]): RegisterTypes.Scope =
+    statements.flatMap {
+      case Statement.Directive(path, arguments, _, _) if path.head.raw == "reg" =>
+        val types = arguments.flatMap {
+          case DirectiveArgument(_, Operand.Qualifier(parts)) => parts.raw.flatMap(part => PtxTypes(part.raw))
+          case _                                              => Vec.empty[PtxType]
+        }
+        types.find(value => value.scalar || value.predicate).toVec.flatMap { tpe =>
+          arguments.flatMap(argument => declaredNames(argument.operand)).flatMap(expand(_)).map(_.raw -> tpe)
+        }
+      case _ => Vec.empty[(String, PtxType)]
+    }.toMap
+
+  private def declaredNames(operand: Operand): Vec[NonEmpty[String]] = operand match {
+    case Operand.Register(name, None) => Vec(name)
+    case Operand.Symbol(name)         => Vec(name)
+    case _                            => Vec.empty
+  }
+
+  private def expand(name: NonEmpty[String]): Vec[NonEmpty[String]] = name.raw match {
+    case s"$base<$count>" if base.nonEmpty && count.toIntOption.exists(_ > 0) =>
+      Vec.tabulate(count.toInt)(index => s"$base$index".unsafe[NonEmpty[String]])
+    case _ => Vec(name)
   }
 
   private def declared[A](statements: Vec[Statement], directive: String)(parse: Vec[Operand] => Option[A]): Option[A] =
@@ -69,14 +114,6 @@ object Validation {
     case Operand.Symbol(name) if name.raw.startsWith("sm_") => name.raw
   }.flatMap(Target.parse(_).toOption).headOption
 
-  private def instructions(statements: Vec[Statement]): Vec[Instruction] = statements.flatMap {
-    case Statement.Instruction(value)    => Vec(value)
-    case Statement.Block(body)           => instructions(body)
-    case Statement.Entry(body = body)    => body.fold(Vec.empty[Instruction])(instructions(_))
-    case Statement.Function(body = body) => body.fold(Vec.empty[Instruction])(instructions(_))
-    case _                               => Vec.empty[Instruction]
-  }
-
   /** Whether any specification section defining the instruction is available to the declared version and target;
     * sections whose syntax admits the instruction's modifiers decide when there are any.
     */
@@ -95,6 +132,14 @@ object Validation {
   }
 
   def validate(instruction: Instruction, version: Version, target: Target): ValidationOutcome[Issue] =
+    validate(instruction, version, target, Map.empty)
+
+  def validate(
+      instruction: Instruction,
+      version: Version,
+      target: Target,
+      registers: RegisterTypes.Scope
+  ): ValidationOutcome[Issue] =
     available(instruction, version, target) match {
       case ValidationOutcome.Accepted =>
         validateForms(
@@ -103,11 +148,26 @@ object Validation {
             version >= entry.introduced && target >= requiredTarget(instruction, entry)
           ).flatMap(_.forms)
         ) match {
-          case ValidationOutcome.Accepted => operandValues(instruction)
-          case other                      => other
+          case ValidationOutcome.Accepted =>
+            operandValues(instruction) match {
+              case ValidationOutcome.Accepted => operandTypes(instruction, registers)
+              case other                      => other
+            }
+          case other => other
         }
       case other => other
     }
+
+  /** The register operands of `instruction` that break the type checking tables. */
+  private def operandTypes(
+      instruction: Instruction,
+      registers: RegisterTypes.Scope
+  ): ValidationOutcome[Issue] =
+    RegisterTypes.violations(instruction, registers).map((position, violation) =>
+      Issue.InvalidOperandType(instruction.opcode, position, violation)
+    ).refine[NonEmpty[Vec[Issue]]].toOption.fold[ValidationOutcome[Issue]](ValidationOutcome.Accepted)(
+      ValidationOutcome.Rejected(_)
+    )
 
   /** The immediates of `instruction` that break the operand rules of the document. */
   private def operandValues(instruction: Instruction): ValidationOutcome[Issue] =
@@ -137,9 +197,12 @@ object Validation {
     ValidationOutcome.combineAll(modules(program).flatMap { module =>
       module.version.fold(Vec.empty[ValidationOutcome[Issue]]) { version =>
         val target = module.target.getOrElse(Target(Int.MaxValue))
-        module.instructions.map(instruction =>
-          if (forms) validate(instruction, version, target) else available(instruction, version, target)
-        )
+        module.chunks.flatMap { chunk =>
+          chunk.instructions.map(instruction =>
+            if (forms) validate(instruction, version, target, chunk.registers)
+            else available(instruction, version, target)
+          )
+        }
       }
     })
 

@@ -62,15 +62,7 @@ object OperandRules {
       opcode: String,
       modifiers: Vec[String]
   ): Vec[(position: Int, violation: OperandViolation)] = {
-    val count = instruction.operands.size
-    val names = ModifierDomains.matching(
-      instruction.definition,
-      instruction.mods
-    ).filter(_.accepts(count)).map(_.names(count)) match {
-      case Vec()   => Vec.fill(count)(Option.empty[String])
-      case results => Vec.tabulate(count)(position => ModifierForm.agreed(results.map(_(position))).flatten)
-    }
-    val types = PtxTypes.operandTypes(opcode.takeWhile(_ != '.'), modifiers, names)
+    val types = PtxTypes.operandTypes(opcode.takeWhile(_ != '.'), modifiers, PtxTypes.operandNames(instruction))
     instruction.operands.zipWithIndex.flatMap { (operand, position) =>
       for {
         tpe       <- types(position).toVec

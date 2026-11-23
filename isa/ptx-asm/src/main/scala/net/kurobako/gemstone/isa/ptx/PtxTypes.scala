@@ -2,6 +2,8 @@ package net.kurobako.gemstone.isa.ptx
 
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.collection.*
+import net.kurobako.gemstone.collection.Vec.*
+import scala.collection.mutable
 
 /** The type tables, special register classes and operand type rules of the PTX document. */
 object PtxTypes {
@@ -49,11 +51,13 @@ object PtxTypes {
 
   /** Whether an operand of type `operand` is compatible with the instruction type, by the type checking rules: bit-size
     * types agree with every type of the same size, integers agree with integers, and floating-point types agree only
-    * with themselves.
+    * with themselves. A packed or alternate instruction type is compatible with the register declaration the table
+    * gives it.
     */
   def agrees(instruction: PtxType, operand: PtxType): Boolean =
-    instruction.scalar && operand.scalar && instruction.bits == operand.bits &&
-      agreement.get(s"${instruction.kind}X").exists(_.contains(s"${operand.kind}X"))
+    instruction.name == operand.name || instruction.declared.contains(operand.name) ||
+      (instruction.scalar && operand.scalar && instruction.bits == operand.bits &&
+        agreement.get(s"${instruction.kind}X").exists(_.contains(s"${operand.kind}X")))
 
   /** The widening the relaxed rules of `ld`, `st` and `cvt` apply to a source operand. */
   def source(instruction: PtxType, operand: PtxType): Option[Widening] =
@@ -61,6 +65,43 @@ object PtxTypes {
 
   def destination(instruction: PtxType, operand: PtxType): Option[Widening] =
     destinations.get((instruction.name, operand.name))
+
+  /** Whether a source operand of `ld`, `st` or `cvt` accepts the register declaration `operand`. */
+  def acceptsSource(instruction: PtxType, operand: PtxType): Boolean =
+    relaxed(sources, instruction, operand)
+
+  /** Whether a destination operand of `ld`, `st` or `cvt` accepts the register declaration `operand`. */
+  def acceptsDestination(instruction: PtxType, operand: PtxType): Boolean =
+    relaxed(destinations, instruction, operand)
+
+  private def relaxed(
+      table: Map[(String, String), Widening],
+      instruction: PtxType,
+      operand: PtxType
+  ): Boolean =
+    table.get((instruction.name, operand.name)) match {
+      case Some(Widening.Invalid) => false
+      case Some(_)                => true
+      case None                   => instruction.name == operand.name || instruction.declared.contains(operand.name)
+    }
+
+  /** The register declaration types an operand of the instruction type may name, in table order. */
+  def allowedOperands(instruction: PtxType): Vec[String] = allowed(agrees(instruction, _))
+
+  def allowedSources(instruction: PtxType): Vec[String] = allowed(acceptsSource(instruction, _))
+
+  def allowedDestinations(instruction: PtxType): Vec[String] = allowed(acceptsDestination(instruction, _))
+
+  private lazy val declarations: Vec[PtxType] = all.filter(value => value.scalar || value.predicate)
+
+  private def allowed(accepts: PtxType => Boolean): Vec[String] =
+    declarations.filter(accepts).map(_.name)
+
+  /** The double-width type of a 16- or 32-bit integer type, as the `.wide` operand type of `mul` and `mad`. */
+  def wide(value: PtxType): Option[PtxType] =
+    Option.when(
+      value.integer && (value.bits == 16 || value.bits == 32)
+    )(s"${value.kind}${value.bits * 2}").flatMap(apply)
 
   lazy val special: Map[String, SpecialRegister] = data("special").arr.flatMap { row =>
     apply(row(1).str).map(value => row(0).str -> SpecialRegister(row(0).str, value, row(2).num.toInt == 1))
@@ -88,6 +129,7 @@ object PtxTypes {
     def named(token: String): Option[PtxType] = token match {
       case "first" => first
       case "last"  => last
+      case "wide"  => last.flatMap(wide)
       case other   => apply(other)
     }
     Vec.tabulate(names.size) { position =>
@@ -98,5 +140,66 @@ object PtxTypes {
           names(position).filter(name => Set("a", "b", "c", "d")(name)).flatMap(_ => last)
       }
     }
+  }
+
+  /** The syntax name of each operand of `instruction`, where every way of choosing the optional operands agrees. */
+  def operandNames(instruction: Instruction): Vec[Option[String]] = {
+    val count = instruction.operands.size
+    ModifierDomains.matching(instruction.definition, instruction.mods)
+      .filter(_.accepts(count)).map(_.names(count)) match {
+      case Vec()   => Vec.fill(count)(Option.empty[String])
+      case results => Vec.tabulate(count)(position => ModifierForm.agreed(results.map(_(position))).flatten)
+    }
+  }
+
+  /** The types the document gives each operand of `instruction`, by the type slot of the matched syntax form. An empty
+    * vector leaves the operand unconstrained.
+    */
+  def registerTypes(instruction: Instruction): Vec[Vec[PtxType]] = {
+    val all     = instruction.fixedModifiers ++ instruction.mods
+    val present = all.map(_.name.raw).toSet
+    val opcode  = instruction.opcode.raw
+    val binding = rules.exists(rule => rule.opcodes.contains(opcode) && (rule.any.isEmpty || rule.any.exists(present)))
+    if (binding) operandTypes(opcode, all.map(_.name.raw), operandNames(instruction)).map(_.toVec)
+    else {
+      val count  = instruction.operands.size
+      val actual = all.flatMap(modifier => apply(modifier.name.raw))
+      val forms  = ModifierDomains.matching(instruction.definition, instruction.mods).filter(_.accepts(count))
+      Vec.tabulate(count)(position =>
+        forms.flatMap(form => formTypes(instruction, form, actual).lift(position).toVec.flatten).distinct
+      )
+    }
+  }
+
+  private def formTypes(instruction: Instruction, form: ModifierForm, actual: Vec[PtxType]): Vec[Vec[PtxType]] = {
+    val count = instruction.operands.size
+    val names = form.names(count)
+    val slots = form.required.filter(slot =>
+      slot.values.nonEmpty && slot.values.forall(value => PtxTypes(value.name.raw).nonEmpty)
+    )
+    val typed  = Vec.tabulate(slots.size)(index => (slots(index).name, actual.lift(index)))
+    val single =
+      if (typed.size == 1) typed.head._2
+      else if (typed.isEmpty && actual.size == 1) actual.headOption
+      else None
+    val found                                           = mutable.Map.empty[String, Vec[PtxType]]
+    def add(name: String, value: Option[PtxType]): Unit =
+      value.foreach(tpe => found.update(name, found.getOrElse(name, Vec.empty[PtxType]) :+ tpe))
+    if (single.nonEmpty) Vec("d", "a", "b", "c").foreach(add(_, single))
+    else if (instruction.opcode.raw == "cvt" && typed.size >= 2) {
+      add("d", typed.head._2)
+      Vec("a", "b", "c").foreach(add(_, typed.last._2))
+    } else
+      typed.foreach { (slot, value) =>
+        slot match {
+          case "dtype" => add("d", value)
+          case "atype" => add("a", value)
+          case "btype" => add("b", value)
+          case "ctype" => add("c", value)
+          case "stype" => Vec("a", "b", "c").foreach(add(_, value))
+          case _       => ()
+        }
+      }
+    Vec.tabulate(count)(position => names(position).toVec.flatMap(name => found.getOrElse(name, Vec.empty[PtxType])))
   }
 }

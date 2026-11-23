@@ -175,7 +175,9 @@
     {"opcodes":["bfi"],"any":[],"fill":"last","at":[[3,"u32"],[4,"u32"]],"section":"integer-arithmetic-instructions-bfi"},
     {"opcodes":["popc"],"any":[],"fill":"last","at":[[0,"u32"]],"section":"integer-arithmetic-instructions-popc"},
     {"opcodes":["clz"],"any":[],"fill":"last","at":[[0,"u32"]],"section":"integer-arithmetic-instructions-clz"},
-    {"opcodes":["bfind"],"any":[],"fill":"last","at":[[0,"u32"]],"section":"integer-arithmetic-instructions-bfind"}
+    {"opcodes":["bfind"],"any":[],"fill":"last","at":[[0,"u32"]],"section":"integer-arithmetic-instructions-bfind"},
+    {"opcodes":["mul"],"any":["wide"],"fill":"last","at":[[0,"wide"]],"section":"integer-arithmetic-instructions-mul"},
+    {"opcodes":["mad"],"any":["wide"],"fill":"last","at":[[0,"wide"],[3,"wide"]],"section":"integer-arithmetic-instructions-mad"}
   ],
   "rules": [
     {"opcodes":["bfe"],"any":[],"all":[],"none":[],"position":2,"kind":"range","values":[0,255],"elements":false,"section":"integer-arithmetic-instructions-bfe"},

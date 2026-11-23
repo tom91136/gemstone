@@ -290,6 +290,24 @@ object PTXOperandRules {
         Vector.empty,
         Vector(0 -> "u32"),
         cite(s"$Integer-bfind", "Operand a has the instruction type, and destination d has type .u32.")
+      ),
+      Binding(
+        Vector("mul"),
+        Vector("wide"),
+        Vector(0 -> "wide"),
+        cite(
+          s"$Integer-mul",
+          "If .wide is specified, then d is twice as wide as a and b to receive the full result of the multiplication."
+        )
+      ),
+      Binding(
+        Vector("mad"),
+        Vector("wide"),
+        Vector(0 -> "wide", 3 -> "wide"),
+        cite(
+          s"$Integer-mad",
+          "If .wide is specified, then d and c are twice as wide as a and b to receive the result of the multiplication."
+        )
       )
     ),
     Vector(
