@@ -57,6 +57,7 @@
 #include "gemstone_texture_layout.hpp"
 #include <gemstone/bytes.hpp>
 #include <gemstone/command_queue.hpp>
+#include <gemstone/device_identity.hpp>
 #include <gemstone/devices.hpp>
 #include <gemstone/elf.hpp>
 #include <gemstone/export.h>
@@ -89,7 +90,6 @@ constexpr size_t MaximumImageSize = size_t{64} * 1024 * 1024;
 // CUDA 11's library can register compressed catalogues containing a valid 75 MB sm_90 image
 // while running on an older target; inspect those entries without passing them through RPC.
 constexpr size_t MaximumCubinValidationSize = size_t{128} * 1024 * 1024;
-constexpr char DeviceName[] = "Gemstone PTX emulator";
 constexpr size_t ContextCapacity = 64;
 constexpr uint32_t FatbinMagic = 0xba55ed50;
 constexpr int FatbinWrapperMagic = 0x466243b1;
@@ -104,7 +104,6 @@ const auto LaunchParamBufferSize = reinterpret_cast<void *>(uintptr_t{0x2});
 // both the attribute and property queries read from this one definition so the
 // two views cannot drift apart.
 namespace device_limits {
-constexpr size_t TotalGlobalMemoryBytes = uint64_t{8} * 1024 * 1024 * 1024;
 constexpr int32_t MaxThreadsPerBlock = 1024;
 constexpr int32_t MaxBlockDimX = 1024;
 constexpr int32_t MaxBlockDimY = 1024;
@@ -121,11 +120,8 @@ constexpr int32_t MaxRegistersPerMultiprocessor = 65536;
 // This is virtual launch capacity, independent of CPU worker count. Libraries
 // use it to size launch grids; a one-SM device also falls outside some host-side
 // launch heuristics' supported configurations. Workgroups still run through the generic scheduler.
-constexpr int32_t MultiprocessorCount = 4;
 constexpr int32_t MaxThreadsPerMultiprocessor = 1536;
 constexpr int32_t MaxBlocksPerMultiprocessor = 32;
-constexpr int32_t ClockRateKhz = 1500000;
-constexpr int32_t MemoryClockRateKhz = 1500000;
 constexpr int32_t GlobalMemoryBusWidth = 128;
 constexpr int32_t L2CacheSize = 4194304;
 constexpr int32_t MaxPersistingL2CacheSize = L2CacheSize;
@@ -277,21 +273,11 @@ CUresult enqueueCommand(CUstream stream, Kind kind, std::function<int32_t()> wor
   }
 }
 
-std::optional<int> parsePtxTarget(std::string_view target) {
-  target = target ^ drop_while([](char value) { return value == ' ' || value == '\t' || value == '\r'; });
-  if (target ^ starts_with("compute")) target = target ^ strip_prefix("compute") ^ strip_prefix("_");
-  else if (target ^ starts_with("sm")) target = target ^ strip_prefix("sm") ^ strip_prefix("_");
-  else return std::nullopt;
-
-  const auto digits = target ^ take_while([](char value) { return value >= '0' && value <= '9'; });
-  int version = 0;
-  const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), version);
-  return !digits.empty() && parsed.ec == std::errc{} ? std::optional{version} : std::nullopt;
-}
+std::optional<int> parsePtxTarget(std::string_view target) { return gemstone::device_identity::targetVersion(target); }
 
 std::optional<int> configuredPtxVersion() {
   const auto target = gemstone::environment::targetArch();
-  return target ? parsePtxTarget(*target) : std::nullopt;
+  return target ? gemstone::device_identity::targetVersion(*target) : std::nullopt;
 }
 
 std::optional<gemstone::TargetMemory> describedTargetMemory() {
@@ -310,10 +296,7 @@ gemstone::TargetMemory targetMemory() {
   return memory;
 }
 
-std::string_view deviceName() {
-  if (const auto device = gemstone::environment::selectedDevicePreset()) return device->name;
-  return DeviceName;
-}
+std::string_view deviceName() { return gemstone::device_identity::name(); }
 
 bool codeRequired(std::string_view mode) {
   const auto value = gemstone::environment::value(gemstone::environment::CudaCodeMode);
@@ -332,30 +315,9 @@ bool environmentAccepted() {
   return accepted(problem);
 }
 
-std::optional<std::pair<int, int>> computeCapability() {
-  return configuredPtxVersion() ^ map([](int target) { return std::pair{target / 10, target % 10}; })
-         ^ filter([](int major, int) { return major > 0; });
-}
+std::optional<std::pair<int, int>> computeCapability() { return gemstone::device_identity::capability(); }
 
-struct DeviceSpec {
-  int32_t multiprocessors;
-  int32_t clockRateKhz;
-  int32_t memoryClockRateKhz;
-  size_t totalGlobalMemoryBytes;
-};
-
-DeviceSpec deviceSpec() {
-  if (const auto device = gemstone::environment::selectedDevicePreset())
-    // the memory clock is the DDR clock, half the transfer rate
-    return {.multiprocessors = device->multiprocessors,
-            .clockRateKhz = device->boostMhz * 1000,
-            .memoryClockRateKhz = device->memoryMTps * 500,
-            .totalGlobalMemoryBytes = static_cast<size_t>(device->memoryBytes)};
-  return {.multiprocessors = device_limits::MultiprocessorCount,
-          .clockRateKhz = device_limits::ClockRateKhz,
-          .memoryClockRateKhz = device_limits::MemoryClockRateKhz,
-          .totalGlobalMemoryBytes = device_limits::TotalGlobalMemoryBytes};
-}
+gemstone::device_identity::Spec deviceSpec() { return gemstone::device_identity::spec(); }
 
 bool keplerDevice() {
   const auto capability = computeCapability();

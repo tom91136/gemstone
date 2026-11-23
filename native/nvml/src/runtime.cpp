@@ -1,17 +1,14 @@
-#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <string>
 #include <string_view>
-#include <system_error>
-#include <utility>
 
 #include <nvml.h>
 
 #include "gemstone_nvml_api.h"
+#include <gemstone/device_identity.hpp>
 #include <gemstone/devices.hpp>
-#include <gemstone/environment.hpp>
 #include <gemstone/export.h>
 #include <gemstone_device_presets.hpp>
 
@@ -29,11 +26,6 @@ uint32_t deviceOrdinal(nvmlDevice_t device) noexcept { return static_cast<uint32
 
 nvmlDevice_t toDevice(uint32_t ordinal) noexcept { return reinterpret_cast<nvmlDevice_t>(static_cast<uintptr_t>(ordinal + 1)); }
 
-gemstone::DevicePreset activePreset() noexcept {
-  if (const auto preset = gemstone::environment::selectedDevicePreset()) return *preset;
-  return gemstone::devicePresets[0];
-}
-
 nvmlReturn_t copyString(char *destination, unsigned int length, std::string_view source) noexcept {
   if (!destination || length == 0) return NVML_ERROR_INVALID_ARGUMENT;
   if (length <= source.size()) return NVML_ERROR_INSUFFICIENT_SIZE;
@@ -49,16 +41,6 @@ std::string formatUuid(uint32_t ordinal) {
                 bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13],
                 bytes[14], bytes[15]);
   return buffer;
-}
-
-std::pair<int, int> parseCapability(std::string_view target) noexcept {
-  if (target.starts_with("sm_") && target.size() > 3) {
-    int value = 0;
-    const std::string_view sub(target.data() + 3, target.size() - 3);
-    const auto [ptr, ec] = std::from_chars(sub.data(), sub.data() + sub.size(), value);
-    if (ec == std::errc{} && value > 0) return {value / 10, value % 10};
-  }
-  return {8, 0};
 }
 
 unsigned int coresPerMultiprocessor(int major, int minor) noexcept {
@@ -155,7 +137,7 @@ nvmlReturn_t nvmlDeviceGetIndex(nvmlDevice_t device, unsigned int *index) {
 
 nvmlReturn_t nvmlDeviceGetName(nvmlDevice_t device, char *name, unsigned int length) {
   if (!validDevice(device)) return NVML_ERROR_INVALID_ARGUMENT;
-  return copyString(name, length, activePreset().name);
+  return copyString(name, length, gemstone::device_identity::name());
 }
 
 nvmlReturn_t nvmlDeviceGetUUID(nvmlDevice_t device, char *uuid, unsigned int length) {
@@ -213,8 +195,7 @@ extern "C" GEMSTONE_PUBLIC_API nvmlReturn_t nvmlInternalGetExportTable(const voi
 
 nvmlReturn_t nvmlDeviceGetMemoryInfo(nvmlDevice_t device, nvmlMemory_t *memory) {
   if (!memory || !validDevice(device)) return NVML_ERROR_INVALID_ARGUMENT;
-  const auto preset = activePreset();
-  memory->total = static_cast<unsigned long long>(preset.memoryBytes);
+  memory->total = static_cast<unsigned long long>(gemstone::device_identity::spec().totalGlobalMemoryBytes);
   memory->used = 0;
   memory->free = memory->total;
   return NVML_SUCCESS;
@@ -222,9 +203,9 @@ nvmlReturn_t nvmlDeviceGetMemoryInfo(nvmlDevice_t device, nvmlMemory_t *memory) 
 
 nvmlReturn_t nvmlDeviceGetMemoryInfo_v2(nvmlDevice_t device, nvmlMemory_v2_t *memory) {
   if (!memory || !validDevice(device)) return NVML_ERROR_INVALID_ARGUMENT;
-  const auto preset = activePreset();
+  const auto spec = gemstone::device_identity::spec();
   memory->version = 2;
-  memory->total = static_cast<unsigned long long>(preset.memoryBytes);
+  memory->total = static_cast<unsigned long long>(spec.totalGlobalMemoryBytes);
   memory->reserved = 0;
   memory->used = 0;
   memory->free = memory->total;
@@ -233,20 +214,20 @@ nvmlReturn_t nvmlDeviceGetMemoryInfo_v2(nvmlDevice_t device, nvmlMemory_v2_t *me
 
 nvmlReturn_t nvmlDeviceGetNumGpuCores(nvmlDevice_t device, unsigned int *numCores) {
   if (!numCores || !validDevice(device)) return NVML_ERROR_INVALID_ARGUMENT;
-  const auto preset = activePreset();
-  const auto [major, minor] = parseCapability(preset.target);
-  *numCores = static_cast<unsigned int>(preset.multiprocessors) * coresPerMultiprocessor(major, minor);
+  const auto spec = gemstone::device_identity::spec();
+  const auto [major, minor] = gemstone::device_identity::computeCapability();
+  *numCores = static_cast<unsigned int>(spec.multiprocessors) * coresPerMultiprocessor(major, minor);
   return NVML_SUCCESS;
 }
 
 nvmlReturn_t nvmlDeviceGetClockInfo(nvmlDevice_t device, nvmlClockType_t type, unsigned int *clock) {
   if (!clock || !validDevice(device)) return NVML_ERROR_INVALID_ARGUMENT;
-  const auto preset = activePreset();
+  const auto spec = gemstone::device_identity::spec();
   switch (type) {
     case NVML_CLOCK_GRAPHICS:
     case NVML_CLOCK_SM:
-    case NVML_CLOCK_VIDEO: *clock = static_cast<unsigned int>(preset.boostMhz); return NVML_SUCCESS;
-    case NVML_CLOCK_MEM: *clock = static_cast<unsigned int>(preset.memoryMTps / 2); return NVML_SUCCESS;
+    case NVML_CLOCK_VIDEO: *clock = static_cast<unsigned int>(spec.clockRateKhz / 1000); return NVML_SUCCESS;
+    case NVML_CLOCK_MEM: *clock = static_cast<unsigned int>(spec.memoryClockRateKhz / 1000); return NVML_SUCCESS;
     default: return NVML_ERROR_INVALID_ARGUMENT;
   }
 }
@@ -257,7 +238,7 @@ nvmlReturn_t nvmlDeviceGetMaxClockInfo(nvmlDevice_t device, nvmlClockType_t type
 
 nvmlReturn_t nvmlDeviceGetCudaComputeCapability(nvmlDevice_t device, int *major, int *minor) {
   if (!major || !minor || !validDevice(device)) return NVML_ERROR_INVALID_ARGUMENT;
-  const auto [maj, min] = parseCapability(activePreset().target);
+  const auto [maj, min] = gemstone::device_identity::computeCapability();
   *major = maj;
   *minor = min;
   return NVML_SUCCESS;

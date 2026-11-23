@@ -536,6 +536,37 @@ TEST_CASE("Every runtime reports the same identity and capacity for every preset
   vkDestroyInstance(vkInstance, nullptr);
 }
 
+TEST_CASE("NVML and CUDA report the same device without a preset", "[preset][identity][nvml]") {
+  const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, "sm_89");
+  REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  REQUIRE(nvmlInit_v2() == NVML_SUCCESS);
+
+  const auto ref = queryCuda(0);
+  const auto nvml = queryNvml(0);
+
+  CHECK(ref.name == "Gemstone PTX emulator");
+  CHECK(nvml.name == ref.name);
+  CHECK(nvml.memoryBytes == ref.memoryBytes);
+  CHECK(nvml.boostMhz == ref.boostMhz);
+  CHECK(nvml.memoryClockMhz == ref.memoryClockMhz);
+
+  int cudaMajor = 0;
+  int cudaMinor = 0;
+  REQUIRE(cuDeviceGetAttribute(&cudaMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, 0) == CUDA_SUCCESS);
+  REQUIRE(cuDeviceGetAttribute(&cudaMinor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, 0) == CUDA_SUCCESS);
+  CHECK(cudaMajor == 8);
+  CHECK(cudaMinor == 9);
+  int nvmlMajor = 0;
+  int nvmlMinor = 0;
+  nvmlDevice_t handle = nullptr;
+  REQUIRE(nvmlDeviceGetHandleByIndex_v2(0, &handle) == NVML_SUCCESS);
+  REQUIRE(nvmlDeviceGetCudaComputeCapability(handle, &nvmlMajor, &nvmlMinor) == NVML_SUCCESS);
+  CHECK(nvmlMajor == cudaMajor);
+  CHECK(nvmlMinor == cudaMinor);
+
+  REQUIRE(nvmlShutdown() == NVML_SUCCESS);
+}
+
 TEST_CASE("AMD device control is not supported", "[preset][control]") {
   const gemstone_test::Environment presetEnv(gemstone::environment::Device, "Radeon RX 9070 XT");
   REQUIRE(rsmi_init(0) == RSMI_STATUS_SUCCESS);
