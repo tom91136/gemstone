@@ -115,6 +115,42 @@ class NvidiaLatencySuite extends Suite {
     assertEquals(NvidiaLatency.measured(90, F2i32), None)
   }
 
+  private val probedSettle = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a BREV, FLO, FRND or POPC and its first consumer, control " +
+      "run subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedFloSh = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a FLO.U32.SH and its first consumer, control run " +
+      "subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  test("sm_89 bit and float rounding conversions carry probed latencies") {
+    assertEquals(NvidiaLatency.measured(89, Brev), Some(Architecture.Sourced(16.0, probedSettle)))
+    assertEquals(NvidiaLatency.measured(89, Flo), Some(Architecture.Sourced(16.0, probedSettle)))
+    assertEquals(NvidiaLatency.measured(89, Frnd), Some(Architecture.Sourced(16.0, probedSettle)))
+    assertEquals(NvidiaLatency.measured(89, Popc), Some(Architecture.Sourced(16.0, probedSettle)))
+    assertEquals(NvidiaLatency.measured(89, FloSh), Some(Architecture.Sourced(17.0, probedFloSh)))
+    assertEquals(NvidiaLatency.measured(90, Brev), None)
+  }
+
+  test("a producer names only the measured bit and float rounding forms") {
+    assertEquals(NvidiaLatency.producer("BREV R1, c[0][0x28];"), Some(Brev))
+    assertEquals(NvidiaLatency.producer("FLO R1, c[0][0x28];"), Some(Flo))
+    assertEquals(NvidiaLatency.producer("FRND R1, c[0][0x28];"), Some(Frnd))
+    assertEquals(NvidiaLatency.producer("POPC R0, 0x8;"), Some(Popc))
+    assertEquals(NvidiaLatency.producer("FLO.U32.SH R7, R12;"), Some(FloSh))
+    assertEquals(NvidiaLatency.producer("FRND.F64 R4, R2;"), None)
+    assertEquals(NvidiaLatency.producer("FRND.F16 R4, R2;"), None)
+    assertEquals(NvidiaLatency.producer("UBREV UR4, UR5;"), None)
+  }
+
   test("a producer names the instruction form it measures, not the whole mnemonic family") {
     assertEquals(NvidiaLatency.producer("LDG.E.CONSTANT R4, [R4.64];"), Some(LdgConstant))
     assertEquals(NvidiaLatency.producer("@!P1 LDG.E.CONSTANT R6, [R6.64];"), Some(LdgConstant))

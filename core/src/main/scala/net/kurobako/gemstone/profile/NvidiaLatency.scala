@@ -4,7 +4,7 @@ object NvidiaLatency {
 
   enum Producer derives CanEqual {
     case Fadd32, Fmul32, Ffma32, Iadd32, Imul32, Lop32, Shl32, I2f32, F2i32, Fma64, Rcp32, Ldg32, Lds32, Isetp,
-      S2rThread, S2rBlock, S2ur, LdgConstant, ShflDown, Dmul64, Dadd64, Rcp64H
+      S2rThread, S2rBlock, S2ur, LdgConstant, ShflDown, Dmul64, Dadd64, Rcp64H, Brev, Flo, FloSh, Frnd, Popc
   }
 
   import Producer.*
@@ -85,7 +85,10 @@ object NvidiaLatency {
     "SHFL.DOWN"      -> ShflDown,
     "DMUL"           -> Dmul64,
     "DADD"           -> Dadd64,
-    "MUFU.RCP64H"    -> Rcp64H
+    "MUFU.RCP64H"    -> Rcp64H,
+    "BREV"           -> Brev,
+    "FLO"            -> Flo,
+    "POPC"           -> Popc
   )
 
   private val specials: Map[(String, String), Producer] = Map(
@@ -99,6 +102,8 @@ object NvidiaLatency {
 
   private val wideF2i = Set("F64", "S64", "U64")
 
+  private val wideFrnd = Set("F64", "F16", "BF16")
+
   def producer(text: String): Option[Producer] = {
     val opcode = text.trim.split("\\s+").dropWhile(_.startsWith("@")).headOption.getOrElse("")
     val parts  = opcode.stripSuffix(";").split('.')
@@ -106,6 +111,8 @@ object NvidiaLatency {
       .orElse(mnemonics.get(parts.take(3).mkString(".")))
       .orElse(mnemonics.get(parts.take(2).mkString(".")))
       .orElse(Option.when(parts.head == "F2I" && !parts.exists(wideF2i))(F2i32))
+      .orElse(Option.when(parts.head == "FLO" && parts.contains("SH"))(FloSh))
+      .orElse(Option.when(parts.head == "FRND" && !parts.exists(wideFrnd))(Frnd))
       .orElse(mnemonics.get(parts.head))
   }
 
@@ -188,6 +195,22 @@ object NvidiaLatency {
     "CUDA 11.6 cuda.h, cuModuleLoadData"
   )
 
+  private val probedSettle = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a BREV, FLO, FRND or POPC and its first consumer, control " +
+      "run subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
+  private val probedFloSh = Architecture.Source.Probed(
+    "hand-assembled cubin: CS2R.32 SR_CLOCKLO bracket of a FLO.U32.SH and its first consumer, control run " +
+      "subtraction, median over 201 launches in each of 3 runs, a warp per multiprocessor",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 11.6 cuda.h, cuModuleLoadData"
+  )
+
   private val measured89: Map[Producer, Architecture.Sourced[Double]] = Map(
     Lds32       -> Architecture.Sourced(24.00, probed),
     Rcp32       -> Architecture.Sourced(28.00, probed),
@@ -201,7 +224,12 @@ object NvidiaLatency {
     Dmul64      -> Architecture.Sourced(48.00, probedDmulDadd),
     Dadd64      -> Architecture.Sourced(48.00, probedDmulDadd),
     Rcp64H      -> Architecture.Sourced(17.00, probedRcp64H),
-    F2i32       -> Architecture.Sourced(17.00, probedF2i)
+    F2i32       -> Architecture.Sourced(17.00, probedF2i),
+    Brev        -> Architecture.Sourced(16.00, probedSettle),
+    Flo         -> Architecture.Sourced(16.00, probedSettle),
+    FloSh       -> Architecture.Sourced(17.00, probedFloSh),
+    Frnd        -> Architecture.Sourced(16.00, probedSettle),
+    Popc        -> Architecture.Sourced(16.00, probedSettle)
   )
 
   def measured(sm: Int, producer: Producer): Option[Architecture.Sourced[Double]] =
