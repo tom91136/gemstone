@@ -14,7 +14,7 @@ Small and medium items, in priority order. Larger efforts have their own plans, 
 | 8 | AMDGPU gfx1250 and gfx1251 | About 1025 forms are NotImplemented and need hardware evidence | `explorer/src/test/resources/coverage/policy.tsv` | L | hardware access | blocked |
 | 9 | Conformance coverage verification | Code items are closed; the `all` tier, emulated release samples and remaining container builds are not yet run | `conformance-coverage.md` | L | | open |
 | 10 | SPIR-V validation | Only header, version, environment and 46 operand constraint rows are checked; V0 to V8 not started | `spirv-validation.md` | L | | open |
-| 11 | Cooperative-groups syscalls beyond sm_89 and PTX mode | `CGS_sync` and `CGS_get_intrinsic_handle` are linked and run from the SASS path; the wrapper ABI was read from sm_80 and sm_89 only, and PTX mode rejects `cudaCG*` calls | `isa/sass-asm/.../Cubin.scala`, `isa/ptx-vm/.../VMInstructionCompiler.scala` | M | | open |
+| 11 | Cooperative-groups syscalls beyond sm_89 and PTX mode | `CGS_sync` and `CGS_get_intrinsic_handle` are linked and run from the SASS path; the wrapper ABI was read from sm_80 and sm_89 only, and PTX mode rejects `cudaCG*` calls | `isa/sass-asm/.../Cubin.scala`, `isa/ptx-vm/.../VMInstructionCompiler.scala` | M | | done |
 
 ## 1. Render-cycle refactor benchmark
 
@@ -59,8 +59,8 @@ pipeline; see `/var/tmp/gs/t191/report.md` for the per-form audit.
 
 ## 11. Cooperative-groups syscalls beyond sm_89 and PTX mode
 
-The SASS path provides `__cuda_syscall_CGS_get_intrinsic_handle` and `__cuda_syscall_CGS_sync` (a grid-wide `GridBarrier` over the resident workgroups of a cooperative launch). One part is open:
+The SASS path provides `__cuda_syscall_CGS_get_intrinsic_handle` and `__cuda_syscall_CGS_sync` (a grid-wide `GridBarrier` over the resident workgroups of a cooperative launch). Done.
 
-- Recheck the `libcudadevrt` wrapper ABI before any sm_90 or later work: handle in R4:R5, flags in R6, result in R4 were read from the sm_80 (CUDA 11.6) and sm_89 (CUDA 13.3) members. Disassemble the sm_90, sm_100 and sm_120 members first; ptxas may bind the syscalls through bank 4 there, which the relocation change covers but no test exercises.
+- The `libcudadevrt` wrappers were rechecked on sm_80, sm_89, sm_90, sm_100 and sm_120 from the CUDA 11.8 and 13.3 conformance images. The register ABI is unchanged: the intrinsic-handle wrapper takes the scope in R4 and returns the handle in R4:R5, and the synchronise wrapper takes the handle in R4:R5 and the flags in R6 and returns the result in R4. No member loads a bank-4 pointer; each binds its syscall with a direct `CALL.ABS.NOINC` relocation, R_CUDA_ABS47_34 (0x3a) on sm_80 and sm_89 and R_CUDA_ABS55_16_34 (0x4b) on sm_90, sm_100 and sm_120. `GridSyncSuite` now runs a cooperative grid sync on sm_90 with the 0x4b relocation, so the newer binding is exercised.
 
 PTX mode lowers `cudaCGGetIntrinsicHandle` to `Builtin.GridHandle` and `cudaCGSynchronize` to a load of its arguments, the 0 or 999 return, and the same `GridBarrier`; the `ptxVm` suite runs the conformance fixture's program on a cooperative launch and returns 999 for the zero handle. `CGS_get_size`, `CGS_get_rank` and the multi-grid scope stay unsupported, and a grid synchronisation with flag bit 0 (`cudaCGSynchronizeGrid`) faults.

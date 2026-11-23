@@ -22,11 +22,12 @@ class GridSyncSuite extends Suite {
   private val Width  = 16
   private val Block  = 32
 
-  // the device runtime's wrappers call the syscalls as CALL.ABS.NOINC relocated to an undefined function
-  private def compile(text: String, calls: Vec[(Int, String)]): VMIR.Kernel = {
+  // the device runtime's wrappers call the syscalls as CALL.ABS.NOINC relocated to an undefined function: sm_80 and
+  // sm_89 use R_CUDA_ABS47_34 (0x3a), sm_90 and later use R_CUDA_ABS55_16_34 (0x4b)
+  private def compile(text: String, calls: Vec[(Int, String)], sm: Int = 80, kind: Long = 0x3aL): VMIR.Kernel = {
     val listing = Listing.program(text, "grid").value.instructions.zipWithIndex
       .map((instruction, index) => instruction.copy(address = (index * Width).unsafe))
-    val base    = Harness.module(80, Vec(Entry("grid", 0x160, Vec(8, 8, 8))))
+    val base    = Harness.module(sm, Vec(Entry("grid", 0x160, Vec(8, 8, 8))))
     val size    = listing.size * Width
     val code    = base.sections.head.copy(size = size.unsafe[Int >= 0], bytes = Vec.fill(size)(0.toByte))
     val names   = calls.map(_._2).distinct
@@ -49,7 +50,7 @@ class GridSyncSuite extends Suite {
     )
     val entries = calls.flatMap((index, name) =>
       LittleEndian.toVec((index * Width).toLong, 8) ++
-        LittleEndian.toVec(((names.indexOf(name) + 1).toLong << 32) | 0x3aL, 8)
+        LittleEndian.toVec(((names.indexOf(name) + 1).toLong << 32) | kind, 8)
     )
     val table = Cubin.Section(
       symbols.index + 1,
@@ -87,10 +88,12 @@ class GridSyncSuite extends Suite {
     )
   }
 
-  private def handle(scope: Int, cooperative: Boolean): (Long, Long) = {
+  private def handle(scope: Int, cooperative: Boolean, sm: Int = 80, kind: Long = 0x3aL): (Long, Long) = {
     val kernel = compile(
       s"MOV R4, 0x$scope; CALL.ABS.NOINC 0x0; LDC.64 R2, c[0x0][0x160]; STG.E [R2.64], R4; STG.E [R2.64+0x4], R5; EXIT",
-      Vec(1 -> Handle)
+      Vec(1 -> Handle),
+      sm,
+      kind
     )
     val memory = Memory()
     val output = memory.allocate(Vec.fill(8)(0x55.toByte))
@@ -111,6 +114,14 @@ class GridSyncSuite extends Suite {
     assertEquals(handle(2, cooperative = true), (0L, 0L))
   }
 
+  test("sm_90 binds both syscalls through the Hopper call relocation") {
+    assertEquals(handle(1, cooperative = true, sm = 90, kind = 0x4bL), (0xffffffffL, 0x0007ffffL))
+    val (result, read, status) = synced(2, sm = 90, kind = 0x4bL)
+    assertEquals(result, Right(()))
+    assertEquals(read, Vec.tabulate(2 * Block)(gid => ((gid ^ Block) + 1).toLong))
+    assertEquals(status, Vec.fill(2 * Block)(0L))
+  }
+
   // each thread stores its index, syncs, then reads the thread a block over and stores what it read and the result
   private val syncText =
     "S2R R0, SR_TID.X; S2R R1, SR_CTAID.X; IMAD R0, R1, c[0x0][0x0], R0; LDC.64 R2, c[0x0][0x160]; " +
@@ -120,9 +131,13 @@ class GridSyncSuite extends Suite {
       "LDC.64 R16, c[0x0][0x168]; IMAD.WIDE.U32 R16, R0, 0x4, R16; STG.E [R16.64], R14; " +
       "LDC.64 R20, c[0x0][0x170]; IMAD.WIDE.U32 R20, R0, 0x4, R20; STG.E [R20.64], R18; EXIT"
 
-  private def synced(blocks: Int, schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed)
-      : (Either[Fault, Unit], Vec[Long], Vec[Long]) = {
-    val kernel = compile(syncText, Vec(8 -> Handle, 10 -> Sync))
+  private def synced(
+      blocks: Int,
+      schedule: ConcurrencySchedule = ConcurrencySchedule.Fixed,
+      sm: Int = 80,
+      kind: Long = 0x3aL
+  ): (Either[Fault, Unit], Vec[Long], Vec[Long]) = {
+    val kernel = compile(syncText, Vec(8 -> Handle, 10 -> Sync), sm, kind)
     val memory = Memory()
     val count  = blocks * Block
     val data   = memory.allocate(Vec.fill(count * 4)(0.toByte))
