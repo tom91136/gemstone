@@ -68,17 +68,18 @@ object GeneratePTXDomains {
     val special = derived.tables.special.map(row =>
       ujson.write(ujson.Arr(row.name, row.tpe, if (row.vector) 1 else 0, row.section))
     )
-    val bindings = derived.rules.bindings.map(row =>
-      ujson.write(
-        ujson.Obj(
-          "opcodes" -> array(row.opcodes.map(ujson.Str(_))),
-          "any"     -> array(row.any.map(ujson.Str(_))),
-          "fill"    -> row.fill,
-          "at"      -> array(row.at.map((position, tpe) => ujson.Arr(position, tpe))),
-          "section" -> row.cite.section
-        )
+    val bindings = derived.rules.bindings.map { row =>
+      val fields = Vector(
+        "opcodes" -> array(row.opcodes.map(ujson.Str(_))),
+        "any"     -> array(row.any.map(ujson.Str(_))),
+        "fill"    -> ujson.Str(row.fill),
+        "at"      -> array(row.at.map((position, tpe) => ujson.Arr(position, tpe))),
+        "section" -> ujson.Str(row.cite.section)
+      ) ++ Option.when(row.by.nonEmpty)(
+        "by" -> array(row.by.map((name, tpe) => ujson.Arr(name, tpe)))
       )
-    )
+      ujson.write(ujson.Obj.from(fields))
+    }
     val values = derived.rules.values.map(row =>
       ujson.write(
         ujson.Obj(

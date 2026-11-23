@@ -19,7 +19,8 @@ object PTXOperandRules {
       cite: Cite
   )
 
-  /** The types of an instruction's operands, by position. `fill` types every position `at` leaves out. A type is a type
+  /** The types of an instruction's operands, by position or by syntax name. `by` decides before `at`, for optional
+    * operands that shift the positions of those after them. `fill` types every position neither names. A type is a type
     * name, `pred`, `first` or `last` instruction type, `wide` for the double-width last type, or `acc` for the 32-bit
     * accumulator of the dot-product instructions. The first row matching `opcodes` and the modifier conditions decides.
     */
@@ -27,7 +28,8 @@ object PTXOperandRules {
       opcodes: Vector[String],
       any: Vector[String],
       at: Vector[(Int, String)],
-      cite: Cite
+      cite: Cite,
+      by: Vector[(String, String)] = Vector.empty
   ) {
     val fill: String = "last"
   }
@@ -307,6 +309,38 @@ object PTXOperandRules {
         cite(
           s"$Integer-mad",
           "If .wide is specified, then d and c are twice as wide as a and b to receive the result of the multiplication."
+        )
+      ),
+      Binding(
+        Vector("bar", "barrier"),
+        Vector("popc"),
+        Vector.empty,
+        cite(s"$Sync-bar", "Operands a, b, and d have type .u32; operands p and c are predicates."),
+        by = Vector("d" -> "u32", "a" -> "u32", "b" -> "u32", "{!}c" -> "pred")
+      ),
+      Binding(
+        Vector("bar", "barrier"),
+        Vector("and", "or"),
+        Vector.empty,
+        cite(s"$Sync-bar", "Operands a, b, and d have type .u32; operands p and c are predicates."),
+        by = Vector("p" -> "pred", "a" -> "u32", "b" -> "u32", "{!}c" -> "pred")
+      ),
+      Binding(
+        Vector("match.any.sync", "match.all.sync"),
+        Vector.empty,
+        Vector(0 -> "b32", 2 -> "u32"),
+        cite(
+          s"$Sync-match-sync",
+          "Operand a has instruction type and d has .b32 type."
+        )
+      ),
+      Binding(
+        Vector("cvt.pack"),
+        Vector.empty,
+        Vector(0 -> "u32", 1 -> "s32", 2 -> "s32", 3 -> "b32"),
+        cite(
+          s"$Move-cvt-pack",
+          "Destination d is an unsigned 32-bit integer. Source operands a and b are integers of type .abType and the source operand c is an integer of type .cType"
         )
       )
     ),

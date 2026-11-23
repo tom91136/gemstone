@@ -67,6 +67,47 @@ class RegisterTypesSuite extends Suite {
     rejected(".reg .u32 %d; .reg .u32 %a, %b;", "mul.wide.u32 %d, %a, %b;")("operand 1", ".u32", ".u64")
   }
 
+  test("matrix fragments are held in packed or wide registers, not element types") {
+    accepted(
+      ".reg .b32 %r<9>;",
+      "mma.sync.aligned.m16n8k16.row.col.f16.f16.f16.f16 {%r1,%r2}, {%r3,%r4,%r5,%r6}, {%r7,%r8}, {%r1,%r2};"
+    )
+    accepted(
+      ".reg .b32 %r<14>;",
+      "mma.sp.sync.aligned.m16n8k16.row.col.f32.f16.f16.f32 {%r1,%r2,%r3,%r4}, {%r5,%r6}, {%r7,%r8}, {%r9,%r10,%r11,%r12}, %r13, 0x0;"
+    )
+    accepted(
+      ".reg .b32 %r<21>;",
+      "wmma.mma.sync.aligned.row.col.m16n16k16.s32.s8.s8.s32 {%r1, %r2, %r3, %r4, %r5, %r6, %r7, %r8}, {%r9, %r10}, {%r11, %r12}, {%r13, %r14, %r15, %r16, %r17, %r18, %r19, %r20};"
+    )
+    accepted(".reg .b32 %r<2>;", "movmatrix.sync.aligned.m8n8.trans.b16 %r1, %r2;")
+  }
+
+  test("mov packs and unpacks vector elements at the instruction bit size") {
+    accepted(".reg .b32 %r<3>; .reg .b64 %rd;", "mov.b64 %rd, {%r1, %r2}; mov.b64 {%r1, %r2}, %rd;")
+    accepted(".reg .b16 %rs<3>; .reg .b32 %r;", "mov.b32 %r, {%rs1, %rs2}; mov.b32 {%rs1, %rs2}, %r;")
+    accepted(".reg .b8 %rb<5>; .reg .b32 %r;", "mov.b32 %r, {%rb1, %rb2, %rb3, %rb4};")
+  }
+
+  test("barrier reductions take the prose types, not the type of their predicate result") {
+    accepted(".reg .pred %p<3>; .reg .b32 %r<2>;", "bar.red.or.pred %p1, 0, %r1, %p2;")
+    accepted(".reg .pred %p<3>; .reg .b32 %r<2>;", "bar.red.or.pred %p1, 0, %p2; bar.red.popc.u32 %r1, 0, %p2;")
+    accepted(".reg .pred %p; .reg .b32 %r<2>;", "bar.red.popc.u32 %r1, 0, %r2, %p;")
+  }
+
+  test("match writes a 32-bit mask whatever its comparison type") {
+    accepted(".reg .b32 %r<3>; .reg .b64 %rd;", "match.any.sync.b64 %r1, %rd, %r2;")
+    accepted(".reg .b32 %r<3>; .reg .b64 %rd; .reg .pred %p;", "match.all.sync.b64 %r1|%p, %rd, %r2;")
+  }
+
+  test("cache-qualified definitions use the relaxed load rules") {
+    accepted(".reg .b16 %rs<2>; .reg .b64 %rd<2>;", "ld.global.nc.b8 %rs1, [%rd1];")
+  }
+
+  test("cvt.pack names its own operand types") {
+    accepted(".reg .b32 %r<5>;", "cvt.pack.sat.u8.s32.b32 %r1, %r2, %r3, %r4;")
+  }
+
   test("declarations are scoped to the block that holds them") {
     val nested =
       """.reg .b32 %r;

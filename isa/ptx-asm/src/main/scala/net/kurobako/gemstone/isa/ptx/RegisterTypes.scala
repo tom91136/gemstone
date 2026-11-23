@@ -8,28 +8,37 @@ import net.kurobako.gemstone.collection.Vec.*
 object RegisterTypes {
   type Scope = Map[String, PtxType]
 
-  private val Relaxed      = Set("ld", "st", "cvt")
-  private val Destinations = Map("ld" -> Set(0), "st" -> Set(1), "cvt" -> Set(0))
+  private val Relaxed         = Set("ld", "st", "cvt")
+  private val Destinations    = Map("ld" -> Set(0), "st" -> Set(1), "cvt" -> Set(0))
+  private val VectorModifiers = Set(Modifier.V2, Modifier.V4, Modifier.V8)
 
   /** The register operands of `instruction` whose declared types no rule accepts, by operand position. */
   def violations(instruction: Instruction, scope: Scope): Vec[(position: Int, violation: RegisterViolation)] =
     if (scope.isEmpty) Vec.empty
     else {
-      val opcode       = instruction.opcode.raw
-      val relaxed      = Relaxed(opcode)
-      val destinations = Destinations.getOrElse(opcode, Set.empty[Int])
+      val mnemonic     = instruction.definition.mnemonic.name.raw
+      val relaxed      = Relaxed(mnemonic)
+      val destinations = Destinations.getOrElse(mnemonic, Set.empty[Int])
+      val vector       = instruction.mods.exists(VectorModifiers)
       val types        = PtxTypes.registerTypes(instruction)
       instruction.operands.zipWithIndex.flatMap { (operand, position) =>
+        val elements = operand match {
+          case Operand.VectorLiteral(items) if !vector => items.size
+          case _                                       => 0
+        }
         types.lift(position).toVec.flatMap { candidates =>
           registers(operand, scope).flatMap { (name, declared) =>
-            def accepts(expected: PtxType): Boolean =
+            def accepts(candidate: PtxType): Boolean = {
+              val expected = element(candidate, elements)
               if (!relaxed) PtxTypes.agrees(expected, declared)
               else if (destinations(position)) PtxTypes.acceptsDestination(expected, declared)
               else PtxTypes.acceptsSource(expected, declared)
+            }
             if (candidates.exists(accepts)) Vec.empty[(position: Int, violation: RegisterViolation)]
             else
-              candidates.headOption.toVec.map { expected =>
-                val rule =
+              candidates.headOption.toVec.map { candidate =>
+                val expected = element(candidate, elements)
+                val rule     =
                   if (!relaxed) RegisterRule.Exact
                   else if (destinations(position)) RegisterRule.Destination
                   else RegisterRule.Source
@@ -46,6 +55,9 @@ object RegisterTypes {
         }
       }.distinct
     }
+
+  private def element(tpe: PtxType, count: Int): PtxType =
+    if (count > 1 && tpe.bits % count == 0) PtxTypes(s"b${tpe.bits / count}").getOrElse(tpe) else tpe
 
   private def registers(operand: Operand, scope: Scope): Vec[(name: String, declared: PtxType)] = operand match {
     case Operand.Register(name, _)       => declared(name.raw, scope)

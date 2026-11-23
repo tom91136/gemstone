@@ -113,6 +113,7 @@ object PtxTypes {
       row("any").arr.map(_.str).toSet,
       Some(row("fill").str).filter(_.nonEmpty),
       row("at").arr.map(cell => cell(0).num.toInt -> cell(1).str).toMap,
+      row.obj.get("by").toVector.flatMap(_.arr.map(cell => cell(0).str -> cell(1).str)).toMap,
       row("section").str
     )
   })
@@ -135,7 +136,7 @@ object PtxTypes {
     Vec.tabulate(names.size) { position =>
       row match {
         case Some(found) =>
-          found.at.get(position).orElse(found.fill).flatMap(named(_))
+          names(position).flatMap(found.by.get).orElse(found.at.get(position)).orElse(found.fill).flatMap(named(_))
         case None =>
           names(position).filter(name => Set("a", "b", "c", "d")(name)).flatMap(_ => last)
       }
@@ -152,22 +153,30 @@ object PtxTypes {
     }
   }
 
+  /** Matrix operands hold fragments whose registers are wider than the element type the syntax names. */
+  private val Fragments =
+    Set(Opcode.Mma, Opcode.Wmma, Opcode.Wgmma, Opcode.Movmatrix, Opcode.Ldmatrix, Opcode.Stmatrix)
+
   /** The types the document gives each operand of `instruction`, by the type slot of the matched syntax form. An empty
     * vector leaves the operand unconstrained.
     */
   def registerTypes(instruction: Instruction): Vec[Vec[PtxType]] = {
-    val all     = instruction.fixedModifiers ++ instruction.mods
-    val present = all.map(_.name.raw).toSet
-    val opcode  = instruction.opcode.raw
-    val binding = rules.exists(rule => rule.opcodes.contains(opcode) && (rule.any.isEmpty || rule.any.exists(present)))
-    if (binding) operandTypes(opcode, all.map(_.name.raw), operandNames(instruction)).map(_.toVec)
+    val count = instruction.operands.size
+    if (Fragments(instruction.definition.mnemonic)) Vec.fill(count)(Vec.empty[PtxType])
     else {
-      val count  = instruction.operands.size
-      val actual = all.flatMap(modifier => apply(modifier.name.raw))
-      val forms  = ModifierDomains.matching(instruction.definition, instruction.mods).filter(_.accepts(count))
-      Vec.tabulate(count)(position =>
-        forms.flatMap(form => formTypes(instruction, form, actual).lift(position).toVec.flatten).distinct
-      )
+      val all     = instruction.fixedModifiers ++ instruction.mods
+      val present = all.map(_.name.raw).toSet
+      val opcode  = instruction.opcode.raw
+      val binding =
+        rules.exists(rule => rule.opcodes.contains(opcode) && (rule.any.isEmpty || rule.any.exists(present)))
+      if (binding) operandTypes(opcode, all.map(_.name.raw), operandNames(instruction)).map(_.toVec)
+      else {
+        val actual = all.flatMap(modifier => apply(modifier.name.raw))
+        val forms  = ModifierDomains.matching(instruction.definition, instruction.mods).filter(_.accepts(count))
+        Vec.tabulate(count)(position =>
+          forms.flatMap(form => formTypes(instruction, form, actual).lift(position).toVec.flatten).distinct
+        )
+      }
     }
   }
 
@@ -186,7 +195,7 @@ object PtxTypes {
     def add(name: String, value: Option[PtxType]): Unit =
       value.foreach(tpe => found.update(name, found.getOrElse(name, Vec.empty[PtxType]) :+ tpe))
     if (single.nonEmpty) Vec("d", "a", "b", "c").foreach(add(_, single))
-    else if (instruction.opcode.raw == "cvt" && typed.size >= 2) {
+    else if (instruction.definition.mnemonic == Opcode.Cvt && typed.size >= 2) {
       add("d", typed.head._2)
       Vec("a", "b", "c").foreach(add(_, typed.last._2))
     } else
