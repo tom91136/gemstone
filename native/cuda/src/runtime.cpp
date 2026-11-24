@@ -3587,6 +3587,18 @@ CUresult cuDeviceSetMemPool(CUdevice device, CUmemoryPool) { return validDevice(
 
 CUresult cuDeviceGraphMemTrim(CUdevice device) { return validDevice(device) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_DEVICE; }
 
+CUresult cuDeviceGetGraphMemAttribute(CUdevice device, CUgraphMem_attribute attribute, void *value) {
+  if (!value) return CUDA_ERROR_INVALID_VALUE;
+  if (!validDevice(device)) return CUDA_ERROR_INVALID_DEVICE;
+  switch (attribute) {
+    case CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT:
+    case CU_GRAPH_MEM_ATTR_USED_MEM_HIGH:
+    case CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT:
+    case CU_GRAPH_MEM_ATTR_RESERVED_MEM_HIGH: *static_cast<cuuint64_t *>(value) = 0; return CUDA_SUCCESS;
+    default: return CUDA_ERROR_INVALID_VALUE;
+  }
+}
+
 CUresult cuCtxCreate_v2(CUcontext *context, unsigned, CUdevice device) {
   if (!context || !validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
   const uint64_t handle = nextContext.fetch_add(1);
@@ -6069,6 +6081,18 @@ gemstone::graph::Graph *graphOf(CUgraph graph) { return reinterpret_cast<gemston
 
 gemstone::graph::Exec *execOf(CUgraphExec exec) { return reinterpret_cast<gemstone::graph::Exec *>(exec); }
 
+const char *graphNodeKind(Kind kind) {
+  switch (kind) {
+    case Kind::Kernel: return "kernel";
+    case Kind::Memcpy: return "memcpy";
+    case Kind::Memset: return "memset";
+    case Kind::Host: return "host";
+    case Kind::Empty: return "empty";
+    case Kind::Work: return "work";
+  }
+  return "empty";
+}
+
 CUresult addNode(CUgraph graph, CUgraphNode *node, Kind kind, const CUgraphNode *dependencies, size_t count, gemstone::graph::Work work) {
   return graphResult(gemstone::graph::add(graphOf(graph), node, kind, dependencies, count, std::move(work)));
 }
@@ -6120,6 +6144,19 @@ CUresult cuStreamBeginCapture_v2(CUstream stream, CUstreamCaptureMode mode) {
   return graphResult(captures.begin(stream, static_cast<gemstone::graph::CaptureMode>(mode)));
 }
 
+CUresult cuStreamBeginCaptureToGraph(CUstream stream, CUgraph graph, const CUgraphNode *dependencies, const CUgraphEdgeData *edgeData,
+                                     size_t count, CUstreamCaptureMode mode) {
+  if (!stream || stream == CU_STREAM_LEGACY || stream == CU_STREAM_PER_THREAD || !graph) return CUDA_ERROR_INVALID_VALUE;
+  if (mode != CU_STREAM_CAPTURE_MODE_GLOBAL && mode != CU_STREAM_CAPTURE_MODE_THREAD_LOCAL && mode != CU_STREAM_CAPTURE_MODE_RELAXED)
+    return CUDA_ERROR_INVALID_VALUE;
+  if (edgeData) return CUDA_ERROR_NOT_SUPPORTED;
+  if (count && !dependencies) return CUDA_ERROR_INVALID_VALUE;
+  if (executionShuttingDown.load()) return CUDA_ERROR_DEINITIALIZED;
+  if (!contextIsLive(activeContext())) return CUDA_ERROR_INVALID_CONTEXT;
+  return graphResult(captures.begin(stream, static_cast<gemstone::graph::CaptureMode>(mode), graphOf(graph),
+                                    reinterpret_cast<gemstone::graph::Node *const *>(dependencies), count));
+}
+
 CUresult cuThreadExchangeStreamCaptureMode(CUstreamCaptureMode *mode) {
   if (!mode) return CUDA_ERROR_INVALID_VALUE;
   std::swap(threadCaptureMode, *mode);
@@ -6128,9 +6165,9 @@ CUresult cuThreadExchangeStreamCaptureMode(CUstreamCaptureMode *mode) {
 
 CUresult cuStreamEndCapture(CUstream stream, CUgraph *graph) {
   if (!graph) return CUDA_ERROR_INVALID_VALUE;
-  std::unique_ptr<gemstone::graph::Graph> captured;
+  gemstone::graph::Graph *captured = nullptr;
   if (const auto outcome = captures.end(stream, captured); outcome != Outcome::Ok) return graphResult(outcome);
-  *graph = reinterpret_cast<CUgraph>(captured.release());
+  *graph = reinterpret_cast<CUgraph>(captured);
   return CUDA_SUCCESS;
 }
 
@@ -6225,9 +6262,16 @@ CUresult cuGraphClone(CUgraph *clone, CUgraph original) {
   return CUDA_SUCCESS;
 }
 
+CUresult cuGraphUpload(CUgraphExec exec, CUstream) {
+  if (!exec) return CUDA_ERROR_INVALID_VALUE;
+  return CUDA_SUCCESS;
+}
+
 CUresult cuGraphInstantiateWithFlags(CUgraphExec *exec, CUgraph graph, unsigned long long flags) {
   if (!exec || !graph) return CUDA_ERROR_INVALID_VALUE;
-  if (flags & ~static_cast<unsigned long long>(CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH)) return CUDA_ERROR_NOT_SUPPORTED;
+  constexpr auto supported = static_cast<unsigned long long>(CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH)
+                             | static_cast<unsigned long long>(CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY);
+  if (flags & ~supported) return CUDA_ERROR_NOT_SUPPORTED;
   *exec =
       reinterpret_cast<CUgraphExec>(std::make_unique<gemstone::graph::Exec>(gemstone::graph::Exec::instantiate(*graphOf(graph))).release());
   return CUDA_SUCCESS;
@@ -6244,6 +6288,17 @@ CUresult cuGraphInstantiate_v2(CUgraphExec *exec, CUgraph graph, CUgraphNode *er
 
 CUresult cuGraphInstantiate(CUgraphExec *exec, CUgraph graph, CUgraphNode *errorNode, char *logBuffer, size_t bufferSize) {
   return cuGraphInstantiate_v2(exec, graph, errorNode, logBuffer, bufferSize);
+}
+
+CUresult cuGraphInstantiateWithParams(CUgraphExec *exec, CUgraph graph, CUDA_GRAPH_INSTANTIATE_PARAMS *params) {
+  if (!exec || !graph || !params) return CUDA_ERROR_INVALID_VALUE;
+  const auto status =
+      cuGraphInstantiateWithFlags(exec, graph, params->flags & ~static_cast<cuuint64_t>(CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD));
+  params->hErrNode_out = nullptr;
+  params->result_out = status == CUDA_SUCCESS ? CUDA_GRAPH_INSTANTIATE_SUCCESS : CUDA_GRAPH_INSTANTIATE_ERROR;
+  if (status != CUDA_SUCCESS) return status;
+  if (params->flags & CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD) return cuGraphUpload(*exec, params->hUploadStream);
+  return CUDA_SUCCESS;
 }
 
 CUresult cuGraphLaunch(CUgraphExec exec, CUstream stream) {
@@ -6310,6 +6365,25 @@ CUresult cuGraphExecUpdate(CUgraphExec exec, CUgraph graph, CUgraphNode *errorNo
   if (errorNode) *errorNode = info.errorNode;
   if (result) *result = info.result;
   return status;
+}
+
+CUresult cuGraphDebugDotPrint(CUgraph graph, const char *path, unsigned int) {
+  if (!graph || !path) return CUDA_ERROR_INVALID_VALUE;
+  const auto &nodes = graphOf(graph)->nodes;
+  std::map<const gemstone::graph::Node *, size_t> positions;
+  std::ofstream output(path);
+  if (!output) return CUDA_ERROR_OPERATING_SYSTEM;
+  output << "digraph {\n";
+  for (size_t index = 0; index < nodes.size(); ++index) {
+    const auto *node = nodes[index].get();
+    positions[node] = index;
+    output << "  " << index << " [label=\"" << index << "\\n" << graphNodeKind(node->kind) << "\"];\n";
+  }
+  for (size_t index = 0; index < nodes.size(); ++index)
+    for (const auto *parent : nodes[index]->dependencies)
+      if (const auto found = positions.find(parent); found != positions.end()) output << "  " << found->second << " -> " << index << ";\n";
+  output << "}\n";
+  return output.good() ? CUDA_SUCCESS : CUDA_ERROR_OPERATING_SYSTEM;
 }
 
 CUresult cuStreamWaitEvent(CUstream stream, CUevent event, unsigned flags) {

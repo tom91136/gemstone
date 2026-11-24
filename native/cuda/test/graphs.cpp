@@ -2,6 +2,9 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -651,5 +654,172 @@ TEST_CASE("capture modes decide which threads may make capture-unsafe calls", "[
     }
   }
   REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("graph instantiates with explicit parameters and optional upload", "[cuda][graph][instantiate]") {
+  auto *const context = createContext();
+  constexpr size_t size = 16;
+  const auto target = allocate(size);
+  REQUIRE(cuMemsetD8_v2(target, 0, size) == CUDA_SUCCESS);
+
+  CUgraph graph = nullptr;
+  REQUIRE(cuGraphCreate(&graph, 0) == CUDA_SUCCESS);
+  CUgraphNode node = nullptr;
+  const auto set = fill(target, 0x63, size);
+  REQUIRE(cuGraphAddMemsetNode(&node, graph, nullptr, 0, &set, nullptr) == CUDA_SUCCESS);
+
+  CUstream upload = nullptr;
+  REQUIRE(cuStreamCreate(&upload, 0) == CUDA_SUCCESS);
+  CUDA_GRAPH_INSTANTIATE_PARAMS params{};
+  params.hUploadStream = upload;
+  CUgraphExec exec = nullptr;
+  REQUIRE(cuGraphInstantiateWithParams(&exec, graph, &params) == CUDA_SUCCESS);
+  CHECK(params.result_out == CUDA_GRAPH_INSTANTIATE_SUCCESS);
+  CHECK(params.hErrNode_out == nullptr);
+
+  CUgraphExec uploaded = nullptr;
+  params.flags = CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD;
+  REQUIRE(cuGraphInstantiateWithParams(&uploaded, graph, &params) == CUDA_SUCCESS);
+  CHECK(params.result_out == CUDA_GRAPH_INSTANTIATE_SUCCESS);
+  CHECK(params.hErrNode_out == nullptr);
+
+  CUgraphExec prioritised = nullptr;
+  params.flags = CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY;
+  REQUIRE(cuGraphInstantiateWithParams(&prioritised, graph, &params) == CUDA_SUCCESS);
+  CHECK(params.result_out == CUDA_GRAPH_INSTANTIATE_SUCCESS);
+  REQUIRE(cuGraphExecDestroy(prioritised) == CUDA_SUCCESS);
+  REQUIRE(cuGraphInstantiateWithFlags(&prioritised, graph, CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY) == CUDA_SUCCESS);
+  REQUIRE(cuGraphExecDestroy(prioritised) == CUDA_SUCCESS);
+
+  CHECK(cuGraphInstantiateWithParams(nullptr, graph, &params) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuGraphInstantiateWithParams(&exec, nullptr, &params) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuGraphInstantiateWithParams(&exec, graph, nullptr) == CUDA_ERROR_INVALID_VALUE);
+
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  REQUIRE(cuGraphLaunch(exec, stream) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+  CHECK(readDevice(target, size) == std::vector<uint8_t>(size, 0x63));
+
+  REQUIRE(cuGraphExecDestroy(uploaded) == CUDA_SUCCESS);
+  REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(upload) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(target) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("stream capture appends to an existing graph with dependencies", "[cuda][graph][capture]") {
+  auto *const context = createContext();
+  constexpr size_t size = 16;
+  const auto target = allocate(size);
+  REQUIRE(cuMemsetD8_v2(target, 0, size) == CUDA_SUCCESS);
+
+  CUgraph graph = nullptr;
+  REQUIRE(cuGraphCreate(&graph, 0) == CUDA_SUCCESS);
+  CUgraphNode root = nullptr;
+  REQUIRE(cuGraphAddEmptyNode(&root, graph, nullptr, 0) == CUDA_SUCCESS);
+
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  REQUIRE(cuStreamBeginCaptureToGraph(stream, graph, &root, nullptr, 1, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+  CHECK(cuStreamBeginCaptureToGraph(stream, graph, nullptr, nullptr, 0, CU_STREAM_CAPTURE_MODE_GLOBAL)
+        == CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+  REQUIRE(cuMemsetD8Async(target, 0x71, size, stream) == CUDA_SUCCESS);
+  CUgraph returned = nullptr;
+  REQUIRE(cuStreamEndCapture(stream, &returned) == CUDA_SUCCESS);
+  CHECK(returned == graph);
+
+  size_t count = 0;
+  REQUIRE(cuGraphGetNodes(graph, nullptr, &count) == CUDA_SUCCESS);
+  CHECK(count == 2);
+  std::vector<CUgraphNode> nodes(count);
+  REQUIRE(cuGraphGetNodes(graph, nodes.data(), &count) == CUDA_SUCCESS);
+  CHECK(nodes[0] == root);
+  size_t roots = 0;
+  REQUIRE(cuGraphGetRootNodes(graph, nullptr, &roots) == CUDA_SUCCESS);
+  CHECK(roots == 1);
+
+  CUgraphExec exec = nullptr;
+  REQUIRE(cuGraphInstantiateWithFlags(&exec, graph, 0) == CUDA_SUCCESS);
+  REQUIRE(cuGraphLaunch(exec, stream) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+  CHECK(readDevice(target, size) == std::vector<uint8_t>(size, 0x71));
+
+  CHECK(cuStreamBeginCaptureToGraph(stream, graph, nullptr, nullptr, 0, static_cast<CUstreamCaptureMode>(99)) == CUDA_ERROR_INVALID_VALUE);
+  CUgraphNode foreign = nullptr;
+  CUgraph other = nullptr;
+  REQUIRE(cuGraphCreate(&other, 0) == CUDA_SUCCESS);
+  REQUIRE(cuGraphAddEmptyNode(&foreign, other, nullptr, 0) == CUDA_SUCCESS);
+  CHECK(cuStreamBeginCaptureToGraph(stream, graph, &foreign, nullptr, 1, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_ERROR_INVALID_HANDLE);
+
+  REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+  REQUIRE(cuGraphDestroy(other) == CUDA_SUCCESS);
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuMemFree_v2(target) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("graph upload validates its arguments", "[cuda][graph][upload]") {
+  auto *const context = createContext();
+  CUgraph graph = nullptr;
+  REQUIRE(cuGraphCreate(&graph, 0) == CUDA_SUCCESS);
+  CUgraphNode node = nullptr;
+  REQUIRE(cuGraphAddEmptyNode(&node, graph, nullptr, 0) == CUDA_SUCCESS);
+  CUgraphExec exec = nullptr;
+  REQUIRE(cuGraphInstantiateWithFlags(&exec, graph, 0) == CUDA_SUCCESS);
+
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  REQUIRE(cuGraphUpload(exec, stream) == CUDA_SUCCESS);
+  CHECK(cuGraphUpload(nullptr, stream) == CUDA_ERROR_INVALID_VALUE);
+
+  REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("graph memory attributes report no graph allocations", "[cuda][graph][memory]") {
+  auto *const context = createContext();
+  CUdevice device = 0;
+  REQUIRE(cuDeviceGet(&device, 0) == CUDA_SUCCESS);
+  for (const auto attribute : {CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT, CU_GRAPH_MEM_ATTR_USED_MEM_HIGH, CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT,
+                               CU_GRAPH_MEM_ATTR_RESERVED_MEM_HIGH}) {
+    cuuint64_t value = 42;
+    REQUIRE(cuDeviceGetGraphMemAttribute(device, attribute, &value) == CUDA_SUCCESS);
+    CHECK(value == 0);
+  }
+  cuuint64_t value = 42;
+  CHECK(cuDeviceGetGraphMemAttribute(device, CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT, nullptr) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuDeviceGetGraphMemAttribute(-1, CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT, &value) == CUDA_ERROR_INVALID_DEVICE);
+  CHECK(cuDeviceGetGraphMemAttribute(device, static_cast<CUgraphMem_attribute>(99), &value) == CUDA_ERROR_INVALID_VALUE);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("graph debug print writes a DOT description", "[cuda][graph][debug]") {
+  auto *const context = createContext();
+  CUgraph graph = nullptr;
+  REQUIRE(cuGraphCreate(&graph, 0) == CUDA_SUCCESS);
+  CUgraphNode first = nullptr;
+  CUgraphNode second = nullptr;
+  REQUIRE(cuGraphAddEmptyNode(&first, graph, nullptr, 0) == CUDA_SUCCESS);
+  REQUIRE(cuGraphAddEmptyNode(&second, graph, &first, 1) == CUDA_SUCCESS);
+
+  const char path[] = "gemstone-graph-debug.dot";
+  REQUIRE(cuGraphDebugDotPrint(graph, path, 0) == CUDA_SUCCESS);
+  std::ifstream output(path);
+  const std::string content((std::istreambuf_iterator<char>(output)), std::istreambuf_iterator<char>());
+  CHECK(content.contains("digraph"));
+  CHECK(content.contains('}'));
+  REQUIRE(cuGraphDebugDotPrint(graph, path, CU_GRAPH_DEBUG_DOT_FLAGS_VERBOSE) == CUDA_SUCCESS);
+  CHECK(cuGraphDebugDotPrint(graph, nullptr, 0) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuGraphDebugDotPrint(nullptr, path, 0) == CUDA_ERROR_INVALID_VALUE);
+  std::remove(path);
+
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }

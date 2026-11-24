@@ -183,18 +183,29 @@ public:
     return true;
   }
 
-  Outcome begin(Stream stream, CaptureMode mode) {
+  Outcome begin(Stream stream, CaptureMode mode) { return begin(stream, mode, nullptr, nullptr, 0); }
+
+  Outcome begin(Stream stream, CaptureMode mode, Graph *target, Node *const *dependencies, size_t count) {
     std::scoped_lock const lock(mutex);
     if (captures.contains(stream)) return Outcome::Unsupported;
     auto session = std::make_shared<Session>();
     session->origin = stream;
     session->mode = mode;
     session->owner = std::this_thread::get_id();
+    if (target) {
+      for (size_t index = 0; index < count; ++index)
+        if (!target->owns(dependencies[index])) return Outcome::InvalidHandle;
+      session->graph = target;
+      for (size_t index = 0; index < count; ++index) session->frontier[stream].push_back(dependencies[index]);
+    } else {
+      session->ownedGraph = std::make_unique<Graph>();
+      session->graph = session->ownedGraph.get();
+    }
     captures.emplace(stream, std::move(session));
     return Outcome::Ok;
   }
 
-  Outcome end(Stream stream, std::unique_ptr<Graph> &result) {
+  Outcome end(Stream stream, Graph *&result) {
     std::scoped_lock const lock(mutex);
     const auto capture = captures.find(stream);
     if (capture == captures.end()) return Outcome::InvalidValue;
@@ -203,7 +214,8 @@ public:
     std::erase_if(captures, [&](const auto &entry) { return entry.second == session; });
     std::erase_if(events, [&](const auto &entry) { return entry.second.session == session; });
     if (session->invalidated) return Outcome::Invalidated;
-    result = std::move(session->graph);
+    result = session->graph;
+    session->ownedGraph.release();
     return Outcome::Ok;
   }
 
@@ -279,13 +291,14 @@ public:
     std::scoped_lock const lock(mutex);
     const auto capture = captures.find(stream);
     if (capture == captures.end()) return std::nullopt;
-    return Info{static_cast<uint64_t>(reinterpret_cast<uintptr_t>(capture->second.get())), capture->second->graph.get(),
+    return Info{static_cast<uint64_t>(reinterpret_cast<uintptr_t>(capture->second.get())), capture->second->graph,
                 capture->second->frontier[stream]};
   }
 
 private:
   struct Session {
-    std::unique_ptr<Graph> graph = std::make_unique<Graph>();
+    Graph *graph{};
+    std::unique_ptr<Graph> ownedGraph;
     Stream origin{};
     CaptureMode mode = CaptureMode::Global;
     std::thread::id owner;

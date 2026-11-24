@@ -2418,9 +2418,9 @@ extern "C" hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCapture
 }
 extern "C" hipError_t hipStreamEndCapture(hipStream_t stream, hipGraph_t *graph) {
   if (!graph) return remember(hipErrorInvalidValue);
-  std::unique_ptr<gemstone::graph::Graph> captured;
+  gemstone::graph::Graph *captured = nullptr;
   if (const auto outcome = captures.end(stream, captured); outcome != Outcome::Ok) return remember(graphResult(outcome));
-  *graph = reinterpret_cast<hipGraph_t>(captured.release());
+  *graph = reinterpret_cast<hipGraph_t>(captured);
   return remember(hipSuccess);
 }
 extern "C" hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus *status) {
