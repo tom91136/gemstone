@@ -717,8 +717,6 @@ constexpr std::array<unsigned char, 16> ToolsContextQueryId{0x21, 0x31, 0x8c, 0x
                                                             0x8c, 0xa6, 0x41, 0xff, 0x73, 0x24, 0xc8, 0xf2};
 constexpr std::array<unsigned char, 16> ToolsContextNotifyId{0xc9, 0x8d, 0x1a, 0xfa, 0xf2, 0x27, 0x5b, 0x42,
                                                              0xb1, 0x2d, 0xcd, 0x81, 0xb5, 0xf2, 0x1e, 0xc1};
-constexpr std::array<unsigned char, 16> ToolsContextVersionId{0xbf, 0xdb, 0x43, 0x2d, 0xbf, 0x3c, 0x5a, 0x4a,
-                                                              0x94, 0x5e, 0xb3, 0x40, 0x29, 0xe8, 0x1e, 0x75};
 
 } // namespace
 
@@ -753,7 +751,7 @@ TEST_CASE("CUDA tools context queries report the context, its device, and fixed 
   CHECK(reserved(nullptr, &word) == CUDA_ERROR_INVALID_VALUE);
 }
 
-TEST_CASE("CUDA tools context notify and version tables validate their context", "[cuda][limits]") {
+TEST_CASE("CUDA tools context notify table validates its context", "[cuda][limits]") {
   auto *const context = createContext();
   const auto *const notify = toolsTable(ToolsContextNotifyId);
   CHECK(reinterpret_cast<uintptr_t>(notify[0]) == 40);
@@ -763,18 +761,6 @@ TEST_CASE("CUDA tools context notify and version tables validate their context",
   CHECK(call(nullptr, &target) == CUDA_ERROR_INVALID_VALUE);
   CHECK(call(context, nullptr) == CUDA_ERROR_INVALID_VALUE);
   CHECK(call(reinterpret_cast<CUcontext>(0x1234), &target) == CUDA_ERROR_INVALID_CONTEXT);
-
-  const auto *const version = toolsTable(ToolsContextVersionId);
-  CHECK(reinterpret_cast<uintptr_t>(version[0]) == 488);
-  const auto query = toolsSlot<CUresult (*)(CUcontext, uint32_t, uint32_t *, uint32_t)>(version, 10);
-  uint32_t out[2] = {77, 77};
-  for (const uint32_t key : {0U, 0x10U, 0x100U}) {
-    CHECK(query(context, key, out, 0) == CUDA_SUCCESS);
-    CHECK(out[0] == 0x000d0000);
-    CHECK(out[1] == 2);
-  }
-  CHECK(query(nullptr, 0x10, out, 0) == CUDA_ERROR_INVALID_CONTEXT);
-  CHECK(query(context, 0x10, nullptr, 0) == CUDA_ERROR_UNKNOWN);
 }
 
 TEST_CASE("CUDA tools device modes report none on the emulated device", "[cuda][limits]") {

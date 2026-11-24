@@ -2237,8 +2237,24 @@ CUresult driverStreamHandle(void *, CUstream stream, CUstream *result, int perTh
   return CUDA_SUCCESS;
 }
 
-CUresult driverStreamId(void *, CUstream stream, uint64_t *result) {
+std::mutex toolsStreamMutex;
+std::map<CUstream, CUcontext> toolsStreams;
+
+std::optional<CUcontext> toolsStreamOwner(CUstream stream) {
+  const std::scoped_lock lock(toolsStreamMutex);
+  const auto found = toolsStreams.find(stream);
+  return found == toolsStreams.end() ? std::nullopt : std::optional{found->second};
+}
+
+CUresult driverStreamId(void *context, CUstream stream, uint64_t *result) {
   if (!result) return CUDA_ERROR_INVALID_VALUE;
+  if (const auto owner = toolsStreamOwner(stream)) {
+    if (*owner != context) return CUDA_ERROR_INVALID_VALUE;
+    const auto assigned = commands().streamId(stream);
+    if (!assigned) return CUDA_ERROR_INVALID_HANDLE;
+    *result = *assigned;
+    return CUDA_SUCCESS;
+  }
   static thread_local const unsigned char perThread = 0;
   if (stream == LegacyStream) *result = 0;
   else if (stream == PerThreadStream) *result = reinterpret_cast<uintptr_t>(&perThread);
@@ -2613,6 +2629,100 @@ CUresult toolsContextModules(ToolsModuleVisit *visit) {
   return CUDA_SUCCESS;
 }
 
+constexpr uint32_t ToolsStreamNonBlocking = 1;
+
+CUresult toolsStreamCreate(CUcontext context, uint32_t mode, uint32_t, uint64_t *handle) {
+  if (!context || !handle || mode > ToolsStreamNonBlocking) return CUDA_ERROR_INVALID_VALUE;
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  auto *const stream = static_cast<CUstream>(commands().createStream((mode & ToolsStreamNonBlocking) != 0));
+  {
+    const std::scoped_lock lock(toolsStreamMutex);
+    toolsStreams.emplace(stream, context);
+  }
+  *handle = reinterpret_cast<uintptr_t>(stream);
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsStreamWait(CUcontext, uint64_t handle) {
+  if (!handle) return CUDA_ERROR_INVALID_VALUE;
+  auto *const stream = reinterpret_cast<CUstream>(handle);
+  if (!toolsStreamOwner(stream)) return CUDA_ERROR_INVALID_HANDLE;
+  return queueStatus(commands().wait(commands().snapshot(stream)));
+}
+
+struct ToolsAllocation {
+  CUdeviceptr device;
+  size_t bytes;
+};
+
+std::mutex toolsAllocationMutex;
+std::map<const void *, std::unique_ptr<ToolsAllocation>> toolsAllocations;
+
+CUresult toolsAllocate(CUcontext context, size_t size, uint64_t *device, void **allocation) {
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  if (!device) return CUDA_ERROR_UNKNOWN;
+  CUdeviceptr pointer = 0;
+  {
+    const ContextBinding binding(context);
+    if (const auto status = allocate(&pointer, size, nullptr); status != CUDA_SUCCESS) return status;
+  }
+  if (allocation) {
+    auto record = std::make_unique<ToolsAllocation>(ToolsAllocation{.device = pointer, .bytes = size});
+    *allocation = record.get();
+    const std::scoped_lock lock(toolsAllocationMutex);
+    toolsAllocations.emplace(record.get(), std::move(record));
+  }
+  *device = pointer;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsCopyIn(CUcontext context, uint64_t handle, void *allocation, uint64_t offset, const void *source, size_t size) {
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  if (!handle || (size != 0 && !source)) return CUDA_ERROR_INVALID_VALUE;
+  auto *const stream = reinterpret_cast<CUstream>(handle);
+  if (!toolsStreamOwner(stream)) return CUDA_ERROR_INVALID_HANDLE;
+  ToolsAllocation target{};
+  {
+    const std::scoped_lock lock(toolsAllocationMutex);
+    const auto found = toolsAllocations.find(allocation);
+    if (found == toolsAllocations.end()) return CUDA_ERROR_INVALID_HANDLE;
+    target = *found->second;
+  }
+  if (offset > target.bytes || size > target.bytes - offset) return CUDA_ERROR_INVALID_VALUE;
+  if (size == 0) return CUDA_SUCCESS;
+  return cuMemcpyHtoDAsync_v2(target.device + offset, source, size, stream);
+}
+
+constexpr size_t ToolsFillWords = 13;
+constexpr uint32_t ToolsFillTag = 0x6c6c6966;
+
+CUresult toolsEncodeFill(uint32_t **cursor, CUcontext context, uint64_t device, uint64_t value, uint64_t, size_t size, uint64_t) {
+  if (!cursor || !*cursor) return CUDA_ERROR_INVALID_VALUE;
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  uint32_t *const words = *cursor;
+  std::fill_n(words, ToolsFillWords, uint32_t{0});
+  words[0] = ToolsFillTag;
+  words[1] = static_cast<uint32_t>(device);
+  words[2] = static_cast<uint32_t>(device >> 32);
+  words[3] = static_cast<uint32_t>(size);
+  words[4] = static_cast<uint32_t>(static_cast<uint64_t>(size) >> 32);
+  words[5] = static_cast<uint32_t>(value);
+  *cursor = words + ToolsFillWords;
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubmitCommands(CUcontext context, uint32_t, uint64_t handle, const uint32_t *words, uint64_t count) {
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  if (!handle || (count != 0 && !words)) return CUDA_ERROR_INVALID_VALUE;
+  auto *const stream = reinterpret_cast<CUstream>(handle);
+  if (!toolsStreamOwner(stream)) return CUDA_ERROR_INVALID_HANDLE;
+  if (count == 0) return CUDA_SUCCESS;
+  if (count != ToolsFillWords || words[0] != ToolsFillTag) return CUDA_ERROR_INVALID_VALUE;
+  const CUdeviceptr device = (static_cast<uint64_t>(words[2]) << 32) | words[1];
+  const size_t size = (static_cast<uint64_t>(words[4]) << 32) | words[3];
+  return cuMemsetD8Async(device, static_cast<unsigned char>(words[5]), size, stream);
+}
+
 constexpr int ToolsDriverInitialised = 0;
 constexpr int ToolsDriverDeinitialised = 1;
 constexpr int ToolsDriverUninitialised = 2;
@@ -2965,9 +3075,6 @@ CUresult toolsDeviceModes(int device, uint32_t *first, uint32_t *second) {
   return CUDA_SUCCESS;
 }
 
-constexpr uint32_t ToolsContextVersion = 0x000d0000;
-constexpr uint32_t ToolsContextVersionLevel = 2;
-
 CUresult toolsContextCheck(CUcontext context) { return contextIsLive(context) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_CONTEXT; }
 
 CUresult toolsContextSelf(CUcontext context, CUcontext *out) {
@@ -3001,15 +3108,6 @@ CUresult toolsContextNotify(CUcontext context, void *target) {
   return toolsContextCheck(context);
 }
 
-CUresult toolsContextVersion(CUcontext context, uint32_t, uint32_t *version, uint32_t) {
-  if (!context) return CUDA_ERROR_INVALID_CONTEXT;
-  if (!version) return CUDA_ERROR_UNKNOWN;
-  if (const auto status = toolsContextCheck(context); status != CUDA_SUCCESS) return status;
-  version[0] = ToolsContextVersion;
-  version[1] = ToolsContextVersionLevel;
-  return CUDA_SUCCESS;
-}
-
 template <class Function> const void *slotFunction(Function function) { return reinterpret_cast<const void *>(function); }
 
 const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> ToolsSlotOverrides{
@@ -3039,12 +3137,15 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
       {4, slotFunction(driverMetadataQuery)},
       {8, slotFunction(toolsContextLevel)},
       {35, slotFunction(toolsContextModules)},
+      {1, slotFunction(toolsStreamWait)},
+      {38, slotFunction(toolsStreamCreate)},
       {39, slotFunction(driverStreamId)},
       {40, slotFunction(toolsContextReserved)},
       {51, slotFunction(driverStreamHandle)},
       {82, slotFunction(toolsContextSelf)}}},
+    {"a6b1ff99ecc4c94f92f91928663d5585", {{27, slotFunction(toolsSubmitCommands)}, {28, slotFunction(toolsEncodeFill)}}},
     {"c98d1afaf2275b42b12dcd81b5f21ec1", {{1, slotFunction(toolsContextNotify)}}},
-    {"bfdb432dbf3c5a4a945eb34029e81e75", {{10, slotFunction(toolsContextVersion)}}},
+    {"bfdb432dbf3c5a4a945eb34029e81e75", {{10, slotFunction(toolsAllocate)}, {47, slotFunction(toolsAllocate)}}},
     {"41ae717da9eba64f999be3c27f3c140f", {{1, slotFunction(toolsInterfaceOfKind)}}},
     {"b10541e1f7c7c74a9f64f223be99f1e2",
      {{2, slotFunction(toolsDeviceCount)},
@@ -3052,7 +3153,7 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
       {7, slotFunction(toolsDeviceToken)},
       {8, slotFunction(toolsDevicePresent)},
       {21, slotFunction(toolsClearFlag)}}},
-    {"35770f1b092e0348a48e056fc423968d", {{9, slotFunction(toolsFeatureEnable)}}},
+    {"35770f1b092e0348a48e056fc423968d", {{1, slotFunction(toolsCopyIn)}, {9, slotFunction(toolsFeatureEnable)}}},
     {"f6d3f4d92de380409f0c058cf1b2906b", {{2, slotFunction(toolsDeviceModes)}}},
     {"41ae717d kind 4",
      {{4, slotFunction(toolsDeviceHandle)},
