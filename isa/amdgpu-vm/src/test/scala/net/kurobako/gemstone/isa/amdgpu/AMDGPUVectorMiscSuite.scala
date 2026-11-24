@@ -502,6 +502,12 @@ class AMDGPUVectorMiscSuite extends Suite {
     Vec(0xffff0000L, 0x00ff0000L, 0xdead0000L),
     0xdeadff00L
   )
+  check(
+    "v_lshlrev_b16 v4.h, 14, v3.l op_sel:[0,0,1] keeps the destination's low half",
+    Vec(gfx1100 -> Vec(0x04, 0x40, 0x38, 0xd7, 0x8e, 0x06, 0x02, 0x02)),
+    Vec(0L, 1L, 0xdead5678L),
+    0x40005678L
+  )
 
   test("gfx1100 v_cndmask_b16 v4.l, v2.l, v3.h, vcc_lo selects the half VCC picks") {
     import InstructionSource.*

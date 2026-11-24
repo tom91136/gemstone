@@ -936,6 +936,8 @@ private object VMCompiler {
 
   // f16 opcodes whose result fills only the low half of the destination.
   private lazy val HalfResultOpcodes: Set[Opcode] = Set(
+    VLshlrevB16,
+    VLshrrevB16,
     VDot2F16F16,
     VDot2Bf16Bf16,
     VCvtPkFp8F16,
@@ -992,6 +994,8 @@ private object VMCompiler {
 
   private def halfResultOpcode(opcode: Opcode): Boolean =
     HalfResultOpcodes.contains(opcode) || convertForm(opcode).exists(form => (form.halves & 8) != 0)
+
+  private val HighHalfOnlyResultOpcodes: Set[Opcode] = Set(VLshlrevB16, VLshrrevB16)
 
   /** GFX10 onwards keeps the high half of a 16-bit result's destination; earlier generations zero it. */
   private def preservesHighHalf(target: Target): Boolean =
@@ -1086,10 +1090,12 @@ private object VMCompiler {
       destination: VectorRegisterIndex,
       high: Boolean,
       target: Target
-  ): Instruction =
-    if (halfResultOpcode(opcode) && (high || preservesHighHalf(target)))
+  ): Instruction = {
+    val preserves = preservesHighHalf(target) && !HighHalfOnlyResultOpcodes.contains(opcode)
+    if (halfResultOpcode(opcode) && (high || preserves))
       Instruction.VHalfResult(operation, destination, high)
     else operation
+  }
 
   // Opcodes whose IR applies the VOP3 clamp bit itself.
   private lazy val ClampingVOP3Opcodes: Set[Opcode] = Set(
