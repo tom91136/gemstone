@@ -85,6 +85,30 @@ TEST_CASE("CUDA enumerates the configured number of distinct devices", "[cuda][m
   CHECK(found == 1);
 }
 
+TEST_CASE("cuCtxGetDevice reports the current context", "[cuda][multi-device]") {
+  CUcontext previous = nullptr;
+  REQUIRE(cuCtxGetCurrent(&previous) == CUDA_SUCCESS);
+  REQUIRE(cuCtxSetCurrent(nullptr) == CUDA_SUCCESS);
+
+  CUdevice device = -1;
+  CHECK(cuCtxGetDevice(&device) == CUDA_ERROR_INVALID_CONTEXT);
+  CHECK(cuCtxGetDevice_v2(&device, nullptr) == CUDA_ERROR_INVALID_CONTEXT);
+
+  auto *const context = createContext(0);
+  REQUIRE(cuCtxGetDevice(&device) == CUDA_SUCCESS);
+  CHECK(device == 0);
+  CHECK(cuCtxGetDevice_v2(&device, nullptr) == CUDA_SUCCESS);
+  CHECK(device == 0);
+
+  REQUIRE(cuCtxSetCurrent(nullptr) == CUDA_SUCCESS);
+  CHECK(cuCtxGetDevice(&device) == CUDA_ERROR_INVALID_CONTEXT);
+  CHECK(cuCtxGetDevice_v2(&device, context) == CUDA_SUCCESS);
+  CHECK(device == 0);
+
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+  CHECK(cuCtxSetCurrent(previous) == CUDA_SUCCESS);
+}
+
 TEST_CASE("CUDA contexts and allocations belong to their device", "[cuda][multi-device]") {
   auto *const first = createContext(0);
   auto *const second = createContext(1);

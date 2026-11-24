@@ -3757,11 +3757,18 @@ CUresult cuCtxPopCurrent_v2(CUcontext *context) {
 
 CUresult cuCtxGetDevice(CUdevice *device) {
   if (!device) return CUDA_ERROR_INVALID_VALUE;
-  *device = activeDevice();
+  if (!contextIsLive(currentContext)) return CUDA_ERROR_INVALID_CONTEXT;
+  *device = contextDevice(currentContext);
   return CUDA_SUCCESS;
 }
 
-CUresult cuCtxGetDevice_v2(CUdevice *device, CUcontext) { return cuCtxGetDevice(device); }
+CUresult cuCtxGetDevice_v2(CUdevice *device, CUcontext context) {
+  if (!device) return CUDA_ERROR_INVALID_VALUE;
+  context = context ? context : currentContext;
+  if (!contextIsLive(context)) return CUDA_ERROR_INVALID_CONTEXT;
+  *device = contextDevice(context);
+  return CUDA_SUCCESS;
+}
 
 CUresult cuCtxGetCacheConfig(CUfunc_cache *config) {
   if (!config) return CUDA_ERROR_INVALID_VALUE;
@@ -6606,7 +6613,11 @@ cudaError_t cudaGetDeviceCount(int *count) {
   return *count == 0 ? cudaErrorNoDevice : cudaSuccess;
 }
 
-cudaError_t cudaGetDevice(int *device) { return runtimeStatus(cuCtxGetDevice(device)); }
+cudaError_t cudaGetDevice(int *device) {
+  if (!device) return cudaErrorInvalidValue;
+  *device = activeDevice();
+  return cudaSuccess;
+}
 
 cudaError_t cudaSetDevice(int device) {
   if (!validDevice(device)) return cudaErrorInvalidDevice;
