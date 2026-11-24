@@ -971,7 +971,7 @@ TEST_CASE("CUDA driver lookup exposes known unsupported APIs and ordinary stream
   const auto lookup = library.load<CUresult (*)(const char *, void **, int, uint64_t, int *)>("cuGetProcAddress_v2");
   void *function = nullptr;
   int status = -1;
-  check(lookup("cuGraphInstantiateWithParams", &function, 12000, 0, &status));
+  check(lookup("cuArrayGetPlane", &function, 12000, 0, &status));
   REQUIRE(function != nullptr);
   REQUIRE(status == 0);
   void *canary = reinterpret_cast<void *>(uintptr_t{0x1234});
