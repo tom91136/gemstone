@@ -118,22 +118,22 @@ class BlockAnalysisSuite extends Suite {
     assert(uneven < always, s"$uneven should be below $always")
   }
 
-  test("an inner loop in a region is refused instead of being weighted") {
+  test("an inner loop in a region is costed from its recorded issue counts") {
     val loop = region(
       report(recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 8, 3 -> 2, 4 -> 4, 5 -> 1), nestedGraph)),
       "k/loop@0x18"
     )
-    assertEquals(loop("status").str, "withheld")
-    assert(loop("reason").str.contains("inner loop"), loop("reason").str)
+    assertEquals(loop("status").str, "executed")
+    assert(loop("cyclesPerIteration").num > 0.0)
   }
 
-  test("a count above the region entry is refused") {
+  test("a count above the region entry is costed") {
     val loop = region(
       report(recordCounts(Vec(0 -> 4, 1 -> 4, 2 -> 6, 3 -> 2, 4 -> 4, 5 -> 1), branchGraph)),
       "k/loop@0x18"
     )
-    assertEquals(loop("status").str, "withheld")
-    assert(loop("reason").str.contains("entry"), loop("reason").str)
+    assertEquals(loop("status").str, "executed")
+    assert(loop("cyclesPerIteration").num > 0.0)
   }
 
   test("a block that never executed is listed without timing") {
