@@ -2037,10 +2037,13 @@ private object VMInterpreter {
 
     inline def jump(target: Int): Flow[Int] = jumps(target)
 
-    inline def jumpTo(target: Long): Flow[Int] = programIndex(target) match {
-      case Some(index) => jumps(index)
-      case None        =>
-        crossed(target, f"AMDGPU setpc at 0x$pc%X targets non-instruction 0x$target%X").flatMap(jumps(_))
+    inline def jumpTo(destination: Long): Flow[Int] = {
+      val target = VMAddressSpace.canonical(destination)
+      programIndex(target) match {
+        case Some(index) => jumps(index)
+        case None        =>
+          crossed(target, f"AMDGPU setpc at 0x$pc%X targets non-instruction 0x$target%X").flatMap(jumps(_))
+      }
     }
 
     inline def branch(condition: Long, taken: Int): Flow[Int] = if (condition != 0L) jumps(taken) else NextStep
@@ -2072,14 +2075,17 @@ private object VMInterpreter {
     }
 
     inline def callTo(link: ScalarRegisterIndex, returnAddress: Long, target: Long): Flow[Int] =
-      called(link, returnAddress, target)
+      called(link, returnAddress, VMAddressSpace.canonical(target))
 
     inline def fork(mask: Long, taken: Int): Flow[Int] = forked(mask, taken)
 
-    inline def forkTo(mask: Long, taken: Long): Flow[Int] = programIndex(taken) match {
-      case Some(index) => forked(mask, index)
-      case None        =>
-        Left(Fault.Backend(f"AMDGPU fork at 0x$pc%X targets non-instruction 0x$taken%X"))
+    inline def forkTo(mask: Long, destination: Long): Flow[Int] = {
+      val taken = VMAddressSpace.canonical(destination)
+      programIndex(taken) match {
+        case Some(index) => forked(mask, index)
+        case None        =>
+          Left(Fault.Backend(f"AMDGPU fork at 0x$pc%X targets non-instruction 0x$taken%X"))
+      }
     }
 
     inline def join(saved: Long): Flow[Int] = joined(saved)

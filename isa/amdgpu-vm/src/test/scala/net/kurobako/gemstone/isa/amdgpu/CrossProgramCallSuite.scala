@@ -15,6 +15,8 @@ class CrossProgramCallSuite extends Suite {
 
   private def window(id: Long): Long = CodeWindows.Base + id * CodeWindows.Stride
 
+  private def canonical(address: Long): Long = address | (-1L << 48)
+
   private def programId(id: Long): ProgramId = ProgramId(id.unsafe[Long > 0])
 
   private def program(code: Int*): LoadedProgram =
@@ -113,6 +115,33 @@ class CrossProgramCallSuite extends Suite {
     val first   = caller(window(2) + TextOffset)
     val context = session(first, callee)
     assertEquals(run(first, context), trapAt(3, window(2) + TextOffset + 36))
+    assertEquals(callee.writeGlobal("device_global", 0L, Vec[Byte](5, 0, 0, 0)), Right(()))
+    assertEquals(run(first, context), trapAt(2, window(1) + TextOffset + 20))
+  }
+
+  test("a call through a sign-extended function pointer enters the code of another program") {
+    val first   = caller(canonical(window(2) + TextOffset))
+    val context = session(first, program(0xbf920001))
+    assertEquals(run(first, context), trapAt(1, window(2) + TextOffset))
+  }
+
+  test("a callee reads its own program's globals through a sign-extended address") {
+    val global = canonical(window(2) + BssOffset)
+    val callee = program(
+      0xbe8600ff,
+      global.toInt,
+      0xbe8700ff,
+      (global >>> 32).toInt,
+      0xc0020003,
+      0x00000000,
+      0xbf8cc07f,
+      0xbf068500,
+      0xbf850001,
+      0xbf920003,
+      returns
+    )
+    val first   = caller(window(2) + TextOffset)
+    val context = session(first, callee)
     assertEquals(callee.writeGlobal("device_global", 0L, Vec[Byte](5, 0, 0, 0)), Right(()))
     assertEquals(run(first, context), trapAt(2, window(1) + TextOffset + 20))
   }

@@ -14,4 +14,7 @@ private object VMAddressSpace {
   def isLocal(address: Long): Boolean   = (address & ~SegmentMask) == LocalBase
   def isPrivate(address: Long): Boolean = (address & ~SegmentMask) == PrivateBase
   def offset(address: Long): Long       = address & SegmentMask
+
+  /** The 48-bit address a bit-47 sign-extended one names, for resolving code windows and what they hold. */
+  def canonical(address: Long): Long = if ((address >> 47) == -1L) address & 0xffffffffffffL else address
 }

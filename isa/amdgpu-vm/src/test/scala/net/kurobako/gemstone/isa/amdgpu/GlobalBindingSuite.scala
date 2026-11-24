@@ -11,6 +11,7 @@ import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
+import scala.collection.mutable
 class GlobalBindingSuite extends Suite {
   private def value(routing: VMDispatchMemory, address: Long, size: Int in 1 ~ 8): Either[Fault, Long] =
     AddressSpace.scalar(routing.readValueInto(address, size, _))
@@ -144,6 +145,46 @@ class GlobalBindingSuite extends Suite {
     assertEquals(value(routing, external, 4), Right(42L))
     assertEquals(routing.writeBytes(external, Array[Byte](7, 8)), Right(()))
     assertEquals(routing.readBytes(0x3000L, 2), Right(Vec[Byte](7, 8)))
+  }
+
+  test("dispatch routing resolves sign-extended addresses to images and bindings but leaves memory the address") {
+    val located = mutable.ArrayBuffer.empty[Long]
+    val memory  = new RegionMemory {
+      override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] = {
+        located += address.raw
+        super.locate(address, size)
+      }
+    }
+    memory.allocate(AllocationId(1), 32)
+    memory.allocate(AllocationId(2), 16)
+    val image   = Array.fill[Byte](16)(0x11)
+    val kernel  = codeKernel(globalMemory = Array((AddressLayout.ProgramBase + 0x2000L) -> image))
+    val bound   = AddressLayout.ProgramBase + 0x3000L
+    val global  = AllocationId(1)
+    val mapping = VMDispatchMemory.GlobalMapping(
+      GuestAddress(bound),
+      16,
+      GlobalBinding.validated("global", global, 8L, 16L, 32L).value
+    )
+    val routing = VMDispatchMemory(
+      kernel = kernel,
+      kernarg = Array.emptyByteArray,
+      dispatch = Array.emptyByteArray,
+      allocations = Array(mapping),
+      memory = memory,
+      kernargAddress = VMDispatchMemory.KernargAddress
+    )
+    val extended = -1L << 48
+    assertEquals(value(routing, extended | (AddressLayout.ProgramBase + 0x2000L), 4), Right(0x11111111L))
+    assert(!routing.isExternal(extended | (AddressLayout.ProgramBase + 0x2000L), 4))
+    assertEquals(routing.writeValue(extended | bound, 42L, 4), Right(()))
+    assertEquals(LittleEndian.decode(memory.array(global), 8, 4), 42L)
+    assertEquals(value(routing, extended | bound, 4), Right(42L))
+    assert(!routing.isExternal(extended | bound, 4))
+    val outside = extended | 0x1234L
+    assert(routing.isExternal(outside, 4))
+    assert(value(routing, outside, 4).isLeft)
+    assertEquals(located.toVector, Vector(outside))
   }
 
 }
