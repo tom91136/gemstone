@@ -9,6 +9,7 @@ object conformanceEnvironment {
   val Deadline: String = "CONFORMANCE_DEADLINE"
   val DeviceCount: String = "CONFORMANCE_DEVICE_COUNT"
   val DevicePattern: String = "CONFORMANCE_DEVICE_PATTERN"
+  val ForwardedEnvironmentKeys: String = "CONFORMANCE_FORWARDED_ENVIRONMENT_KEYS"
   val InterpreterArchiveDirectory: String = "CONFORMANCE_INTERPRETER_ARCHIVE_DIRECTORY"
   val InterpreterDirectory: String = "CONFORMANCE_INTERPRETER_DIRECTORY"
   val InterpreterOffline: String = "CONFORMANCE_INTERPRETER_OFFLINE"

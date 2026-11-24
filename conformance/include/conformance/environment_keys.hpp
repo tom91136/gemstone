@@ -14,6 +14,7 @@ inline constexpr char CudaCodeMode[] = "CONFORMANCE_CUDA_CODE_MODE";
 inline constexpr char Deadline[] = "CONFORMANCE_DEADLINE";
 inline constexpr char DeviceCount[] = "CONFORMANCE_DEVICE_COUNT";
 inline constexpr char DevicePattern[] = "CONFORMANCE_DEVICE_PATTERN";
+inline constexpr char ForwardedEnvironmentKeys[] = "CONFORMANCE_FORWARDED_ENVIRONMENT_KEYS";
 inline constexpr char InterpreterArchiveDirectory[] = "CONFORMANCE_INTERPRETER_ARCHIVE_DIRECTORY";
 inline constexpr char InterpreterDirectory[] = "CONFORMANCE_INTERPRETER_DIRECTORY";
 inline constexpr char InterpreterOffline[] = "CONFORMANCE_INTERPRETER_OFFLINE";

@@ -1237,6 +1237,19 @@ TEST_CASE("interpreter directory is forwarded to cases as a suite setting", "[dr
   CHECK(conformance::reservedEnvironmentKey(conformance::environment::InterpreterDirectory));
 }
 
+TEST_CASE("named harness variables reach cases without becoming suite settings", "[driver]") {
+  const conformance_test::Environment forwarding(conformance::environment::ForwardedEnvironmentKeys, "TEST_FORWARDED_TRACE");
+  const conformance_test::Environment forwarded("TEST_FORWARDED_TRACE", "cuda");
+  TemporaryDirectory const scratch;
+  auto env = baseEnvironment();
+  CHECK(env.contains("TEST_FORWARDED_TRACE"));
+  CHECK(env["TEST_FORWARDED_TRACE"] == "cuda");
+  CHECK_FALSE(suiteEnvironmentKey("TEST_FORWARDED_TRACE"));
+  CHECK_FALSE(conformance::invalidSuiteSetting("TEST_FORWARDED_TRACE", "cuda").has_value());
+  prepareRuntimeEnvironment(env, scratch.path / "artifact", scratch.path / "support", {}, "cuda");
+  CHECK(env.at("TEST_FORWARDED_TRACE") == "cuda");
+}
+
 TEST_CASE("PTX-only artifacts warm every program's JIT cache unless an isolated launcher runs them", "[driver][jit]") {
   const std::vector<ScheduledCase> tests{{.identity = "a", .program = "unified", .timeoutSeconds = 10, .index = 0, .count = 3},
                                          {.identity = "b", .program = "minibude", .timeoutSeconds = 10, .index = 1, .count = 3},

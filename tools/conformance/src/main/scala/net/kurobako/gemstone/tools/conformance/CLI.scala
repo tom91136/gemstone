@@ -309,10 +309,11 @@ object CLI {
       "OMP_TEAMS_THREAD_LIMIT_DEV"                         -> "2",
       environment.ExecutionMaxInstructionCount             -> MaxInstructions
     ).map((key, default) => key -> sys.env.getOrElse(key, default)) ++ Map(
-      conformanceEnvironment.JobCount              -> s"$jobs",
-      conformanceEnvironment.MemoryBudgetMegabytes -> s"${memoryBudgetMegabytes(memory, heapMegabytes)}",
-      environment.ExecutionThreadCount             -> s"$workers",
-      environment.NativeDir                        -> s"${emulation.server.native.toAbsolutePath}"
+      conformanceEnvironment.JobCount                 -> s"$jobs",
+      conformanceEnvironment.MemoryBudgetMegabytes    -> s"${memoryBudgetMegabytes(memory, heapMegabytes)}",
+      environment.ExecutionThreadCount                -> s"$workers",
+      environment.NativeDir                           -> s"${emulation.server.native.toAbsolutePath}",
+      conformanceEnvironment.ForwardedEnvironmentKeys -> environment.TraceList
     )
     // a Unix socket path is limited to 107 bytes, which a deep checkout would exceed
     val session   = Files.createTempDirectory("gemstone-conformance-")

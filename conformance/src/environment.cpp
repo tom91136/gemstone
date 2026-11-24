@@ -27,6 +27,16 @@ std::map<std::string, std::string> baseEnvironment() {
                   const auto *value = std::getenv(std::string(name).c_str());
                   return value ? std::optional{std::pair{std::string(name), std::string(value)}} : std::nullopt;
                 });
+  if (const auto *list = std::getenv(environment::ForwardedEnvironmentKeys)) {
+    std::string_view names(list);
+    while (!names.empty()) {
+      const auto comma = names.find(',');
+      const auto name = names.substr(0, comma);
+      if (!name.empty())
+        if (const auto *value = std::getenv(std::string(name).c_str())) result[std::string(name)] = value;
+      names = comma == std::string_view::npos ? std::string_view{} : names.substr(comma + 1);
+    }
+  }
   result["PATH"] = "/usr/bin:/bin:/usr/sbin:/sbin";
   return result;
 }
