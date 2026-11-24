@@ -24,13 +24,23 @@ for directory in ${LD_LIBRARY_PATH-}; do
   fi
 done
 
+rocblas_missing=0
+if [ -n "${ROCBLAS_TENSILE_LIBPATH-}" ] && [ -n "${CONFORMANCE_TARGET_ARCH-}" ] \
+    && [ ! -f "$ROCBLAS_TENSILE_LIBPATH/TensileLibrary_lazy_${CONFORMANCE_TARGET_ARCH}.dat" ]; then
+  rocblas_missing=1
+fi
+
 rocm_overlay=
 if [ -n "${ROCM_PATH-}" ]; then
   rocm_overlay=$(mktemp -d)
   trap 'rm -rf "$rocm_overlay"' EXIT
   for directory in "$ROCM_PATH" ${LD_LIBRARY_PATH-}; do
     for library in "$directory"/lib*; do
-      [ -e "$library" ] && ln -s "$library" "$rocm_overlay/" 2>/dev/null || true
+      [ -e "$library" ] || continue
+      if [ "$rocblas_missing" -eq 1 ]; then
+        case "$(basename "$library")" in librocblas*) continue ;; esac
+      fi
+      ln -s "$library" "$rocm_overlay/" 2>/dev/null || true
     done
   done
   export ROCM_PATH="$rocm_overlay"

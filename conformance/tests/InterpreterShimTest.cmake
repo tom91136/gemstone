@@ -27,11 +27,19 @@ function(shim_arguments preload output)
   if(ARGC GREATER 2)
     set(library_path "${ARGV2}")
   endif()
+  set(extra)
+  if(ARGC GREATER 3)
+    list(APPEND extra "CONFORMANCE_TARGET_ARCH=${ARGV3}")
+  endif()
+  if(ARGC GREATER 4)
+    list(APPEND extra "ROCBLAS_TENSILE_LIBPATH=${ARGV4}")
+  endif()
   execute_process(
     COMMAND "${CMAKE_COMMAND}" -E env
       "CONFORMANCE_INTERPRETER_DIRECTORY=${directory}/base"
       "LD_PRELOAD=${preload}"
       "LD_LIBRARY_PATH=${library_path}"
+      ${extra}
       "${directory}/shim"
     OUTPUT_VARIABLE text RESULT_VARIABLE result ERROR_VARIABLE error)
   if(NOT result EQUAL 0)
@@ -90,5 +98,25 @@ foreach(argument IN LISTS arguments)
     fail("ROCM_PATH must stay unset without a HIP preload: ${argument}")
   endif()
 endforeach()
+
+set(tensile "${directory}/tensile")
+file(MAKE_DIRECTORY "${tensile}")
+file(WRITE "${tensile}/TensileLibrary_lazy_gfx908.dat" "")
+set(rocblas_entry "ROCM_ENTRY=librocblas.so.5->${directory}/vendor/librocblas.so.5")
+
+shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-runtime64.so.1"
+  arguments "${directory}/vendor" gfx803 "${tensile}")
+if("${rocblas_entry}" IN_LIST arguments)
+  fail("rocBLAS without a Tensile payload for gfx803 must stay hidden:\n${arguments}")
+endif()
+if(NOT "ROCM_ENTRY=libamdhip64.so.7->${directory}/native/libamdhip64.so.7" IN_LIST arguments)
+  fail("hiding rocBLAS must keep the HIP runtime visible:\n${arguments}")
+endif()
+
+shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-runtime64.so.1"
+  arguments "${directory}/vendor" gfx908 "${tensile}")
+if(NOT "${rocblas_entry}" IN_LIST arguments)
+  fail("an architecture with a Tensile payload must expose rocBLAS:\n${arguments}")
+endif()
 
 file(REMOVE_RECURSE "${directory}")
