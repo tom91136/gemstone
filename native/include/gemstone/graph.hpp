@@ -267,6 +267,15 @@ public:
     return conflict;
   }
 
+  /** Invalidates the capture that recorded the event, including relaxed captures. */
+  bool invalidateEvent(Event event) {
+    std::scoped_lock const lock(mutex);
+    const auto recorded = events.find(event);
+    if (recorded == events.end()) return false;
+    recorded->second.session->invalidated = true;
+    return true;
+  }
+
   /** Invalidates the captures that a capture-unsafe call from this thread, in the given thread mode, would corrupt. */
   bool prohibit(CaptureMode threadMode) {
     std::scoped_lock const lock(mutex);

@@ -6560,6 +6560,7 @@ CUresult cuEventRecordWithFlags(CUevent event, CUstream stream, unsigned) { retu
 
 CUresult cuEventSynchronize(CUevent event) {
   if (const auto status = unlessCaptureProhibits(); status != CUDA_SUCCESS) return status;
+  if (captures.invalidateEvent(event)) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
   const auto ticket = commands().eventTicket(event);
   return ticket ? queueStatus(commands().wait(*ticket)) : CUDA_ERROR_INVALID_HANDLE;
 }

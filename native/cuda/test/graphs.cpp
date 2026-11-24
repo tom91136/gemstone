@@ -856,6 +856,28 @@ TEST_CASE("event synchronization invalidates a capture", "[cuda][graph][capture]
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
+TEST_CASE("event synchronization invalidates a relaxed capture", "[cuda][graph][capture][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_RELAXED) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(event, stream) == CUDA_SUCCESS);
+  CHECK(cuEventSynchronize(event) == CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+  CUgraph graph = nullptr;
+  CHECK(cuStreamEndCapture(stream, &graph) == CUDA_ERROR_STREAM_CAPTURE_INVALIDATED);
+
+  CUstreamCaptureStatus status = CU_STREAM_CAPTURE_STATUS_ACTIVE;
+  REQUIRE(cuStreamIsCapturing(stream, &status) == CUDA_SUCCESS);
+  CHECK(status == CU_STREAM_CAPTURE_STATUS_NONE);
+
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("kernel nodes keep their launch parameters", "[cuda][graph][kernel-params]") {
   auto *const context = createContext();
   fixture.kernelMetadata(4, 1, {{.width = 4, .offset = 0, .kind = 1, .containsPointers = 0}});
