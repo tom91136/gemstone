@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <any>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -23,6 +24,7 @@ struct Node {
   Kind kind;
   Work work;
   std::vector<Node *> dependencies;
+  std::any parameters;
 };
 
 inline bool dependsOn(const Node *node, const Node *target) {
@@ -41,7 +43,8 @@ struct Graph {
     Graph copy;
     std::map<const Node *, Node *> copies;
     for (const auto &node : nodes) {
-      copy.nodes.push_back(std::make_unique<Node>(Node{.kind = node->kind, .work = node->work, .dependencies = {}}));
+      copy.nodes.push_back(
+          std::make_unique<Node>(Node{.kind = node->kind, .work = node->work, .dependencies = {}, .parameters = node->parameters}));
       copies.emplace(node.get(), copy.nodes.back().get());
     }
     for (const auto &node : nodes)
@@ -51,7 +54,8 @@ struct Graph {
   }
 };
 
-template <class Handle> Outcome add(Graph *graph, Handle *node, Kind kind, const Handle *dependencies, size_t count, Work work) {
+template <class Handle>
+Outcome add(Graph *graph, Handle *node, Kind kind, const Handle *dependencies, size_t count, Work work, std::any parameters = {}) {
   if (!graph || !node || (count && !dependencies)) return Outcome::InvalidValue;
   std::vector<Node *> parents;
   for (size_t index = 0; index < count; ++index) {
@@ -59,7 +63,8 @@ template <class Handle> Outcome add(Graph *graph, Handle *node, Kind kind, const
     if (!graph->owns(parent)) return Outcome::InvalidHandle;
     parents.push_back(parent);
   }
-  auto owned = std::make_unique<Node>(Node{.kind = kind, .work = std::move(work), .dependencies = std::move(parents)});
+  auto owned = std::make_unique<Node>(
+      Node{.kind = kind, .work = std::move(work), .dependencies = std::move(parents), .parameters = std::move(parameters)});
   *node = reinterpret_cast<Handle>(owned.get());
   graph->nodes.push_back(std::move(owned));
   return Outcome::Ok;
@@ -172,12 +177,12 @@ public:
     std::vector<Node *> frontier;
   };
 
-  bool record(Stream stream, Kind kind, Work &work) {
+  bool record(Stream stream, Kind kind, Work &work, std::any parameters = {}) {
     std::scoped_lock const lock(mutex);
     const auto capture = captures.find(stream);
     if (capture == captures.end()) return false;
     auto &frontier = capture->second->frontier[stream];
-    auto node = std::make_unique<Node>(Node{kind, std::move(work), frontier});
+    auto node = std::make_unique<Node>(Node{kind, std::move(work), frontier, std::move(parameters)});
     frontier = {node.get()};
     capture->second->graph->nodes.push_back(std::move(node));
     return true;
@@ -196,7 +201,8 @@ public:
       for (size_t index = 0; index < count; ++index)
         if (!target->owns(dependencies[index])) return Outcome::InvalidHandle;
       session->graph = target;
-      for (size_t index = 0; index < count; ++index) session->frontier[stream].push_back(dependencies[index]);
+      for (size_t index = 0; index < count; ++index)
+        session->frontier[stream].push_back(dependencies[index]);
     } else {
       session->ownedGraph = std::make_unique<Graph>();
       session->graph = session->ownedGraph.get();

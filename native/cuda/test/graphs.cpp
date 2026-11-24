@@ -81,6 +81,16 @@ constexpr char EmptyKernel[] = R"PTX(.version 8.4
 }
 )PTX";
 
+constexpr char ParameterKernel[] = R"PTX(.version 8.4
+.target sm_89
+.address_size 64
+
+.visible .entry with_param(.param .u32 value)
+{
+  ret;
+}
+)PTX";
+
 CUfunction loadKernel(const char *image, const char *name) {
   CUmodule module = nullptr;
   REQUIRE(cuModuleLoadData(&module, image) == CUDA_SUCCESS);
@@ -820,6 +830,94 @@ TEST_CASE("graph debug print writes a DOT description", "[cuda][graph][debug]") 
   CHECK(cuGraphDebugDotPrint(nullptr, path, 0) == CUDA_ERROR_INVALID_VALUE);
   std::remove(path);
 
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("event synchronization invalidates a capture", "[cuda][graph][capture][event]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUevent event = nullptr;
+  REQUIRE(cuEventCreate(&event, 0) == CUDA_SUCCESS);
+
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+  REQUIRE(cuEventRecord(event, stream) == CUDA_SUCCESS);
+  CHECK(cuEventSynchronize(event) == CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+  CUgraph graph = nullptr;
+  CHECK(cuStreamEndCapture(stream, &graph) == CUDA_ERROR_STREAM_CAPTURE_INVALIDATED);
+
+  CUstreamCaptureStatus status = CU_STREAM_CAPTURE_STATUS_ACTIVE;
+  REQUIRE(cuStreamIsCapturing(stream, &status) == CUDA_SUCCESS);
+  CHECK(status == CU_STREAM_CAPTURE_STATUS_NONE);
+
+  REQUIRE(cuEventDestroy_v2(event) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
+TEST_CASE("kernel nodes keep their launch parameters", "[cuda][graph][kernel-params]") {
+  auto *const context = createContext();
+  fixture.kernelMetadata(4, 1, {{.width = 4, .offset = 0, .kind = 1, .containsPointers = 0}});
+  auto *const function = loadKernel(ParameterKernel, "with_param");
+  int argument = 42;
+  void *arguments[] = {&argument};
+
+  CUDA_KERNEL_NODE_PARAMS params{};
+  params.func = function;
+  params.gridDimX = 2;
+  params.gridDimY = 3;
+  params.gridDimZ = 4;
+  params.blockDimX = 5;
+  params.blockDimY = 6;
+  params.blockDimZ = 7;
+  params.sharedMemBytes = 16;
+  params.kernelParams = arguments;
+
+  CUgraph graph = nullptr;
+  REQUIRE(cuGraphCreate(&graph, 0) == CUDA_SUCCESS);
+  CUgraphNode node = nullptr;
+  REQUIRE(cuGraphAddKernelNode(&node, graph, nullptr, 0, &params) == CUDA_SUCCESS);
+
+  CUDA_KERNEL_NODE_PARAMS readback{};
+  REQUIRE(cuGraphKernelNodeGetParams_v2(node, &readback) == CUDA_SUCCESS);
+  CHECK(readback.func == function);
+  CHECK(readback.gridDimX == 2);
+  CHECK(readback.gridDimY == 3);
+  CHECK(readback.gridDimZ == 4);
+  CHECK(readback.blockDimX == 5);
+  CHECK(readback.blockDimY == 6);
+  CHECK(readback.blockDimZ == 7);
+  CHECK(readback.sharedMemBytes == 16);
+  REQUIRE(readback.kernelParams != nullptr);
+  CHECK(*static_cast<int *>(readback.kernelParams[0]) == 42);
+
+  argument = 7;
+  REQUIRE(cuGraphKernelNodeGetParams_v2(node, &readback) == CUDA_SUCCESS);
+  CHECK(*static_cast<int *>(readback.kernelParams[0]) == 42);
+  CHECK(cuGraphKernelNodeGetParams_v2(nullptr, &readback) == CUDA_ERROR_INVALID_VALUE);
+  CHECK(cuGraphKernelNodeGetParams_v2(node, nullptr) == CUDA_ERROR_INVALID_VALUE);
+
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+  argument = 42;
+  REQUIRE(cuLaunchKernel(function, 3, 1, 1, 4, 1, 1, 8, stream, arguments, nullptr) == CUDA_SUCCESS);
+  CUgraph captured = nullptr;
+  REQUIRE(cuStreamEndCapture(stream, &captured) == CUDA_SUCCESS);
+  size_t count = 0;
+  REQUIRE(cuGraphGetNodes(captured, nullptr, &count) == CUDA_SUCCESS);
+  REQUIRE(count == 1);
+  CUgraphNode capturedNode = nullptr;
+  REQUIRE(cuGraphGetNodes(captured, &capturedNode, &count) == CUDA_SUCCESS);
+  REQUIRE(cuGraphKernelNodeGetParams_v2(capturedNode, &readback) == CUDA_SUCCESS);
+  CHECK(readback.gridDimX == 3);
+  CHECK(readback.blockDimX == 4);
+  CHECK(readback.sharedMemBytes == 8);
+  CHECK(*static_cast<int *>(readback.kernelParams[0]) == 42);
+
+  REQUIRE(cuGraphDestroy(captured) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
   REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }

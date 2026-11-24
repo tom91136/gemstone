@@ -10,6 +10,7 @@
 #define __CUDA_API_VERSION_INTERNAL 1
 
 #include <algorithm>
+#include <any>
 #include <array>
 #include <atomic>
 #include <cctype>
@@ -262,8 +263,8 @@ CUresult graphResult(Outcome outcome) {
   return CUDA_ERROR_UNKNOWN;
 }
 
-CUresult enqueueCommand(CUstream stream, Kind kind, std::function<int32_t()> work) {
-  if (gemstone::graph::divert(work) || captures.record(stream, kind, work)) return CUDA_SUCCESS;
+CUresult enqueueCommand(CUstream stream, Kind kind, std::function<int32_t()> work, std::any parameters = {}) {
+  if (gemstone::graph::divert(work) || captures.record(stream, kind, work, std::move(parameters))) return CUDA_SUCCESS;
   if (const auto latched = stickyError.load(); latched != CUDA_SUCCESS) return latched;
   try {
     commands().submit(stream, std::move(work));
@@ -1524,6 +1525,43 @@ std::pair<Function *, std::array<int, 3>> findLaunchFunction(const void *handle)
   const std::scoped_lock lock(stateMutex);
   auto *entry = registeredFunction(handle);
   return {entry, entry ? entry->clusterDimensions : std::array<int, 3>{}};
+}
+
+struct KernelNodeParameters {
+  CUDA_KERNEL_NODE_PARAMS params{};
+  std::vector<std::vector<uint8_t>> arguments;
+  std::vector<void *> pointers;
+};
+
+std::any keepKernelParameters(CUfunction function, unsigned gridX, unsigned gridY, unsigned gridZ, unsigned blockX, unsigned blockY,
+                              unsigned blockZ, unsigned sharedMemoryBytes, void **kernelParams, void **extra) {
+  auto kept = std::make_shared<KernelNodeParameters>();
+  kept->params = {.func = function,
+                  .gridDimX = gridX,
+                  .gridDimY = gridY,
+                  .gridDimZ = gridZ,
+                  .blockDimX = blockX,
+                  .blockDimY = blockY,
+                  .blockDimZ = blockZ,
+                  .sharedMemBytes = sharedMemoryBytes,
+                  .kernelParams = kernelParams,
+                  .extra = extra,
+                  .kern = nullptr,
+                  .ctx = nullptr};
+  const auto [entry, required] = findLaunchFunction(function);
+  if (entry && kernelParams) {
+    for (size_t index = 0; index < entry->parameters.size(); ++index) {
+      const auto *bytes = static_cast<const uint8_t *>(kernelParams[index]);
+      if (!bytes) return kept;
+      const auto width = static_cast<size_t>(entry->parameters[index].width.value);
+      kept->arguments.emplace_back(bytes, bytes + width);
+    }
+    kept->pointers.reserve(kept->arguments.size());
+    for (auto &argument : kept->arguments)
+      kept->pointers.push_back(argument.data());
+    kept->params.kernelParams = kept->pointers.data();
+  }
+  return kept;
 }
 
 // A kernel is built on its first launch, which reports a build failure the way a lazily loaded module does.
@@ -5702,7 +5740,7 @@ constexpr uint64_t MaximumClusterSize = 16;
 
 CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsigned gridZ, unsigned blockX, unsigned blockY,
                       unsigned blockZ, unsigned sharedMemoryBytes, CUstream stream, void **kernelParams, void **extra,
-                      std::optional<ClusterShape> cluster, bool cooperative = false) {
+                      std::optional<ClusterShape> cluster, bool cooperative = false, std::any *parameters = nullptr) {
   try {
     if (const auto latched = stickyError.load(); latched != CUDA_SUCCESS) return latched;
     if (!function || (extra && kernelParams)) return CUDA_ERROR_INVALID_VALUE;
@@ -5732,6 +5770,8 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
 
     const auto [entry, required] = findLaunchFunction(function);
     if (!entry) return CUDA_ERROR_INVALID_VALUE;
+    auto kept = keepKernelParameters(function, gridX, gridY, gridZ, blockX, blockY, blockZ, sharedMemoryBytes, kernelParams, extra);
+    if (parameters) *parameters = kept;
     if (static_cast<uint64_t>(blockX) * blockY * blockZ > static_cast<uint64_t>(entry->maxThreadsPerBlock)) return CUDA_ERROR_INVALID_VALUE;
     const auto registerThreads = registerBlockLimit(activeTargetLimits(), entry->registerCount);
     if (static_cast<uint64_t>(blockX) * blockY * blockZ > static_cast<uint64_t>(registerThreads)) return CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES;
@@ -5812,14 +5852,17 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
     }
     if (const auto status = deviceHeapFor(launch.deviceHeap); status != CUDA_SUCCESS) return status;
     if (const auto status = buildFunction(*entry); status != CUDA_SUCCESS) return status;
-    return enqueueCommand(stream, Kind::Kernel, [launch = std::move(launch), encoding = entry->module->encoding] -> int32_t {
-      std::string error;
-      CompletionResult result;
-      if (launchAndCollect(launch, result, error)) return CUDA_SUCCESS;
-      if (result.failure == gemstone::execution::FailureKind::AssertionFailed) std::fprintf(stderr, "%s\n", error.c_str());
-      if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA launch failed: %s\n", error.c_str());
-      return latchStatus(failureStatus(result.failure, encoding, CUDA_ERROR_LAUNCH_FAILED));
-    });
+    return enqueueCommand(
+        stream, Kind::Kernel,
+        [launch = std::move(launch), encoding = entry->module->encoding] -> int32_t {
+          std::string error;
+          CompletionResult result;
+          if (launchAndCollect(launch, result, error)) return CUDA_SUCCESS;
+          if (result.failure == gemstone::execution::FailureKind::AssertionFailed) std::fprintf(stderr, "%s\n", error.c_str());
+          if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA launch failed: %s\n", error.c_str());
+          return latchStatus(failureStatus(result.failure, encoding, CUDA_ERROR_LAUNCH_FAILED));
+        },
+        std::move(kept));
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
   }
@@ -6093,17 +6136,18 @@ const char *graphNodeKind(Kind kind) {
   return "empty";
 }
 
-CUresult addNode(CUgraph graph, CUgraphNode *node, Kind kind, const CUgraphNode *dependencies, size_t count, gemstone::graph::Work work) {
-  return graphResult(gemstone::graph::add(graphOf(graph), node, kind, dependencies, count, std::move(work)));
+CUresult addNode(CUgraph graph, CUgraphNode *node, Kind kind, const CUgraphNode *dependencies, size_t count, gemstone::graph::Work work,
+                 std::any parameters = {}) {
+  return graphResult(gemstone::graph::add(graphOf(graph), node, kind, dependencies, count, std::move(work), std::move(parameters)));
 }
 
-CUresult recordKernel(const CUDA_KERNEL_NODE_PARAMS &params, gemstone::graph::Work &work) {
+CUresult recordKernel(const CUDA_KERNEL_NODE_PARAMS &params, gemstone::graph::Work &work, std::any *parameters = nullptr) {
   CUfunction function = params.func;
   if (!function && params.kern)
     if (const auto status = cuKernelGetFunction(&function, params.kern); status != CUDA_SUCCESS) return status;
   gemstone::graph::Recording const recording(work);
   return launchKernel(function, params.gridDimX, params.gridDimY, params.gridDimZ, params.blockDimX, params.blockDimY, params.blockDimZ,
-                      params.sharedMemBytes, nullptr, params.kernelParams, params.extra, std::nullopt);
+                      params.sharedMemBytes, nullptr, params.kernelParams, params.extra, std::nullopt, false, parameters);
 }
 
 CUresult captureInfo(CUstream stream, CUstreamCaptureStatus *status, cuuint64_t *id, CUgraph *graph, const CUgraphNode **dependencies,
@@ -6186,8 +6230,9 @@ CUresult cuGraphAddKernelNode_v2(CUgraphNode *node, CUgraph graph, const CUgraph
                                  const CUDA_KERNEL_NODE_PARAMS *params) {
   if (!params) return CUDA_ERROR_INVALID_VALUE;
   gemstone::graph::Work work;
-  if (const auto status = recordKernel(*params, work); status != CUDA_SUCCESS) return status;
-  return addNode(graph, node, Kind::Kernel, dependencies, count, std::move(work));
+  std::any parameters;
+  if (const auto status = recordKernel(*params, work, &parameters); status != CUDA_SUCCESS) return status;
+  return addNode(graph, node, Kind::Kernel, dependencies, count, std::move(work), std::move(parameters));
 }
 
 CUresult cuGraphAddMemcpyNode(CUgraphNode *node, CUgraph graph, const CUgraphNode *dependencies, size_t count, const CUDA_MEMCPY3D *copy,
@@ -6253,6 +6298,16 @@ CUresult cuGraphNodeGetType(CUgraphNode node, CUgraphNodeType *type) {
     case Kind::Empty: *type = CU_GRAPH_NODE_TYPE_EMPTY; break;
     case Kind::Work: return CUDA_ERROR_NOT_SUPPORTED;
   }
+  return CUDA_SUCCESS;
+}
+
+CUresult cuGraphKernelNodeGetParams_v2(CUgraphNode node, CUDA_KERNEL_NODE_PARAMS *params) {
+  if (!node || !params) return CUDA_ERROR_INVALID_VALUE;
+  const auto *target = reinterpret_cast<gemstone::graph::Node *>(node);
+  if (target->kind != Kind::Kernel) return CUDA_ERROR_INVALID_HANDLE;
+  const auto *kept = std::any_cast<std::shared_ptr<KernelNodeParameters>>(&target->parameters);
+  if (!kept || !*kept) return CUDA_ERROR_INVALID_HANDLE;
+  *params = (*kept)->params;
   return CUDA_SUCCESS;
 }
 
@@ -6504,6 +6559,7 @@ CUresult cuEventRecord(CUevent event, CUstream stream) {
 CUresult cuEventRecordWithFlags(CUevent event, CUstream stream, unsigned) { return cuEventRecord(event, stream); }
 
 CUresult cuEventSynchronize(CUevent event) {
+  if (const auto status = unlessCaptureProhibits(); status != CUDA_SUCCESS) return status;
   const auto ticket = commands().eventTicket(event);
   return ticket ? queueStatus(commands().wait(*ticket)) : CUDA_ERROR_INVALID_HANDLE;
 }
