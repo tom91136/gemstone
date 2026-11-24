@@ -504,8 +504,10 @@ private object VMCompiler {
           else emit(Move(result.slot, value, bits))
           if (negative) emit(IntegerUnary(IntegerUnaryOperation.Negate, result.slot, result, bits))
           result
-        case value @ (Operand.Integer(_) | Operand.Bits(_, _)) => literal(value)
-        case other                                             => unsupported(s"unsupported source $other")
+        case value @ (Operand.Integer(_) | Operand.Bits(_, _))                      => literal(value)
+        case Operand.FloatingBits(_, encodedWidth, encoded) if encodedWidth == bits =>
+          Value.Immediate(encoded.toLong)
+        case other => unsupported(s"unsupported source $other")
       }
 
     def floatSource(raw: Operand): Value  = floatingSource(raw, 32)

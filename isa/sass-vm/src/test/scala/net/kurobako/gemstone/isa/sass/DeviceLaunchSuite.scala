@@ -50,6 +50,13 @@ class DeviceLaunchSuite extends Suite {
       |STG.E [R2.64+0xc], R4
       |EXIT""".stripMargin
 
+  private val synchronize =
+    """LDC.64 R2, c[0x0][0x160]
+      |MOV R4, 0x1
+      |CALL.ABS.NOINC 0x0
+      |STG.E [R2.64], R4
+      |EXIT""".stripMargin
+
   private val child = "LDC.64 R2, c[0x0][0x160]; MOV R5, 0x2a; STG.E [R2.64], R5; EXIT"
 
   // libcudadevrt's wrappers call these driver functions, and a kernel loads a child's function descriptor into UR4:UR5
@@ -146,5 +153,11 @@ class DeviceLaunchSuite extends Suite {
     assertEquals(status, Right(CompletionStatus.Succeeded))
     assertNotEquals(LittleEndian.decodeInt64(output, 0), 0L)
     assertEquals(output.drop(8), Vec.fill(8)(0.toByte))
+  }
+
+  test("cudaDeviceSynchronize's cnpCtxSynchronize call is linked and reports success") {
+    val (status, output) = launch(synchronize, Vec((2, "cnpCtxSynchronize", 0x3aL)), 4)
+    assertEquals(status, Right(CompletionStatus.Succeeded))
+    assertEquals(LittleEndian.decodeInt32(output, 0), 0)
   }
 }

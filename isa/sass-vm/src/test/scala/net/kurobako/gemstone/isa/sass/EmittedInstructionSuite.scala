@@ -41,6 +41,12 @@ class EmittedInstructionSuite extends Suite {
       same(sm, s"MOV R5, 0x3fc00000\nMOV R6, 0xc0000000\n$spelling", expected)
     }
 
+  // __nv_cvt_float_to_fp8 with a constant argument: ptxas folds the two binary16 halves into one F32Imm, whose raw bits
+  // F2FP unpacks before saturating to E4M3.
+  test("sm_89 F2FP.SATFINITE.E4M3.F16.UNPACK_B_MERGE_C takes a floating immediate source") {
+    same(89, "F2FP.SATFINITE.E4M3.F16.UNPACK_B_MERGE_C R4, bits<F32Imm>:32(0x3c00), RZ", 0x00000038L)
+  }
+
   // __hmin2, __hmax2, __hmax2_nan and their bfloat16 forms: PT selects the minimum, !PT the maximum.
   for (
     (spelling, a, b, expected) <- Vec(

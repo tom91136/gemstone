@@ -560,9 +560,10 @@ private object VMControlCompiler {
         step(StoreParameter(buffer, 0, source(Operand.Register(RegisterBank.R, 6), 32), 32))
         step(CallBuiltin(Builtin.StreamCreate, Vec(result), Vec(argument, buffer)))
         step(LoadParameter(Vec(register(4)), result, 0, 32, signed = false))
-      case "cnpStreamDestroy" => step(Move(register(4), Value.Immediate(0L), 32))
-      case "cnpSetLastError"  => ()
-      case _                  => step(Trap)
+      case "cnpStreamDestroy"  => step(Move(register(4), Value.Immediate(0L), 32))
+      case "cnpSetLastError"   => ()
+      case "cnpCtxSynchronize" => step(Move(register(4), Value.Immediate(0L), 32))
+      case _                   => step(Trap)
     }
   }
 

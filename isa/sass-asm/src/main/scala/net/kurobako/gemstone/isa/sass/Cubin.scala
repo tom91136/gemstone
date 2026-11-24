@@ -95,7 +95,8 @@ object Cubin {
       "cnpLaunchDeviceV2",
       "cnpSetLastError",
       "cnpStreamCreate",
-      "cnpStreamDestroy"
+      "cnpStreamDestroy",
+      "cnpCtxSynchronize"
     ).zipWithIndex
       .map((name, index) => name -> (0xffffff0000000000L | ((index + 1).toLong << 4))).toMap
 
