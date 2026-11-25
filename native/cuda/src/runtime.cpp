@@ -31,6 +31,7 @@
 #include <mutex>
 #include <new>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -616,6 +617,12 @@ std::optional<Fatbin> parseFatbin(const void *image, bool validating = false) {
     for (size_t index = 0; index < 64 && wrapper->prelinked[index]; ++index)
       if (!appendFatbin(fatbin, static_cast<const uint8_t *>(wrapper->prelinked[index]), validating)) return std::nullopt;
   return fatbin;
+}
+
+std::vector<uint8_t> deviceCubin(const Fatbin &fatbin) {
+  const auto target = configuredPtxVersion();
+  if (fatbin.selectedCubinEmpty || !target || fatbin.selectedCubinTarget > *target) return {};
+  return fatbin.cubin;
 }
 
 // PTX the selected code mode may execute; null when only the selected cubin applies.
@@ -1476,10 +1483,10 @@ struct Module {
   CUcontext context = activeContext();
   uint32_t serial = ++moduleSerials;
   bool loadedByTools = false;
-  std::vector<std::string> deviceFunctions;
   uint64_t program{};
   ProgramEncoding encoding = ProgramEncoding::PTXText;
   const void *deferredImage = nullptr;
+  std::vector<uint8_t> cubin;
   std::recursive_mutex loadMutex;
   std::mutex mutex;
   std::vector<std::unique_ptr<Global>> globals;
@@ -1503,6 +1510,104 @@ struct Function {
 
 std::vector<std::unique_ptr<Module>> modules;
 std::vector<std::unique_ptr<Function>> functions;
+
+constexpr std::array<uint16_t, 33> ToolsDomainCallbackCounts{0, 8,  105, 18, 5,  5, 877, 1024, 13, 4, 3,  4, 8, 11, 3,  14, 7,
+                                                             5, 11, 30,  6,  22, 4, 2,   13,   4,  4, 10, 7, 5, 2,  15, 2};
+
+using ToolsCallback = void (*)(void *argument, uint32_t domain, uint32_t callback, const void *params);
+
+struct ToolsSubscriber {
+  ToolsCallback callback;
+  void *argument;
+  std::set<std::pair<uint32_t, uint32_t>> enabled;
+};
+
+std::mutex toolsSubscriberMutex;
+std::optional<ToolsSubscriber> toolsSubscriber;
+
+constexpr uint32_t ToolsModuleDomain = 2;
+constexpr uint32_t ToolsModuleLoaded = 17;
+constexpr uint32_t ToolsModuleUnloading = 18;
+constexpr uint32_t ToolsLaunchDomain = 3;
+constexpr uint32_t ToolsLaunchBegin = 1;
+constexpr uint32_t ToolsLaunchEnd = 9;
+constexpr uint32_t ToolsModuleOriginDriver = 0;
+constexpr uint32_t ToolsModuleOriginTools = 5;
+constexpr uint32_t ToolsModuleFlavour = 2;
+
+struct ToolsModuleLoadedParams {
+  uint32_t size = sizeof(ToolsModuleLoadedParams);
+  CUcontext context{};
+  CUmodule module{};
+  uint64_t reserved = 0;
+  const void *image{};
+  uint64_t imageBytes{};
+  const char *api = "cuModuleLoadDataEx";
+  uint32_t flavour = ToolsModuleFlavour;
+  uint32_t reservedFlavour = 0;
+  uint32_t origin{};
+  std::array<uint64_t, 6> reservedWords{};
+  std::array<uint64_t, 2> absent{~uint64_t{0}, ~uint64_t{0}};
+};
+static_assert(sizeof(ToolsModuleLoadedParams) == 0x88);
+
+struct ToolsModuleUnloadingParams {
+  uint32_t size = sizeof(ToolsModuleUnloadingParams);
+  CUcontext context{};
+  CUmodule module{};
+  std::array<uint64_t, 2> reserved{};
+};
+static_assert(sizeof(ToolsModuleUnloadingParams) == 0x28);
+
+struct ToolsLaunchBeginParams {
+  uint32_t size = sizeof(ToolsLaunchBeginParams);
+  CUcontext context{};
+  CUstream stream{};
+  CUmodule module{};
+  CUfunction function{};
+  std::array<uint32_t, 3> grid{};
+  std::array<uint32_t, 3> block{};
+  uint64_t launch{};
+  std::array<uint64_t, 4> reserved{};
+  uint64_t reportable = 1;
+  std::array<uint64_t, 18> trailing{};
+};
+static_assert(sizeof(ToolsLaunchBeginParams) == 0x100);
+
+struct ToolsLaunchEndParams {
+  uint32_t size = sizeof(ToolsLaunchEndParams);
+  CUcontext context{};
+  CUstream stream{};
+  CUmodule module{};
+  CUfunction function{};
+  uint64_t launch{};
+  std::array<uint64_t, 2> reserved{};
+};
+static_assert(sizeof(ToolsLaunchEndParams) == 0x40);
+
+std::atomic<uint64_t> toolsLaunches{0};
+
+template <class Params> void toolsNotify(uint32_t domain, uint32_t callback, const Params &params) {
+  ToolsCallback deliver = nullptr;
+  void *argument = nullptr;
+  {
+    const std::scoped_lock lock(toolsSubscriberMutex);
+    if (!toolsSubscriber || !toolsSubscriber->enabled.contains({domain, callback})) return;
+    deliver = toolsSubscriber->callback;
+    argument = toolsSubscriber->argument;
+  }
+  deliver(argument, domain, callback, &params);
+}
+
+void toolsNotifyModuleLoaded(CUmodule handle, const Module &entry) {
+  if (entry.cubin.empty()) return;
+  toolsNotify(ToolsModuleDomain, ToolsModuleLoaded,
+              ToolsModuleLoadedParams{.context = entry.context,
+                                      .module = handle,
+                                      .image = entry.cubin.data(),
+                                      .imageBytes = entry.cubin.size(),
+                                      .origin = entry.loadedByTools ? ToolsModuleOriginTools : ToolsModuleOriginDriver});
+}
 
 Module *findModule(const void *handle) {
   const std::scoped_lock lock(stateMutex);
@@ -1641,12 +1746,15 @@ CUresult initialiseModule(Module &entry, const void *image, bool allowMetadataOn
 
   entry.encoding = encoding;
   const auto *imageBytes = reinterpret_cast<const uint8_t *>(imageText);
-  auto loaded = client->call(LoadProgram{.encoding = encoding, .image = std::vector<uint8_t>(imageBytes, imageBytes + size)});
+  LoadProgram request{.encoding = encoding, .image = std::vector<uint8_t>(imageBytes, imageBytes + size)};
+  auto loaded = client->call(request);
   if (!loaded) {
     if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA module load failed: %s\n", loaded.error().detail.c_str());
     return failureStatus(loaded.error().kind, encoding, CUDA_ERROR_UNKNOWN);
   }
   entry.program = static_cast<uint64_t>(loaded.value().value);
+  if (encoding == ProgramEncoding::CUDACubin) entry.cubin = std::move(request.image);
+  else if (fatbin) entry.cubin = deviceCubin(*fatbin);
   return CUDA_SUCCESS;
 }
 
@@ -1663,15 +1771,18 @@ CUresult bindDeclaredGlobals(CUmodule handle, const Module &entry) {
   return CUDA_SUCCESS;
 }
 
-CUresult loadModule(CUmodule *module, const void *image, bool allowMetadataOnly) noexcept {
+CUresult loadModule(CUmodule *module, const void *image, bool allowMetadataOnly, bool byTools = false,
+                    std::vector<uint8_t> cubin = {}) noexcept {
   std::optional<uint64_t> loadedProgram;
   try {
     if (!module || !image || !contextIsLive(activeContext())) return CUDA_ERROR_INVALID_VALUE;
     if (executionReady() != CUDA_SUCCESS) return CUDA_ERROR_NOT_INITIALIZED;
 
     auto entry = std::make_unique<Module>();
+    entry->loadedByTools = byTools;
     if (const auto status = initialiseModule(*entry, image, allowMetadataOnly); status != CUDA_SUCCESS) return status;
     loadedProgram = entry->program;
+    if (entry->cubin.empty()) entry->cubin = std::move(cubin);
     auto *const raw = entry.get();
     auto *const handle = reinterpret_cast<CUmodule>(raw);
     {
@@ -1683,6 +1794,7 @@ CUresult loadModule(CUmodule *module, const void *image, bool allowMetadataOnly)
       return status;
     }
     *module = handle;
+    toolsNotifyModuleLoaded(handle, *raw);
     return CUDA_SUCCESS;
   } catch (...) {
     if (loadedProgram) (void)unloadProgram(*loadedProgram);
@@ -1719,7 +1831,7 @@ bool deferrableLibraryImage(const void *image) {
   return inLoadedObject(image) && wrapper->data && !wrapper->prelinked && inLoadedObject(wrapper->data);
 }
 
-CUresult loadModuleImage(CUmodule *module, const void *image);
+CUresult loadModuleImage(CUmodule *module, const void *image, bool byTools = false);
 
 CUresult loadLibraryImage(CUmodule *module, const void *image) noexcept {
   if (!module || !image) return CUDA_ERROR_INVALID_VALUE;
@@ -1751,6 +1863,7 @@ CUresult materialiseModule(CUmodule handle, Module &entry) noexcept {
       status = bindDeclaredGlobals(handle, entry);
     }
     if (status != CUDA_SUCCESS) (void)cuModuleUnload(handle);
+    else toolsNotifyModuleLoaded(handle, entry);
     return status;
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
@@ -1758,12 +1871,13 @@ CUresult materialiseModule(CUmodule handle, Module &entry) noexcept {
 }
 
 // Fatbins hand their executable PTX to the module loader; images without one fall back to their selected cubin.
-CUresult loadModuleImage(CUmodule *module, const void *image) {
+CUresult loadModuleImage(CUmodule *module, const void *image, bool byTools) {
   if (!module || !image) return CUDA_ERROR_INVALID_VALUE;
   const auto fatbin = parseFatbin(image);
-  if (!fatbin) return loadModule(module, image, false);
+  if (!fatbin) return loadModule(module, image, false, byTools);
   const char *ptx = executablePtx(fatbin);
-  return loadModule(module, ptx ? ptx : image, ptx && sassCodeRequired() && fatbin->metadataOnly);
+  return loadModule(module, ptx ? ptx : image, ptx && sassCodeRequired() && fatbin->metadataOnly, byTools,
+                    ptx ? deviceCubin(*fatbin) : std::vector<uint8_t>{});
 }
 
 template <class Reference> CUresult moduleReference(Reference *reference, CUmodule module, const char *name) {
@@ -1851,7 +1965,8 @@ CUresult loadFatBinary(FatBinary &fat) {
   if (const auto status = ensureRuntimeContext(); status != CUDA_SUCCESS) return status;
   if (fat.ptx.empty() && fat.cubin.empty()) return CUDA_ERROR_NOT_SUPPORTED;
 
-  auto status = cuModuleLoadData(&fat.module, fat.ptx.empty() ? static_cast<const void *>(fat.cubin.data()) : fat.ptx.c_str());
+  auto status =
+      loadModule(&fat.module, fat.ptx.empty() ? static_cast<const void *>(fat.cubin.data()) : fat.ptx.c_str(), false, false, fat.cubin);
   if (status != CUDA_SUCCESS) return status;
   for (const auto &variable : registeredVariables) {
     if (variable->fatBinary != &fat) continue;
@@ -2131,7 +2246,7 @@ CUresult cudartLoadModuleImage(CUmodule *module, const void *image, bool allowEm
   const auto fatbin = parseFatbin(image, true);
   if (!fatbin || !fatbin->entriesValid) return CUDA_ERROR_NOT_SUPPORTED;
   const char *ptx = executablePtx(fatbin);
-  if (ptx) return loadModule(module, ptx, sassCodeRequired() && fatbin->metadataOnly);
+  if (ptx) return loadModule(module, ptx, sassCodeRequired() && fatbin->metadataOnly, false, deviceCubin(*fatbin));
   if (fatbin->incompatibleExecutable && !fatbin->compatibleExecutable) return CUDA_ERROR_NO_BINARY_FOR_GPU;
   if (!fatbin->cubin.empty()) return loadModule(module, fatbin->cubin.data(), false);
   if (!allowEmpty || !fatbin->metadataOnly) return CUDA_ERROR_NOT_SUPPORTED;
@@ -2490,9 +2605,6 @@ int moduleEnumerateFunctions(const void *, CUmodule module, ModuleEnumerationCal
   }
 }
 
-constexpr uint32_t ToolsModuleOriginDriver = 0;
-constexpr uint32_t ToolsModuleOriginTools = 5;
-constexpr uint32_t ToolsModuleFlavour = 2;
 constexpr uint32_t ToolsModuleInfoSize = 0x28;
 constexpr uint32_t ToolsModuleInfoVersion = 2;
 
@@ -2506,9 +2618,10 @@ public:
   ~ContextBinding() { currentContext = previous; }
 };
 
-std::vector<std::string> cubinFunctionNames(const void *image) {
-  std::vector<std::string> names;
-  if (!cubinImageSize(image)) return names;
+std::vector<std::pair<uint64_t, std::string>> cubinFunctions(const std::vector<uint8_t> &cubin) {
+  std::vector<std::pair<uint64_t, std::string>> names;
+  const void *const image = cubin.data();
+  if (cubin.empty() || !cubinImageSize(image, cubin.size())) return names;
   const auto header = readNative<Elf64_Ehdr>(image);
   const auto section = [&](uint64_t index) { return readNative<Elf64_Shdr>(image, header.e_shoff + (index * header.e_shentsize)); };
   for (uint16_t index = 0; index < header.e_shnum; ++index) {
@@ -2520,7 +2633,7 @@ std::vector<std::string> cubinFunctionNames(const void *image) {
       if (ELF64_ST_TYPE(symbol.st_info) != STT_FUNC || symbol.st_name >= strings.sh_size) continue;
       const std::string_view text{static_cast<const char *>(image) + strings.sh_offset + symbol.st_name,
                                   static_cast<size_t>(strings.sh_size - symbol.st_name)};
-      names.emplace_back(text.substr(0, text.find('\0')));
+      names.emplace_back(offset / table.sh_entsize, text.substr(0, text.find('\0')));
     }
   }
   return names;
@@ -2531,11 +2644,7 @@ CUresult toolsModuleLoad(CUcontext context, CUmodule *module, const void *image,
   if (!module) return CUDA_ERROR_INVALID_VALUE;
   if (!image) return CUDA_ERROR_INVALID_IMAGE;
   const ContextBinding binding(context);
-  if (const auto status = loadModuleImage(module, image); status != CUDA_SUCCESS) return status;
-  auto *const loaded = findModule(*module);
-  loaded->loadedByTools = true;
-  loaded->deviceFunctions = cubinFunctionNames(image);
-  return CUDA_SUCCESS;
+  return loadModuleImage(module, image, true);
 }
 
 CUfunction deviceFunction(Module &owner, const std::string &name) {
@@ -2557,9 +2666,8 @@ CUresult toolsModuleFunction(CUcontext, CUmodule module, const char *name, CUfun
   *function = nullptr;
   const auto status = cuModuleGetFunction(function, module, name);
   auto *const owner = findModule(module);
-  if (status != CUDA_ERROR_NOT_FOUND || !owner) return status;
-  const auto &declared = owner->deviceFunctions;
-  if (std::find(declared.begin(), declared.end(), name) == declared.end()) return status;
+  if (status != CUDA_ERROR_NOT_FOUND || !owner || !owner->loadedByTools) return status;
+  if (!(cubinFunctions(owner->cubin) ^ exists([name](const auto &declared) { return declared.second == name; }))) return status;
   *function = deviceFunction(*owner, name);
   return CUDA_SUCCESS;
 }
@@ -2591,6 +2699,33 @@ CUresult toolsModuleFlavour(CUmodule module, uint32_t *flavour) {
   return toolsModuleWord(module, flavour, CUDA_ERROR_UNKNOWN, [](const Module &) { return ToolsModuleFlavour; });
 }
 
+CUresult toolsModuleImage(CUmodule module, const void **image, size_t *size) {
+  auto *const found = findModule(module);
+  if (!found || !image || !size) return CUDA_ERROR_INVALID_VALUE;
+  if (const auto status = materialiseModule(module, *found); status != CUDA_SUCCESS) return status;
+  if (found->cubin.empty()) return CUDA_ERROR_NOT_SUPPORTED;
+  *image = found->cubin.data();
+  *size = found->cubin.size();
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsFunctionName(CUcontext, CUfunction function, const char **name) {
+  const auto *const entry = findFunction(function);
+  if (!entry || !name) return CUDA_ERROR_INVALID_VALUE;
+  *name = entry->name.c_str();
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsFunctionSymbol(CUfunction function, uint64_t *index) {
+  const auto *const entry = findFunction(function);
+  if (!entry || !index) return CUDA_ERROR_UNKNOWN;
+  const auto symbols = cubinFunctions(entry->module->cubin);
+  const auto symbol = symbols ^ find([entry](const auto &declared) { return declared.second == entry->name; });
+  if (!symbol) return CUDA_ERROR_NOT_SUPPORTED;
+  *index = symbol->first;
+  return CUDA_SUCCESS;
+}
+
 struct ToolsModuleInfo {
   uint32_t size;
   uint32_t version;
@@ -2618,11 +2753,13 @@ CUresult toolsContextModules(ToolsModuleVisit *visit) {
   }
   if (visit->callback)
     for (auto *const module : owned) {
+      const auto *const found = findModule(module);
+      if (!found) continue;
       const ToolsModuleInfo info{.size = ToolsModuleInfoSize,
                                  .version = ToolsModuleInfoVersion,
                                  .module = module,
-                                 .image = nullptr,
-                                 .imageBytes = 0,
+                                 .image = found->cubin.empty() ? nullptr : found->cubin.data(),
+                                 .imageBytes = found->cubin.size(),
                                  .reserved = 0};
       visit->callback(visit->argument, &info);
     }
@@ -2780,11 +2917,6 @@ CUresult toolsCallbackSlot(void **callback, void **callbacks, unsigned index, un
 constexpr CUresult ToolsSubscriberLimitReached = static_cast<CUresult>(210);
 constexpr uint32_t ToolsSubscriberFeatureCount = 23;
 constexpr uint32_t ToolsSubscriberFirstId = 1;
-constexpr std::array<uint16_t, 33> ToolsDomainCallbackCounts{0, 8,  105, 18, 5,  5, 877, 1024, 13, 4, 3,  4, 8, 11, 3,  14, 7,
-                                                             5, 11, 30,  6,  22, 4, 2,   13,   4,  4, 10, 7, 5, 2,  15, 2};
-
-std::mutex toolsSubscriberMutex;
-bool toolsSubscriberActive = false;
 
 CUresult toolsSubscriberWords(uint64_t *first, uint64_t *second, unsigned) {
   if (!first || !second) return CUDA_ERROR_INVALID_VALUE;
@@ -2805,31 +2937,54 @@ CUresult toolsSubscriberFeatureLimit(uint32_t *count) {
   return CUDA_SUCCESS;
 }
 
-CUresult toolsSubscriberRegister(uint32_t *id, void *callback, void *) {
+CUresult toolsSubscriberRegister(uint32_t *id, void *callback, void *argument) {
   if (!id || !callback) return CUDA_ERROR_INVALID_VALUE;
   std::scoped_lock const lock{toolsSubscriberMutex};
-  if (toolsSubscriberActive) return ToolsSubscriberLimitReached;
-  toolsSubscriberActive = true;
+  if (toolsSubscriber) return ToolsSubscriberLimitReached;
+  toolsSubscriber.emplace(ToolsSubscriber{.callback = reinterpret_cast<ToolsCallback>(callback), .argument = argument, .enabled = {}});
   *id = ToolsSubscriberFirstId;
   return CUDA_SUCCESS;
 }
 
 CUresult toolsSubscriberRelease(uint32_t id) {
   std::scoped_lock const lock{toolsSubscriberMutex};
-  if (!toolsSubscriberActive || id != ToolsSubscriberFirstId) return CUDA_ERROR_UNKNOWN;
-  toolsSubscriberActive = false;
+  if (!toolsSubscriber || id != ToolsSubscriberFirstId) return CUDA_ERROR_UNKNOWN;
+  toolsSubscriber.reset();
   return CUDA_SUCCESS;
 }
 
-CUresult toolsSubscriberEnableAll(int, uint32_t id) { return id == ToolsSubscriberFirstId ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
-
-CUresult toolsSubscriberEnableDomain(int, uint32_t id, uint32_t domain) {
-  return id == ToolsSubscriberFirstId && domain < ToolsDomainCallbackCounts.size() ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+void toolsSubscriberSelect(bool enable, uint32_t domain, uint32_t callback) {
+  if (!toolsSubscriber) return;
+  if (enable) toolsSubscriber->enabled.emplace(domain, callback);
+  else toolsSubscriber->enabled.erase({domain, callback});
 }
 
-CUresult toolsSubscriberEnableCallback(int, uint32_t id, uint32_t domain, uint32_t callback) {
+void toolsSubscriberSelectDomain(bool enable, uint32_t domain) {
+  for (uint32_t callback = 0; callback < ToolsDomainCallbackCounts[domain]; ++callback)
+    toolsSubscriberSelect(enable, domain, callback);
+}
+
+CUresult toolsSubscriberEnableAll(int enable, uint32_t id) {
+  if (id != ToolsSubscriberFirstId) return CUDA_ERROR_INVALID_VALUE;
+  std::scoped_lock const lock{toolsSubscriberMutex};
+  for (uint32_t domain = 1; domain < ToolsDomainCallbackCounts.size(); ++domain)
+    toolsSubscriberSelectDomain(enable != 0, domain);
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubscriberEnableDomain(int enable, uint32_t id, uint32_t domain) {
+  if (id != ToolsSubscriberFirstId || domain >= ToolsDomainCallbackCounts.size()) return CUDA_ERROR_INVALID_VALUE;
+  std::scoped_lock const lock{toolsSubscriberMutex};
+  toolsSubscriberSelectDomain(enable != 0, domain);
+  return CUDA_SUCCESS;
+}
+
+CUresult toolsSubscriberEnableCallback(int enable, uint32_t id, uint32_t domain, uint32_t callback) {
   const bool known = domain >= 1 && domain < ToolsDomainCallbackCounts.size() && callback < ToolsDomainCallbackCounts[domain];
-  return id == ToolsSubscriberFirstId && known ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE;
+  if (id != ToolsSubscriberFirstId || !known) return CUDA_ERROR_INVALID_VALUE;
+  std::scoped_lock const lock{toolsSubscriberMutex};
+  toolsSubscriberSelect(enable != 0, domain, callback);
+  return CUDA_SUCCESS;
 }
 
 CUresult toolsSubscriberEnableFeature(int, uint32_t id, uint32_t feature) {
@@ -3125,12 +3280,15 @@ const std::map<std::string_view, std::vector<std::pair<size_t, const void *>>> T
      {{2, slotFunction(toolsDriverVersion)}, {3, slotFunction(toolsDriverState)}, {4, slotFunction(toolsDriverRun)}}},
     {"7cb63f9b9ca48e42a484beb66e6aed7f", {{67, slotFunction(toolsCallbackSlot)}}},
     {"6e163fbeb958444d835ce182aff1991e",
-     {{6, slotFunction(toolsModuleFunction)},
+     {{5, slotFunction(toolsFunctionName)},
+      {6, slotFunction(toolsModuleFunction)},
       {7, slotFunction(moduleEnumerateFunctions)},
       {11, slotFunction(toolsModuleSerial)},
       {27, slotFunction(toolsModuleFlavour)},
       {28, slotFunction(toolsModuleLoad)},
       {39, slotFunction(toolsFunctionAddress)},
+      {55, slotFunction(toolsFunctionSymbol)},
+      {62, slotFunction(toolsModuleImage)},
       {65, slotFunction(toolsModuleOrigin)}}},
     {"21318c60971432488ca641ff7324c8f2",
      {{3, slotFunction(toolsContextDevice)},
@@ -5429,6 +5587,8 @@ CUresult cuModuleUnload(CUmodule module) {
   try {
     Module *owner = findModule(module);
     if (!owner) return CUDA_ERROR_INVALID_VALUE;
+    if (!owner->cubin.empty())
+      toolsNotify(ToolsModuleDomain, ToolsModuleUnloading, ToolsModuleUnloadingParams{.context = owner->context, .module = module});
     if (!owner->deferredImage && !client->call(UnloadProgram{ProgramId{static_cast<int64_t>(owner->program)}})) return CUDA_ERROR_UNKNOWN;
 
     std::unique_ptr<Module> removed;
@@ -5960,7 +6120,20 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
     }
     if (const auto status = deviceHeapFor(launch.deviceHeap); status != CUDA_SUCCESS) return status;
     if (const auto status = buildFunction(*entry); status != CUDA_SUCCESS) return status;
-    return enqueueCommand(
+    const bool observed = !entry->module->cubin.empty();
+    const auto number = ++toolsLaunches;
+    auto *const context = entry->module->context;
+    auto *const module = reinterpret_cast<CUmodule>(entry->module);
+    if (observed)
+      toolsNotify(ToolsLaunchDomain, ToolsLaunchBegin,
+                  ToolsLaunchBeginParams{.context = context,
+                                         .stream = stream,
+                                         .module = module,
+                                         .function = function,
+                                         .grid = {gridX, gridY, gridZ},
+                                         .block = {blockX, blockY, blockZ},
+                                         .launch = number});
+    const auto queued = enqueueCommand(
         stream, Kind::Kernel,
         [launch = std::move(launch), encoding = entry->module->encoding] -> int32_t {
           std::string error;
@@ -5971,6 +6144,10 @@ CUresult launchKernel(CUfunction function, unsigned gridX, unsigned gridY, unsig
           return latchStatus(failureStatus(result.failure, encoding, CUDA_ERROR_LAUNCH_FAILED));
         },
         std::move(kept));
+    if (observed)
+      toolsNotify(ToolsLaunchDomain, ToolsLaunchEnd,
+                  ToolsLaunchEndParams{.context = context, .stream = stream, .module = module, .function = function, .launch = number});
+    return queued;
   } catch (...) {
     return CUDA_ERROR_UNKNOWN;
   }
@@ -7325,6 +7502,7 @@ void **__cudaRegisterFatBinary(void *image) {
     if (const char *ptx = executablePtx(fatbin)) {
       entry->ptx = ptx;
       entry->ptxVersion = std::string_view{ptx} ^ split(".target") ^ drop(1) ^ collect_first(parsePtxTarget);
+      if (fatbin) entry->cubin = deviceCubin(*fatbin);
     } else if (fatbin) {
       entry->cubin = fatbin->cubin;
       if (!entry->cubin.empty()) entry->ptxVersion = fatbin->cubinTarget;
