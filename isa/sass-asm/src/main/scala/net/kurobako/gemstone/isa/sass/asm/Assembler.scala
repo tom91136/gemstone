@@ -272,9 +272,52 @@ class Assembler(target: Target) {
   private def controlOf(bytes: Vec[Byte]): CodeWords.ControlBits =
     ((bytes(8) & 255) | ((bytes(9) & 255) << 8) | ((bytes(10) & 31) << 16)).unsafe[CodeWords.ControlBits]
 
+  private def relative(instruction: Instruction, preserved: Option[DecodedInstruction]): Boolean =
+    preserved.flatMap(_.machine) match {
+      case Some(machine) => machine.target.database.byForm.get(machine.form).exists(_.relative)
+      case None          =>
+        val names = instruction.definition.forms.toSet
+        val forms = target.database.forms.filter(form =>
+          !form.alternate && names(form.name) &&
+            form.opcodes.exists(_.name.takeWhile(_ != '.') == instruction.mnemonic.raw)
+        )
+        forms.nonEmpty && forms.forall(_.relative)
+    }
+
+  private def relocated(
+      old: DecodedInstruction,
+      operation: Instruction,
+      before: Vec[Operand],
+      address: Int >= 0
+  ): DecodedInstruction = {
+    val shifted = old.copy(address = address, operation = operation)
+    old.machine match {
+      case Some(machine) =>
+        machine.target.database.byForm.get(machine.form).filter(_.relative) match {
+          case Some(form) =>
+            val names = form.declared.collect {
+              case field if field.category == NVDisasm.FieldKind.RelativeImmediate => form.binding(field)
+            }.toSet
+            val shift    = BigInt(address) - BigInt(old.address)
+            val followed = before.zip(operation.operands).collect {
+              case (previous, next) if previous != next =>
+                OperandQueries.integer(next).zip(OperandQueries.integer(previous)).headOption
+                  .map { case (target, source) => target - source }
+            }.flatten.headOption.getOrElse(BigInt(0))
+            val adjustment = followed - shift
+            val bindings   = machine.bindings.map { case (name, value) =>
+              if (names(name)) name -> (value + adjustment) else name -> value
+            }
+            shifted.copy(machine = Some(machine.copy(bindings = bindings)))
+          case None => shifted
+        }
+      case None => shifted
+    }
+  }
+
   /** `program` laid out afresh after instructions were inserted or removed: each preserved encoding moves to the
-    * address its position now gives it, and direct branch targets that named a preserved instruction's old address
-    * follow that instruction. A branch whose distance to its target changed is encoded anew.
+    * address its position now gives it, and PC-relative encodings are re-encoded for their new address, following
+    * preserved instructions whose own addresses moved.
     */
   def relaid(program: Program): Either[Error, Program] = for {
     layout <- locate(program)
@@ -288,6 +331,7 @@ class Assembler(target: Target) {
         0)) {
         case (result, operation @ Operation(instruction, preserved, _)) => result.flatMap { (statements, index) =>
             val address                      = addresses(index)
+            val isRelative                   = relative(instruction, preserved)
             val retarget: Operand => Operand = {
               case Operand.Integer(destination) if moved.contains(destination) => Operand.Integer(moved(destination))
               case Operand.Bits(destination, width) if moved.contains(destination) =>
@@ -295,7 +339,7 @@ class Assembler(target: Target) {
               case other => other
             }
             val operands =
-              if (ControlFlow.directTarget(instruction)) instruction.operands.map(retarget) else instruction.operands
+              if (isRelative) instruction.operands.map(retarget) else instruction.operands
             val rebuilt =
               if (operands == instruction.operands) Right(instruction)
               else InstructionDefinitions.decode(
@@ -306,16 +350,7 @@ class Assembler(target: Target) {
               )
                 .left.map(assembly(_))
             rebuilt.map { updated =>
-              val kept = preserved.filter(old =>
-                !ControlFlow.directTarget(instruction) || moved.get(BigInt(old.address)).exists { now =>
-                  def steady(before: Operand, after: Operand): Boolean =
-                    OperandQueries.integer(after).zip(OperandQueries.integer(before))
-                      .forall((next, previous) => next - now == previous - old.address.raw)
-                  val pairs = instruction.operands.zip(operands)
-                  pairs.forall((before, after) => before == after || steady(before, after)) &&
-                  pairs.lastOption.forall(steady(_, _))
-                }
-              ).map(_.copy(address = address, operation = updated))
+              val kept = preserved.map(old => relocated(old, updated, instruction.operands, address))
               (statements :+ operation.copy(instruction = updated, preserved = kept), index + 1)
             }
           }

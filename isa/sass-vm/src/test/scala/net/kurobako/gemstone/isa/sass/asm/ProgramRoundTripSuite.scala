@@ -13,6 +13,15 @@ class ProgramRoundTripSuite extends Suite {
     Parser.parseProgram(source).fold(error => fail(error.message), identity(_))
   private def assembled(program: Program, sm: Int): Vec[Byte] =
     Assembler(target(sm)).encode(program).fold(error => fail(error.message), identity(_))
+  private def encoded(sm: Int, address: Int, form: String, opcode: String, text: String): DecodedInstruction = {
+    val selected     = target(sm)
+    val selectedForm = selected.database.byForm.get(form).getOrElse(fail(s"no $form form"))
+    val bindings     = FormatParser.parse(selected.database, selectedForm, address, text)
+      .fold(error => fail(error), identity(_))
+    val bytes = Encoder.encode(NVDisasm.Encoding(selected.database, selectedForm), opcode, bindings)
+      .fold(error => fail(error), identity(_))
+    InstructionDecoder.decode(address.unsafe[Int >= 0], bytes, selected).fold(error => fail(error), identity(_))
+  }
 
   private val sms = Vec(35, 50, 89)
 
@@ -45,6 +54,19 @@ class ProgramRoundTripSuite extends Suite {
       .fold(error => fail(error.message), identity(_))
     val branch = CodeSection.decode(Vec.toArray(encoded), target(89)).fold(fail(_), identity(_)).instructions.head
     assertEquals(branch.operands.collect { case Operand.Bits(value, _) => value }, Vec(BigInt(0x30)))
+  }
+
+  test("relaying re-encodes a relative return so its target stays put") {
+    val selected = target(89)
+    val returned = encoded(89, 0, "ret__REL", "RET", "RET.REL.NODEC,R6 0x40")
+    val program  = Program(Some(selected), Vec(Program.Statement.Operation(returned.operation, Some(returned))))
+    val extra    = Parser.parse("NOP;").fold(fail(_), identity(_))
+    val edited   = program.copy(statements = Program.Statement.Operation(extra) +: program.statements)
+    val bytes    = Assembler(selected).relaid(edited).flatMap(Assembler(selected).encode(_))
+      .fold(error => fail(error.message), identity(_))
+    val decoded = CodeSection.decode(Vec.toArray(bytes), selected).fold(fail(_), identity(_))
+    val found   = decoded.instructions.find(_.mnemonic.raw == "RET").getOrElse(fail("no return"))
+    assertEquals(found.operands.collect { case Operand.Bits(value, _) => value }, Vec(BigInt(0x40)))
   }
 
   test("relaying re-encodes a branch that moved while its target did not") {
