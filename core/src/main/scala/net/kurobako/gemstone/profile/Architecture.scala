@@ -600,11 +600,20 @@ object Architecture {
   )
 
   private val adaFp64Constant = Source.Probed(
-    "loop_stream_dfma sweep timed with clock64: 19.00 cycles per DFMA with a constant-bank addend against 16.00 " +
-      "with register operands at 8 and 16 DFMA per trip (2026-11-11, median of 201 launches)",
+    "loop_stream_dfma sweep timed with clock64: 19.00 cycles per DFMA with a constant-bank addend at 8 and 16 " +
+      "DFMA per trip (2026-11-11, median of 201 launches); the register form was then probed at 19.00 by the " +
+      "straight-line SASS bracket, revising the earlier 16.00 estimate from a loop intercept",
     "RTX 4060 Ti, sm_89, 34 SMs",
     "NVIDIA 620.70.06",
     "CUDA 13.3"
+  )
+
+  private val adaFp64Rate = Source.Probed(
+    "straight-line hand-assembled SASS probe of independent DMUL and DADD: 19.00 cycles per op from the slope of " +
+      "8, 12 and 16 op blocks on the RTX 4060 Ti (sm_89, median of three launches)",
+    "RTX 4060 Ti, sm_89, 34 SMs",
+    "NVIDIA 620.70.06",
+    "CUDA 13.3, repository SASS assembler"
   )
 
   private val adaSharedFp64 = Source.Probed(
@@ -677,6 +686,7 @@ object Architecture {
       shared = Sourced(1.0, adaPeak),
       mufu = Sourced(16.0, adaRate),
       loads = Some(Sourced(0.5, adaLoads)),
+      fp64 = Sourced(32.0 / 19.0, adaFp64Rate),
       fp64Constant = Some(Sourced(32.0 / 19.0, adaFp64Constant))
     ),
     Latency(

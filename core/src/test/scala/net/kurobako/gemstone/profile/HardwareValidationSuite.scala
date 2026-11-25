@@ -400,4 +400,41 @@ class HardwareValidationSuite extends Suite {
   register(Architecture.gfx1036, HardwareLoops.gfx1036, gfx1036Cases, gfx1036Shared)
   expectationsFollowRule(Architecture.sm89, sm89Cases)
   expectationsFollowRule(Architecture.gfx1036, gfx1036Cases)
+
+  test("sm89 straight-line probe rows agree with their own issue intervals") {
+    val control = HardwareQueue.sm89.find(row => row.name == "ctl").get
+    assertEquals(control.cycles, 31.0)
+    HardwareQueue.sm89.groupBy(row => (row.name, row.warps)).foreach { (_, rows) =>
+      val low  = rows.minBy(_.n)
+      val high = rows.maxBy(_.n)
+      if (high.n != low.n)
+        assertEqualsDouble(
+          (high.cycles - low.cycles) / (high.n - low.n),
+          HardwareQueue.slope(low.name, low.warps),
+          1e-9
+        )
+    }
+  }
+
+  test("sm89 MUFU issues back to back at the blocking interval without a queue") {
+    val measured   = HardwareQueue.slope("mufu", 1)
+    val rate       = Architecture.sm89.throughput.rate(Pipe.Mufu).value
+    val partitions = Architecture.sm89.limits.partitions.value
+    assertEquals(measured, math.ceil(32.0 * partitions / rate))
+    assertEquals(Architecture.sm89.pipeQueue.get(Pipe.Mufu), None)
+  }
+
+  test("sm89 FP64 issues back to back at the probed interval for one warp") {
+    val model = math.ceil(32.0 / Architecture.sm89.throughput.rate(Pipe.Fp64).value)
+    assertEquals(HardwareQueue.slope("dmul", 1), 19.0)
+    assertEquals(HardwareQueue.slope("dadd", 1), 19.0)
+    assertEquals(HardwareQueue.slope("dmul", 1), model)
+  }
+
+  test("sm89 FP64 issues at twice the probed interval for two warps") {
+    val model = math.ceil(64.0 / Architecture.sm89.throughput.rate(Pipe.Fp64).value)
+    assertEquals(HardwareQueue.slope("dmul", 2), 38.0)
+    assertEquals(HardwareQueue.slope("dadd", 2), 38.0)
+    assertEquals(HardwareQueue.slope("dmul", 2), model)
+  }
 }

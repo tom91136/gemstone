@@ -6,6 +6,7 @@ import net.kurobako.gemstone.flow.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.vm.*
 import net.kurobako.gemstone.vm.LaunchObserver.*
+import scala.collection.immutable.ArraySeq
 
 /** The loop bodies of the hardware validation kernels as compiled for each card: SASS from nvcc 13.3 for sm_89 and
   * AMDGPU code from hipcc 7.2 (clang 22) for gfx1036. Pipe, schedule and text are what the VM profiles on the compiled
@@ -1809,4 +1810,38 @@ object HardwareLoops {
     )
   )
 
+}
+
+/** Cycles of the straight-line clock bracket used by the sm_89 pipe-queue probe on the RTX 4060 Ti. Each row holds a
+  * fixed number of back-to-back independent ops between two `CS2R.32 SR_CLOCKLO` reads; the cycles are the median of
+  * three launches after five warm-ups, taken from the third repetition in the cubin. The slope between rows of the same
+  * body is the issue interval, which is what the simulator's pipe rate and queue depth decide.
+  */
+object HardwareQueue {
+  case class Row(name: String, pipe: String, n: Int, warps: Int, cycles: Double)
+
+  val sm89: ArraySeq[Row] = Vec(
+    Row("ctl", "-", 8, 1, 31.0),
+    Row("mufu", "mufu", 8, 1, 69.0),
+    Row("mufu", "mufu", 12, 1, 101.0),
+    Row("dmul", "fp64", 8, 1, 101.0),
+    Row("dmul", "fp64", 12, 1, 177.0),
+    Row("dmul", "fp64", 16, 1, 253.0),
+    Row("dadd", "fp64", 8, 1, 101.0),
+    Row("dadd", "fp64", 12, 1, 177.0),
+    Row("dadd", "fp64", 16, 1, 253.0),
+    Row("dmul", "fp64", 8, 2, 254.0),
+    Row("dmul", "fp64", 12, 2, 406.0),
+    Row("dmul", "fp64", 16, 2, 558.0),
+    Row("dadd", "fp64", 8, 2, 254.0),
+    Row("dadd", "fp64", 12, 2, 406.0),
+    Row("dadd", "fp64", 16, 2, 558.0)
+  )
+
+  def slope(name: String, warps: Int): Double = {
+    val rows = sm89.filter(row => row.name == name && row.warps == warps).sortBy(_.n)
+    val low  = rows.head
+    val high = rows.last
+    (high.cycles - low.cycles) / (high.n - low.n)
+  }
 }

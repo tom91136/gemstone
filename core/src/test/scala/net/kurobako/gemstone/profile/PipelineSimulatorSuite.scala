@@ -105,8 +105,8 @@ class PipelineSimulatorSuite extends Suite {
   }
 
   test("a pipe shared across partitions gives a lone subgroup its whole rate") {
-    assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 1).cyclesPerIteration, 16.0, 1e-9)
-    assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 48).cyclesPerIteration, 16.0, 1e-9)
+    assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 1).cyclesPerIteration, 19.0, 1e-9)
+    assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Fp64))), subgroups = 48).cyclesPerIteration, 19.0, 1e-9)
     assertEqualsDouble(run(Vec(op(pipe = Some(Pipe.Mufu))), subgroups = 1).cyclesPerIteration, 8.0, 1e-9)
   }
 
@@ -299,5 +299,27 @@ class PipelineSimulatorSuite extends Suite {
     val block =
       PipelineSimulator.simulate(Architecture.sm89, occupancy(48), Stream.repeat(Vec.fill(64)(op())), None, 100L)
     assert(block.cyclesPerIteration.isNaN, block.cyclesPerIteration)
+  }
+
+  test("sm89 issues independent MUFU ops eight cycles apart with no queue") {
+    val body    = Vec.fill(8)(op(pipe = Some(Pipe.Mufu)))
+    val entries = PipelineSimulator.simulate(
+      Architecture.sm89,
+      occupancy(1),
+      Stream.once(body),
+      None
+    ).entries.filter(_.index < 8)
+    assertEquals(entries.map(_.issue), Vec(0L, 8L, 16L, 24L, 32L, 40L, 48L, 56L))
+  }
+
+  test("sm89 issues independent FP64 ops at the probed interval with no queue") {
+    val body    = Vec.fill(8)(op(pipe = Some(Pipe.Fp64)))
+    val entries = PipelineSimulator.simulate(
+      Architecture.sm89,
+      occupancy(1),
+      Stream.once(body),
+      None
+    ).entries.filter(_.index < 8)
+    assertEquals(entries.map(_.issue), Vec(0L, 19L, 38L, 57L, 76L, 95L, 114L, 133L))
   }
 }
