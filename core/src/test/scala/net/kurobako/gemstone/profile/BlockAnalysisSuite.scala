@@ -212,4 +212,30 @@ class BlockAnalysisSuite extends Suite {
     assertEquals(recorder.instruction(at(0x10L), State(0L, "op")), Right(()))
     assert(BlockAnalysis.of(recorder.stream, Architecture.sm89).isLeft)
   }
+
+  test("a non-settling level stops an uneven region without simulating the later levels") {
+    val counts  = Vec(4L, 4L, 2L, 2L, 4L, 1L)
+    val members = Vec.from(counts.zipWithIndex.map((count, at) => BlockAnalysis.Member(0x10L + at * 8L, None, count)))
+    val failed  = PipelineSimulator.Block(
+      entries = Vec.empty,
+      cyclesPerIteration = Double.NaN,
+      binding = ProfileReport.Binding.Path,
+      pressure = Vec.empty,
+      source = Architecture.Source.Estimate("test"),
+      steady = true,
+      noise = 0.0
+    )
+    val calls  = new java.util.concurrent.atomic.AtomicInteger(0)
+    val result = BlockAnalysis.simulated(
+      Profiler.run(record(Vec(0, 1, 2, 3)), Architecture.sm89),
+      BlockAnalysis.Kind.Loop,
+      members,
+      Vec.empty[PipelineSimulator.Op],
+      None,
+      Some { _ => calls.incrementAndGet(); failed }
+    )
+    assert(result.isLeft, result)
+    assert(result.left.toOption.get.contains("did not settle"), result)
+    assertEquals(calls.get(), 1)
+  }
 }

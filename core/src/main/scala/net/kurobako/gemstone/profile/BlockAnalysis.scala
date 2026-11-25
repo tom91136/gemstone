@@ -148,26 +148,32 @@ object BlockAnalysis {
     * issued at least `count` times. The weights telescope from the recorded counts, so an instruction issued in a
     * fraction `f` of the entries adds `f` of its cost; an even region has one stream and keeps its old cost.
     */
-  private def simulated(
+  private[profile] def simulated(
       profile: Profile,
       kind: Kind,
       members: Vec[Member],
       ops: Vec[Op],
-      placement: Option[PipelineSimulator.Placement]
+      placement: Option[PipelineSimulator.Placement],
+      runner: Option[Vec[Op] => PipelineSimulator.Block] = None
   ): Either[String, PipelineSimulator.Block] = {
-    val counts                                      = members.map(_.issues)
-    val entry                                       = counts.head
-    def run(kept: Vec[Op]): PipelineSimulator.Block = {
+    def simulate(kept: Vec[Op]): PipelineSimulator.Block = {
       val stream = kind match {
         case Kind.Block => PipelineSimulator.Stream.once(kept)
         case Kind.Loop  => PipelineSimulator.Stream.repeat(kept)
       }
       PipelineSimulator.simulate(profile.architecture, profile.occupancy, stream, placement)
     }
+    val run    = runner.getOrElse(simulate _)
+    val counts = members.map(_.issues)
+    val entry  = counts.head
     val levels = counts.distinct.sorted.reverse
-    val runs   = levels.map(level => run(ops.zip(counts).collect { case (op, count) if count >= level => op }))
+    val runs   = levels.iterator
+      .map(level => run(ops.zip(counts).collect { case (op, count) if count >= level => op }))
+      .takeWhile(result => !result.cyclesPerIteration.isNaN)
+      .toVector
     val cycles =
-      if (levels.size == 1) runs.head.cyclesPerIteration
+      if (runs.size < levels.size) Double.NaN
+      else if (levels.size == 1) runs.head.cyclesPerIteration
       else {
         val weights = levels.zip(levels.tail :+ 0L).map { case (high, low) =>
           (high - low).toDouble / entry.toDouble
