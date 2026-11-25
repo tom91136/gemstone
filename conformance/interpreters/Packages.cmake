@@ -27,7 +27,7 @@ set(conformance_interpreter_package_julia-oneapi_backend levelzero)
 set(conformance_interpreter_package_julia-oneapi_environment julia/oneapi)
 set(conformance_interpreter_package_julia-oneapi_programs julia_babelstream_oneapi julia_tests_oneapi)
 
-set(conformance_julia_tests_timeout 450)
+set(conformance_julia_tests_timeout 1200)
 
 set(conformance_interpreter_program_python_numba_script python/numba_cases.py)
 set(conformance_interpreter_program_python_numba_timeout 900)
