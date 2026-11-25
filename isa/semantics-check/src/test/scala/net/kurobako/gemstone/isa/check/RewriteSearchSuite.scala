@@ -340,6 +340,65 @@ class RewriteSearchSuite extends Suite {
     })
   }
 
+  private val pcRelative: Vec[Byte] = WindowFixtures.assembled(
+    """v_mov_b32 v1, 0
+      |v_add_nc_u32 v2, v1, v1
+      |v_add_nc_u32 v3, v1, v4
+      |s_getpc_b64 s[0:1]
+      |v_add_nc_u32 v5, v1, v4
+      |v_mov_b32 v6, v5
+      |v_add_nc_u32 v7, v1, v4
+      |v_add_nc_u32 v8, v1, v4
+      |s_endpgm
+      |""".stripMargin
+  )
+
+  test("an unresolvable PC-relative anchor refuses a size-changing rewrite on either side") {
+    val image = pcRelative
+    val text  = assembly(image)
+    val at    = text.indexWhere(_.startsWith("s_getpc_b64"))
+    assert(at >= 0, text)
+    val all    = windows(image, 2)
+    val before = all.filter(_.last < at)
+    val after  = all.filter(_.first > at)
+    assert(before.nonEmpty && after.nonEmpty, all)
+    val cost                               = AMDGPUBlockCost.of(image, kernel, target, oneWave).fold(fail(_), identity)
+    def grown(window: Window): Vec[String] =
+      Vec(text(window.first), "s_nop 0") ++ text.slice(window.first + 1, window.last + 1)
+    val shifted   = cost.cost(before.head, grown(before.head))
+    val unshifted = cost.cost(after.head, grown(after.head))
+    assert(shifted.left.exists(_.contains("relative to the program counter")), shifted)
+    assert(unshifted.left.exists(_.contains("relative to the program counter")), unshifted)
+  }
+
+  private val anchored: Vec[Byte] = WindowFixtures.assembled(
+    """s_getpc_b64 s[0:1]
+      |s_add_u32 s0, s0, 0x18
+      |s_addc_u32 s1, s1, 0
+      |v_mov_b32 v1, 0
+      |v_mov_b32 v2, 0
+      |v_mov_b32 v3, 0
+      |v_mov_b32 v4, 0
+      |s_mov_b32 s2, s0
+      |s_endpgm
+      |""".stripMargin
+  )
+
+  test("an anchor reaching into the code a window moves refuses that window") {
+    val image = anchored
+    val text  = assembly(image)
+    assert(text.head.startsWith("s_getpc_b64"), text)
+    val anchorAt = text.indexWhere(_.startsWith("s_getpc_b64"))
+    val targetAt = text.indexWhere(_.startsWith("s_mov_b32 s2, s0"))
+    assert(anchorAt < targetAt, text)
+    val window = windows(image, 2).find(w => anchorAt < w.first && w.last < targetAt)
+      .getOrElse(fail(s"no window between the anchor and its target: $text"))
+    val cost  = AMDGPUBlockCost.of(image, kernel, target, oneWave).fold(fail(_), identity)
+    val grown = Vec(text(window.first), "s_nop 0") ++ text.slice(window.first + 1, window.last + 1)
+    val moved = cost.cost(window, grown)
+    assert(moved.left.exists(_.contains("relative to the program counter")), moved)
+  }
+
   private def fixture(
       name: String,
       image: Vec[Byte],
