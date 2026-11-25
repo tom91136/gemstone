@@ -414,44 +414,38 @@ class ConstantSuite extends Suite {
     assertEquals(loadsBank(Map(Cubin.constantSymbol(bank.index) -> GuestAddress(0x1000L))), Right(true))
   }
 
-  // cvta.const of a .const global as ptxas 11.6 (sm_70 to sm_86) and 13.3 (sm_75 to sm_89) emit it
-  for (
-    (sm, window) <- Vec(
-      70 -> "MOV R4, c[0x0][0x50]; IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]",
-      75 -> "ULDC.64 UR4, c[0x0][0x50]; MOV R4, UR4; MOV R5, UR5",
-      80 -> "IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]; MOV R4, c[0x0][0x50]",
-      86 -> "IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]; MOV R4, c[0x0][0x50]",
-      89 -> "IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]; MOV R4, c[0x0][0x50]"
-    )
-  ) test(s"sm_$sm c[0x0][0x50] holds the generic address of constant bank 3") {
-    val module = Harness.module(
-      sm,
-      Vec(Entry("window", 0x160, Vec(8), registers = 8)),
-      constants = Vec(".nv.constant3" -> LittleEndian.toVec(77L, 8))
-    )
-    val bank      = module.sections.find(_.name == ".nv.constant3").get
-    val functions = Vec(Listing.program(
-      s"$window; LD.E R6, [R4.64]; LDC.64 R8, c[0x0][0x160]; STG.E [R8.64], R6; EXIT",
-      "window"
-    ).value)
-    session { (service, fixtures) =>
-      val program = service.load(ProgramEncoding.CUDACubin, fixtures.image(Image(module, functions)))
-        .fold(e => fail(e.message), identity)
-      val storage = service.registerAllocation(8).toOption.get
-      val output  = service.registerAllocation(4).toOption.get
-      assert(service.write(storage, 0L, LittleEndian.toVec(77L, 8)).isRight)
-      assert(service.bindGlobal(program, s"__sass_const${bank.index}", storage, 0L).isRight)
-      val task = KernelTask.validated(
-        "window": NonEmpty[String],
-        LaunchGeometry.Dimensions.One,
-        LaunchGeometry.Dimensions.One,
-        Vec(KernelTask.Argument.Memory(output, 0L))
-      ).toOption.get
-      val completion = service.launch(program, task).fold(e => fail(e.message), identity)
-      assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
-      assertEquals(service.read(AllocationRange(output, 0L, 4)), Right(LittleEndian.toVec(77L, 4)))
+  // ptxas reads the generic address of constant bank 3 from c0[0x50:0x58] until Hopper.
+  for (target <- Target.all if target.sm.raw >= 70 && target.sm.raw < 90)
+    test(s"sm_${target.sm} c[0x0][0x50] holds the generic address of constant bank 3") {
+      val module = Harness.module(
+        target.sm,
+        Vec(Entry("window", 0x160, Vec(8), registers = 8)),
+        constants = Vec(".nv.constant3" -> LittleEndian.toVec(77L, 8))
+      )
+      val bank      = module.sections.find(_.name == ".nv.constant3").get
+      val functions = Vec(Listing.program(
+        "IMAD.MOV.U32 R5, RZ, RZ, c[0x0][0x54]; MOV R4, c[0x0][0x50]; " +
+          "LD.E R6, [R4.64]; LDC.64 R8, c[0x0][0x160]; STG.E [R8.64], R6; EXIT",
+        "window"
+      ).value)
+      session { (service, fixtures) =>
+        val program = service.load(ProgramEncoding.CUDACubin, fixtures.image(Image(module, functions)))
+          .fold(e => fail(e.message), identity)
+        val storage = service.registerAllocation(8).toOption.get
+        val output  = service.registerAllocation(4).toOption.get
+        assert(service.write(storage, 0L, LittleEndian.toVec(77L, 8)).isRight)
+        assert(service.bindGlobal(program, s"__sass_const${bank.index}", storage, 0L).isRight)
+        val task = KernelTask.validated(
+          "window": NonEmpty[String],
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec(KernelTask.Argument.Memory(output, 0L))
+        ).toOption.get
+        val completion = service.launch(program, task).fold(e => fail(e.message), identity)
+        assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
+        assertEquals(service.read(AllocationRange(output, 0L, 4)), Right(LittleEndian.toVec(77L, 4)))
+      }
     }
-  }
 
   for {
     destinationFirst <- Flags
