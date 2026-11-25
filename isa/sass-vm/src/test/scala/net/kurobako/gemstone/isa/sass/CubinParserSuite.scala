@@ -71,6 +71,18 @@ class CubinParserSuite extends Suite {
     } finally program.close()
   }
 
+  test("a reserved-smem cubin reports the kernel's static size without the per-block reserve") {
+    val reserved = Cubin.decode(Vec.unsafeWrapArray(bytes.hex(ReservedSharedFixtures.sm90WithReserve))).value
+    assertEquals(reserved.sm.raw, 90)
+    assertEquals(reserved.kernels.head.sharedSizeBytes.raw, 400)
+    val plain = Cubin.decode(Vec.unsafeWrapArray(bytes.hex(ReservedSharedFixtures.sm89WithoutReserve))).value
+    assertEquals(plain.sm.raw, 89)
+    assertEquals(plain.kernels.head.sharedSizeBytes.raw, 400)
+    val capped = Cubin.decode(Vec.unsafeWrapArray(bytes.hex(ReservedSharedFixtures.sm100WithCap))).value
+    assertEquals(capped.sm.raw, 100)
+    assertEquals(capped.kernels.head.sharedSizeBytes.raw, 400)
+  }
+
   test("CUDA ELF ABI 7 reads the architecture from the low flags byte") {
     assertEquals(Cubin.decode(Vec.unsafeWrapArray(metadataElf(7, 35))).map(_.sm.raw), Right(35))
   }

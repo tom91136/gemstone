@@ -7,6 +7,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.elf.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.profile.Architecture
 import net.kurobako.gemstone.vm.*
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -686,12 +687,15 @@ object Cubin {
         case _ => None
       })
     }.map(_.toMap)
-    callees = deviceFunctions(parsed, sections)
-    names   = sections.map(_.name).toSet
+    callees  = deviceFunctions(parsed, sections)
+    names    = sections.map(_.name).toSet
+    reserved = reservedSharedByKernel(parsed, sections, sm.raw)
     kernels <- sections.filter(section =>
       section.name.startsWith(".text.") && !callees(section.name.stripPrefix(".text.")) &&
         names(s".nv.info.${section.name.stripPrefix(".text.")}")
-    ).traverse(section => kernel(section, sections, registerCounts, localSizes))
+    ).traverse(section =>
+      kernel(section, sections, registerCounts, localSizes, reserved.getOrElse(section.name.stripPrefix(".text."), 0))
+    )
     globals <- sections.filter(_.kind == SectionType.SymbolTable)
       .flatMap(table => parsed.symbolTables.getOrElse(table.index, Vec.empty[elf.Symbol]))
       .traverse(global(_, sections))
@@ -753,11 +757,32 @@ object Cubin {
     } else Right(None)
   }
 
+  /** The reserve ptxas folds into a kernel's `.nv.shared.<name>` section. The undefined `.nv.reservedSmem.offset*`
+    * symbol marks that it did; `.nv.reservedSmem.cap`, where present, states the size in bytes. Where the cubin has no
+    * cap symbol, the architecture of the cubin supplies the same reserved size the native target table reports.
+    */
+  private def reservedSharedByKernel(parsed: Image, sections: Vec[Section], sm: Int): Map[String, Int] = {
+    val fallback = Architecture.named(s"sm_$sm").fold(0)(_.limits.reservedShared.value)
+    sections.filter(_.name.startsWith(".text.")).map { section =>
+      val symbols            = parsed.symbolTables.getOrElse(section.link.raw, Vec.empty[elf.Symbol])
+      val referencesReserved =
+        symbols.exists(symbol => symbol.name.exists(_.raw.startsWith(".nv.reservedSmem.offset")))
+      val cap = symbols.collectFirst {
+        case symbol
+            if symbol.name.exists(_.raw == ".nv.reservedSmem.cap") && symbol.value >= 0 &&
+              symbol.value <= Int.MaxValue =>
+          symbol.value.toInt
+      }
+      section.name.stripPrefix(".text.") -> (if (referencesReserved) cap.getOrElse(fallback) else 0)
+    }.toMap
+  }
+
   private def kernel(
       section: Section,
       sections: Vec[Section],
       registerCounts: Map[(Int, Int), Int >= 0],
-      localSizes: Map[(Int, Int), Int >= 0]
+      localSizes: Map[(Int, Int), Int >= 0],
+      reservedShared: Int
   ): Either[NonEmpty[String], Kernel] = {
     val name                                                          = section.name.stripPrefix(".text.")
     def record(value: Vec[Byte], size: Int, detail: NonEmpty[String]) = check(value.size == size, detail)
@@ -805,7 +830,8 @@ object Cubin {
       registers <- registerCounts.get(section.link.raw -> (section.info & 0x00ffffff))
         .fold((section.info >>> 24).refine[Int >= 0])(Right(_))
       localSize  = localSizes.getOrElse(section.link.raw -> (section.info & 0x00ffffff), 0: Int >= 0)
-      sharedSize = sections.find(_.name == s".nv.shared.$name").fold(0: Int >= 0)(_.size)
+      declared   = sections.find(_.name == s".nv.shared.$name").fold(0: Int >= 0)(_.size)
+      sharedSize = (declared.raw - reservedShared).refine[Int >= 0].toOption.getOrElse(0: Int >= 0)
       kernelName <- name.refine[NonEmpty[String]]
     } yield Kernel(
       kernelName,
