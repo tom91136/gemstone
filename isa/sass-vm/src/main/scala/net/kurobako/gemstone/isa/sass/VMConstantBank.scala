@@ -174,8 +174,8 @@ private object VMConstantBank {
         MemoryAccess.Parameter
       ))
       result
-    } else if (bits == 32 && isDimension(offset)) {
-      emit(Move(result.slot, dimension(offset), 32))
+    } else if (PartialFunction.cond(bits.raw) { case 8 | 16 | 32 => true } && isDimension(offset)) {
+      emit(Move(result.slot, dimension(offset), bits))
       result
     }
     // ULDC.64 reads two dimensions at once, as ptxas multiplies %ntid.x by %ntid.y from sm_75

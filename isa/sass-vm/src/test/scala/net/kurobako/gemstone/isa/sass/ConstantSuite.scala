@@ -20,6 +20,16 @@ import scala.util.Using
 class ConstantSuite extends Suite {
   private val Flags = Vec(false, true)
 
+  for (sm <- Vec(75, 89)) test(s"sm_$sm 8-bit constant loads read launch dimensions") {
+    val run = program(
+      sm,
+      "LDC.64 R2, c[0x0][0x160]; LDC.U8 R4, c[0x0][0x0]; LDC.U8 R5, c[0x0][0xc]; " +
+        "STG.E.U8 [R2.64], R4; STG.E.U8 [R2.64+0x1], R5; EXIT"
+    ).launch(LaunchGeometry.Dimensions(128, 1, 1), LaunchGeometry.Dimensions(3, 1, 1))(Arg.zeros(4))
+    assertEquals(run.words(0).head & 0xffL, 128L)
+    assertEquals((run.words(0).head >>> 8) & 0xffL, 3L)
+  }
+
   // cuda::barrier's init in conformance/unified/src/cuda/async_bulk.cu counts the block with ULDC.64 on sm_75
   for (sm <- Vec(75, 89)) test(s"sm_$sm 64-bit constant loads read launch dimensions in pairs") {
     val run = program(
