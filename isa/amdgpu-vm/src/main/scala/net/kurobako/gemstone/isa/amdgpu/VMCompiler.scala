@@ -951,6 +951,7 @@ private object VMCompiler {
     VMinF16,
     VMaxF16,
     VFmacF16,
+    VFmaF16,
     VCvtF16F32,
     VCvtI16F16,
     VSubF16,
@@ -1092,7 +1093,8 @@ private object VMCompiler {
       target: Target
   ): Instruction = {
     val preserves = preservesHighHalf(target) && !HighHalfOnlyResultOpcodes.contains(opcode)
-    if (halfResultOpcode(opcode) && (high || preserves))
+    val defined   = opcode != VFmaF16 || halfOpSelectionDefined(target)
+    if (defined && halfResultOpcode(opcode) && (high || preserves))
       Instruction.VHalfResult(operation, destination, high)
     else operation
   }
@@ -3397,6 +3399,22 @@ private object VMCompiler {
               negateHigh = machine(EncodingField.ABS).toInt,
               clamp = clamp
             ))
+          case VFmaF16 if halfOpSelectionDefined(target) =>
+            def selected(source: InstructionSource, bit: Int): InstructionSource =
+              if ((opSelection & (1 << bit)) != 0) InstructionSource.HighHalf(source) else source
+            vectorTernaryOperation(opcode)
+              .map(operation =>
+                Instruction.VTernary(
+                  operation,
+                  destination,
+                  selected(srcA, 0),
+                  selected(srcB, 1),
+                  selected(srcC, 2),
+                  modifiers,
+                  clamp
+                )
+              )
+              .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
           case VAdd3U32 | VOr3B32 | VXor3B32 | VFmaF16 | VDivFmasF32 | VMadLegacyU16 | VMadU16 | VMadU32U24 | VAlignbitB32 | VBfiB32 |
               VMed3I16 | VMed3I32 | VMed3U16 | VMed3U32 | VMin3F32 |
               VMax3I16 | VMax3U16 | VMin3I16 | VMin3U16 |
