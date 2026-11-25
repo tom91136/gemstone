@@ -945,7 +945,7 @@ private object VMFloatingCompiler {
       binary(IntegerOperation.BitwiseAnd, source(OperandQueries.base(rest)), Value.Immediate(0xffff0000L)),
       result
     )
-    def narrowed(high: Value, low: Value, halves: Boolean) = {
+    def narrowed(high: Value, low: Value, halves: Boolean, bf16: Boolean = false) = {
       if (scaled && rounding.isEmpty) unsupported("F2FP to UE8M0 requires RZ or RP")
       emit(ConvertNarrow(
         result.slot,
@@ -954,7 +954,7 @@ private object VMFloatingCompiler {
         scale,
         format,
         halves,
-        bf16 = false,
+        bf16,
         rounding.getOrElse(ConversionRounding.RN),
         relu,
         saturate
@@ -971,6 +971,10 @@ private object VMFloatingCompiler {
       case Vec(Modifier.F16, Modifier.UNPACK_B_MERGE_C) if !scaled =>
         requireOperands(3, "F2FP.UNPACK_B_MERGE_C requires destination and two sources")
         narrowed(source(operands(1)), Value.Immediate(0L), halves = true)
+        store(operands.head, merged(operands(2)))
+      case Vec(Modifier.BF16, Modifier.UNPACK_B_MERGE_C) if scaled =>
+        requireOperands(3, "F2FP.UNPACK_B_MERGE_C requires destination and two sources")
+        narrowed(source(operands(1)), Value.Immediate(0L), halves = true, bf16 = true)
         store(operands.head, merged(operands(2)))
       case Vec(target @ (Modifier.F16 | Modifier.BF16), Modifier.UNPACK_B)
           if !relu && !saturate && rounding.isEmpty && (target == Modifier.BF16) == scaled =>
