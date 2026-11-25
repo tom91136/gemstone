@@ -2164,14 +2164,17 @@ extern "C" hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int *blocks, 
 namespace {
 hipError_t potentialBlockSize(int *minGridSize, int *blockSize, const Kernel &kernel, size_t shared, int blockSizeLimit) {
   const uint32_t kernelLimit = kernelBlockLimit(kernel);
-  const uint32_t limit = blockSizeLimit > 0 ? std::min<uint32_t>(static_cast<uint32_t>(blockSizeLimit), kernelLimit) : kernelLimit;
-  uint64_t bestResident = 0;
+  uint32_t limit = kernelLimit;
+  if (blockSizeLimit > 0) {
+    const uint64_t wave = gemstone::hsa::waveSize();
+    const uint64_t rounded = ((static_cast<uint64_t>(blockSizeLimit) + wave - 1) / wave) * wave;
+    limit = static_cast<uint32_t>(std::min<uint64_t>(rounded, kernelLimit));
+  }
   uint32_t best = 0;
   for (uint32_t threads = limit; threads >= 1; --threads) {
-    const uint64_t resident = static_cast<uint64_t>(residentBlocks(threads, shared)) * threads;
-    if (resident > bestResident) {
-      bestResident = resident;
+    if (residentBlocks(threads, shared) > 0) {
       best = threads;
+      break;
     }
   }
   if (best == 0) return hipErrorLaunchOutOfResources;

@@ -1274,6 +1274,24 @@ TEST_CASE("HIP occupancy reports a block size for a registered kernel", "[hip]")
   __hipUnregisterFatBinary(token);
 }
 
+TEST_CASE("HIP unconstrained occupancy reports the device limit on gfx1011", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1011");
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  hipModule_t module = nullptr;
+  hipFunction_t function = nullptr;
+  REQUIRE((hipModuleLoadData(&module, image.data()) == hipSuccess));
+  REQUIRE((hipModuleGetFunction(&function, module, "add") == hipSuccess));
+  int maxThreads = 0;
+  REQUIRE((hipDeviceGetAttribute(&maxThreads, hipDeviceAttributeMaxThreadsPerBlock, 0) == hipSuccess));
+  int grid = 0;
+  int block = 0;
+  REQUIRE((hipModuleOccupancyMaxPotentialBlockSize(&grid, &block, function, 0, 0) == hipSuccess));
+  CHECK((block == maxThreads));
+  REQUIRE((hipModuleUnload(module) == hipSuccess));
+}
+
 TEST_CASE("HIP kernel launch bounds limit the reported block size and the launch", "[hip]") {
   gemstone_test::RpcFixture fixture;
   fixture.kernelMetadata(88, 2,
