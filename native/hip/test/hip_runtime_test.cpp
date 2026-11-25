@@ -1157,6 +1157,26 @@ TEST_CASE("HIP module loads a code object from a file", "[hip]") {
   REQUIRE((hipModuleUnload(module) == hipSuccess));
 }
 
+TEST_CASE("HIP bundle selection accepts only the canonical image of an ISA family", "[hip]") {
+  gemstone_test::RpcFixture const fixture;
+  gemstone_test::RpcEnvironment const environment(fixture);
+  const auto image = gemstone::hsa::test::codeObjectFixture(1, true, true);
+  {
+    const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1036");
+    const auto bundle = offloadBundle(image, "gfx1030");
+    hipModule_t module = nullptr;
+    REQUIRE((hipModuleLoadData(&module, bundle.data()) == hipSuccess));
+    REQUIRE((hipModuleUnload(module) == hipSuccess));
+  }
+  for (const auto &[target, bundled] : {std::pair{"gfx1011", "gfx1010"}, std::pair{"gfx1102", "gfx1101"}}) {
+    const gemstone_test::Environment arch(gemstone::environment::TargetArch, target);
+    const auto bundle = offloadBundle(image, bundled);
+    hipModule_t module = nullptr;
+    CHECK((hipModuleLoadData(&module, bundle.data()) == hipErrorInvalidImage));
+    CHECK((module == nullptr));
+  }
+}
+
 TEST_CASE("HIP symbol address and size resolve a registered device variable", "[hip]") {
   gemstone_test::RpcFixture fixture;
   const gemstone_test::RpcEnvironment environment(fixture);

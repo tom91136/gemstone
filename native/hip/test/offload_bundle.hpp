@@ -9,9 +9,11 @@
 
 namespace gemstone::hip::test {
 
-inline std::vector<uint8_t> offloadBundle(const std::vector<uint8_t> &code) {
+inline std::vector<uint8_t> offloadBundle(const std::vector<uint8_t> &code, std::string_view architecture = {}) {
   constexpr std::string_view magic = "__CLANG_OFFLOAD_BUNDLE__";
-  const std::string triple = std::string("hipv4-amdgcn-amd-amdhsa--") + gemstone::hsa::targetArch();
+  const std::string owned =
+      architecture.empty() ? std::string(gemstone::hsa::targetArch()) : std::string(architecture);
+  const std::string triple = std::string("hipv4-amdgcn-amd-amdhsa--") + owned;
   std::vector<uint8_t> bundle;
   bundle.insert(bundle.end(), magic.begin(), magic.end());
   const auto append = [&](uint64_t value) {

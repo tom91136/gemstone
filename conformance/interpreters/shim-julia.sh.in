@@ -24,6 +24,19 @@ for directory in ${LD_LIBRARY_PATH-}; do
   fi
 done
 
+library_has_code_object() {
+  matched=$(grep -aoE 'amdgcn-amd-amdhsa--gfx[0-9a-f]+' "$1" 2>/dev/null | sed 's/.*--//' | sort -u |
+    while IFS= read -r architecture; do
+      if [ "$architecture" = "$2" ]; then echo matched; break; fi
+      case " @GEMSTONE_HIP_BUNDLE_FAMILIES@ " in
+        *" $architecture "*)
+          if [ "${architecture%?}" = "${2%?}" ]; then echo matched; break; fi
+          ;;
+      esac
+    done)
+  [ -n "$matched" ]
+}
+
 rocblas_missing=0
 if [ -n "${ROCBLAS_TENSILE_LIBPATH-}" ] && [ -n "${CONFORMANCE_TARGET_ARCH-}" ] \
     && [ ! -f "$ROCBLAS_TENSILE_LIBPATH/TensileLibrary_lazy_${CONFORMANCE_TARGET_ARCH}.dat" ]; then
@@ -37,9 +50,17 @@ if [ -n "${ROCM_PATH-}" ]; then
   for directory in "$ROCM_PATH" ${LD_LIBRARY_PATH-}; do
     for library in "$directory"/lib*; do
       [ -e "$library" ] || continue
-      if [ "$rocblas_missing" -eq 1 ]; then
-        case "$(basename "$library")" in librocblas*) continue ;; esac
-      fi
+      case "$(basename "$library")" in
+        librocblas*)
+          [ "$rocblas_missing" -eq 0 ] || continue
+          ;;
+        librocsparse*)
+          if [ -n "${CONFORMANCE_TARGET_ARCH-}" ] \
+              && ! library_has_code_object "$library" "$CONFORMANCE_TARGET_ARCH"; then
+            continue
+          fi
+          ;;
+      esac
       ln -s "$library" "$rocm_overlay/" 2>/dev/null || true
     done
   done

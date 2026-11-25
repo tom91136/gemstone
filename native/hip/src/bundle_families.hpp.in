@@ -1,0 +1,16 @@
+#pragma once
+
+#include <array>
+#include <string_view>
+
+namespace gemstone::hip {
+
+struct BundleFamily {
+  std::string_view prefix;
+  std::string_view canonical;
+};
+
+inline constexpr std::array<BundleFamily, @GEMSTONE_HIP_BUNDLE_FAMILY_COUNT@> bundleFamilies{{
+@GEMSTONE_HIP_BUNDLE_FAMILY_ENTRIES@}};
+
+} // namespace gemstone::hip

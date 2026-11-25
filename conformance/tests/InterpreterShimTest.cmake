@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 get_filename_component(interpreters "${CMAKE_CURRENT_LIST_DIR}/../interpreters" ABSOLUTE)
+include("${CMAKE_CURRENT_LIST_DIR}/../../native/cmake/HipBundleFamilies.cmake")
+string(REPLACE ";" " " GEMSTONE_HIP_BUNDLE_FAMILIES "${gemstone_hip_bundle_families}")
 
 execute_process(COMMAND mktemp -d /tmp/conformance-interpreter-shim-test-XXXXXX
   OUTPUT_VARIABLE directory OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
@@ -53,6 +55,7 @@ file(WRITE "${directory}/native/libamdhip64.so.7" "")
 file(WRITE "${directory}/native/libhsa-runtime64.so.1" "")
 file(WRITE "${directory}/vendor/libamdhip64.so.7" "")
 file(WRITE "${directory}/vendor/librocblas.so.5" "")
+file(WRITE "${directory}/vendor/librocsparse.so.1" "hipv4-amdgcn-amd-amdhsa--gfx1030\n")
 
 function(require_entries arguments context)
   foreach(entry IN ITEMS "libamdhip64.so.7->${directory}/native/libamdhip64.so.7" "libhsa-runtime64.so.1->${directory}/native/libhsa-runtime64.so.1"
@@ -117,6 +120,47 @@ shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-
   arguments "${directory}/vendor" gfx908 "${tensile}")
 if(NOT "${rocblas_entry}" IN_LIST arguments)
   fail("an architecture with a Tensile payload must expose rocBLAS:\n${arguments}")
+endif()
+
+set(rocsparse_entry "ROCM_ENTRY=librocsparse.so.1->${directory}/vendor/librocsparse.so.1")
+
+file(WRITE "${directory}/vendor/librocsparse.so.1" "hipv4-amdgcn-amd-amdhsa--gfx1010\n")
+shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-runtime64.so.1"
+  arguments "${directory}/vendor" gfx1011)
+if("${rocsparse_entry}" IN_LIST arguments)
+  fail("a gfx1010 bundle must not serve gfx1011:\n${arguments}")
+endif()
+
+file(WRITE "${directory}/vendor/librocsparse.so.1" "hipv4-amdgcn-amd-amdhsa--gfx1101\n")
+shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-runtime64.so.1"
+  arguments "${directory}/vendor" gfx1102)
+if("${rocsparse_entry}" IN_LIST arguments)
+  fail("a gfx1101 bundle must not serve gfx1102:\n${arguments}")
+endif()
+
+file(WRITE "${directory}/vendor/librocsparse.so.1" "hipv4-amdgcn-amd-amdhsa--gfx1030\n")
+shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-runtime64.so.1"
+  arguments "${directory}/vendor" gfx1011)
+if("${rocsparse_entry}" IN_LIST arguments)
+  fail("rocSPARSE without a code object for gfx1011 must stay hidden:\n${arguments}")
+endif()
+if(NOT "ROCM_ENTRY=libamdhip64.so.7->${directory}/native/libamdhip64.so.7" IN_LIST arguments)
+  fail("hiding rocSPARSE must keep the HIP runtime visible:\n${arguments}")
+endif()
+
+foreach(architecture IN ITEMS gfx1030 gfx1036)
+  shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-runtime64.so.1"
+    arguments "${directory}/vendor" "${architecture}")
+  if(NOT "${rocsparse_entry}" IN_LIST arguments)
+    fail("an architecture whose family has a rocSPARSE code object must expose it:\n${arguments}")
+  endif()
+endforeach()
+
+file(WRITE "${directory}/vendor/librocsparse.so.1" "hipv4-amdgcn-amd-amdhsa--gfx950\nhipv4-amdgcn-amd-amdhsa--gfx1030\n")
+shim_arguments("${directory}/native/libamdhip64.so.7:${directory}/native/libhsa-runtime64.so.1"
+  arguments "${directory}/vendor" gfx1036)
+if(NOT "${rocsparse_entry}" IN_LIST arguments)
+  fail("several bundles in one library must keep the canonical family image visible:\n${arguments}")
 endif()
 
 file(REMOVE_RECURSE "${directory}")

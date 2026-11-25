@@ -1,5 +1,7 @@
 include("${CMAKE_CURRENT_LIST_DIR}/Environment.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/../artifacts/ShardCosts.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/../../native/cmake/HipBundleFamilies.cmake")
+string(REPLACE ";" " " GEMSTONE_HIP_BUNDLE_FAMILIES "${gemstone_hip_bundle_families}")
 
 if(CONFORMANCE_INTERPRETER_DIRECTORY STREQUAL "")
   message(FATAL_ERROR "CONFORMANCE_INTERPRETER_PACKAGES requires CONFORMANCE_INTERPRETER_DIRECTORY")

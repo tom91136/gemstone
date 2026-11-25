@@ -11,8 +11,18 @@ set_target_properties(gemstone_hip_runtime PROPERTIES
   BUILD_WITH_INSTALL_RPATH ON
   INSTALL_RPATH "$ORIGIN")
 target_include_directories(gemstone_hip_runtime SYSTEM PRIVATE ${HIP_INCLUDE_DIR} ${HSA_INCLUDE_DIR})
-target_include_directories(gemstone_hip_runtime PRIVATE ../hsa/include ../generated/hip)
+target_include_directories(gemstone_hip_runtime PRIVATE ../hsa/include ../generated/hip "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_definitions(gemstone_hip_runtime PRIVATE __HIP_PLATFORM_AMD__=1)
+
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/HipBundleFamilies.cmake")
+set(GEMSTONE_HIP_BUNDLE_FAMILY_ENTRIES "")
+foreach(canonical IN LISTS gemstone_hip_bundle_families)
+  string(SUBSTRING "${canonical}" 0 6 prefix)
+  string(APPEND GEMSTONE_HIP_BUNDLE_FAMILY_ENTRIES "    {\"${prefix}\", \"${canonical}\"},\n")
+endforeach()
+list(LENGTH gemstone_hip_bundle_families GEMSTONE_HIP_BUNDLE_FAMILY_COUNT)
+configure_file("${CMAKE_CURRENT_LIST_DIR}/src/bundle_families.hpp.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/generated/bundle_families.hpp" @ONLY)
 gemstone_project_target(gemstone_hip_runtime)
 target_link_libraries(gemstone_hip_runtime PRIVATE
   gemstone_zstd

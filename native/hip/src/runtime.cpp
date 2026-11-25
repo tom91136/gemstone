@@ -64,6 +64,7 @@
 #include <gemstone/trace.hpp>
 #include <gemstone/zstd.hpp>
 
+#include <bundle_families.hpp>
 #include <environment_keys.hpp>
 
 namespace {
@@ -648,10 +649,8 @@ bool imageIsElf(const void *image) {
 bool bundleTargetCompatible(const std::string &triple) {
   const std::string target = gemstone::hsa::targetArch();
   if (triple ^ contains_slice(target)) return true;
-  constexpr std::array<std::pair<std::string_view, std::string_view>, 4> families = {
-      {{"gfx103", "gfx1030"}, {"gfx110", "gfx1100"}, {"gfx115", "gfx1150"}, {"gfx120", "gfx1200"}}};
-  return families ^ exists([&](std::string_view prefix, std::string_view canonical) {
-           return (target ^ starts_with(prefix)) && (triple ^ contains_slice(canonical));
+  return gemstone::hip::bundleFamilies ^ exists([&](const gemstone::hip::BundleFamily &family) {
+           return (target ^ starts_with(family.prefix)) && (triple ^ contains_slice(family.canonical));
          });
 }
 
