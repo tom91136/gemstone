@@ -15,6 +15,13 @@ import net.kurobako.gemstone.isa.sass.asm.Program.Statement.*
 object Assembler {
   private type EncodedInstruction = (bytes: Vec[Byte], operation: Instruction)
 
+  private def formsOf(instruction: Instruction, target: Target) = {
+    val names = instruction.definition.forms.toSet
+    target.database.forms.filter(form =>
+      !form.alternate && names(form.name) && form.opcodes.exists(_.name.takeWhile(_ != '.') == instruction.mnemonic.raw)
+    )
+  }
+
   def assemble(source: String, target: Target, address: Int >= 0 = 0): Either[String, Array[Byte]] = source match {
     case s"$assembly// encoding: $annotationText" => for {
         annotation <- MachineSyntax.parse(annotationText)
@@ -37,11 +44,7 @@ object Assembler {
       address: Int >= 0
   ): Either[String, EncodedInstruction] = {
     val database = target.database
-    val names    = instruction.definition.forms.toSet
-    val forms    = database.forms.filter(form =>
-      !form.alternate && names(form.name) &&
-        form.opcodes.exists(_.name.takeWhile(_ != '.') == instruction.mnemonic.raw)
-    )
+    val forms    = formsOf(instruction, target)
     for {
       text <- Printer.print(instruction)
       attempts = forms.map { form =>
@@ -276,11 +279,7 @@ class Assembler(target: Target) {
     preserved.flatMap(_.machine) match {
       case Some(machine) => machine.target.database.byForm.get(machine.form).exists(_.relative)
       case None          =>
-        val names = instruction.definition.forms.toSet
-        val forms = target.database.forms.filter(form =>
-          !form.alternate && names(form.name) &&
-            form.opcodes.exists(_.name.takeWhile(_ != '.') == instruction.mnemonic.raw)
-        )
+        val forms = formsOf(instruction, target)
         forms.nonEmpty && forms.forall(_.relative)
     }
 

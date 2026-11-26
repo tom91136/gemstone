@@ -5,6 +5,8 @@ import net.kurobako.gemstone.semantics.prelude.*
 /** The linear images a lane of a rendered AMDGPU definition addresses through eight-dword resource descriptors, `t0` to
   * `t7`, as `isa` lays them out. A descriptor execution cannot read faults.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] trait Images {
 
   /** The address of the texel an image address names, as [[ImageResource.locate]] finds it from the coordinates `c0` to

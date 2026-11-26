@@ -17,6 +17,8 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 /** Runs a loaded program on the real VM and records the timeline of the launch, so the explorer shows the machine that
   * runs the program rather than a model of one.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 object ProgramRun {
 
   /** The least an allocation argument gets: enough for the examples' output buffers and the strides their kernels use.

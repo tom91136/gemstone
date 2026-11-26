@@ -19,7 +19,8 @@ import scala.reflect.ClassTag
 import scala.util.Random
 
 // rewrite reports are the product the suites assert on
-@SuppressWarnings(Array("bonsai:test-only-member"))
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:test-only-member", "bonsai:data-clump"))
 object RewriteSearch {
 
   case class Config(seed: Long, budget: Int, temperature: Double, states: Int, limit: Int)

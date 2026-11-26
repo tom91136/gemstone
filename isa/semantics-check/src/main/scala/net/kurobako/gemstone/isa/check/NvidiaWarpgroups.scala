@@ -16,6 +16,8 @@ import scala.collection.mutable
   * inputs, every other operand element zero, and A and B in shared memory, K-major without a swizzle, where descriptors
   * place them.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 object NvidiaWarpgroups {
   private val Lanes: Int > 0 = 128.unsafe[Int > 0]
 

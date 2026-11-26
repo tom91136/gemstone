@@ -10,6 +10,8 @@ import scala.annotation.targetName
   * integers, and floating-point sums accumulate in blocks whose terms align to a shared exponent as
   * [[VMIR.Matrix.Accumulation.Blocked]] describes.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] object TensorArithmetic {
 
   /** The alignment exponent of a zero product or accumulator, below every other. */

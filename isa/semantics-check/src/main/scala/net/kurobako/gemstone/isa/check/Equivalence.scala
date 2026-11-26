@@ -11,7 +11,8 @@ import scala.reflect.ClassTag
 import scala.util.Random
 
 // verdicts are observation surfaces of the differential harness
-@SuppressWarnings(Array("bonsai:test-only-member"))
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:test-only-member", "bonsai:data-clump"))
 object Equivalence {
 
   /** The inputs each definition runs on, which a proof reports as the differential coverage of its instructions. */

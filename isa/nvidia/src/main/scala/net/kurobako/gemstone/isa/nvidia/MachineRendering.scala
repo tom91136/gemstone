@@ -7,6 +7,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
 
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] object MachineRendering {
 
   /** The machine semantics of `instruction` rendered over `machine`, or none for an instruction they do not cover. */

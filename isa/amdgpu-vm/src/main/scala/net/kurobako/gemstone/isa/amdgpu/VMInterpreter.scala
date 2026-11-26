@@ -23,6 +23,8 @@ import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 import scala.runtime.LongRef
 
+// the two branches keep distinct register semantics
+@SuppressWarnings(Array("bonsai:duplicate-code"))
 private object VMInterpreter {
   import VMDispatchMemory.*
 

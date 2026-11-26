@@ -12,6 +12,8 @@ import net.kurobako.gemstone.vm.*
   * invocations that take part have arrived, so one definition describes both the request an invocation makes and the
   * result it receives.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 private object GroupSemantics {
 
   private val ClusterFault: NonEmpty[String] = "a cluster size accompanies exactly the ClusteredReduce group operation"

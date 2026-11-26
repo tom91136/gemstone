@@ -8,6 +8,8 @@ import net.kurobako.gemstone.semantics.render.*
 /** The staged semantics one AMDGPU instruction lowers to on a target, rendered through the dispatch execution uses as a
   * definition of what it does to one lane.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 object InstructionSemantics {
 
   /** The modifiers that, one at a time, give the valid variants of the matrix instruction `mnemonic` on `target`: the

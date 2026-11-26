@@ -7,6 +7,8 @@ import net.kurobako.gemstone.semantics.prelude.*
 import scala.annotation.targetName
 
 /** NVIDIA integer operations that combine many fields of their operands, as functions of the operands' bits. */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] object IntegerArithmetic {
 
   /** The legacy IADD.SAT: each of `lanes` 16-bit lanes of `left` and `right`, extended as signed values, added and

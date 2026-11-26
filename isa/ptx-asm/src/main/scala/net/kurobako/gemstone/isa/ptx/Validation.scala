@@ -8,6 +8,8 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import scala.annotation.tailrec
 
+// the two modules keep ISA-specific data; a shared helper would couple them
+@SuppressWarnings(Array("bonsai:duplicate-code"))
 object Validation {
   enum Issue {
     case VersionTooOld(opcode: NonEmpty[String], required: Version, selected: Version)

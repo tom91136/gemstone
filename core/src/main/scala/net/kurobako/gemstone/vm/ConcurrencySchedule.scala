@@ -5,6 +5,8 @@ import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Random as ScalaRandom
 
+// the two modules keep ISA-specific data; a shared helper would couple them
+@SuppressWarnings(Array("bonsai:duplicate-code"))
 object ConcurrencySchedule {
 
   case object Fixed extends ConcurrencySchedule {

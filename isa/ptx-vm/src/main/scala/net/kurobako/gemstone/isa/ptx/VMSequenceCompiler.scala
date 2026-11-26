@@ -14,6 +14,8 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * multiply-add, three-input extrema, the predicate form of `lop3`, warp matching and floating reductions, mbarrier
   * layout and report queries, and the cache policies, fences and breakpoints that change nothing the VM models.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 private object VMSequenceCompiler {
   private val Axes = Vec(Axis.X, Axis.Y, Axis.Z)
 

@@ -25,7 +25,9 @@ import net.kurobako.gemstone.vm.Schedule
   * every instruction outside the window then issues, and reaches memory, as recorded.
   */
 // tests read laid-out rows to check the static view
-@SuppressWarnings(Array("bonsai:test-only-member"))
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// the two modules keep ISA-specific data; a shared helper would couple them
+@SuppressWarnings(Array("bonsai:test-only-member", "bonsai:data-clump", "bonsai:duplicate-code"))
 object AMDGPUBlockCost {
 
   /** What a dispatch decides and the code object does not hold. */

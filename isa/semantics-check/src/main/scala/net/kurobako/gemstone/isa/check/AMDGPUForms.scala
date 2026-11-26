@@ -17,6 +17,8 @@ import scala.util.Try
   * ([[AMDGPUGenerator.checked]]), and the cases behind it are those of that mnemonic and encoding there, of which the
   * generator keeps one per definition up to names and numbers.
   */
+// the two modules keep ISA-specific data; a shared helper would couple them
+@SuppressWarnings(Array("bonsai:duplicate-code"))
 object AMDGPUForms {
   private val Width    = "_(e32|e64)$".r
   private val Variant  = "_(sdwa|dpp8?)$".r

@@ -16,13 +16,16 @@ object NvidiaLatency {
   private val ptxas129 = "cuda_12.9.r12.9/compiler.36037853_0"
   private val ptxas133 = "cuda_13.3.r13.3/compiler.38244171_0"
 
+  private val sixStalls129 =
+    Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6))
+
   private val harvests: Map[Int, Harvest] = Map(
-    50 -> Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6)),
-    52 -> Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6)),
-    53 -> Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6)),
-    60 -> Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6)),
-    61 -> Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6)),
-    62 -> Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6)),
+    50 -> sixStalls129,
+    52 -> sixStalls129,
+    53 -> sixStalls129,
+    60 -> sixStalls129,
+    61 -> sixStalls129,
+    62 -> sixStalls129,
     70 -> Harvest(ptxas129, Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4)),
     72 -> Harvest(ptxas129, Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4)),
     75 -> Harvest(

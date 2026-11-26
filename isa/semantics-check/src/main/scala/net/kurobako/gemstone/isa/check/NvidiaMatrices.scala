@@ -15,6 +15,9 @@ import scala.collection.mutable
   * picks, with the row of A, the column of B, the element of C, the sparse metadata and the scale factors it reads set
   * from the inputs and every other operand element zero.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// the two modules keep ISA-specific data; a shared helper would couple them
+@SuppressWarnings(Array("bonsai:data-clump", "bonsai:duplicate-code"))
 object NvidiaMatrices {
 
   /** The code of the element at a fragment's row and column, if the product reads one there. */

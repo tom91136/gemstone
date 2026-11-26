@@ -13,6 +13,8 @@ import scala.collection.mutable
   * registers it uses: 32-bit registers, truth-valued predicates and, where the lowering joins a register pair into one
   * value, the pair as a 64-bit value named after its first register. `PT` reads as true and writes to it are discarded.
   */
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+@SuppressWarnings(Array("bonsai:data-clump"))
 object InstructionSemantics {
   private val Kernel: NonEmpty[String] = "semantics"
 

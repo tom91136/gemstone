@@ -16,6 +16,9 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.boundary
 import scala.util.boundary.break
 
+// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// the two branches keep distinct register semantics
+@SuppressWarnings(Array("bonsai:data-clump", "bonsai:duplicate-code"))
 private[isa] object VMInterpreter {
 
   // The unit a cohort runs as: its identity follows it as it splits, parks and finishes, so a timeline can draw it.
@@ -171,6 +174,15 @@ private[isa] object VMInterpreter {
       slot
     }
 
+    private def release(slot: Slot): Cohort = {
+      val cohort = slot.cohort.nn
+      if (slot.indexed) erase(find(key(cohort.pc, cohort.frame), tag(cohort.partition)))
+      slot.cohort = null
+      spare += slot
+      count -= 1
+      cohort
+    }
+
     /** Queues the cohort, at the head when `first`, or adds its lanes to the cohort already queued at its pc in its
       * frame. A cohort that is `apart` does not join one already queued: that one issues first and this one follows.
       */
@@ -216,11 +228,7 @@ private[isa] object VMInterpreter {
       }
       if (target >= 0) {
         val slot   = order.remove(target)
-        val cohort = slot.cohort.nn
-        if (slot.indexed) erase(find(key(cohort.pc, cohort.frame), tag(cohort.partition)))
-        slot.cohort = null
-        spare += slot
-        count -= 1
+        val cohort = release(slot)
         while (order.nonEmpty && (order.head.cohort eq null))
           spare += order.removeHead()
         cohort
@@ -233,12 +241,7 @@ private[isa] object VMInterpreter {
         spare += slot
         slot = order.removeHead()
       }
-      val cohort = slot.cohort.nn
-      if (slot.indexed) erase(find(key(cohort.pc, cohort.frame), tag(cohort.partition)))
-      slot.cohort = null
-      spare += slot
-      count -= 1
-      cohort
+      release(slot)
     }
 
     /** Removes the cohort of the partition queued at the pc in the frame, or returns null when there is none. */
