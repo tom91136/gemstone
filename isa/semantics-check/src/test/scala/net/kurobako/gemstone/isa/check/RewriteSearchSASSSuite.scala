@@ -61,9 +61,9 @@ class RewriteSearchSASSSuite extends Suite {
       """IADD3 R2, R2, 0x1, RZ ;
         |IADD3 R4, R2, 0x2, RZ ;
         |BRA 0x40 ;
-        |IADD3 R6, R2, 0x3, RZ ;
-        |IADD3 R8, R2, 0x4, RZ ;
-        |IADD3 R10, R2, 0x5, RZ ;
+        |IADD3 R3, R2, 0x3, RZ ;
+        |IADD3 R0, R2, 0x4, RZ ;
+        |IADD3 R1, R2, 0x5, RZ ;
         |EXIT ;
         |""".stripMargin
     val selected = net.kurobako.gemstone.isa.sass.Target.parse(SASSFixtures.target).fold(fail(_), identity)

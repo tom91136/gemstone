@@ -29,8 +29,8 @@ object SASSFixtures {
   private val source =
     """IADD3 R2, R2, 0x1, RZ ;
       |IADD3 R4, R2, 0x2, RZ ;
-      |IMAD R6, R2, R2, RZ ;
-      |ISETP.GT.U32.AND P0, PT, R6, 0x10, PT ;
+      |IMAD R5, R2, R2, RZ ;
+      |ISETP.GT.U32.AND P0, PT, R5, 0x10, PT ;
       |@P0 EXIT ;
       |EXIT ;
       |""".stripMargin

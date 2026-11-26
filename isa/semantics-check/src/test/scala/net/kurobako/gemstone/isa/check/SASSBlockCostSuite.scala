@@ -36,7 +36,7 @@ class SASSBlockCostSuite extends Suite {
     val kept   = cycles(arithmetic, window, body)
     assert(kept > 0.0, kept)
     assert(cycles(arithmetic, window, body.patch(1, Vec.empty[DecodedInstruction], 1)) < kept)
-    assert(cycles(arithmetic, window, body.patch(2, Vec(instruction("IADD3 R8, R2, 0x1, RZ ;")), 0)) > kept)
+    assert(cycles(arithmetic, window, body.patch(2, Vec(instruction("IADD3 R3, R2, 0x1, RZ ;")), 0)) > kept)
   }
 
   test("an instruction that does nothing never costs a region less") {
@@ -48,7 +48,7 @@ class SASSBlockCostSuite extends Suite {
     val floored  = RewriteSearch.floored(text, body)(cost.cost)
     val original = floored(window, body).fold(fail(_), _.cycles)
     (0 to body.size).foreach { at =>
-      val grown = floored(window, body.patch(at, Vec(instruction("IADD3 R8, R2, 0x1, RZ ;")), 0))
+      val grown = floored(window, body.patch(at, Vec(instruction("IADD3 R3, R2, 0x1, RZ ;")), 0))
         .fold(fail(_), _.cycles)
       assert(grown >= original, s"a dead instruction at $at costs $grown against $original")
     }
@@ -82,15 +82,15 @@ class SASSBlockCostSuite extends Suite {
   test("a return refuses a size-changing rewrite") {
     val image = laidOver(
       """IADD3 R2, R2, 0x1, RZ ;
-        |IADD3 R4, R2, 0x2, RZ ;
-        |IADD3 R16, RZ, 0x40, RZ ;
+        |IADD3 R3, R2, 0x2, RZ ;
+        |IADD3 R4, RZ, 0x40, RZ ;
         |CALL.REL.NOINC 0x50 ;
         |EXIT ;
-        |IADD3 R6, R2, 0x3, RZ ;
-        |IADD3 R8, R2, 0x4, RZ ;
+        |IADD3 R0, R2, 0x3, RZ ;
+        |IADD3 R1, R2, 0x4, RZ ;
         |""".stripMargin,
-      // RET.REL.NODEC R16 to the start of its function
-      Some("5079001060dcffffffffc30300ec0f00")
+      // RET.REL.NODEC R4 to the start of its function
+      Some("5079000460dcffffffffc30300ec0f00")
     )
     assertAnchored(shrunk(image, 0, 1))
   }
@@ -110,7 +110,7 @@ class SASSBlockCostSuite extends Suite {
     val image = laidOver(
       """IADD3 R2, R2, 0x1, RZ ;
         |IADD3 R4, R2, 0x2, RZ ;
-        |LEPC R6 ;
+        |LEPC R0 ;
         |EXIT ;
         |""".stripMargin
     )
@@ -122,7 +122,7 @@ class SASSBlockCostSuite extends Suite {
       """@P0 BRA 0x30 ;
         |IADD3 R2, R2, 0x1, RZ ;
         |IADD3 R4, R2, 0x2, RZ ;
-        |LEPC R6 ;
+        |LEPC R0 ;
         |EXIT ;
         |""".stripMargin
     )
@@ -135,7 +135,7 @@ class SASSBlockCostSuite extends Suite {
         |IADD3 R2, R2, 0x1, RZ ;
         |BSYNC B0 ;
         |IADD3 R4, R2, 0x2, RZ ;
-        |IADD3 R6, R2, 0x3, RZ ;
+        |IADD3 R3, R2, 0x3, RZ ;
         |EXIT ;
         |""".stripMargin
     )
@@ -145,8 +145,8 @@ class SASSBlockCostSuite extends Suite {
   private val branched =
     """IADD3 R2, R2, 0x1, RZ ;
       |IADD3 R4, R2, 0x2, RZ ;
-      |IADD3 R6, R2, 0x3, RZ ;
-      |IADD3 R8, R2, 0x4, RZ ;
+      |IADD3 R3, R2, 0x3, RZ ;
+      |IADD3 R0, R2, 0x4, RZ ;
       |@P0 BRA 0x20 ;
       |EXIT ;
       |""".stripMargin
