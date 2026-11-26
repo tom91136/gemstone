@@ -3635,6 +3635,7 @@ struct MemoryPool {
   uint64_t usedCurrent = 0;
   uint64_t usedHigh = 0;
   uint64_t releaseThreshold = 0;
+  bool destroyed = false;
   std::vector<PoolBlock> idle;
 };
 
@@ -3657,10 +3658,28 @@ void trimPool(MemoryPool &pool, uint64_t keep) {
   }
 }
 
+auto livePool(uintptr_t handle) -> std::map<uintptr_t, MemoryPool>::iterator {
+  const auto found = memoryPools.find(handle);
+  return found == memoryPools.end() || found->second.destroyed ? memoryPools.end() : found;
+}
+
+bool poolHasAllocations(uintptr_t handle) {
+  return std::any_of(poolAllocations.begin(), poolAllocations.end(), [handle](const auto &entry) { return entry.second.pool == handle; });
+}
+
+void reclaimPool(std::map<uintptr_t, MemoryPool>::iterator found) {
+  auto &pool = found->second;
+  for (const auto &block : pool.idle)
+    (void)releaseDeviceMemory(block.pointer);
+  pool.idle.clear();
+  pool.reservedCurrent = 0;
+  if (!poolHasAllocations(found->first)) memoryPools.erase(found);
+}
+
 CUresult allocateFromPool(CUdeviceptr *pointer, size_t size, uintptr_t handle) {
   if (!pointer) return CUDA_ERROR_INVALID_VALUE;
   std::scoped_lock const lock{poolMutex};
-  const auto found = memoryPools.find(handle);
+  const auto found = livePool(handle);
   if (found == memoryPools.end()) return CUDA_ERROR_INVALID_HANDLE;
   auto &pool = found->second;
   CUdeviceptr address = 0;
@@ -3686,11 +3705,19 @@ bool releaseToPool(CUdeviceptr pointer) {
   std::scoped_lock const lock{poolMutex};
   const auto allocation = poolAllocations.find(pointer);
   if (allocation == poolAllocations.end()) return false;
-  auto &pool = memoryPools.at(allocation->second.pool);
-  pool.usedCurrent -= allocation->second.size;
-  pool.idle.push_back(PoolBlock{.pointer = pointer, .size = allocation->second.size});
+  const auto handle = allocation->second.pool;
+  const auto size = allocation->second.size;
+  const auto found = memoryPools.find(handle);
+  auto &pool = found->second;
+  pool.usedCurrent -= size;
   poolAllocations.erase(allocation);
-  trimPool(pool, pool.releaseThreshold);
+  if (pool.destroyed) {
+    (void)releaseDeviceMemory(pointer);
+    reclaimPool(found);
+  } else {
+    pool.idle.push_back(PoolBlock{.pointer = pointer, .size = size});
+    trimPool(pool, pool.releaseThreshold);
+  }
   return true;
 }
 
@@ -4518,30 +4545,20 @@ CUresult cuMemPoolCreate(CUmemoryPool *pool, const CUmemPoolProps *) {
 }
 
 CUresult cuMemPoolDestroy(CUmemoryPool pool) {
-  if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
   const auto handle = reinterpret_cast<uintptr_t>(pool);
   std::scoped_lock const lock{poolMutex};
   if (handle == DefaultMemoryPool) return CUDA_ERROR_INVALID_VALUE;
-  const auto found = memoryPools.find(handle);
+  const auto found = livePool(handle);
   if (found == memoryPools.end()) return CUDA_ERROR_INVALID_HANDLE;
-  for (const auto &block : found->second.idle)
-    (void)releaseDeviceMemory(block.pointer);
-  for (auto allocation = poolAllocations.begin(); allocation != poolAllocations.end();) {
-    if (allocation->second.pool == handle) {
-      (void)releaseDeviceMemory(allocation->first);
-      allocation = poolAllocations.erase(allocation);
-    } else {
-      ++allocation;
-    }
-  }
-  memoryPools.erase(found);
+  found->second.destroyed = true;
+  reclaimPool(found);
   return CUDA_SUCCESS;
 }
 
 CUresult cuMemPoolGetAttribute(CUmemoryPool pool, CUmemPool_attribute attribute, void *value) {
   if (!value) return CUDA_ERROR_INVALID_VALUE;
   std::scoped_lock const lock{poolMutex};
-  const auto found = memoryPools.find(reinterpret_cast<uintptr_t>(pool));
+  const auto found = livePool(reinterpret_cast<uintptr_t>(pool));
   if (found == memoryPools.end()) return CUDA_ERROR_INVALID_HANDLE;
   const auto &memoryPool = found->second;
   uint64_t result = 0;
@@ -4560,7 +4577,7 @@ CUresult cuMemPoolGetAttribute(CUmemoryPool pool, CUmemPool_attribute attribute,
 CUresult cuMemPoolSetAttribute(CUmemoryPool pool, CUmemPool_attribute attribute, void *value) {
   if (!value) return CUDA_ERROR_INVALID_VALUE;
   std::scoped_lock const lock{poolMutex};
-  const auto found = memoryPools.find(reinterpret_cast<uintptr_t>(pool));
+  const auto found = livePool(reinterpret_cast<uintptr_t>(pool));
   if (found == memoryPools.end()) return CUDA_ERROR_INVALID_HANDLE;
   if (attribute == CU_MEMPOOL_ATTR_RELEASE_THRESHOLD) found->second.releaseThreshold = *static_cast<const uint64_t *>(value);
   return CUDA_SUCCESS;
@@ -4569,7 +4586,7 @@ CUresult cuMemPoolSetAttribute(CUmemoryPool pool, CUmemPool_attribute attribute,
 CUresult cuMemPoolTrimTo(CUmemoryPool pool, size_t keep) {
   if (const auto pending = waitCommands(); pending != CUDA_SUCCESS) return pending;
   std::scoped_lock const lock{poolMutex};
-  const auto found = memoryPools.find(reinterpret_cast<uintptr_t>(pool));
+  const auto found = livePool(reinterpret_cast<uintptr_t>(pool));
   if (found == memoryPools.end()) return CUDA_ERROR_INVALID_HANDLE;
   trimPool(found->second, keep);
   return CUDA_SUCCESS;

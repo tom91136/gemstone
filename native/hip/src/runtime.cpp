@@ -2286,10 +2286,15 @@ extern "C" hipError_t hipStreamCreateWithPriority(hipStream_t *stream, unsigned 
   return createStream(stream, flags, priority);
 }
 extern "C" hipError_t hipStreamDestroy(hipStream_t stream) {
-  if (const auto pending = static_cast<hipError_t>(commands().wait(commands().snapshot(stream))); pending != hipSuccess)
-    return remember(pending);
-  if (stream && !sentinelStream(stream)) {
-    if (!commands().destroyStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  const auto work = commands().snapshot(stream);
+  const bool unfinished = !commands().ready(work);
+  const bool created = stream && !sentinelStream(stream);
+  if (created && !commands().destroyStream(stream)) return remember(hipErrorInvalidResourceHandle);
+  if (unfinished && !created) {
+    const auto status = static_cast<hipError_t>(commands().wait(work));
+    if (status != hipSuccess) return remember(status);
+  }
+  if (created) {
     std::scoped_lock const guard(state().lock);
     state().streamDevices.erase(stream);
     state().streamPriorities.erase(stream);

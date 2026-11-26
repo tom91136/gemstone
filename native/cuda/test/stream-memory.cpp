@@ -998,3 +998,44 @@ TEST_CASE("destroying a busy stream returns before its work finishes", "[cuda][s
   CHECK(gate.opened);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+TEST_CASE("destroying a memory pool returns before its pending frees finish", "[cuda][memory-pool]") {
+  auto *const context = createContext();
+  CUmemPoolProps props{};
+  props.allocType = CU_MEM_ALLOCATION_TYPE_PINNED;
+  props.handleTypes = CU_MEM_HANDLE_TYPE_NONE;
+  props.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  props.location.id = 0;
+  CUmemoryPool pool = nullptr;
+  REQUIRE(cuMemPoolCreate(&pool, &props) == CUDA_SUCCESS);
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  CUdeviceptr pointer = 0;
+  REQUIRE(cuMemAllocFromPoolAsync(&pointer, 256, pool, stream) == CUDA_SUCCESS);
+  struct Gate {
+    std::atomic_bool open{false};
+    std::atomic_bool finished{false};
+  } gate;
+  REQUIRE(cuLaunchHostFunc(
+              stream,
+              [](void *data) {
+                auto &state = *static_cast<Gate *>(data);
+                const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
+                while (!state.open && std::chrono::steady_clock::now() < deadline)
+                  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                state.finished = true;
+              },
+              &gate)
+          == CUDA_SUCCESS);
+  REQUIRE(cuMemFreeAsync(pointer, stream) == CUDA_SUCCESS);
+
+  CHECK(cuMemPoolDestroy(pool) == CUDA_SUCCESS);
+  CHECK_FALSE(gate.finished);
+  uint64_t usage = 0;
+  CHECK(cuMemPoolGetAttribute(pool, CU_MEMPOOL_ATTR_USED_MEM_CURRENT, &usage) == CUDA_ERROR_INVALID_HANDLE);
+  gate.open = true;
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(gate.finished);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}

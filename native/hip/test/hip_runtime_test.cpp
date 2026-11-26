@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <chrono>
 #include <csignal>
@@ -152,6 +153,34 @@ TEST_CASE("HIP stream callback reports completed work", "[hip]") {
   REQUIRE((hipStreamSynchronize(stream) == hipSuccess));
   REQUIRE((calls == 1));
   REQUIRE((hipStreamDestroy(stream) == hipSuccess));
+}
+
+TEST_CASE("HIP stream destroy returns before its queued work finishes", "[hip][stream]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "gfx1036");
+  gemstone_test::RpcFixture const fixture;
+  const gemstone_test::RpcEnvironment environment(fixture);
+  hipStream_t stream = nullptr;
+  REQUIRE((hipStreamCreate(&stream) == hipSuccess));
+  struct Gate {
+    std::atomic_bool open{false};
+    std::atomic_bool finished{false};
+  } gate;
+  REQUIRE((hipStreamAddCallback(
+               stream,
+               [](hipStream_t, hipError_t, void *data) {
+                 auto &state = *static_cast<Gate *>(data);
+                 const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
+                 while (!state.open && std::chrono::steady_clock::now() < deadline)
+                   std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                 state.finished = true;
+               },
+               &gate, 0)
+           == hipSuccess));
+  CHECK((hipStreamDestroy(stream) == hipSuccess));
+  CHECK_FALSE(gate.finished);
+  gate.open = true;
+  CHECK((hipDeviceSynchronize() == hipSuccess));
+  CHECK(gate.finished);
 }
 
 TEST_CASE("HIP event elapsed time covers the work between the records", "[hip]") {
