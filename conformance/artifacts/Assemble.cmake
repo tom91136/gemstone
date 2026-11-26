@@ -149,6 +149,9 @@ endif()
 if(NOT DEFINED CONFORMANCE_INTERPRETER_IMAGE)
   set(CONFORMANCE_INTERPRETER_IMAGE "")
 endif()
+if(NOT DEFINED CONFORMANCE_HIP_BUNDLE_FAMILIES)
+  set(CONFORMANCE_HIP_BUNDLE_FAMILIES "")
+endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ArtifactWork.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/../cmake/ComponentNotices.cmake")
@@ -157,7 +160,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/Floor.cmake")
 set(work "${CONFORMANCE_WORK_DIRECTORY}")
 file(SHA256 "${CMAKE_CURRENT_LIST_DIR}/../dependencies.cmake" dependencies_digest)
 set(configuration_signature
-  "${dependencies_digest}|${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${BUILD_HECBENCH}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${CONFORMANCE_INTERPRETER_PACKAGES}|${backend_cmake_arguments}")
+  "${dependencies_digest}|${BACKEND}|${CONFORMANCE_COMPILER}|${architecture}|${BUILD_UNIFIED}|${BUILD_CTS}|${BUILD_MINIAPPS}|${BUILD_HECBENCH}|${HIP_ENABLE_ROCBLAS}|${MINIAPP_MODELS}|${cuda_architecture}|${amd_architecture}|${ROCM_VERSION}|${CONFORMANCE_SUPPORT_KEY}|${CONFORMANCE_HIP_BUNDLE_FAMILIES}|${CONFORMANCE_INTERPRETER_PACKAGES}|${backend_cmake_arguments}")
 prepare_work_directory("${work}" "${configuration_signature}")
 set(build "${work}/build")
 set(ENV{HOME} "${work}/home")
@@ -192,6 +195,7 @@ execute_process(
     "-DCONFORMANCE_INTERPRETER_DIRECTORY=${CONFORMANCE_INTERPRETER_DIRECTORY}"
     "-DCONFORMANCE_INTERPRETER_PACKAGES=${CONFORMANCE_INTERPRETER_PACKAGES}"
     "-DCONFORMANCE_INTERPRETER_IMAGE=${CONFORMANCE_INTERPRETER_IMAGE}"
+    "-DCONFORMANCE_HIP_BUNDLE_FAMILIES=${CONFORMANCE_HIP_BUNDLE_FAMILIES}"
     -DBUILD_TESTING=OFF
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
     ${backend_cmake_arguments}

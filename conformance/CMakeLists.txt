@@ -178,6 +178,8 @@ endif()
 set(CONFORMANCE_INTERPRETER_DIRECTORY "" CACHE PATH "Interpreter environment cache the shims resolve by default")
 set(CONFORMANCE_INTERPRETER_PACKAGES "" CACHE STRING "Interpreter packages whose shims this artifact installs")
 string(REPLACE "," ";" CONFORMANCE_INTERPRETER_PACKAGES "${CONFORMANCE_INTERPRETER_PACKAGES}")
+set(CONFORMANCE_HIP_BUNDLE_FAMILIES "" CACHE STRING
+    "HIP ISA families whose first image serves later ASICs, supplied by the host build")
 set(CONFORMANCE_TIMEOUT_INTERPRETER 900)
 include(dependencies.cmake)
 if(CONFORMANCE_BACKEND MATCHES "^(cuda|openacc)$")
@@ -289,6 +291,9 @@ if(BUILD_TESTING)
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/OffloadKeyTest.cmake")
     add_test(NAME conformance_interpreter_shim
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterShimTest.cmake")
+    add_test(NAME conformance_interpreter_shim_boundary
+      COMMAND "${CMAKE_COMMAND}" "-DCONFORMANCE_HIP_BUNDLE_FAMILIES=gfx1030,gfx1100"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterShimBoundaryTest.cmake")
     add_test(NAME conformance_interpreter_python_shim
       COMMAND "${CMAKE_COMMAND}" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/InterpreterPythonShimTest.cmake")
     add_test(NAME conformance_interpreter_cache

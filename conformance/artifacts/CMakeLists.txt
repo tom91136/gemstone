@@ -12,6 +12,9 @@ if(NOT ROCM_VERSION)
   message(FATAL_ERROR "ROCM_VERSION is required; pass -DROCM_VERSION=<major.minor.patch>")
 endif()
 get_filename_component(CONFORMANCE_SOURCE_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
+set(hip_bundle_families_file "${CONFORMANCE_SOURCE_DIRECTORY}/../native/cmake/HipBundleFamilies.cmake")
+include("${hip_bundle_families_file}")
+string(REPLACE ";" "," conformance_hip_bundle_families "${gemstone_hip_bundle_families}")
 set(CONFORMANCE_ARTIFACT_DIRECTORY "${CMAKE_BINARY_DIR}/output" CACHE PATH "Conformance artifact output directory")
 set(CONFORMANCE_OFFLOAD_DIRECTORY "${CMAKE_BINARY_DIR}/offload" CACHE PATH
   "Exported llvm-offload trees, one directory per LLVM release and Containerfile text")
@@ -257,7 +260,8 @@ function(artifact_arguments backend architecture compiler output_mode code resul
     "-DCONFORMANCE_COMPILER=${compiler}"
     "-DCONFORMANCE_OUTPUT=${output_mode}"
     "-DROCM_VERSION=${ROCM_VERSION}"
-    "-DCONFORMANCE_KEEP_WORK=${CONFORMANCE_KEEP_WORK}")
+    "-DCONFORMANCE_KEEP_WORK=${CONFORMANCE_KEEP_WORK}"
+    "-DCONFORMANCE_HIP_BUNDLE_FAMILIES=${conformance_hip_bundle_families}")
   if(backend MATCHES "^(cuda|openacc)$")
     list(APPEND arguments "-DCUDA_ARCHITECTURES=${architecture}" "-DCONFORMANCE_CUDA_CODE=${code}")
   elseif(backend STREQUAL "sycl")
@@ -323,7 +327,7 @@ function(add_artifact backend architecture compiler code output supplement_outpu
   # CTS directories and unified backend implementations belong only to their
   # backend. Everything else remains shared, including headers used across
   # backends and CMake files that select sources or package runtime libraries.
-  set(dependencies ${artifact_scripts} "${toolchain_stamp}")
+  set(dependencies ${artifact_scripts} "${toolchain_stamp}" "${hip_bundle_families_file}")
   foreach(input IN LISTS artifact_inputs)
     if(input MATCHES "^cts/([^/]+)/" AND NOT CMAKE_MATCH_1 STREQUAL backend)
       continue()

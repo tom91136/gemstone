@@ -28,7 +28,7 @@ library_has_code_object() {
   matched=$(grep -aoE 'amdgcn-amd-amdhsa--gfx[0-9a-f]+' "$1" 2>/dev/null | sed 's/.*--//' | sort -u |
     while IFS= read -r architecture; do
       if [ "$architecture" = "$2" ]; then echo matched; break; fi
-      case " @GEMSTONE_HIP_BUNDLE_FAMILIES@ " in
+      case " @HIP_BUNDLE_FAMILIES@ " in
         *" $architecture "*)
           if [ "${architecture%?}" = "${2%?}" ]; then echo matched; break; fi
           ;;

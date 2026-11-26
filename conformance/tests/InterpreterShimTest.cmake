@@ -1,7 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 get_filename_component(interpreters "${CMAKE_CURRENT_LIST_DIR}/../interpreters" ABSOLUTE)
-include("${CMAKE_CURRENT_LIST_DIR}/../../native/cmake/HipBundleFamilies.cmake")
-string(REPLACE ";" " " GEMSTONE_HIP_BUNDLE_FAMILIES "${gemstone_hip_bundle_families}")
+if(NOT DEFINED CONFORMANCE_HIP_BUNDLE_FAMILIES OR CONFORMANCE_HIP_BUNDLE_FAMILIES STREQUAL "")
+  set(CONFORMANCE_HIP_BUNDLE_FAMILIES gfx1030,gfx1100)
+endif()
+string(REPLACE "," ";" families "${CONFORMANCE_HIP_BUNDLE_FAMILIES}")
+string(REPLACE ";" " " HIP_BUNDLE_FAMILIES "${families}")
 
 execute_process(COMMAND mktemp -d /tmp/conformance-interpreter-shim-test-XXXXXX
   OUTPUT_VARIABLE directory OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
