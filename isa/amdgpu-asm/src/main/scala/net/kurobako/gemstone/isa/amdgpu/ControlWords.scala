@@ -181,8 +181,7 @@ object ControlWords {
   }
 
   private def special(kind: OperandKind): Vector[String] = kind match {
-    case OperandKind.EXEC                                                    => Vector("exec_lo", "exec_hi")
-    case OperandKind.SDST_EXEC                                               => Vector("exec_lo", "exec_hi")
+    case OperandKind.EXEC | OperandKind.SDST_EXEC                            => Vector("exec_lo", "exec_hi")
     case OperandKind.VCC                                                     => Vector("vcc_lo", "vcc_hi")
     case OperandKind.SSRC_SPECIAL_SCC                                        => Vector("scc")
     case OperandKind.SREG_M0 | OperandKind.SDST_M0 | OperandKind.SREG_M0_INL => Vector("m0")
