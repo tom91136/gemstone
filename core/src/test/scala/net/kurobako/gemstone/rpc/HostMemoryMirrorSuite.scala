@@ -421,6 +421,17 @@ class HostMemoryMirrorSuite extends Suite {
     assertEquals(mirror.requests(), Vec(HostMemoryRange(GuestAddress(0x4004L), 4)))
   }
 
+  test("a rejected reply consumes its batch and keeps the demand") {
+    val mirror = HostMemoryMirror()
+    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.requests(), Vec(page(0x4000L)))
+    assert(mirror.awaitingReply)
+    assert(mirror.supply(reply(Vec(page(0x9000L)))).isLeft)
+    assert(!mirror.awaitingReply)
+    assert(mirror.hasPending)
+    assertEquals(mirror.requests(), Vec(page(0x4000L)))
+  }
+
   test("a system invalidation keeps unpublished writes and clean bytes elsewhere") {
     val mirror = HostMemoryMirror()
     assertEquals(mirror.read(at(0x4000), 8, None), None)

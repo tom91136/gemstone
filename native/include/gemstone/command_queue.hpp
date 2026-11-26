@@ -212,12 +212,16 @@ public:
     created.nonblocking = nonblocking;
     return stream;
   }
-  /** False for streams this queue did not create, including the special legacy and per-thread streams. */
+  /** False for streams this queue did not create, including the special legacy and per-thread streams. A destroyed
+   * stream rejects its handle at once, while synchronisation still covers its pending work.
+   */
   bool destroyStream(const void *stream) {
     std::scoped_lock const lock(mutex);
     const auto found = streams.find(stream);
     if (found == streams.end() || !found->second.created) return false;
-    streams.erase(found);
+    found->second.created = false;
+    found->second.destroyed = true;
+    std::erase_if(streams, [](const auto &entry) { return drainedLocked(entry.second); });
     return true;
   }
   bool hasStream(const void *stream) {
@@ -334,6 +338,7 @@ private:
     uint64_t id = 0;
     bool nonblocking = false;
     bool created = false;
+    bool destroyed = false;
   };
   struct Event {
     Ticket ticket;
@@ -358,6 +363,14 @@ private:
     return statusLocked(ticket, true);
   }
   void *mintHandle() { return reinterpret_cast<void *>(static_cast<uintptr_t>(nextHandle++)); }
+  // a destroyed stream whose work has completed without a failure left to report
+  static bool drainedLocked(const Stream &stream) {
+    if (!stream.destroyed) return false;
+    std::vector<Ticket> work;
+    frontier(stream, work);
+    using namespace aspartame;
+    return work ^ forall([](const Ticket &ticket) { return readyLocked(ticket) && statusLocked(ticket, false) == 0; });
+  }
   static void frontier(const Stream &stream, std::vector<Ticket> &into) {
     if (stream.tail) into.push_back(stream.tail);
     into.insert(into.end(), stream.outstanding.begin(), stream.outstanding.end());

@@ -196,6 +196,23 @@ TEST_CASE("Streams and events created by the queue order work and reject unknown
   CHECK_FALSE(queue.hasStream(stream));
 }
 
+TEST_CASE("Destroyed streams keep their pending work visible to synchronisation", "[queue]") {
+  gemstone::CommandQueue queue(999);
+  auto *stream = queue.createStream(false);
+  std::promise<void> release;
+  const auto gate = release.get_future().share();
+  queue.submit(stream,
+               [gate] { return gate.wait_for(gemstone_test::scaled(std::chrono::seconds(5))) == std::future_status::ready ? 7 : 1; });
+  CHECK(queue.destroyStream(stream));
+  CHECK_FALSE(queue.hasStream(stream));
+  const auto all = queue.snapshotAll();
+  const auto legacy = queue.submit(nullptr, [] { return 0; });
+  const bool pending = !queue.ready(all) && !queue.ready(legacy);
+  release.set_value();
+  CHECK(queue.wait(all) == 7);
+  CHECK(pending);
+}
+
 #ifdef __linux__
 
 TEST_CASE("Timed waits narrow the caller's timer slack only while waiting", "[queue]") {

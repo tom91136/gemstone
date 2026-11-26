@@ -115,6 +115,10 @@ private class Completion(
   @volatile private var exchange: Option[Completion.HostSync] = None
   @volatile private var engagedHost                           = false
   private var readWaiters                                     = 0
+  private var issuedReads                                     = 0L
+  private var answeredReads                                   = 0L
+  @volatile private var unappliedWrites                       = false
+  private var due                                             = false
   def hostSync: Option[Completion.HostSync]                   = exchange
   def engaged: Boolean                                        = engagedHost
   def engage(): Unit                                          = engagedHost = true
@@ -123,9 +127,22 @@ private class Completion(
     require(exchange.isEmpty, "host synchronisation is already pending")
     exchange = Some(value)
   }
-  def endHostSync(): Unit   = exchange = None
-  def beginReadWait(): Unit = readWaiters += 1
-  def endReadWait(): Unit   = {
+  def endHostSync(): Unit = exchange = None
+
+  def beginReadWait(): Long = {
+    readWaiters += 1
+    issuedReads
+  }
+  def issueReads(): Unit                       = issuedReads += 1
+  def answerReads(): Unit                      = answeredReads = issuedReads
+  def answeredReadsAfter(batch: Long): Boolean = answeredReads > batch
+
+  def publishing: Boolean                    = unappliedWrites
+  def beginPublication(): Unit               = unappliedWrites = true
+  def endPublication(): Unit                 = unappliedWrites = false
+  def publicationDue: Boolean                = due
+  def publicationDue_=(value: Boolean): Unit = due = value
+  def endReadWait(): Unit                    = {
     require(readWaiters > 0, "no host read waiter to release")
     readWaiters -= 1
   }

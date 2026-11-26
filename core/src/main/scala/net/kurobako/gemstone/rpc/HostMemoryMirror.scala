@@ -145,6 +145,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   private val demandedCensus   = Census()
   private val dirtyCensus      = Census()
   private val unreadableCensus = Census()
+  private val issuedCensus     = Census()
   // shards holding pages or unreadable bytes, so that an acquire visits only those
   private val populatedShards = AtomicLong()
   private val invalidations   = AtomicLong()
@@ -175,7 +176,8 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       Watch(() => missing.nonEmpty, missingCensus),
       Watch(() => demanded.nonEmpty, demandedCensus),
       Watch(() => changed.nonEmpty, dirtyCensus),
-      Watch(() => unreadable.nonEmpty, unreadableCensus)
+      Watch(() => unreadable.nonEmpty, unreadableCensus),
+      Watch(() => issued.nonEmpty, issuedCensus)
     )
     private var populated = false
 
@@ -340,6 +342,10 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
           if (requested.isEmpty) { val _ = missing.pages.subtractOne(number) }
         }
       }
+      abandon()
+    }
+
+    def abandon(): Unit = {
       issued.pages.clear()
       stale.pages.clear()
     }
@@ -858,12 +864,14 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   /** Counts transitions of the demanded bytes from some to none, which release the waiting readers. */
   def drains: Long = demandedCensus.drained
 
+  def awaitingReply: Boolean = issuedCensus.occupied
+
   def requests(): Vec[HostMemoryRange] =
     if (!missingCensus.occupied) Vec.empty[HostMemoryRange]
     else
       locked(EveryShard) {
         // only the latest request can still be answered, so earlier unsent ones must not count as in flight
-        populated.foreach { shard => shard.issued.pages.clear(); shard.stale.pages.clear() }
+        populated.foreach(_.abandon())
         val result = readRanges(Cursor(populated.map(_.missing)))
         result.foreach(range =>
           spans(range.address.raw, range.size)((number, offset, length, _) =>
@@ -882,8 +890,10 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       )
       all
     }
-    if (!valid) Left("host memory reply includes bytes that were not requested")
-    else {
+    if (!valid) {
+      populated.foreach(_.abandon())
+      Left("host memory reply includes bytes that were not requested")
+    } else {
       val outdated = Array.ofDim[Boolean](shardCount)
       populated.foreach(shard => outdated(shard.slot) = shard.stale.nonEmpty)
       values.foreach { value =>

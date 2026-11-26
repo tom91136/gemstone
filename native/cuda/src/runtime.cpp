@@ -6374,10 +6374,13 @@ CUresult cuStreamGetPriority(CUstream stream, int *priority) {
   return CUDA_SUCCESS;
 }
 
-// Handles this queue did not create are drained like any stream but leave the registry untouched.
+// Pending work of a created stream completes after the call. Handles this queue did not create are drained like any
+// stream but leave the registry untouched.
 CUresult cuStreamDestroy_v2(CUstream stream) {
-  const auto status = queueStatus(commands().wait(commands().snapshot(stream)));
-  (void)commands().destroyStream(stream);
+  const auto work = commands().snapshot(stream);
+  const bool unfinished = !commands().ready(work);
+  const bool owned = commands().destroyStream(stream);
+  const auto status = owned && unfinished ? CUDA_SUCCESS : queueStatus(commands().wait(work));
   std::scoped_lock const lock{streamContextMutex};
   streamContexts.erase(stream);
   streamPriorities.erase(stream);

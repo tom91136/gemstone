@@ -968,3 +968,33 @@ TEST_CASE("cuIpcCloseMemHandle unmaps an import once and leaves the owner's allo
   CHECK(cuMemFree_v2(pointer) == CUDA_SUCCESS);
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
+
+TEST_CASE("destroying a busy stream returns before its work finishes", "[cuda][stream]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  struct Gate {
+    std::atomic_bool open{false};
+    std::atomic_bool opened{false};
+    std::atomic_bool finished{false};
+  } gate;
+  REQUIRE(cuLaunchHostFunc(
+              stream,
+              [](void *data) {
+                auto &state = *static_cast<Gate *>(data);
+                const auto deadline = std::chrono::steady_clock::now() + gemstone_test::scaled(std::chrono::seconds(5));
+                while (!state.open && std::chrono::steady_clock::now() < deadline)
+                  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                state.opened = state.open.load();
+                state.finished = true;
+              },
+              &gate)
+          == CUDA_SUCCESS);
+  CHECK(cuStreamDestroy(stream) == CUDA_SUCCESS);
+  CHECK_FALSE(gate.finished);
+  gate.open = true;
+  CHECK(cuCtxSynchronize() == CUDA_SUCCESS);
+  CHECK(gate.finished);
+  CHECK(gate.opened);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}

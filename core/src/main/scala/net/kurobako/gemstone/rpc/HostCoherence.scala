@@ -19,6 +19,10 @@ import scala.collection.mutable
   * only the mirror's shard locks. Exchanges wait on the session state lock and its condition; host atomics also
   * serialise on their own lock and linearise in the native process.
   *
+  * A client polls one batch at a time per dispatch. It applies a batch's writes before it sends anything else, so its
+  * next message acknowledges them, and it answers a batch with reads through [[supply]]. The mirror holds that batch
+  * until the answer arrives, and no other batch leaves in the meantime.
+  *
   * A dispatch keeps its workgroup-scope atomics in its own mirror only while it is the sole dispatch using atomics on
   * host memory. When a second one starts, the first publishes its mirror and both perform every atomic natively until a
   * later dispatch finds the others finished.
@@ -61,6 +65,7 @@ private class HostCoherence(
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def poll(id: CompletionId): Either[ExecutionFailure, HostMemoryBatch] = lock.withLock {
+    completions(id).filterNot(_.hostMemory.awaitingReply).foreach(_.endPublication())
     var result: Option[Either[ExecutionFailure, HostMemoryBatch]] = None
     while (result.isEmpty)
       completions(id) match {
@@ -74,43 +79,68 @@ private class HostCoherence(
               result = Some(Right(HostMemoryBatch(Vec.empty, writes, !memory.hasDirty)))
             case CompletionStatus.Pending if closed() =>
               result = Some(Left(ExecutionFailure.Failed("execution session is closed")))
-            case CompletionStatus.Pending =>
+            case CompletionStatus.Pending if memory.awaitingReply => changed.await()
+            case CompletionStatus.Pending                         =>
               completion.hostSync match {
                 case Some(exchange) if exchange.awaitingIssue =>
                   val request     = exchange.request
                   val relaxedOnly = request.relaxed && request.publish.isEmpty
                   val writes      =
                     if (relaxedOnly) Vec.empty[HostMemoryBytes]
-                    else if (request.publish.nonEmpty) memory.takeDirty(request.publish)
-                    else memory.takeDirty()
+                    else if (request.publish.nonEmpty) publishing(completion)(memory.takeDirty(request.publish))
+                    else publishing(completion)(memory.takeDirty())
                   val dirty = !relaxedOnly &&
                     (if (request.publish.nonEmpty) memory.hasDirty(request.publish) else memory.hasDirty)
                   val sync = if (dirty) None else Some(exchange.issue())
                   result = Some(Right(HostMemoryBatch(Vec.empty, writes, false, sync)))
                 case Some(_) => changed.await()
                 case None    =>
-                  val reads = memory.requests()
-                  if (completion.hasReadWaiters && reads.nonEmpty)
-                    result = Some(Right(HostMemoryBatch(reads, memory.takeDirty(), false)))
-                  else changed.await()
+                  val reads = if (completion.hasReadWaiters) memory.requests() else Vec.empty[HostMemoryRange]
+                  if (reads.nonEmpty || completion.publicationDue && memory.hasDirty) {
+                    if (reads.nonEmpty) completion.issueReads()
+                    completion.publicationDue = false
+                    result = Some(Right(HostMemoryBatch(reads, publishing(completion)(memory.takeDirty()), false)))
+                  } else changed.await()
               }
           }
       }
     result.get
   }
 
+  // marked before the bytes leave the mirror, so that a flush never finds them neither dirty nor in flight
+  private def publishing(completion: Completion)(take: => Vec[HostMemoryBytes]): Vec[HostMemoryBytes] = {
+    completion.beginPublication()
+    val writes = take
+    if (writes.isEmpty) completion.endPublication()
+    writes
+  }
+
+  def schedulePublication(id: CompletionId): Unit =
+    completions(id).filter(_.hostMemory.hasDirty).foreach(completion =>
+      lock.withLock {
+        completion.publicationDue = true
+        changed.signalAll()
+      }
+    )
+
   def supply(id: CompletionId, ranges: Vec[HostMemoryBytes]): Either[ExecutionFailure, Unit] = lock.withLock {
     completions(id) match {
       case None                                     => Left(ExecutionFailure.NotFound(s"completion $id does not exist"))
       case Some(completion) if completion.isPending =>
-        completion.hostMemory.supply(ranges).left.map(ExecutionFailure.InvalidRequest(_)).map(_ => changed.signalAll())
-      case Some(_) => Left(ExecutionFailure.InvalidRequest("host memory completion is no longer pending"))
+        val supplied = completion.hostMemory.supply(ranges)
+        completion.endPublication()
+        if (supplied.isRight) completion.answerReads()
+        changed.signalAll()
+        supplied.left.map(ExecutionFailure.InvalidRequest(_))
+      // the demand ended with the dispatch while the reply travelled
+      case Some(_) => Right(())
     }
   }
 
   def supplySync(id: CompletionId, ticket: Long, observed: Long): Either[ExecutionFailure, Unit] = lock.withLock {
     completions(id).flatMap(_.hostSync) match {
       case Some(exchange) if exchange.acknowledge(ticket, observed) =>
+        completions(id).foreach(_.endPublication())
         changed.signalAll()
         Right(())
       case _ => Left(ExecutionFailure.InvalidRequest("host synchronisation reply has no matching outstanding request"))
@@ -239,17 +269,21 @@ private class HostCoherence(
     if (completion.hostMemory.drains != drains) lock.withLock(changed.signalAll())
   }
 
-  // with nothing dirty and no exchange in flight every earlier write is already published
+  // with nothing dirty or in flight every earlier write is already published
   def flushWrites(completion: Completion): Either[Fault, Unit] =
-    if (!completion.hostMemory.hasDirty && completion.hostSync.isEmpty) Right(())
+    if (!completion.hostMemory.hasDirty && completion.hostSync.isEmpty && !completion.publishing) Right(())
     else syncLock.withLock {
-      if (completion.hostMemory.hasDirty) synchronise(completion, None).map(_ => ()) else Right(())
+      if (completion.hostMemory.hasDirty || completion.publishing) synchronise(completion, None).map(_ => ())
+      else Right(())
     }
 
+  /** Waits until no read is demanded, or until a batch issued from now on is answered: that batch carried the caller's
+    * demand as far as its bound allows. Callers read again and wait again for whatever is still missing.
+    */
   def flushReads(completion: Completion): Either[Fault, Unit] = lock.withLock {
-    completion.beginReadWait()
+    val issued = completion.beginReadWait()
     changed.signalAll()
-    while (!closed() && completion.hostMemory.hasPending) changed.await()
+    while (!closed() && completion.hostMemory.hasPending && !completion.answeredReadsAfter(issued)) changed.await()
     completion.endReadWait()
     if (closed()) Left(Fault.Cancelled) else Right(())
   }

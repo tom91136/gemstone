@@ -3,6 +3,7 @@ package net.kurobako.gemstone.rpc
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import net.kurobako.gemstone.binary.*
@@ -1113,6 +1114,162 @@ class ExecutionSessionSuite extends Suite {
           thread.join(TimeUnit.SECONDS.toMillis(15))
         }
       }
+    }
+  }
+
+  private def exchanging(lanes: Int, backend: Backend)(
+      client: (ExecutionSession, CompletionId) => Unit
+  ): Unit =
+    Using.resource(WorkerPool(lanes.refine[Int > 0].toOption.get)) { workers =>
+      Using.resource(pooled(workers, backend)) { service =>
+        assertEquals(service.enableHostMemory(), Right(()))
+        val program    = service.load(encoding, Vec[Byte](1)).toOption.get
+        val completion = service.launch(program, task("exchange")).toOption.get
+        client(service, completion)
+      }
+    }
+
+  private def polling(service: ExecutionSession, completion: CompletionId) = {
+    val polled = FutureTask(() => service.pollHostMemory(completion).fold(error => fail(error.message), identity))
+    val thread = Thread(polled, "gemstone-exchange-poll")
+    thread.setDaemon(true)
+    thread.start()
+    polled
+  }
+
+  private def next(service: ExecutionSession, completion: CompletionId): HostMemoryBatch =
+    polling(service, completion).get(5, TimeUnit.SECONDS)
+
+  private def reply(batch: HostMemoryBatch, value: Byte): Vec[HostMemoryBytes] =
+    batch.reads.map(range => HostMemoryBytes(range.address, Vec.fill(range.size)(value)))
+
+  @annotation.tailrec
+  private def drain(service: ExecutionSession, completion: CompletionId): Unit = {
+    val batch = next(service, completion)
+    batch.sync.foreach(sync => assertEquals(service.supplyHostSync(completion, sync.ticket, 0L), Right(())))
+    if (batch.reads.nonEmpty) assertEquals(service.supplyHostMemory(completion, reply(batch, 1)), Right(()))
+    if (!batch.completed) drain(service, completion)
+  }
+
+  test("a poll waits for the outstanding read batch, and a rejected reply releases it") {
+    val backend = TestBackend { (_, memory, _) =>
+      memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 4)).map(_ => ())
+    }
+    exchanging(1, backend) { (service, completion) =>
+      val first  = next(service, completion)
+      val second = polling(service, completion)
+      intercept[TimeoutException](second.get(200, TimeUnit.MILLISECONDS))
+      assert(service.supplyHostMemory(completion, Vec(HostMemoryBytes(GuestAddress(0x200000L), Vec[Byte](9)))).isLeft)
+      val again = second.get(5, TimeUnit.SECONDS)
+      assertEquals(again.reads, first.reads)
+      assertEquals(service.supplyHostMemory(completion, reply(again, 1)), Right(()))
+      drain(service, completion)
+      assertEquals(service.awaitCompletion(completion), Right(()))
+    }
+  }
+
+  test("a read reply that arrives after its dispatch finished is accepted") {
+    val published = CountDownLatch(1)
+    val staged    = CountDownLatch(1)
+    val address   = GuestAddress(0x1000L)
+    val backend   = TestBackend { (_, memory, _) =>
+      assertEquals(memory.readDeferred(address, 4), Left(AddressSpace.Pending))
+      staged.countDown()
+      val writer = Thread(() =>
+        if (published.await(5, TimeUnit.SECONDS)) assertEquals(memory.write(address, Vec.fill(4)(5.toByte)), Right(()))
+      )
+      writer.start()
+      try memory.flushHostReads()
+      finally writer.join(5000)
+    }
+    exchanging(1, backend) { (service, completion) =>
+      val batch = next(service, completion)
+      published.countDown()
+      assertEquals(service.awaitCompletion(completion), Right(()))
+      assertEquals(service.supplyHostMemory(completion, reply(batch, 1)), Right(()))
+      assert(next(service, completion).completed)
+    }
+  }
+
+  test("a reader resumes once its demand is answered while another worker still waits") {
+    val published = CountDownLatch(1)
+    val staged    = CountDownLatch(1)
+    val resumed   = CountDownLatch(1)
+    val backend   = TestBackend { (_, memory, _) =>
+      val second = Thread(() =>
+        if (published.await(5, TimeUnit.SECONDS)) {
+          assertEquals(memory.readDeferred(GuestAddress(0x200000L), 4), Left(AddressSpace.Pending))
+          staged.countDown()
+          val _ = memory.flushHostReads()
+        }
+      )
+      second.start()
+      assertEquals(memory.readDeferred(GuestAddress(0x1000L), 4), Left(AddressSpace.Pending))
+      val first = memory.flushHostReads()
+      resumed.countDown()
+      second.join(15000)
+      first
+    }
+    exchanging(1, backend) { (service, completion) =>
+      val batch = next(service, completion)
+      published.countDown()
+      assert(staged.await(5, TimeUnit.SECONDS))
+      assertEquals(service.supplyHostMemory(completion, reply(batch, 1)), Right(()))
+      val released = resumed.await(5, TimeUnit.SECONDS)
+      drain(service, completion)
+      assert(released, "the first reader stayed parked on another worker's demand")
+      assertEquals(service.awaitCompletion(completion), Right(()))
+    }
+  }
+
+  test("a release waits until the client has applied the stores a poll handed out") {
+    val handed   = CountDownLatch(1)
+    val released = CountDownLatch(1)
+    val backend  = TestBackend { (_, memory, _) =>
+      assertEquals(memory.write(GuestAddress(0x200000L), Vec[Byte](7)), Right(()))
+      val releasing = Thread(() =>
+        if (handed.await(5, TimeUnit.SECONDS) && memory.flushHostWrites().isRight) released.countDown()
+      )
+      releasing.start()
+      val read = memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 4))
+      releasing.join(15000)
+      read.map(_ => ())
+    }
+    exchanging(1, backend) { (service, completion) =>
+      val batch = next(service, completion)
+      assertEquals(batch.writes.map(_.address), Vec(GuestAddress(0x200000L)))
+      handed.countDown()
+      val early = released.await(200, TimeUnit.MILLISECONDS)
+      assertEquals(service.supplyHostMemory(completion, reply(batch, 1)), Right(()))
+      drain(service, completion)
+      assert(!early, "the release returned before the client had applied the stores")
+      assert(released.await(5, TimeUnit.SECONDS))
+      assertEquals(service.awaitCompletion(completion), Right(()))
+    }
+  }
+
+  test("a kernel that only stores to host memory publishes while it runs") {
+    val seen = CountDownLatch(1)
+    class StoreOnly extends Program(AtomicBoolean()) {
+      override def execute(task: KernelTask, context: TaskContext): Either[Fault, Unit] =
+        context.memory.write(GuestAddress(0x1000L), Vec[Byte](7)).flatMap { _ =>
+          @annotation.tailrec
+          def run(remaining: Int): Either[Fault, Unit] =
+            if (remaining == 0 || seen.await(1, TimeUnit.MILLISECONDS)) Right(())
+            else context.control.checkpoint(1024) match {
+              case Left(fault) => Left(fault)
+              case Right(())   => run(remaining - 1)
+            }
+          run(2000)
+        }
+    }
+    exchanging(1, ProgramBackend(StoreOnly())) { (service, completion) =>
+      val batch = next(service, completion)
+      assert(!batch.completed, "the stores arrived only when the kernel ended")
+      assertEquals(batch.writes.map(write => write.address -> write.bytes), Vec(GuestAddress(0x1000L) -> Vec[Byte](7)))
+      seen.countDown()
+      drain(service, completion)
+      assertEquals(service.awaitCompletion(completion), Right(()))
     }
   }
 

@@ -566,7 +566,8 @@ class ExecutionSession(
       execute: Completion.Execute
   ): CompletionId = {
     val id         = current.nextCompletion
-    val completion = Completion(id, program, execute, references, TaskControl(taskLimits), device, maxPrintEvents)
+    val control    = TaskControl(taskLimits, onSlice = () => host.schedulePublication(id))
+    val completion = Completion(id, program, execute, references, control, device, maxPrintEvents)
     state.set(current.copy(completions = current.completions.updated(id, completion), nextCompletion = id.next))
     pendingCompletions.enqueue(completion)
     id

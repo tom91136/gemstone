@@ -19,19 +19,22 @@ object TaskControl {
   private val Accepted: Either[Fault, Unit] = Right(())
   private val Cells                         = 64
   // One cell per cache line keeps workers that share no cell off each other's lines.
-  private val Stride = 8
-  private val Lease  = 1024L
+  private val Stride    = 8
+  private val Lease     = 1024L
+  private val SliceBits = 16
 }
 
 /** One execution's irreversible cancellation, shared instruction allowance and optional observer. A rejected charge
-  * consumes nothing; cancellation is permanent. Already-running instructions stop at their next checkpoint.
+  * consumes nothing; cancellation is permanent. Already-running instructions stop at their next checkpoint. A
+  * checkpoint calls `onSlice` each time the instructions granted to the execution cross into a new slice.
   *
   * Workers charge leases held in per-thread cells and refill them from the shared allowance in bounded chunks. A charge
   * the allowance cannot cover reclaims every unspent lease first, so rejection still means the whole allowance is used.
   */
 class TaskControl(
     val limits: TaskControl.Limits = TaskControl.Limits.Default,
-    val observer: Option[LaunchObserver] = None
+    val observer: Option[LaunchObserver] = None,
+    onSlice: () => Unit = () => ()
 ) {
   import TaskControl.*
 
@@ -70,21 +73,27 @@ class TaskControl(
     lease >= cost && (leases.compareAndSet(cell, lease, lease - cost) || spend(cell, cost))
   }
 
-  private def refill(cell: Int, cost: Long): Boolean = reclaim.readLock().withLock {
-    @tailrec def grant(): Boolean = {
-      val current   = granted.get()
-      val remaining = limits.maxInstructions.raw - current
-      if (cost > remaining) false
-      else {
-        val lease = math.min(Lease, remaining - cost)
-        if (!granted.compareAndSet(current, current + cost + lease)) grant()
+  private def refill(cell: Int, cost: Long): Boolean = {
+    // -1 when the allowance cannot cover the cost
+    val crossed = reclaim.readLock().withLock {
+      @tailrec def grant(): Long = {
+        val current   = granted.get()
+        val remaining = limits.maxInstructions.raw - current
+        if (cost > remaining) -1L
         else {
-          if (lease > 0) { val _ = leases.getAndAdd(cell, lease) }
-          true
+          val lease = math.min(Lease, remaining - cost)
+          val next  = current + cost + lease
+          if (!granted.compareAndSet(current, next)) grant()
+          else {
+            if (lease > 0) { val _ = leases.getAndAdd(cell, lease) }
+            (next >>> SliceBits) - (current >>> SliceBits)
+          }
         }
       }
+      grant()
     }
-    grant()
+    if (crossed > 0) onSlice()
+    crossed >= 0
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
