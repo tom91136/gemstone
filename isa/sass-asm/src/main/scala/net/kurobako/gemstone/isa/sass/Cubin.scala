@@ -507,6 +507,27 @@ object Cubin {
   // Other EIATTR lists of instruction offsets, which only the code's author can carry across an edit.
   private val AuthoredOffsets = Set(0x25, 0x27, 0x28, 0x2d, 0x31, 0x34, 0x39, 0x3a)
   private val Ctaids          = Set(SpecialRegister.SR_CTAID_X, SpecialRegister.SR_CTAID_Y, SpecialRegister.SR_CTAID_Z)
+  private val Fp64Opcodes     = Set("DADD", "DMUL", "DFMA", "DMNMX", "DSET", "DSETP", "DCHK")
+  private val Fp64PairFields  = Set("_Rd", "_Ra", "_Rb", "_Rc")
+
+  private def fp64Budget(kernel: Kernel, code: CodeSection): Either[NonEmpty[String], Unit] = {
+    val budget = (kernel.registerCount.raw - 4) / 2 * 2
+    val bad    = code.instructions.flatMap { instruction =>
+      if (!Fp64Opcodes(instruction.mnemonic.raw)) Vec.empty[Int]
+      else instruction.machine.fold(Vec.empty[Int]) { machine =>
+        Vec.from(machine.fields.collect {
+          case (name, value) if Fp64PairFields.exists(name.endsWith) => value.toInt
+        }).filter(base => base % 2 != 0 || base > budget).distinct
+      }
+    }.distinct
+    bad.headOption.fold[Either[NonEmpty[String], Unit]](Right(()))(base =>
+      Left(
+        s"FP64 register pair R$base/R${base + 1} exceeds the ${kernel.registerCount.raw}-register budget of ${kernel.name}": NonEmpty[
+          String
+        ]
+      )
+    )
+  }
 
   private case class Record(format: Int, attribute: Int, payload: Vec[Byte]) {
     def bytes: Vec[Byte] =
@@ -560,6 +581,7 @@ object Cubin {
       target <- module.kernels.find(_.name == kernel).toRight(s"kernel $kernel is not in the cubin": NonEmpty[String])
       code   <-
         Target.of(module.sm).flatMap(CodeSection.decode(Vec.toArray(text), _)).left.map(_.unsafe[NonEmpty[String]])
+      _      <- fp64Budget(target, code)
       parsed <- Image.parse(image)
       info   <- parsed.section(s".nv.info.$kernel").traverse(section => records(parsed.contents(section)))
       _      <- info.getOrElse(Vec.empty[Record]).find(record => AuthoredOffsets(record.attribute)).toLeft(()).left.map(
