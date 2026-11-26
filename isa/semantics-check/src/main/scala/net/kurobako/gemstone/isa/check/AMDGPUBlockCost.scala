@@ -24,6 +24,8 @@ import net.kurobako.gemstone.vm.Schedule
   * is issued again over the rewritten one, which holds for a rewrite that leaves the window's live-out state as it was:
   * every instruction outside the window then issues, and reaches memory, as recorded.
   */
+// tests read laid-out rows to check the static view
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object AMDGPUBlockCost {
 
   /** What a dispatch decides and the code object does not hold. */

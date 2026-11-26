@@ -10,6 +10,8 @@ import scala.annotation.tailrec
 import scala.reflect.ClassTag
 import scala.util.Random
 
+// verdicts are observation surfaces of the differential harness
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object Equivalence {
 
   /** The inputs each definition runs on, which a proof reports as the differential coverage of its instructions. */

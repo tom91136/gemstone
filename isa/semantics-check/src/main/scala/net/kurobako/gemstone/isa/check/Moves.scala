@@ -8,6 +8,8 @@ import net.kurobako.gemstone.vm.RegisterUse
 import scala.reflect.ClassTag
 import scala.util.Random
 
+// move suites inspect the candidates this object builds
+@SuppressWarnings(Array("bonsai:test-only-member"))
 private[check] object Moves {
   enum Kind derives CanEqual {
     case Opcode, Swap, Delete, Insert, Immediate

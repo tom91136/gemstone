@@ -1,5 +1,7 @@
 package net.kurobako.gemstone.profile
 
+// each row is a measurement of a different ptxas release
+@SuppressWarnings(Array("bonsai:near-duplicate-code"))
 object NvidiaLatency {
 
   enum Producer derives CanEqual {

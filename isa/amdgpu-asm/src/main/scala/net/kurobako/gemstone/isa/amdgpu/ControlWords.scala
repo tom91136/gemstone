@@ -30,6 +30,8 @@ import scala.annotation.tailrec
   * `GCNHazardRecognizer` checks, such as DivFMas, RWLane, MAI, inline assembly, RFE, the M0 read of movrel and
   * interpolation, the gfx101x bugs, and the `fixHazards` pass.
   */
+// the semantics-check harness reads hazards to check regenerated control words
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object ControlWords {
   private enum Kind derives CanEqual { case Other, Valu, Trans, Salu }
 
@@ -395,11 +397,9 @@ object ControlWords {
     else {
       val setreg = if (target.isa.isPreGFX9) 1 else 2
       val byReg  = step.hwreg match {
-        case Some(hwreg) if step.mnemonic.startsWith("s_setreg") =>
-          val same = (previous: Step) => previous.mnemonic.startsWith("s_setreg") && previous.hwreg.contains(hwreg)
-          math.max(0, setreg - waitStatesSince(state.hazard, same, setreg))
-        case Some(hwreg) if step.mnemonic.startsWith("s_getreg") =>
-          val same = (previous: Step) => previous.mnemonic.startsWith("s_getreg") && previous.hwreg.contains(hwreg)
+        case Some(hwreg) if step.mnemonic.startsWith("s_setreg") || step.mnemonic.startsWith("s_getreg") =>
+          val name = if (step.mnemonic.startsWith("s_setreg")) "s_setreg" else "s_getreg"
+          val same = (previous: Step) => previous.mnemonic.startsWith(name) && previous.hwreg.contains(hwreg)
           math.max(0, setreg - waitStatesSince(state.hazard, same, setreg))
         case _ => 0
       }

@@ -15,6 +15,8 @@ import scala.concurrent.duration.*
 /** Equivalence proofs: the differential filter, then one definition per sequence for a solver, over the lane cases
   * whose rendered semantics are checked against the VMs.
   */
+// proof results are reported to callers and asserted by suites
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object Proof {
 
   /** An instruction a proof relies on, and the runs of the differential check behind its definition. `checked` names

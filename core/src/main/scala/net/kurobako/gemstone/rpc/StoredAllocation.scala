@@ -9,6 +9,8 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 
+// tests observe resident bytes to check allocation lifetimes
+@SuppressWarnings(Array("bonsai:test-only-member"))
 private object StoredAllocation {
 
   /** Every device ordinal may access the allocation. */

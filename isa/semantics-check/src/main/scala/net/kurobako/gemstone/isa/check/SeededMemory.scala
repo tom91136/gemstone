@@ -21,6 +21,8 @@ object SeededMemory {
 /** Bytes by address, within `mask`, below `limit`, `initial` until written, recording every load and write; those from
   * `limit` read zero and drop writes.
   */
+// tests read changes to check what a replay wrote
+@SuppressWarnings(Array("bonsai:test-only-member"))
 class SeededMemory(initial: SeededMemory.Initial, limit: Long = Long.MaxValue, mask: Long = -1L) {
   private val written = mutable.LongMap.empty[Byte]
   private val loaded  = mutable.Set.empty[(Long, Byte)]

@@ -11,6 +11,8 @@ import net.kurobako.gemstone.vm.LaunchGeometry
 import scala.util.Using
 
 /** The launches a cost is read from. */
+// tests bind arguments to check recorded launches
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object LaunchRecording {
 
   /** The stream the VM records for `groups` workgroups of `lanes` lanes of `function`. `arguments` holds one

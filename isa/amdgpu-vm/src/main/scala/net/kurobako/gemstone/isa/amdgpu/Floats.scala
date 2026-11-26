@@ -11,6 +11,8 @@ import scala.annotation.targetName
   * arithmetic rounds as the JVM does, and binary16 arithmetic rounds its binary32 result. Arithmetic on a NaN returns
   * the first NaN operand quieted.
   */
+// each form pins its own width and NaN sign, which a shared helper would obscure
+@SuppressWarnings(Array("bonsai:near-duplicate-code"))
 private[isa] object Floats {
   private inline def bits[T](value: T): Long = toRaw[T](value)
 

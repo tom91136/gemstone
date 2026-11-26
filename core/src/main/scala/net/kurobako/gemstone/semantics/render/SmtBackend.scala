@@ -167,6 +167,8 @@ object SmtBackend extends Backend {
   private def encode(definition: Definition, prefix: String): Either[String, Encoding] =
     Encoder(prefix, definition).run()
 
+  // SMT rendering stays separate from the semantics AST these functions dispatch on; each NaN order is a distinct ISA rule
+  @SuppressWarnings(Array("bonsai:enum-dispatch-function", "bonsai:near-duplicate-code"))
   private class Encoder(prefix: String, definition: Definition) {
     import Value.*
 

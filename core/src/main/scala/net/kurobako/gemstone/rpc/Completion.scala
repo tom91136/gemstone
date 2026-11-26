@@ -10,6 +10,8 @@ import net.kurobako.gemstone.vm.*
 import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 
+// the harness reads retained dirty bytes to check publication
+@SuppressWarnings(Array("bonsai:test-only-member"))
 private object Completion {
   type Execute = TaskContext => Either[Fault, Option[GraphicsStatistics]]
 

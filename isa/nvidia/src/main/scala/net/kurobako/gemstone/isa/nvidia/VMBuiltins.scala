@@ -124,6 +124,9 @@ private object VMBuiltins {
       Fault.Unsupported("device-side malloc needs the context's heap, which the launch lacks")
     )
 
+  private def bufferRange(name: String, buffer: Long): Fault.Backend =
+    Fault.Backend(s"$name parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range")
+
   private def positive(value: Long): Either[Fault, Int > 0] =
     value.toInt.refine[Int > 0].left.map(_ => Fault.Backend(s"invalid launch dimension: $value"))
 
@@ -151,9 +154,7 @@ private object VMBuiltins {
         block <-
           if (child.entry.blockSize == 0) Right(Array.emptyByteArray)
           else context.workgroup.bufferBytes(buffer, child.entry.blockSize).toRight(
-            Fault.Backend(
-              s"cudaLaunchDevice parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
-            )
+            bufferRange("cudaLaunchDevice", buffer)
           )
         groupCount <- dimensions(storage, parameters(2))
         groupSize  <- dimensions(storage, parameters(3))
@@ -231,9 +232,7 @@ private object VMBuiltins {
       block <-
         if (child.entry.blockSize == 0) Right(Array.emptyByteArray)
         else context.workgroup.bufferBytes(buffer, child.entry.blockSize).toRight(
-          Fault.Backend(
-            s"cudaLaunchDeviceV2 parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range"
-          )
+          bufferRange("cudaLaunchDeviceV2", buffer)
         )
       groupCount <-
         (positive(header.getInt(8)), positive(header.getInt(12)), positive(header.getInt(16))).mapN(Dimensions(_, _, _))

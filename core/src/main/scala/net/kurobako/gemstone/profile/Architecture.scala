@@ -3,6 +3,8 @@ package net.kurobako.gemstone.profile
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.string.*
 
+// each row pins a distinct chip with its own limits and citation
+@SuppressWarnings(Array("bonsai:near-duplicate-code"))
 object Architecture {
 
   /** How a partition's scheduler picks among its ready waves. */

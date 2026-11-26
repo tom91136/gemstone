@@ -9,6 +9,8 @@ import scala.util.Random
 /** How an ISA executes one instruction, and the machine state its definitions' contexts read and write: a harness `H`
   * whose givens are those contexts. A case carries the lookup `L` of its instance.
   */
+// the reference exposes input sampling to differential suites
+@SuppressWarnings(Array("bonsai:test-only-member"))
 trait Reference[H, L <: Lookup] {
 
   /** A fresh machine for one run, the same for every `seed`, executing lane `lane` of its wave, or [[lane]] where none

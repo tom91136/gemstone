@@ -19,6 +19,8 @@ import scala.collection.mutable
   * active, so a region that reaches memory or has more than one path is not costed. The unmodified kernel is costed the
   * same way, so a window's cost before and after a rewrite differ by the rewrite alone.
   */
+// tests read laid-out rows to check the static view
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object SASSBlockCost {
 
   private val Granule = 8

@@ -18,6 +18,8 @@ import scala.collection.mutable
 import scala.reflect.ClassTag
 import scala.util.Random
 
+// rewrite reports are the product the suites assert on
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object RewriteSearch {
 
   case class Config(seed: Long, budget: Int, temperature: Double, states: Int, limit: Int)

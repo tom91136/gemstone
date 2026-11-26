@@ -261,11 +261,14 @@ private object VMCompiler {
         } yield current * elements
     }.flatMap(_.toInt.refine[Int > 0].left.map(_ => Error.Invalid(s"kernel parameter ${parameter.name} is too wide")))
 
+  private def directiveArguments(directives: Vec[Statement.Directive], name: String) =
+    directives.collectFirst {
+      case Statement.Directive(path, arguments, _, _) if path.raw == Vec(name) => arguments
+    }
+
   /** The cluster shape `.reqnctapercluster` requires; `.explicitcluster` alone leaves the shape to the launch. */
   private def clusterDirectives(directives: Vec[Statement.Directive]): Either[Error, Option[Dimensions]] =
-    directives.collectFirst {
-      case Statement.Directive(path, arguments, _, _) if path.raw == Vec("reqnctapercluster") => arguments
-    }.traverse { arguments =>
+    directiveArguments(directives, "reqnctapercluster").traverse { arguments =>
       arguments.traverse(argument => NumericLiteral.immediate(argument.operand)).flatMap {
         case Vec(x, y, z) if x > 0 && y > 0 && z > 0 && x * y * z <= VMInterpreter.ClusterLimit =>
           Some(Dimensions(x.toInt.unsafe[Int > 0], y.toInt.unsafe[Int > 0], z.toInt.unsafe[Int > 0]))
@@ -275,9 +278,7 @@ private object VMCompiler {
 
   /** The thread count `.maxntid` bounds a launch to: the product of its one to three dimensions. */
   def maxThreadsDirective(directives: Vec[Statement.Directive]): Either[Error, Option[Int > 0]] =
-    directives.collectFirst {
-      case Statement.Directive(path, arguments, _, _) if path.raw == Vec("maxntid") => arguments
-    }.traverse { arguments =>
+    directiveArguments(directives, "maxntid").traverse { arguments =>
       arguments.traverse(argument => NumericLiteral.immediate(argument.operand)).flatMap { dimensions =>
         Option.when(dimensions.nonEmpty && dimensions.size <= 3 && dimensions.forall(_ > 0)) {
           dimensions.foldLeft(Option(1L))((product, dimension) =>

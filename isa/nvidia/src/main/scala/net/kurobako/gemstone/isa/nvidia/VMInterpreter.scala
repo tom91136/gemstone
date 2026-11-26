@@ -436,6 +436,9 @@ private[isa] object VMInterpreter {
   /** Runs every workgroup of a seeded launch on this thread, a sweep giving each unfinished group one slice in an order
     * the launch schedule picks, so one group spinning on memory cannot starve the group it waits for.
     */
+  private def tooManyOnOneThread(count: Long, kind: String): Fault.InvalidRequest =
+    Fault.InvalidRequest(s"$count $kind cannot run on one thread")
+
   private def seeded(
       kernel: Kernel,
       geometry: LaunchGeometry,
@@ -447,7 +450,7 @@ private[isa] object VMInterpreter {
       log: PrintLog
   ): Either[Fault, Unit] =
     geometry.groupTotal.refine[Long in 1L ~ 2147483647L].left.map(_ =>
-      Fault.InvalidRequest(s"${geometry.groupTotal} workgroups cannot run on one thread")
+      tooManyOnOneThread(geometry.groupTotal, "workgroups")
     ).flatMap { count =>
       val total   = count.toInt
       val blocks  = Vec.tabulate(total)(_ => Block(geometry.groupVolume.unsafe[Int in 1 ~ 1024]))
@@ -498,7 +501,7 @@ private[isa] object VMInterpreter {
       val size = shape.x.raw * shape.y.raw * shape.z.raw
       LaunchGeometry.forLaunch(geometry.groupSize, count).left.map(Fault.InvalidRequest(_)).flatMap { grid =>
         grid.groupTotal.refine[Long in 1L ~ 2147483647L].left.map(_ =>
-          Fault.InvalidRequest(s"${grid.groupTotal} clusters cannot run on one thread")
+          tooManyOnOneThread(grid.groupTotal, "clusters")
         ).flatMap { total =>
           val units = Vec.tabulate(total.toInt) { index =>
             val origin = grid.groupCoordinates(index.toLong.unsafe[Long >= 0])

@@ -37,6 +37,8 @@ case class Form(
   }
 }
 
+// tests build steps through this factory
+@SuppressWarnings(Array("bonsai:test-only-member"))
 object Form {
   val UnitBits = 32
 

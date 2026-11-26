@@ -17,6 +17,8 @@ import scala.collection.mutable
   * those warp 0's lanes hold, with its row of A and column of B in shared or tensor memory as K-major matrices, C, the
   * sparse metadata and the scale factors in tensor memory set from the inputs, and everything else zero.
   */
+// tcgen05 definitions and their suites drive this wrapper
+@SuppressWarnings(Array("bonsai:test-only, bonsai:test-only-member"))
 object NvidiaTensorMemory {
   private def located(place: Placement, row: Int, column: Int): (cta: Int, lane: Int, column: Int) =
     (place.cta(row), place.lane(row, column), place.column(column))
