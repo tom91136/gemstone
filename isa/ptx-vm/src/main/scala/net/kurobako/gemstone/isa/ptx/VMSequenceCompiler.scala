@@ -92,9 +92,9 @@ private object VMSequenceCompiler {
         Some(pairFma(destination, left, right, addend, modifiers))
       case Form.Setp(Operand.WithPredicate(low, high), left, right, other)
           if modifiers.lastOption.exists(_.isPackedHalf) =>
-        Some(packedComparison(Comparison(low, high, left, right, other, modifiers)))
+        Some(packedComparison(SetpOperands(low, high, left, right, other, modifiers)))
       case Form.Setp(Operand.WithPredicate(low, high), left, right, other) =>
-        Some(pairComparison(Comparison(low, high, left, right, other, modifiers)))
+        Some(pairComparison(SetpOperands(low, high, left, right, other, modifiers)))
       case Form.Set(destination, left, right, Some(other))
           if modifiers.lastOption.exists(_.isPackedHalf) =>
         Some(packedSet(destination, left, right, other, modifiers))
@@ -395,7 +395,7 @@ private object VMSequenceCompiler {
     case None => VMIR.Instruction.SetPredicate(destination, relation, format, left, right, flush)
   }
 
-  private case class Comparison(
+  private case class SetpOperands(
       low: Operand,
       high: Operand,
       left: Operand,
@@ -405,8 +405,8 @@ private object VMSequenceCompiler {
   )
 
   /** `setp` of a pair of halves: the low halves' result in `p` and the high halves' in `q`. */
-  private def packedComparison(c: Comparison)(using scope: Scope): Lowered = {
-    val Comparison(low, high, left, right, other, modifiers) = c
+  private def packedComparison(c: SetpOperands)(using scope: Scope): Lowered = {
+    val SetpOperands(low, high, left, right, other, modifiers) = c
     for {
       (relation, combined)  <- combinedRelation(other, modifiers)
       (splitA, aLow, aHigh) <- halves(left, "setp a")
@@ -426,8 +426,8 @@ private object VMSequenceCompiler {
   }
 
   /** `setp` of a predicate pair: `p` takes the comparison and `q` its complement. */
-  private def pairComparison(c: Comparison)(using scope: Scope): Lowered = {
-    val Comparison(low, high, left, right, other, modifiers) = c
+  private def pairComparison(c: SetpOperands)(using scope: Scope): Lowered = {
+    val SetpOperands(low, high, left, right, other, modifiers) = c
     for {
       (relation, combined) <- combinedRelation(other, modifiers)
       operandType          <- modifiers.view.flatMap(VMInstructionCompiler.format(_)).headOption
