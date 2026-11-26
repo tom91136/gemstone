@@ -277,6 +277,44 @@ CUresult enqueueCommand(CUstream stream, Kind kind, std::function<int32_t()> wor
 
 std::optional<int> parsePtxTarget(std::string_view target) { return gemstone::device_identity::targetVersion(target); }
 
+int maximumTargetVersion() {
+  static const int maximum = [] {
+    int found = 0;
+    for (int version = 1; version < 1000; ++version)
+      if (gemstone::targetLimits("sm_" + std::to_string(version))) found = version;
+    return found;
+  }();
+  return maximum;
+}
+
+std::optional<std::string> ptxTargetError(std::string_view ptx) {
+  const auto at = ptx.find(".target");
+  if (at == std::string_view::npos) return std::nullopt;
+  const auto begin = ptx.find_first_not_of(" \t", at + sizeof(".target") - 1);
+  if (begin == std::string_view::npos) return std::nullopt;
+  const auto end = ptx.find_first_of(" \t\r\n,", begin);
+  const auto name = ptx.substr(begin, end == std::string_view::npos ? end : end - begin);
+  const auto version = parsePtxTarget(name);
+  if (gemstone::targetLimits(name) || (version && *version <= maximumTargetVersion())) return std::nullopt;
+  const size_t line = 1 + static_cast<size_t>(std::count(ptx.begin(), ptx.begin() + static_cast<ptrdiff_t>(at), '\n'));
+  return "ptxas application ptx input, line " + std::to_string(line) + "; fatal   : Unsupported .target '" + std::string(name)
+         + "'\nptxas fatal   : Ptx assembly aborted due to errors\n";
+}
+
+void writeJitErrorLog(CUjit_option *options, void **values, unsigned count, const std::string &message) {
+  for (unsigned index = 0; index < count; ++index) {
+    if (options[index] != CU_JIT_ERROR_LOG_BUFFER || !values[index]) continue;
+    size_t capacity = 0;
+    for (unsigned other = 0; other < count; ++other)
+      if (options[other] == CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES) capacity = reinterpret_cast<size_t>(values[other]);
+    if (capacity == 0) return;
+    const size_t bytes = std::min(capacity - 1, message.size());
+    std::memcpy(values[index], message.data(), bytes);
+    static_cast<char *>(values[index])[bytes] = '\0';
+    return;
+  }
+}
+
 std::optional<int> configuredPtxVersion() {
   const auto target = gemstone::environment::targetArch();
   return target ? gemstone::device_identity::targetVersion(*target) : std::nullopt;
@@ -657,6 +695,7 @@ ContextLimits &contextLimitsOf(CUcontext context) { return contextLimits.try_emp
 struct PrimaryContext {
   CUcontext context = nullptr;
   uint32_t references = 0;
+  unsigned flags = 0;
 };
 std::mutex primaryContextMutex;
 PrimaryContext primaryContexts[gemstone::MaximumDeviceCount];
@@ -1737,6 +1776,12 @@ CUresult initialiseModule(Module &entry, const void *image, bool allowMetadataOn
   const auto *imageText = static_cast<const char *>(image);
   auto size = binarySize ? *binarySize : static_cast<size_t>(std::find(imageText, imageText + MaximumPayload, '\0') - imageText);
   if (size == MaximumPayload || size > std::numeric_limits<uint32_t>::max()) return CUDA_ERROR_INVALID_VALUE;
+  if (encoding == ProgramEncoding::PTXText) {
+    if (const auto error = ptxTargetError({imageText, size})) {
+      if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA module load failed: %s\n", error->c_str());
+      return CUDA_ERROR_INVALID_PTX;
+    }
+  }
   if (compileText) {
     if (const auto status = compilePtx({std::string(imageText, size)}, compiled); status != CUDA_SUCCESS) return status;
     imageText = reinterpret_cast<const char *>(compiled.data());
@@ -1891,6 +1936,8 @@ struct LinkState {
   size_t size = 0;
   std::vector<std::string> modules;
   std::vector<uint8_t> cubin;
+  char *errorLog = nullptr;
+  size_t errorLogCapacity = 0;
 };
 
 bool linkAppend(LinkState *state, const char *source, size_t sourceSize) {
@@ -2108,6 +2155,10 @@ constexpr std::array ErrorTexts{
               .driverName = "CUDA_ERROR_INVALID_VALUE",
               .runtimeName = "cudaErrorInvalidValue",
               .message = "invalid argument"},
+    ErrorText{.status = CUDA_ERROR_INVALID_DEVICE,
+              .driverName = "CUDA_ERROR_INVALID_DEVICE",
+              .runtimeName = "cudaErrorInvalidDevice",
+              .message = "invalid device"},
     ErrorText{.status = CUDA_ERROR_NOT_INITIALIZED,
               .driverName = "CUDA_ERROR_NOT_INITIALIZED",
               .runtimeName = "cudaErrorInitializationError",
@@ -3648,6 +3699,7 @@ std::mutex poolMutex;
 std::map<uintptr_t, MemoryPool> memoryPools{{DefaultMemoryPool, MemoryPool{}}};
 std::map<CUdeviceptr, PoolAllocation> poolAllocations;
 uintptr_t nextMemoryPool = DefaultMemoryPool + 0x10;
+std::vector<uintptr_t> currentMemoryPools(gemstone::MaximumDeviceCount, DefaultMemoryPool);
 
 void trimPool(MemoryPool &pool, uint64_t keep) {
   while (pool.reservedCurrent > keep && !pool.idle.empty()) {
@@ -3786,8 +3838,8 @@ CUresult cuDeviceGetCount(int *count) {
 }
 
 CUresult cuDeviceGet(CUdevice *device, int ordinal) {
-  if (!device) return CUDA_ERROR_INVALID_VALUE;
-  if (!validDevice(ordinal)) return CUDA_ERROR_INVALID_DEVICE;
+  if (!device) return reportFailure(CUDA_ERROR_INVALID_VALUE, "cuDeviceGet");
+  if (!validDevice(ordinal)) return reportFailure(CUDA_ERROR_INVALID_DEVICE, "cuDeviceGet");
   *device = ordinal;
   return CUDA_SUCCESS;
 }
@@ -3907,7 +3959,21 @@ CUresult cuDeviceGetDefaultMemPool(CUmemoryPool *pool, CUdevice device) {
   return CUDA_SUCCESS;
 }
 
-CUresult cuDeviceSetMemPool(CUdevice device, CUmemoryPool) { return validDevice(device) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
+CUresult cuDeviceGetMemPool(CUmemoryPool *pool, CUdevice device) {
+  if (!pool || !validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
+  std::scoped_lock const lock{poolMutex};
+  *pool = reinterpret_cast<CUmemoryPool>(currentMemoryPools[device]);
+  return CUDA_SUCCESS;
+}
+
+CUresult cuDeviceSetMemPool(CUdevice device, CUmemoryPool pool) {
+  if (!validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
+  const auto handle = reinterpret_cast<uintptr_t>(pool);
+  std::scoped_lock const lock{poolMutex};
+  if (handle != DefaultMemoryPool && !memoryPools.contains(handle)) return CUDA_ERROR_INVALID_HANDLE;
+  currentMemoryPools[device] = handle;
+  return CUDA_SUCCESS;
+}
 
 CUresult cuDeviceGraphMemTrim(CUdevice device) { return validDevice(device) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_DEVICE; }
 
@@ -4225,7 +4291,7 @@ CUresult cuDevicePrimaryCtxRetain(CUcontext *context, CUdevice device) {
   auto &primary = primaryContexts[device];
   if (primary.context && !contextIsLive(primary.context)) primary = {};
   if (!primary.context) {
-    auto status = cuCtxCreate_v2(&primary.context, 0, device);
+    auto status = cuCtxCreate_v2(&primary.context, primary.flags, device);
     CUcontext created = nullptr;
     if (status == CUDA_SUCCESS) status = cuCtxPopCurrent_v2(&created);
     if (status != CUDA_SUCCESS) return status;
@@ -4253,18 +4319,35 @@ CUresult cuDevicePrimaryCtxRelease_v2(CUdevice device) {
 
 CUresult cuDevicePrimaryCtxGetState(CUdevice device, unsigned *flags, int *active) {
   if (!validDevice(device) || !flags || !active) return CUDA_ERROR_INVALID_VALUE;
-  *flags = 0;
   std::scoped_lock const lock{primaryContextMutex};
+  *flags = primaryContexts[device].flags;
   *active = primaryContexts[device].references == 0 ? 0 : 1;
   return CUDA_SUCCESS;
 }
 
-CUresult cuDevicePrimaryCtxSetFlags_v2(CUdevice device, unsigned) { return validDevice(device) ? CUDA_SUCCESS : CUDA_ERROR_INVALID_VALUE; }
+CUresult cuDevicePrimaryCtxSetFlags_v2(CUdevice device, unsigned flags) {
+  if (!validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
+  std::scoped_lock const lock{primaryContextMutex};
+  primaryContexts[device].flags = flags;
+  return CUDA_SUCCESS;
+}
 
 CUresult cuDevicePrimaryCtxReset_v2(CUdevice device) {
   if (!validDevice(device)) return CUDA_ERROR_INVALID_VALUE;
   stickyError.store(CUDA_SUCCESS);
-  return CUDA_SUCCESS;
+  CUcontext context = nullptr;
+  {
+    std::scoped_lock const lock{primaryContextMutex};
+    auto &primary = primaryContexts[device];
+    if (!primary.context) return CUDA_SUCCESS;
+    context = std::exchange(primary.context, nullptr);
+    primary.references = 0;
+    primary.flags = 0;
+  }
+  CUcontext implicit = context;
+  implicitContext.compare_exchange_strong(implicit, nullptr, std::memory_order_acq_rel);
+  peerAccess.clear(physicalDevice(device));
+  return cuCtxDestroy_v2(context);
 }
 
 CUresult cuLogsRegisterCallback(CUlogsCallback callbackFunc, void *userData, CUlogsCallbackHandle *callbackOut) {
@@ -4552,6 +4635,8 @@ CUresult cuMemPoolDestroy(CUmemoryPool pool) {
   if (found == memoryPools.end()) return CUDA_ERROR_INVALID_HANDLE;
   found->second.destroyed = true;
   reclaimPool(found);
+  for (auto &current : currentMemoryPools)
+    if (current == handle) current = DefaultMemoryPool;
   return CUDA_SUCCESS;
 }
 
@@ -5461,8 +5546,12 @@ cudaError_t cudaGetChannelDesc(cudaChannelFormatDesc *desc, cudaArray_const_t ar
 
 CUresult cuModuleLoadData(CUmodule *module, const void *image) { return loadModule(module, image, false); }
 
-CUresult cuModuleLoadDataEx(CUmodule *module, const void *image, unsigned, CUjit_option *, void **) {
-  return loadModuleImage(module, image);
+CUresult cuModuleLoadDataEx(CUmodule *module, const void *image, unsigned count, CUjit_option *options, void **values) {
+  const auto status = loadModuleImage(module, image);
+  if (status != CUDA_SUCCESS && ptxText(image)) {
+    if (const auto error = ptxTargetError(static_cast<const char *>(image))) writeJitErrorLog(options, values, count, *error);
+  }
+  return status;
 }
 
 CUresult cuModuleLoadFatBinary(CUmodule *module, const void *image) { return loadModuleImage(module, image); }
@@ -5690,10 +5779,14 @@ CUresult cuKernelSetAttribute(CUfunction_attribute attribute, int value, CUkerne
   return cuFuncSetAttribute(reinterpret_cast<CUfunction>(kernel), attribute, value);
 }
 
-CUresult cuLinkCreate_v2(unsigned, CUjit_option *, void **, CUlinkState *state) {
+CUresult cuLinkCreate_v2(unsigned count, CUjit_option *options, void **values, CUlinkState *state) {
   if (!state) return CUDA_ERROR_INVALID_VALUE;
   auto *link = new (std::nothrow) LinkState;
   if (!link) return CUDA_ERROR_UNKNOWN;
+  for (unsigned index = 0; index < count; ++index) {
+    if (options[index] == CU_JIT_ERROR_LOG_BUFFER) link->errorLog = static_cast<char *>(values[index]);
+    if (options[index] == CU_JIT_ERROR_LOG_BUFFER_SIZE_BYTES) link->errorLogCapacity = reinterpret_cast<size_t>(values[index]);
+  }
   *state = reinterpret_cast<CUlinkState>(link);
   return CUDA_SUCCESS;
 }
@@ -5708,6 +5801,14 @@ CUresult cuLinkAddData_v2(CUlinkState state, CUjitInputType type, void *data, si
     const auto *end = static_cast<const char *>(std::memchr(source, '\0', size));
     const size_t sourceSize = end ? static_cast<size_t>(end - source) : size;
     if (sourceSize == 0) return CUDA_ERROR_INVALID_VALUE;
+    if (const auto error = ptxTargetError({source, sourceSize})) {
+      if (link->errorLog && link->errorLogCapacity != 0) {
+        const size_t bytes = std::min(link->errorLogCapacity - 1, error->size());
+        std::memcpy(link->errorLog, error->data(), bytes);
+        link->errorLog[bytes] = '\0';
+      }
+      return CUDA_ERROR_INVALID_PTX;
+    }
     if (!linkAppend(link, source, sourceSize)) return CUDA_ERROR_UNKNOWN;
     if (sassCodeRequired()) link->modules.emplace_back(source, sourceSize);
     return CUDA_SUCCESS;
@@ -7655,7 +7756,7 @@ cudaError_t cudaLaunchKernelExC(const cudaLaunchConfig_t *config, const void *fu
 // NOLINTNEXTLINE(bugprone-macro-parentheses)
 #define GEMSTONE_CUDA_ALIAS(symbol, target) extern "C" decltype(target) symbol __attribute__((alias(#target)));
 GEMSTONE_CUDA_ALIAS(cuDeviceGetUuid, cuDeviceGetUuid_v2)
-GEMSTONE_CUDA_ALIAS(cuDeviceGetMemPool, cuDeviceGetDefaultMemPool)
+
 GEMSTONE_CUDA_ALIAS(cuCtxCreate, cuCtxCreate_v2)
 GEMSTONE_CUDA_ALIAS(cuCtxDetach, cuCtxDestroy_v2)
 GEMSTONE_CUDA_ALIAS(cuCtxPushCurrent, cuCtxPushCurrent_v2)
