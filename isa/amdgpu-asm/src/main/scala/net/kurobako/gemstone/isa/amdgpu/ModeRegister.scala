@@ -18,7 +18,6 @@ private[isa] object ModeRegister {
   /** MODE.FP_ROUND, the field `s_round_mode` writes. */
   inline val RoundShift = 0
   inline val RoundWidth = 4
-  val RoundMask: Int    = (1 << RoundWidth) - 1
 
   /** FP_ROUND holds binary32's rounding in its low two bits, and binary16's and binary64's in the next two. */
   val Round32Mask: Int      = 0x3

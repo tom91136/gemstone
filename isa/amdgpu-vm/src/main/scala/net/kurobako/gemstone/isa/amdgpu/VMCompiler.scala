@@ -342,10 +342,9 @@ private object VMCompiler {
   }
 
   /** How the VOP3 form of a conversion the VM runs generically takes modifiers: the sources whose ABS and NEG bits
-    * apply, the width of the floating-point result OMOD and the clamp scale, and the OP_SEL bits of its binary16 source
-    * and result halves.
+    * apply, and the width of the floating-point result OMOD and the clamp scale.
     */
-  private case class ConvertForm(modifiers: Int, output: Option[Int in (16, 32, 64)], halves: Int)
+  private case class ConvertForm(modifiers: Int, output: Option[Int in (16, 32, 64)])
 
   private def convertForm(opcode: Opcode): Option[ConvertForm] = vectorConvertOperation(opcode).flatMap {
     case VectorConvertOperation.CeilF32 | VectorConvertOperation.TruncateF32 | VectorConvertOperation.FloorF32 |
@@ -356,40 +355,40 @@ private object VMCompiler {
         VectorConvertOperation.ReciprocalClampF32 | VectorConvertOperation.ReciprocalSquareRootClampF32 |
         VectorConvertOperation.LogarithmClampF32 | VectorConvertOperation.ReciprocalLegacyF32 |
         VectorConvertOperation.ReciprocalSquareRootLegacyF32 =>
-      Some(ConvertForm(1, Some(32), 0))
+      Some(ConvertForm(1, Some(32)))
     case VectorConvertOperation.F32FromI32 | VectorConvertOperation.F32FromU32 |
         VectorConvertOperation.F32FromUByte0 | VectorConvertOperation.F32FromUByte1 |
         VectorConvertOperation.F32FromUByte2 | VectorConvertOperation.F32FromUByte3 =>
-      Some(ConvertForm(0, Some(32), 0))
+      Some(ConvertForm(0, Some(32)))
     case VectorConvertOperation.CeilF64 | VectorConvertOperation.TruncateF64 | VectorConvertOperation.FloorF64 |
         VectorConvertOperation.FractionF64 | VectorConvertOperation.RoundNearestEvenF64 |
         VectorConvertOperation.ReciprocalF64 | VectorConvertOperation.ReciprocalSquareRootF64 |
         VectorConvertOperation.SquareRootF64 | VectorConvertOperation.ReciprocalClampF64 |
         VectorConvertOperation.ReciprocalSquareRootClampF64 =>
-      Some(ConvertForm(1, Some(64), 0))
-    case VectorConvertOperation.F64FromI32 | VectorConvertOperation.F64FromU32 => Some(ConvertForm(0, Some(64), 0))
+      Some(ConvertForm(1, Some(64)))
+    case VectorConvertOperation.F64FromI32 | VectorConvertOperation.F64FromU32 => Some(ConvertForm(0, Some(64)))
     case VectorConvertOperation.I32FromF32 | VectorConvertOperation.U32FromF32 | VectorConvertOperation.I32FromF64 |
         VectorConvertOperation.U32FromF64 | VectorConvertOperation.FloorI32FromF32 |
         VectorConvertOperation.NearestI32FromF32 | VectorConvertOperation.FrexpExponentF32 |
         VectorConvertOperation.FrexpExponentF64 =>
-      Some(ConvertForm(1, None, 0))
+      Some(ConvertForm(1, None))
     case VectorConvertOperation.CeilF16 | VectorConvertOperation.FloorF16 | VectorConvertOperation.TruncateF16 |
         VectorConvertOperation.RoundNearestEvenF16 | VectorConvertOperation.FractionF16 |
         VectorConvertOperation.SquareRootF16 | VectorConvertOperation.ReciprocalF16 |
         VectorConvertOperation.ReciprocalSquareRootF16 | VectorConvertOperation.ExponentBase2F16 |
         VectorConvertOperation.LogarithmBase2F16 | VectorConvertOperation.SineF16 | VectorConvertOperation.CosineF16 |
         VectorConvertOperation.FrexpMantissaF16 =>
-      Some(ConvertForm(1, Some(16), 9))
-    case VectorConvertOperation.F16FromI16 | VectorConvertOperation.F16FromU16 => Some(ConvertForm(0, Some(16), 9))
-    case VectorConvertOperation.FrexpExponentF16 | VectorConvertOperation.U16FromF16 => Some(ConvertForm(1, None, 9))
+      Some(ConvertForm(1, Some(16)))
+    case VectorConvertOperation.F16FromI16 | VectorConvertOperation.F16FromU16       => Some(ConvertForm(0, Some(16)))
+    case VectorConvertOperation.FrexpExponentF16 | VectorConvertOperation.U16FromF16 => Some(ConvertForm(1, None))
     case VectorConvertOperation.SignedNormFromF16 | VectorConvertOperation.UnsignedNormFromF16 =>
-      Some(ConvertForm(1, None, 9))
-    case VectorConvertOperation.OffsetF32FromI4                                => Some(ConvertForm(0, Some(32), 0))
-    case VectorConvertOperation.I32FromI16 | VectorConvertOperation.U32FromU16 => Some(ConvertForm(0, None, 1))
-    case VectorConvertOperation.F32FromBF16                                    => Some(ConvertForm(1, Some(32), 1))
+      Some(ConvertForm(1, None))
+    case VectorConvertOperation.OffsetF32FromI4                                => Some(ConvertForm(0, Some(32)))
+    case VectorConvertOperation.I32FromI16 | VectorConvertOperation.U32FromU16 => Some(ConvertForm(0, None))
+    case VectorConvertOperation.F32FromBF16                                    => Some(ConvertForm(1, Some(32)))
     case VectorConvertOperation.SaturatePackU8FromI16 | VectorConvertOperation.SaturatePackI4FromI8 |
-        VectorConvertOperation.SaturatePackU4FromU8 => Some(ConvertForm(0, None, 8))
-    case VectorConvertOperation.PseudoRandom => Some(ConvertForm(0, None, 0))
+        VectorConvertOperation.SaturatePackU4FromU8 => Some(ConvertForm(0, None))
+    case VectorConvertOperation.PseudoRandom => Some(ConvertForm(0, None))
     case _                                   => None
   }
 

@@ -15,7 +15,7 @@ private[check] object BlockRegion {
   /** `order` is the instructions of the region in layout order, and `paths` whether a loop has more than one path
     * through it.
     */
-  case class Region(label: String, kind: BlockAnalysis.Kind, order: Vec[Int], paths: Boolean)
+  case class Region(label: String, order: Vec[Int], paths: Boolean)
 
   def each[A, B](values: Vec[A])(f: A => Either[String, B]): Either[String, Vec[B]] = {
     val found = values.map(f(_))
@@ -36,7 +36,7 @@ private[check] object BlockRegion {
     val inside = blocks.toSet
     val paths  = loop.nonEmpty && blocks.exists(index => graph.blocks(index).successors.count(inside) != 1)
     val label  = s"$function/${kind.name}@${BlockAnalysis.hex(offsets(graph.blocks(header).first).toLong)}"
-    Region(label, kind, order, paths)
+    Region(label, order, paths)
   }
 
   def timing(

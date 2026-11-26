@@ -34,6 +34,8 @@ private[isa] object AMDGPUHarness {
 
   /** Little-endian loads and stores on the bytes and byte address an access of `size` bytes locates. */
   trait Located[A] extends Memory[A] {
+    // the harness supplies these memories as givens; reach analysis does not follow the typeclass
+    @SuppressWarnings(Array("bonsai:unused-member"))
     protected def locate(address: A, size: Int): (SeededMemory, Long)
 
     private def read(address: A, size: Int): Long = {

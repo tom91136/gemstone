@@ -354,7 +354,6 @@ object RewriteSearch {
     )
 
     private case class Walk(
-        state: Vec[I],
         moves: Walker[I],
         cycles: Double,
         distance: Long,
@@ -394,7 +393,6 @@ object RewriteSearch {
           val accepted = value <= current || random.nextDouble() < math.exp((current - value) / config.temperature)
           if (accepted)
             Walk(
-              candidate.instructions,
               walk.moves.from(candidate.instructions).getOrElse(walk.moves),
               after.cycles,
               bits,
@@ -416,7 +414,7 @@ object RewriteSearch {
           walk(iteration + 1, considered.foldLeft(current)(visit))
         }
 
-      val start   = Walk(original, moves, before.cycles, 0L, 0)
+      val start   = Walk(moves, before.cycles, 0L, 0)
       val walked  = if (idle) visit(start, deleted) else walk(0, start)
       val cheaper = seen.values.filter((_, bits, after) =>
         bits == 0L && gain(before, Measure(after.cycles, after.source, after.noise))
