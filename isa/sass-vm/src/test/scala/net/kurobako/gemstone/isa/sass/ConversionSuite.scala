@@ -138,19 +138,16 @@ class ConversionSuite extends Suite {
     assertEquals(kernel.launch(4)(Arg.zeros(16)).words(0), Vec.fill(4)(0x3c00L))
   }
 
-  test("I2F.F16 lowering rejects unverified rounding modifiers") {
-    // the rounding toward zero is verified by the hardware's own results, the other roundings are not
-    rejects(load(80, Fixture.listing("i2fF16Sm80"), "i2f_f16_probe"), 8, 8) {
-      case instruction
-          if instruction.mnemonic.raw == "I2F" && instruction.modifiers.headOption.exists(_.name == "F16") =>
-        instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier("RM"))
+  test("I2F.F16 lowering keeps directed rounding modifiers") {
+    val kernel = load(80, Fixture.listing("i2fF16Sm80"), "i2f_f16_probe")
+    Vec("RM", "RP", "RZ").foreach { rounding =>
+      val directed = kernel.map { instruction =>
+        if (instruction.mnemonic.raw == "I2F" && instruction.modifiers.headOption.exists(_.name == "F16"))
+          instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier(rounding))
+        else instruction
+      }
+      assert(directed.lower(8, 8).isRight)
     }
-    val kernel = load(80, Fixture.listing("i2fF16Sm80"), "i2f_f16_probe").map { instruction =>
-      if (instruction.mnemonic.raw == "I2F" && instruction.modifiers.headOption.exists(_.name == "F16"))
-        instruction.rewrite(modifiers = instruction.modifiers :+ Instruction.Modifier("RZ"))
-      else instruction
-    }
-    assert(kernel.lower(8, 8).isRight)
   }
 
   test("sm_86 I2FP and I2F preserve signed conversion rounding modes") {

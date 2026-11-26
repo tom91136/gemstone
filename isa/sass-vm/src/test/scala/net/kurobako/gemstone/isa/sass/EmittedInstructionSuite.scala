@@ -259,6 +259,24 @@ class EmittedInstructionSuite extends Suite {
       same(sm, s"$setup\n$spelling", expected)
     }
 
+  test("sm_90 I2F.BF16.RM rounds a bfloat16 result toward minus infinity") {
+    same(90, "MOV R5, 0x103\nI2F.BF16.RM R4, R5", 0x4381L)
+  }
+
+  test("sm_100 I2F.F64.U16 selects the high half of a register source") {
+    check(
+      100,
+      """S2R R0, SR_TID.X
+        |MOV R7, 0xffff1234
+        |I2F.F64.U16 R4, R7.H1
+        |LDC.64 R2, c[0x0][0x160]
+        |IMAD.WIDE.U32 R2, R0, 4, R2
+        |STG.E [R2.64], R5
+        |EXIT""".stripMargin,
+      Vec.fill(32)(0x40efffe0L.toInt)
+    )
+  }
+
   // __hadd2, __hmul2, __hsub2, __hfma2_relu and __hfma2_sat on binary16 and bfloat16 pairs.
   for (
     (sm, spelling, expected) <- Vec(

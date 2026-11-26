@@ -377,10 +377,6 @@ private object VMFloatingCompiler {
       (!modifiers.contains(Modifier.F32) ||
         modifiers.exists(PartialFunction.cond(_) { case Modifier.F64 | Modifier.U64 | Modifier.S64 => true }))
     ) unsupported("only scalar 32-bit I2FP conversion is implemented")
-    // A half result is verified with the default rounding and with the rounding toward zero; the other roundings and the
-    // bfloat16 results are verified only with the default rounding.
-    if (modifiers.exists(_.isHalf) && modifiers.exists(roundings) && !modifiers.contains(Modifier.RZ))
-      unsupported(s"unsupported I2F modifiers ${modifiers.mkString(".")}")
     val rounding = modifiers.find(roundings).getOrElse(Modifier.RN)
     val kind     =
       modifiers.find(integerSourceKinds).getOrElse(Modifier.S32)
@@ -393,11 +389,22 @@ private object VMFloatingCompiler {
     val inputWidth: ScalarBitWidth = if (kind.is64BitInteger) 64 else 32
     val (input, inputType)         = operands(1) match {
       case Operand.Unary(inner, false, false, true) if kind.isSigned32Or64 =>
-        val extended = convert(source(inner, inputWidth), kind.integerConversion, NumericFormat.Signed(64))
+        val extended = convert(integerHalf(inner, inputWidth), kind.integerConversion, NumericFormat.Signed(64))
         (unary(IntegerUnaryOperation.Absolute, extended, 64), NumericFormat.Unsigned(64))
-      case operand => (source(operand, inputWidth), kind.integerConversion)
+      case operand => (integerHalf(operand, inputWidth), kind.integerConversion)
     }
     store(operands.head, convert(input, inputType, target, Some(rounding.conversionRounding)), bits)
+  }
+
+  private def integerHalf(operand: Operand, bits: ScalarBitWidth)(using context: VMCompilationContext): Value = {
+    import context.*
+    OperandQueries.qualifiers(operand) match {
+      case Vec()                   => source(operand, bits)
+      case Vec(OperandSelector.H0) => source(OperandQueries.base(operand), bits)
+      case Vec(OperandSelector.H1) =>
+        binary(IntegerOperation.ShiftRightLogical, source(OperandQueries.base(operand), bits), Value.Immediate(16L))
+      case selectors => unsupported(s"unsupported I2F source selectors ${selectors.mkString(".")}")
+    }
   }
 
   private def floatToInteger()(using context: VMCompilationContext): Unit = {
