@@ -31,12 +31,12 @@ object RegisterUses {
 
     def distinct: Slots =
       Slots(
-        registersRead.distinct,
-        registersWritten.distinct,
-        predicatesRead.distinct,
-        predicatesWritten.distinct,
-        flagsRead.distinct,
-        flagsWritten.distinct
+        registersRead = registersRead.distinct,
+        registersWritten = registersWritten.distinct,
+        predicatesRead = predicatesRead.distinct,
+        predicatesWritten = predicatesWritten.distinct,
+        flagsRead = flagsRead.distinct,
+        flagsWritten = flagsWritten.distinct
       )
   }
 
@@ -93,12 +93,12 @@ object RegisterUses {
     def writeOptionals(registers: Vec[Option[Register]]): Unit = registers.foreach(writeOptional)
 
     def result: Slots = Slots(
-      registersRead.result(),
-      registersWritten.result(),
-      predicatesRead.result(),
-      predicatesWritten.result(),
-      flagsRead.result(),
-      flagsWritten.result()
+      registersRead = registersRead.result(),
+      registersWritten = registersWritten.result(),
+      predicatesRead = predicatesRead.result(),
+      predicatesWritten = predicatesWritten.result(),
+      flagsRead = flagsRead.result(),
+      flagsWritten = flagsWritten.result()
     ).distinct
 
     def instruction(instruction: Instruction): Unit = instruction match {
@@ -152,11 +152,11 @@ object RegisterUses {
     }
 
     private def valueOps(instruction: Instruction): Unit = (instruction: @unchecked) match {
-      case Instruction.ConvertTF32(destination, source, _, _, _, _) =>
+      case Instruction.ConvertTF32(destination = destination, source = source) =>
         writeRegister(destination); readValue(source)
-      case Instruction.LoadParameter(destinations, _, _, _, _) =>
+      case Instruction.LoadParameter(destinations = destinations) =>
         writeRegisters(destinations)
-      case Instruction.StoreParameter(_, _, source, _) =>
+      case Instruction.StoreParameter(source = source) =>
         readValue(source)
       case Instruction.Move(destination, source, _) =>
         writeRegister(destination); readValue(source)
@@ -178,11 +178,11 @@ object RegisterUses {
         writeRegister(destination); readValues(sources)
       case Instruction.IntegerUnary(_, destination, source, _) =>
         writeRegister(destination); readValue(source)
-      case Instruction.BitFind(destination, source, _, _, _) =>
+      case Instruction.BitFind(destination = destination, source = source) =>
         writeRegister(destination); readValue(source)
       case Instruction.DotProduct4(destination, left, right, addend, _, _) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
-      case Instruction.DotProduct2(destination, left, right, addend, _, _, _) =>
+      case Instruction.DotProduct2(destination = destination, left = left, right = right, addend = addend) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
       case Instruction.SumAbsoluteDifference(destination, left, right, addend, _, _) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
@@ -190,11 +190,11 @@ object RegisterUses {
         writeRegister(destination); readValues(Vec(mask, base, offset))
       case Instruction.PackSaturated(destination, high, low, rest, _, _) =>
         writeRegister(destination); readValues(Vec(high, low, rest))
-      case Instruction.ConvertToFloat8(destination, high, low, rest, _, _, _) =>
+      case Instruction.ConvertToFloat8(destination = destination, high = high, low = low, rest = rest) =>
         writeRegister(destination); readValues(Vec(high, low, rest))
-      case Instruction.ConvertNarrow(destination, high, low, scale, _, _, _, _, _, _) =>
+      case Instruction.ConvertNarrow(destination = destination, high = high, low = low, scale = scale) =>
         writeRegister(destination); readValues(Vec(high, low, scale))
-      case Instruction.ConvertWiden(destination, source, scale, _, _, _, _) =>
+      case Instruction.ConvertWiden(destination = destination, source = source, scale = scale) =>
         writeRegister(destination); readValues(Vec(source, scale))
       case Instruction.ConvertFromFloat8(destination, source, _) =>
         writeRegister(destination); readValue(source)
@@ -202,24 +202,39 @@ object RegisterUses {
         writePredicate(destination); readValue(address)
       case Instruction.PackedSaturatingAdd(destination, left, right, _, _) =>
         writeRegister(destination); readValues(Vec(left, right))
-      case Instruction.VideoSimd(destination, left, right, addend, _, _, _, _, _, _, _, _, _) =>
+      case Instruction.VideoSimd(destination = destination, left = left, right = right, addend = addend) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
-      case Instruction.VideoScalar(destination, left, right, addend, _, _, _, _, _, _, _, _, _, _) =>
+      case Instruction.VideoScalar(destination = destination, left = left, right = right, addend = addend) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
-      case Instruction.VideoMultiplyAdd(destination, left, right, addend, _, _, _, _, _, _, _, _, _, _) =>
+      case Instruction.VideoMultiplyAdd(destination = destination, left = left, right = right, addend = addend) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
-      case Instruction.ConvertStochastic(destination, high, low, bits, rest, _, _, _, _) =>
+      case Instruction.ConvertStochastic(destination = destination, high = high, low = low, bits = bits, rest = rest) =>
         writeRegister(destination); readValues(Vec(high, low, bits, rest))
-      case Instruction.SelectSign(destination, whenNonNegative, whenNegative, condition, _, _, _) =>
+      case Instruction.SelectSign(
+            destination = destination,
+            whenNonNegative = whenNonNegative,
+            whenNegative = whenNegative,
+            condition = condition
+          ) =>
         writeRegister(destination); readValues(Vec(whenNonNegative, whenNegative, condition))
     }
 
     private def arithmeticOps(instruction: Instruction): Unit = (instruction: @unchecked) match {
       case Instruction.TestProperty(destination, source, _, _) =>
         writePredicate(destination); readValue(source)
-      case Instruction.CompareSetCombined(destination, _, _, left, right, _, _, _, predicate, _) =>
+      case Instruction.CompareSetCombined(
+            destination = destination,
+            left = left,
+            right = right,
+            predicate = predicate
+          ) =>
         writeRegister(destination); readValues(Vec(left, right)); readPredicate(predicate)
-      case Instruction.SetPredicateCombined(destination, _, _, left, right, _, _, predicate, _) =>
+      case Instruction.SetPredicateCombined(
+            destination = destination,
+            left = left,
+            right = right,
+            predicate = predicate
+          ) =>
         writePredicate(destination); readValues(Vec(left, right)); readPredicate(predicate)
       case Instruction.StackAllocate(destination, size, _) =>
         writeRegister(destination); readValue(size)
@@ -243,7 +258,13 @@ object RegisterUses {
         writeRegister(destination); readValues(Vec(left, right))
         if (borrowIn) readFlag(VMConditionCodes.Flag.Carry)
         if (borrowOut) writeFlag(VMConditionCodes.Flag.Carry)
-      case Instruction.IntegerAddThree(destination, first, second, third, _, carryMode, _, _, _) =>
+      case Instruction.IntegerAddThree(
+            destination = destination,
+            first = first,
+            second = second,
+            third = third,
+            carryMode = carryMode
+          ) =>
         writeRegister(destination); readValues(Vec(first, second, third))
         carryMode match {
           case AddThreeCarryMode.None    => ()
@@ -262,17 +283,17 @@ object RegisterUses {
         writeFlag(VMConditionCodes.Flag.Carry)
       case Instruction.MultiplyAdd(destination, left, right, addend, _) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
-      case Instruction.FloatBinary(_, destination, left, right, _, _) =>
+      case Instruction.FloatBinary(destination = destination, left = left, right = right) =>
         writeRegister(destination); readValues(Vec(left, right))
-      case Instruction.FloatBinaryPacked(_, destination, left, right, _, _) =>
+      case Instruction.FloatBinaryPacked(destination = destination, left = left, right = right) =>
         writeRegister(destination); readValues(Vec(left, right))
-      case Instruction.FloatUnary(_, destination, source, _, _) =>
+      case Instruction.FloatUnary(destination = destination, source = source) =>
         writeRegister(destination); readValue(source)
-      case Instruction.MufuUnary(destination, source, _, _, _) =>
+      case Instruction.MufuUnary(destination = destination, source = source) =>
         writeRegister(destination); readValue(source)
       case Instruction.FloatUnaryPacked(_, destination, source, _) =>
         writeRegister(destination); readValue(source)
-      case Instruction.FusedMultiplyAdd(destination, left, right, addend, _, _, _) =>
+      case Instruction.FusedMultiplyAdd(destination = destination, left = left, right = right, addend = addend) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
       case Instruction.FusedMultiplyAddBf16(destination, left, right, addend) =>
         writeRegister(destination); readValues(Vec(left, right, addend))
@@ -288,7 +309,7 @@ object RegisterUses {
         writeRegister(destination); readPredicate(predicate); readValue(memberMask)
       case Instruction.Elect(destination, predicate, memberMask) =>
         writeOptional(destination); readPredicate(predicate); readValue(memberMask)
-      case Instruction.WarpReduceFloat(destination, source, memberMask, _, _, _) =>
+      case Instruction.WarpReduceFloat(destination = destination, source = source, memberMask = memberMask) =>
         writeRegister(destination); readValues(Vec(source, memberMask))
       case Instruction.WarpMatch(destination, predicate, source, memberMask, _, _) =>
         writeOptional(destination); predicate.foreach(writePredicate); readValues(Vec(source, memberMask))
@@ -304,15 +325,15 @@ object RegisterUses {
         writeRegister(destination); readValues(Vec(left, right, control))
       case Instruction.Select(destination, whenTrue, whenFalse, predicate, _) =>
         writeRegister(destination); readValues(Vec(whenTrue, whenFalse)); readPredicate(predicate)
-      case Instruction.Convert(destination, source, _, _, _, _) =>
+      case Instruction.Convert(destination = destination, source = source) =>
         writeRegister(destination); readValue(source)
-      case Instruction.ConvertPacked(destination, high, low, _, _, _) =>
+      case Instruction.ConvertPacked(destination = destination, high = high, low = low) =>
         writeRegister(destination); readValues(Vec(high, low))
-      case Instruction.CompareSet(destination, _, _, left, right, _, _, _) =>
+      case Instruction.CompareSet(destination = destination, left = left, right = right) =>
         writeRegister(destination); readValues(Vec(left, right))
-      case Instruction.Load(destination, address, _, _, _) =>
+      case Instruction.Load(destination = destination, address = address) =>
         writeRegister(destination); readValue(address)
-      case Instruction.LoadVector(destinations, address, _, _, _) =>
+      case Instruction.LoadVector(destinations = destinations, address = address) =>
         writeRegisters(destinations); readValue(address)
       case Instruction.Store(address, source, _, _) =>
         readValues(Vec(address, source))
@@ -331,7 +352,14 @@ object RegisterUses {
         barrier.foreach(readValue)
       case Instruction.AsyncBulkFill(address, size) =>
         readValues(Vec(address, size))
-      case Instruction.AsyncTensor(_, tensorMap, coordinates, shared, barrier, multicast, offsets, _, _, _) =>
+      case Instruction.AsyncTensor(
+            tensorMap = tensorMap,
+            coordinates = coordinates,
+            shared = shared,
+            barrier = barrier,
+            multicast = multicast,
+            offsets = offsets
+          ) =>
         readValue(tensorMap); readValues(coordinates); readValue(shared); readValues(offsets)
         barrier.foreach(readValue)
         multicast.foreach(readValue)
@@ -414,7 +442,7 @@ object RegisterUses {
         ()
       case Instruction.Spin =>
         ()
-      case Instruction.SetPredicate(destination, _, _, left, right, _) =>
+      case Instruction.SetPredicate(destination = destination, left = left, right = right) =>
         writePredicate(destination); readValues(Vec(left, right))
       case Instruction.PredicateCompare(destination, _, left, right) =>
         writePredicate(destination); readPredicate(left); readPredicate(right)
@@ -437,7 +465,7 @@ object RegisterUses {
         }
         readValue(id); readPredicate(predicate)
         count.foreach(readValue)
-      case Instruction.Atomic(destination, address, source, _, _, _) =>
+      case Instruction.Atomic(destination = destination, address = address, source = source) =>
         writeOptional(destination); readValues(Vec(address, source))
       case Instruction.AtomicCompareExchange(destination, address, comparator, source, _, _) =>
         writeRegister(destination); readValues(Vec(address, comparator, source))
@@ -447,9 +475,8 @@ object RegisterUses {
         ()
       case Instruction.Convergence(token, action) =>
         action match {
-          case ConvergenceAction.Setup       => writeRegister(token)
-          case ConvergenceAction.Synchronise => readRegister(token)
-          case ConvergenceAction.Break       => readRegister(token)
+          case ConvergenceAction.Setup                                 => writeRegister(token)
+          case ConvergenceAction.Synchronise | ConvergenceAction.Break => readRegister(token)
         }
       case Instruction.ReturnStackPush(_) =>
         ()
@@ -472,11 +499,18 @@ object RegisterUses {
     }
 
     private def matrix(operation: Matrix.Operation): Unit = operation match {
-      case Matrix.Operation.Load(_, destinations, address, stride, _, _) =>
+      case Matrix.Operation.Load(destinations = destinations, address = address, stride = stride) =>
         writeRegisters(destinations); readValues(Vec(address, stride))
-      case Matrix.Operation.Store(_, sources, address, stride, _, _) =>
+      case Matrix.Operation.Store(sources = sources, address = address, stride = stride) =>
         readValues(sources); readValues(Vec(address, stride))
-      case Matrix.Operation.Multiply(_, _, _, _, destinations, left, right, addend, _, _, _, sparsity, scaling) =>
+      case Matrix.Operation.Multiply(
+            destinations = destinations,
+            left = left,
+            right = right,
+            addend = addend,
+            sparsity = sparsity,
+            scaling = scaling
+          ) =>
         writeRegisters(destinations); readValues(left); readValues(right); readValues(addend)
         sparsity.foreach(value => readValues(Vec(value.metadata, value.selector)))
         scaling.foreach(value =>
@@ -490,12 +524,12 @@ object RegisterUses {
         writeRegister(destination); readValue(source)
       case Matrix.Operation.Widen(low, high, source) =>
         writeRegister(low); writeRegister(high); readValue(source)
-      case Matrix.Operation.WarpgroupMultiply(product, a, b, scale, _, _, _, _) =>
+      case Matrix.Operation.WarpgroupMultiply(product = product, a = a, b = b, scale = scale) =>
         matrix(product); readValues(a); readValues(b); readValue(scale)
     }
 
     private def texture(operation: Texture.Operation): Unit = operation match {
-      case Texture.Operation.Sample(handle, coordinates, _, _, destinations, _) =>
+      case Texture.Operation.Sample(handle = handle, coordinates = coordinates, destinations = destinations) =>
         readValue(handle); readValues(coordinates); writeOptionals(destinations)
       case Texture.Operation.Gather(handle, coordinates, _, _, destinations) =>
         readValue(handle); readValues(coordinates); writeOptionals(destinations)
@@ -505,7 +539,7 @@ object RegisterUses {
         readValue(handle); readValues(coordinates); writeOptionals(destinations)
       case Texture.Operation.Store(handle, coordinates, _, _, sources) =>
         readValue(handle); readValues(coordinates); readValues(sources)
-      case Texture.Operation.Reduce(handle, coordinates, _, _, _, operand, fetched) =>
+      case Texture.Operation.Reduce(handle = handle, coordinates = coordinates, operand = operand, fetched = fetched) =>
         readValue(handle); readValues(coordinates); readValue(operand); writeOptional(fetched)
     }
 
