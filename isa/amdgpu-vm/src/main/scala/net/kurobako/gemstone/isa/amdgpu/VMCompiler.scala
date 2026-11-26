@@ -875,30 +875,18 @@ private object VMCompiler {
     case other                                                      => convertForm(other).flatMap(_.output)
   }
 
-  /** The OP_SEL bits each f16 VOP3 opcode defines, from GFX11 for those VOP1/VOP2 also encode; bit 3 selects the
-    * destination half.
-    */
-  private def halfOpSelection(opcode: Opcode): Option[Int] = opcode match {
-    case VMax3F16 | VMin3F16 | VMed3F16 | VMaxminF16 | VMinmaxF16                            => Some(0xf)
-    case VMax3NumF16 | VMin3NumF16 | VMed3NumF16 | VMaxminNumF16 | VMinmaxNumF16             => Some(0xf)
-    case VMaxNumF16 | VMinNumF16 | VAndB16 | VOrB16 | VXorB16                                => Some(0xb)
-    case VMinimumF16 | VMaximumF16                                                           => Some(0xb)
-    case VMinimum3F16 | VMaximum3F16 | VMaximumminimumF16 | VMinimummaximumF16               => Some(0xf)
-    case VMovB16 | VNotB16 | VCvtI32I16 | VCvtU32U16 | VSwapB16                              => Some(0x9)
-    case VCndmaskB16                                                                         => Some(0xb)
-    case VDivFixupF16 | VDivFixupLegacyF16 | VMadF16 | VMadLegacyF16 | VFmaLegacyF16         => Some(0xf)
-    case VMacF16                                                                             => Some(0xb)
-    case VMadU32U16 | VMadI32I16 | VMadI16 | VMadLegacyI16                                   => Some(0x3)
-    case VCvtPknormI16F16_2 | VCvtPkNormI16F16_1 | VCvtPknormU16F16_2 | VCvtPkNormU16F16_1   => Some(0x3)
-    case VAddF16 | VMulF16 | VMinF16 | VMaxF16 | VFmacF16 | VSubF16 | VSubrevF16 | VLdexpF16 => Some(0xb)
-    case VCvtF32F16                                                                          => Some(0x1)
-    case VCvtF16F32                                                                          => Some(0x8)
-    case VCvtF16Fp8 | VCvtF16Bf8                                                             => Some(0x8)
-    case VCvtI16F16                                                                          => Some(0x9)
-    case VDot2F16F16 | VDot2Bf16Bf16                                                         => Some(0xc)
-    case VAshrPkI8I32 | VAshrPkU8I32                                                         => Some(0x8)
-    case other => convertForm(other).map(_.halves).filter(_ != 0)
-  }
+  /** The half bits an encoding defines: one for each 16-bit source and bit 3 for a 16-bit destination. */
+  private def encodingHalves(encoding: Metadata.Encoding): Int =
+    encoding.operands.foldLeft(0) { (bits, operand) =>
+      if (operand.bits != 16) bits
+      else operand.field match {
+        case Some(EncodingField.SRC0 | EncodingField.VSRC0) => bits | 1
+        case Some(EncodingField.SRC1 | EncodingField.VSRC1) => bits | 2
+        case Some(EncodingField.SRC2 | EncodingField.VSRC2) => bits | 4
+        case Some(EncodingField.VDST)                       => bits | 8
+        case _                                              => bits
+      }
+    }
 
   private val NativeHalfOpcodes: Set[Opcode] = Set(
     VMax3F16,
@@ -934,69 +922,8 @@ private object VMCompiler {
     VCvtPknormU16F16_2
   )
 
-  // f16 opcodes whose result fills only the low half of the destination.
-  private lazy val HalfResultOpcodes: Set[Opcode] = Set(
-    VLshlrevB16,
-    VLshrrevB16,
-    VDot2F16F16,
-    VDot2Bf16Bf16,
-    VCvtPkFp8F16,
-    VCvtPkBf8F16,
-    VCvtF16Fp8,
-    VCvtF16Bf8,
-    VAshrPkI8I32,
-    VAshrPkU8I32,
-    VAddF16,
-    VMulF16,
-    VMinF16,
-    VMaxF16,
-    VFmacF16,
-    VFmaF16,
-    VCvtF16F32,
-    VCvtI16F16,
-    VSubF16,
-    VSubrevF16,
-    VLdexpF16,
-    VMax3F16,
-    VMin3F16,
-    VMed3F16,
-    VMaxminF16,
-    VMinmaxF16,
-    VMax3NumF16,
-    VMin3NumF16,
-    VMed3NumF16,
-    VMaxminNumF16,
-    VMinmaxNumF16,
-    VMaxNumF16,
-    VMinNumF16,
-    VMinimumF16,
-    VMaximumF16,
-    VMinimum3F16,
-    VMaximum3F16,
-    VMaximumminimumF16,
-    VMinimummaximumF16,
-    VAndB16,
-    VOrB16,
-    VXorB16,
-    VMovB16,
-    VNotB16,
-    VCndmaskB16,
-    VDivFixupF16,
-    VDivFixupLegacyF16,
-    VMadF16,
-    VMadLegacyF16,
-    VFmaLegacyF16,
-    VMacF16,
-    VMadakF16,
-    VMadmkF16,
-    VFmaakF16,
-    VFmamkF16
-  )
-
-  private def halfResultOpcode(opcode: Opcode): Boolean =
-    HalfResultOpcodes.contains(opcode) || convertForm(opcode).exists(form => (form.halves & 8) != 0)
-
-  private val HighHalfOnlyResultOpcodes: Set[Opcode] = Set(VLshlrevB16, VLshrrevB16)
+  // The 16-bit shifts write a dword result and leave the unused half clear, unlike other half-result instructions.
+  private val ZeroOtherHalfOpcodes: Set[Opcode] = Set(VLshlrevB16, VLshrrevB16)
 
   /** GFX10 onwards keeps the high half of a 16-bit result's destination; earlier generations zero it. */
   private def preservesHighHalf(target: Target): Boolean =
@@ -1007,6 +934,27 @@ private object VMCompiler {
     case ISA.RDNA3 | ISA.RDNA3_5 | ISA.GFX11_7 | ISA.RDNA4 | ISA.CDNA5 => true
     case _                                                             => false
   }
+
+  /** Whether OP_SEL names the 16-bit operands of an opcode on `target`: GFX11 does so in VOP3 and native VOP3 half
+    * opcodes define it earlier.
+    */
+  private def halfSelectionDefined(opcode: Opcode, target: Target): Boolean =
+    halfOpSelectionDefined(target) || NativeHalfOpcodes(opcode)
+
+  /** GFX10 keeps the other half of a result even where OP_SEL is undefined, for opcodes that also have a 32-bit form.
+    */
+  private def halfResultDefined(opcode: Opcode, target: Target): Boolean =
+    halfSelectionDefined(opcode, target) ||
+      (preservesHighHalf(target) && opcode.encodings(target).exists { encoding =>
+        val base = encoding.format.base
+        base == EncodingFormat.VOP1 || base == EncodingFormat.VOP2
+      })
+
+  /** An encoding whose source is written back places its result without a half wrapper. */
+  private def writesSource(encoding: Metadata.Encoding): Boolean =
+    encoding.operands.exists(operand =>
+      operand.output && operand.field.exists(field => field != EncodingField.VDST)
+    )
 
   /** The 8-bit float format of a conversion: CDNA3's FNUZ formats, the OCP formats from gfx950 and GFX12 on. */
   private def eightBit(bf8: Boolean, target: Target): Minifloat = (target.isa == ISA.CDNA3, bf8) match {
@@ -1039,15 +987,7 @@ private object VMCompiler {
     */
   private def trueHalves(machine: InstructionDecoder.Decoded, target: Target): Int =
     if (!halfOpSelectionDefined(target) || machine.format.isVOP3) 0
-    else machine.definition match {
-      case VFmaakF16 | VFmamkF16 | VMadakF16 | VMadmkF16 => 0xb
-      case opcode                                        =>
-        halfOpSelection(opcode).orElse(vectorComparison(opcode).collect {
-          case VectorComparison(kind = VectorComparisonKind.Float16 | VectorComparisonKind.Signed16 |
-              VectorComparisonKind.Unsigned16) => 0x3
-          case VectorComparison(kind = VectorComparisonKind.ClassFloat16) => 0x1
-        }).getOrElse(0)
-    }
+    else encodingHalves(machine.encoding)
 
   /** A 32-bit encoding's source as the 16-bit operand bit `bit` of `halves` selects it. */
   private def trueHalf(source: InstructionSource, halves: Int, bit: Int): InstructionSource = source match {
@@ -1087,14 +1027,17 @@ private object VMCompiler {
 
   private def halfResult(
       opcode: Opcode,
+      encoding: Metadata.Encoding,
       operation: Instruction,
       destination: VectorRegisterIndex,
       high: Boolean,
       target: Target
   ): Instruction = {
-    val preserves = preservesHighHalf(target) && !HighHalfOnlyResultOpcodes.contains(opcode)
-    val defined   = opcode != VFmaF16 || halfOpSelectionDefined(target)
-    if (defined && halfResultOpcode(opcode) && (high || preserves))
+    val preserves = preservesHighHalf(target) && !ZeroOtherHalfOpcodes(opcode)
+    if (
+      halfResultDefined(opcode, target) && !writesSource(encoding) &&
+      (encodingHalves(encoding) & 8) != 0 && (high || preserves)
+    )
       Instruction.VHalfResult(operation, destination, high)
     else operation
   }
@@ -2503,7 +2446,7 @@ private object VMCompiler {
       case other if machine.format.isSdwa                        => subDwordResult(machine, other)
       case other                                                 =>
         trueDestination(machine, target).map((destination, high) =>
-          halfResult(machine.definition, other, destination, high, target)
+          halfResult(machine.definition, machine.encoding, other, destination, high, target)
         )
     }
 
@@ -3036,6 +2979,34 @@ private object VMCompiler {
     )
   }
 
+  private def plainTernary(
+      opcode: Opcode,
+      destination: VectorRegisterIndex,
+      sources: (InstructionSource, InstructionSource, InstructionSource),
+      halfMask: Int,
+      opSelection: Int,
+      halfDefined: Boolean,
+      modifiers: SourceModifiers,
+      clamp: Boolean
+  ): Either[NonEmpty[String], Instruction] = {
+    def selected(source: InstructionSource, bit: Int): InstructionSource =
+      if (halfDefined && (halfMask & opSelection & (1 << bit)) != 0) InstructionSource.HighHalf(source)
+      else source
+    vectorTernaryOperation(opcode)
+      .map(operation =>
+        Instruction.VTernary(
+          operation,
+          destination,
+          selected(sources._1, 0),
+          selected(sources._2, 1),
+          selected(sources._3, 2),
+          modifiers,
+          clamp
+        )
+      )
+      .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
+  }
+
   private def decodeVOP3(machine: InstructionDecoder.Decoded, target: Target): Either[NonEmpty[String], Instruction] = {
     val opcode    = machine.definition
     val literal   = machine.literal
@@ -3046,9 +3017,14 @@ private object VMCompiler {
       operandSource(machine, field, literal, target).leftMap[NonEmpty[String]](error =>
         s"$error in $opcode"
       )
-    val opSelection                                                  = machine(EncodingField.OP_SEL).toInt
+    val opSelection = machine(EncodingField.OP_SEL).toInt
+    val halfMask    = encodingHalves(machine.encoding)
+    val halfOpSel   = halfMask != 0 &&
+      (vectorBinaryOperation(opcode).nonEmpty || vectorTernaryOperation(opcode).nonEmpty ||
+        convertForm(opcode).nonEmpty)
     def half(source: InstructionSource, bit: Int): InstructionSource =
-      if ((opSelection & (1 << bit)) != 0 && halfOpSelection(opcode).nonEmpty) InstructionSource.HighHalf(source)
+      if ((opSelection & halfMask & (1 << bit)) != 0 && halfSelectionDefined(opcode, target))
+        InstructionSource.HighHalf(source)
       else source
     for {
       srcA <- if (machine.format.isDpp) Right(InstructionSource.DPP) else operand(EncodingField.SRC0)
@@ -3060,10 +3036,8 @@ private object VMCompiler {
         s"$opcode source modifiers are not implemented"
       )
       _ <- Either.cond[NonEmpty[String], Unit](
-        halfOpSelection(opcode).forall(defined =>
-          opSelection == 0 ||
-            ((halfOpSelectionDefined(target) || NativeHalfOpcodes(opcode)) && (opSelection & ~defined) == 0)
-        ),
+        !halfOpSel || opSelection == 0 ||
+          (halfSelectionDefined(opcode, target) && (opSelection & ~halfMask) == 0),
         (),
         s"$opcode op_sel is not implemented"
       )
@@ -3288,8 +3262,8 @@ private object VMCompiler {
                 Instruction.VBinary(
                   operation = operation,
                   dest = destination,
-                  srcA = srcA,
-                  srcB = srcB,
+                  srcA = half(srcA, 0),
+                  srcB = half(srcB, 1),
                   clamp = clamp
                 )
               )
@@ -3399,22 +3373,6 @@ private object VMCompiler {
               negateHigh = machine(EncodingField.ABS).toInt,
               clamp = clamp
             ))
-          case VFmaF16 if halfOpSelectionDefined(target) =>
-            def selected(source: InstructionSource, bit: Int): InstructionSource =
-              if ((opSelection & (1 << bit)) != 0) InstructionSource.HighHalf(source) else source
-            vectorTernaryOperation(opcode)
-              .map(operation =>
-                Instruction.VTernary(
-                  operation,
-                  destination,
-                  selected(srcA, 0),
-                  selected(srcB, 1),
-                  selected(srcC, 2),
-                  modifiers,
-                  clamp
-                )
-              )
-              .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
           case VAdd3U32 | VOr3B32 | VXor3B32 | VFmaF16 | VDivFmasF32 | VMadLegacyU16 | VMadU16 | VMadU32U24 | VAlignbitB32 | VBfiB32 |
               VMed3I16 | VMed3I32 | VMed3U16 | VMed3U32 | VMin3F32 |
               VMax3I16 | VMax3U16 | VMin3I16 | VMin3U16 |
@@ -3425,9 +3383,16 @@ private object VMCompiler {
               VMaximumminimumF32 | VMinimummaximumF32 |
               VAlignbyteB32 | VSadU8 | VSadHiU8 | VSadU16 | VSadU32 | VMsadU8 | VAshrPkI8I32 | VAshrPkU8I32 |
               VAddMaxI32 | VAddMaxU32 | VAddMinI32 | VAddMinU32 | VMadU32 =>
-            vectorTernaryOperation(opcode)
-              .map(operation => Instruction.VTernary(operation, destination, srcA, srcB, srcC, modifiers, clamp))
-              .toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
+            plainTernary(
+              opcode,
+              destination,
+              (srcA, srcB, srcC),
+              halfMask,
+              opSelection,
+              halfSelectionDefined(opcode, target),
+              modifiers,
+              clamp
+            )
           case VMax3F16 | VMin3F16 | VMed3F16 | VMaxminF16 | VMinmaxF16 | VMax3NumF16 | VMin3NumF16 | VMed3NumF16 |
               VMaxminNumF16 | VMinmaxNumF16 | VMinimum3F16 | VMaximum3F16 | VMaximumminimumF16 | VMinimummaximumF16 =>
             halvedTernary
@@ -3606,7 +3571,7 @@ private object VMCompiler {
           clamp
         )
       routed <- if (machine.format.isDpp) dataParallel(machine, operation, target) else Right(operation)
-    } yield halfResult(opcode, routed, destination, (opSelection & 8) != 0, target)
+    } yield halfResult(opcode, machine.encoding, routed, destination, (opSelection & 8) != 0, target)
   }
 
   // the mixed-precision and dot forms route source 0 under DPP from GFX11 on

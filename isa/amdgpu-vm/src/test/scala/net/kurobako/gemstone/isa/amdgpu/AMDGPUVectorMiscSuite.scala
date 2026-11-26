@@ -520,6 +520,30 @@ class AMDGPUVectorMiscSuite extends Suite {
     Vec(0x3c001111L, 0x38002222L, 0xdead5678L),
     0xdead3c00L
   )
+  check(
+    "v_med3_i16 v4.h, v2.l, v3.h, v5.l op_sel:[0,1,0,1] reads each source's selected half",
+    Vec(gfx1100 -> Vec(0x04, 0x50, 0x50, 0xd6, 0x02, 0x07, 0x16, 0x04)),
+    Vec(0x00010002L, 0x00050003L, 0xdead5678L, 0x00070004L),
+    0x00045678L
+  )
+  check(
+    "v_max3_i16 v4.h, v2.l, v3.h, v5.l op_sel:[0,1,0,1] writes the selected destination half",
+    Vec(gfx1100 -> Vec(0x04, 0x50, 0x4d, 0xd6, 0x02, 0x07, 0x16, 0x04)),
+    Vec(0x00010002L, 0x00050003L, 0xdead5678L, 0x00070004L),
+    0x00055678L
+  )
+  check(
+    "v_mad_u16 v4.h, v2.l, v3.l, v5.l op_sel:[0,0,0,1] writes the selected destination half",
+    Vec(gfx1100 -> Vec(0x04, 0x40, 0x41, 0xd6, 0x02, 0x07, 0x16, 0x04)),
+    Vec(0x00010002L, 0x00000003L, 0xdead5678L, 0x00000004L),
+    0x000a5678L
+  )
+  check(
+    "v_add_nc_u16 v4.h, v2.l, v3.l op_sel:[0,0,1] writes the selected destination half",
+    Vec(gfx1100 -> Vec(0x04, 0x40, 0x03, 0xd7, 0x02, 0x07, 0x02, 0x02)),
+    Vec(0x00010002L, 0x00000003L, 0xdead5678L),
+    0x00055678L
+  )
 
   test("gfx1100 v_cndmask_b16 v4.l, v2.l, v3.h, vcc_lo selects the half VCC picks") {
     import InstructionSource.*
