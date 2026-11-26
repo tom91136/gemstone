@@ -49,8 +49,10 @@ private object VMAsync {
       : Either[Fault, Array[Byte]] =
     if (size == 0) Right(Array.emptyByteArray)
     else context.workgroup.bufferBytes(address, size) match {
-      case Some(bytes)                                    => Right(bytes)
-      case None if VMAddressSpace.isShared(address, size) =>
+      case Some(bytes) => Right(bytes)
+      case None
+          if VMAddressSpace.isShared(address, size) &&
+            !VMMemoryAccess.registeredBelowWindows(context, address, size) =>
         sharedTarget(context, address, size.raw, "tensor map").map((owner, start) => readShared(owner, start, size))
       case None =>
         context.device.memory.read(GuestAddress(address), size).map(Vec.toArray(_)).leftMap(located(context, lane))

@@ -13,6 +13,16 @@ import scala.collection.mutable
 /** One lane's memory accesses, routed to the storage their address space selects. */
 private object VMMemoryAccess {
 
+  /** A registered allocation at a numeric address in a shared or local window is global memory: host-visible
+    * allocations can land below 4 GiB, so the window alone does not name on-chip storage.
+    */
+  private[isa] inline def registeredBelowWindows(context: VMContext, address: Long, size: Int >= 0): Boolean =
+    (VMAddressSpace.isShared(address, size) || VMAddressSpace.isLocal(address)) &&
+      (context.device.memory.locate(GuestAddress(address), size) match {
+        case Right(AddressSpace.Location.Within(_, _)) => true
+        case _                                         => false
+      })
+
   /** Routes one access to the parameter buffers, the workgroup's shared or thread-local storage, or device memory.
     * Generic addresses select a window by aperture; explicit global accesses still see parameter buffers. Explicit
     * local addresses are relative to the executing frame, generic ones to the thread's whole local window.
@@ -29,7 +39,10 @@ private object VMMemoryAccess {
     case MemoryAccess.Local  => local(context.frame.localBase + address)
     case _                   =>
       context.workgroup.withBuffer(address, size)(buffer)(
-        if (access.generic && VMAddressSpace.isShared(address, size) && context.workgroup.sharedOwner(address) != null)
+        if (access.generic && registeredBelowWindows(context, address, size)) global
+        else if (
+          access.generic && VMAddressSpace.isShared(address, size) && context.workgroup.sharedOwner(address) != null
+        )
           shared
         else if (access.generic && VMAddressSpace.isLocal(address)) local(address)
         else global
@@ -179,8 +192,9 @@ private object VMMemoryAccess {
       size > 0 && size <= 16 &&
       (size & (size.raw - 1)) == 0 &&
       (address & (size.raw - 1).toLong) == 0L &&
-      !VMAddressSpace.isShared(address) && !VMAddressSpace.isLocal(address) &&
-      context.workgroup.withBuffer(address, size)((_, _) => false)(true))
+      (registeredBelowWindows(context, address, size) ||
+        (!VMAddressSpace.isShared(address) && !VMAddressSpace.isLocal(address) &&
+          context.workgroup.withBuffer(address, size)((_, _) => false)(true))))
 
   /** The misaligned-address fault of an access of `size` bytes at `address`, or null where it is aligned to the largest
     * power of two dividing `size`. NVIDIA GPUs fault such an access in every state space, kernel parameters reached
@@ -203,9 +217,10 @@ private object VMMemoryAccess {
         s"pc ${context.pc}, lane $lane: ${width.toScalarByteWidth}-byte atomic at 0x${address.toHexString}"
       )
 
-  def atomicTarget(space: MemorySpace, address: Long, width: ScalarBitWidth): AtomicTarget =
+  def atomicTarget(context: VMContext, space: MemorySpace, address: Long, width: ScalarBitWidth): AtomicTarget =
     if (space == MemorySpace.Shared) AtomicTarget.Shared
     else if (space != MemorySpace.Generic) AtomicTarget.Device
+    else if (registeredBelowWindows(context, address, width.toScalarByteWidth)) AtomicTarget.Device
     else if (VMAddressSpace.isShared(address, width.toScalarByteWidth)) AtomicTarget.Shared
     else if (VMAddressSpace.isLocal(address)) AtomicTarget.Local
     else AtomicTarget.Device

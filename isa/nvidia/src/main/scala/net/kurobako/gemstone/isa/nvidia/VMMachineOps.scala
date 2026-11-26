@@ -61,7 +61,11 @@ private[isa] object VMMachineOps {
     case Space.Shared  => writeShared(context, address, data, what)
     case Space.Global  => writeDevice(context, lane, address, data)
     case Space.Generic =>
-      if (VMAddressSpace.isShared(address, data.length)) writeShared(context, address, data, what)
+      if (
+        VMAddressSpace.isShared(address, data.length) &&
+        !VMMemoryAccess.registeredBelowWindows(context, address, data.length.unsafe[Int >= 0])
+      )
+        writeShared(context, address, data, what)
       else writeDevice(context, lane, address, data)
     case _ => Left(unsupported)
   }

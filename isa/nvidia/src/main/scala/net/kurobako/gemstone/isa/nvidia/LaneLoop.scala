@@ -868,7 +868,7 @@ private class LaneLoop(val context: VMContext) extends AnyVal with NvidiaSinks[L
       val raw = context.read(lane, address)
       VMMemoryAccess.misalignedAtomic(context, lane, raw, width) match {
         case null =>
-          val target = VMMemoryAccess.atomicTarget(space, raw, width)
+          val target = VMMemoryAccess.atomicTarget(context, space, raw, width)
           VMObservation.atomic(context, lane, raw, width.toScalarByteWidth.toLong, target == AtomicTarget.Shared)
           effects.stage(VMWrite.Atomic(
             lane,

@@ -127,6 +127,46 @@ class VMMemoryAccessSuite extends Suite {
     )
   }
 
+  test("generic stores to registered allocations below 4 GiB reach global memory") {
+    class LowMemory extends ArrayMemory {
+      val globalWrites: mutable.ArrayBuffer[Long] = mutable.ArrayBuffer.empty
+      override def writeValue(address: GuestAddress, value: Long, size: Int in 1 ~ 8): Either[Fault, Unit] = {
+        globalWrites += address.raw
+        super.writeValue(address, value, size)
+      }
+    }
+    val memory = LowMemory()
+    memory.allocate(allocation, 64, GuestAddress(sharedBase))
+    memory.allocate(AllocationId(2), 64, GuestAddress(8L))
+    val program = Vec(
+      Instruction.Store(Value.Immediate(sharedBase), Value.Immediate(0x1111), 32, MemoryAccess.Generic(false)),
+      Instruction.Store(Value.Immediate(8L), Value.Immediate(0x2222), 32, MemoryAccess.Generic(false)),
+      Instruction.Return
+    )
+    assertEquals(execute(program, memory), Right(()))
+    assertEquals(Vec.from(memory.globalWrites), Vec(sharedBase, 8L))
+    assertEquals(memory.getInt(allocation, 0), 0x1111)
+    assertEquals(memory.getInt(AllocationId(2), 0), 0x2222)
+  }
+
+  test("generic atomics on a registered allocation below 4 GiB reach global memory") {
+    val memory = ArrayMemory()
+    memory.allocate(allocation, 64, GuestAddress(sharedBase))
+    val program = Vec(
+      Instruction.Atomic(
+        Some(r(0)),
+        Value.Immediate(sharedBase),
+        Value.Immediate(1),
+        32,
+        MemorySpace.Generic,
+        AtomicOperation.Add
+      ),
+      Instruction.Return
+    )
+    assertEquals(execute(program, memory), Right(()))
+    assertEquals(memory.getInt(allocation, 0), 1)
+  }
+
   test("shared-window generic loads, stores and atomics alias explicit shared storage") {
     val memory   = ObservedMemory()
     val output   = memory.base
