@@ -1429,6 +1429,26 @@ TEST_CASE("HIP function attributes and occupancy of a registered kernel follow i
   __hipUnregisterFatBinary(token);
 }
 
+TEST_CASE("HIP direct launches still enforce the kernel's 192-thread code-object bound", "[hip]") {
+  gemstone_test::RpcFixture fixture;
+  fixture.kernelLaunchBound(192);
+  const gemstone_test::RpcEnvironment environment(fixture);
+  const auto bundle = offloadBundle(gemstone::hsa::test::codeObjectFixture(1, true, true));
+  const std::array<const void *, 3> wrapper{nullptr, bundle.data(), nullptr};
+  void **const token = __hipRegisterFatBinary(wrapper.data());
+  __hipRegisterFunction(token, reinterpret_cast<const void *>(&occupancyStub), nullptr, "add", 0, nullptr, nullptr, nullptr, nullptr,
+                        nullptr);
+  hipFuncAttributes attributes{};
+  REQUIRE((hipFuncGetAttributes(&attributes, reinterpret_cast<const void *>(&occupancyStub)) == hipSuccess));
+  CHECK((attributes.maxThreadsPerBlock == 192));
+  int *output = nullptr;
+  void *arguments[] = {&output};
+  CHECK((hipLaunchKernel(reinterpret_cast<const void *>(&occupancyStub), dim3(1), dim3(256), arguments, 0, nullptr)
+         == hipErrorLaunchFailure));
+  CHECK((fixture.launches.load() == 0));
+  __hipUnregisterFatBinary(token);
+}
+
 TEST_CASE("HIP reports the multiprocessors, clock and memory of the selected device preset", "[hip]") {
   const gemstone_test::Environment device(gemstone::environment::Device, "Radeon RX 9070 XT");
   char name[64]{};

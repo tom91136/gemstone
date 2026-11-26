@@ -165,7 +165,7 @@ class LoadedProgram private (program: CodeObject, workgroups: Workgroups) extend
 
   override def kernel(name: NonEmpty[String]): Either[Fault, KernelMetadata] =
     initialised.flatMap { program =>
-      program.metadata.get(program.aliases.getOrElse(name, name)).orElse(program.metadata.get(name))
+      program.metadata.get(name).orElse(program.metadata.get(program.aliases.getOrElse(name, name)))
         .toRight(Fault.NotFound(s"AMDGPU kernel metadata for '$name' is not present"))
     }
 
