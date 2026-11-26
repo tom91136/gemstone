@@ -168,27 +168,25 @@ class PacingStressSuite extends Suite {
         while (!stop.get() && deadline.hasTimeLeft()) {
           permits.acquire()
           holders.incrementAndGet()
-          try
+          try {
+            val pace = pacing.join()
             try {
-              val pace = pacing.join()
-              try {
-                var step = 0
-                while (step < steps && !stop.get()) { pace.step(); step += 1 }
-                val _ = joins.incrementAndGet()
-              } finally pace.leave()
-            } catch {
-              case error: IllegalStateException =>
-                val _ = failures.incrementAndGet()
-                val _ = first.compareAndSet(
-                  None,
-                  Some(
-                    s"${error.getMessage}; ${holders.get()} of $slots permits held, this joiner holds one, " +
-                      s"so at most ${slots - 1} slots were taken and one was free"
-                  )
+              var step = 0
+              while (step < steps && !stop.get()) { pace.step(); step += 1 }
+              val _ = joins.incrementAndGet()
+            } finally pace.leave()
+          } catch {
+            case error: IllegalStateException =>
+              val _ = failures.incrementAndGet()
+              val _ = first.compareAndSet(
+                None,
+                Some(
+                  s"${error.getMessage}; ${holders.get()} of $slots permits held, this joiner holds one, " +
+                    s"so at most ${slots - 1} slots were taken and one was free"
                 )
-                stop.set(true)
-            }
-          finally {
+              )
+              stop.set(true)
+          } finally {
             holders.decrementAndGet()
             permits.release()
           }
