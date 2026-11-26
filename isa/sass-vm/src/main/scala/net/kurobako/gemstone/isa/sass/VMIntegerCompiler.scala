@@ -220,31 +220,15 @@ private object VMIntegerCompiler {
         val lanes: Int in (2, 4) =
           if (PartialFunction.cond(format) { case Modifier.`U8x4` | Modifier.`S8x4` => true }) 4 else 2
         val signed = PartialFunction.cond(format) { case Modifier.`S8x4` | Modifier.`S16x2` => true }
-        def lanewise(operation: VideoOperation, left: Value, right: Value) = {
-          val result = temp()
-          emit(VideoSimd(
-            result.slot,
-            left,
-            right,
-            Value.Immediate(0L),
-            operation,
-            lanes,
-            signed,
-            signed,
-            signed,
-            false,
-            false
-          ))
-          result
-        }
-        def extremum(operation: VideoOperation) = lanewise(operation, source(data(1)), source(data(2)))
-        val selected                            = select(
+        def extremum(operation: VideoOperation) =
+          lanewise(operation, lanes, signed, source(data(1)), source(data(2)))
+        val selected = select(
           extremum(VideoOperation.Minimum),
           extremum(VideoOperation.Maximum),
           predicateSource(data(3))
         )
         val result = if (modifiers.contains(Modifier.RELU))
-          lanewise(VideoOperation.Maximum, selected, Value.Immediate(0L))
+          lanewise(VideoOperation.Maximum, lanes, signed, selected, Value.Immediate(0L))
         else selected
         if (outputs.exists(value => !OperandQueries.isAlwaysPredicate(value))) {
           if (lanes != 2 || outputs.size != 2) unsupported("VIMNMX predicate outputs require two 16-bit lanes")
@@ -261,13 +245,23 @@ private object VMIntegerCompiler {
         minMax()
         true
       case _: Form.Vimnmx3 =>
-        requireModifiers(Set(Modifier.U32, Modifier.S32))
+        requireModifiers(Set(Modifier.U32, Modifier.S32, Modifier.U16x2, Modifier.S16x2, Modifier.RELU))
         requireOperands(5, "expected three integer min/max inputs and a selector")
-        val signed = !modifiers.contains(Modifier.U32)
-        val inputs = operands.slice(1, 4).map(source(_))
-        val low    = inputs.tail.foldLeft(inputs.head)(binary(IntegerOperation.Minimum(signed), _, _))
-        val high   = inputs.tail.foldLeft(inputs.head)(binary(IntegerOperation.Maximum(signed), _, _))
-        store(operands.head, select(low, high, predicateSource(operands(4))))
+        val signed = !modifiers.exists(PartialFunction.cond(_) { case Modifier.U32 | Modifier.U16x2 => true })
+        val packed = modifiers.exists(PartialFunction.cond(_) { case Modifier.U16x2 | Modifier.S16x2 => true })
+        val relu   = modifiers.contains(Modifier.RELU)
+        if (relu && !signed) unsupported("RELU clamps signed min/max")
+        def extremum(operation: IntegerOperation, video: VideoOperation, left: Value, right: Value) =
+          if (packed) lanewise(video, 2, signed, left, right) else binary(operation, left, right)
+        def smaller(left: Value, right: Value) =
+          extremum(IntegerOperation.Minimum(signed), VideoOperation.Minimum, left, right)
+        def larger(left: Value, right: Value) =
+          extremum(IntegerOperation.Maximum(signed), VideoOperation.Maximum, left, right)
+        val inputs   = operands.slice(1, 4).map(source(_))
+        val low      = inputs.tail.foldLeft[Value](inputs.head)(smaller)
+        val high     = inputs.tail.foldLeft[Value](inputs.head)(larger)
+        val selected = select(low, high, predicateSource(operands(4)))
+        store(operands.head, if (relu) larger(selected, Value.Immediate(0L)) else selected)
         true
       case _: Form.Vmnmx =>
         videoMinMax()
@@ -1234,6 +1228,31 @@ private object VMIntegerCompiler {
     val start                         = if (predicate(operands.head)) 0 else 1
     val outputs                       = operands.drop(start).takeWhile(predicate)
     (outputs, operands.take(start) ++ operands.drop(start + outputs.size))
+  }
+
+  private def lanewise(
+      video: VideoOperation,
+      lanes: Int in (2, 4),
+      signed: Boolean,
+      left: Value,
+      right: Value
+  )(using context: VMCompilationContext): Value.Register = {
+    import context.*
+    val result = temp()
+    emit(VideoSimd(
+      result.slot,
+      left,
+      right,
+      Value.Immediate(0L),
+      video,
+      lanes,
+      signed,
+      signed,
+      signed,
+      false,
+      false
+    ))
+    result
   }
 
   /** A `VIMNMX` on 8-bit or 16-bit lanes, which clamps negative 16-bit lanes to zero under `RELU`. */

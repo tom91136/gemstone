@@ -498,6 +498,7 @@ struct FatbinWrapper {
 
 struct Fatbin {
   std::string ptx;
+  std::string newerPtx;
   std::vector<uint8_t> cubin;
   int cubinTarget = 0;
   int selectedCubinTarget = -1;
@@ -604,7 +605,7 @@ bool appendFatbin(Fatbin &fatbin, const uint8_t *data, bool validating) {
     if ((kind & 1U) != 0 && content)
       if (const auto ptx = findPtxText(*content)) {
         fatbin.metadataOnly = false;
-        if (!appendPtx(fatbin.ptx, *ptx)) return false;
+        if (!appendPtx(target && cubinTarget > *target ? fatbin.newerPtx : fatbin.ptx, *ptx)) return false;
       }
     if (cubin) {
       sawCubin = true;
@@ -640,9 +641,17 @@ bool appendFatbin(Fatbin &fatbin, const uint8_t *data, bool validating) {
   }
   while (offset < totalSize)
     if (data[offset++] != 0) return false;
-  if (fatbin.ptx.empty() && sawCubin && (fatbin.selectedCubinTarget >= 0 ? fatbin.selectedCubinEmpty : onlyEmptyCubins))
+  if (fatbin.ptx.empty() && fatbin.newerPtx.empty() && sawCubin
+      && (fatbin.selectedCubinTarget >= 0 ? fatbin.selectedCubinEmpty : onlyEmptyCubins))
     return appendPtx(fatbin.ptx, emptyPtx());
   return true;
+}
+
+std::vector<uint8_t> deviceCubin(const Fatbin &fatbin) {
+  const auto target = configuredPtxVersion();
+  if (fatbin.selectedCubinEmpty || !target || fatbin.selectedCubinTarget > *target || fatbin.selectedCubinTarget / 10 != *target / 10)
+    return {};
+  return fatbin.cubin;
 }
 
 // Validation additionally decompresses oversized cubins for newer targets so their headers can be checked.
@@ -659,13 +668,8 @@ std::optional<Fatbin> parseFatbin(const void *image, bool validating = false) {
   if (wrapped && wrapper->version >= 2 && wrapper->prelinked)
     for (size_t index = 0; index < 64 && wrapper->prelinked[index]; ++index)
       if (!appendFatbin(fatbin, static_cast<const uint8_t *>(wrapper->prelinked[index]), validating)) return std::nullopt;
+  if (fatbin.ptx.empty() && deviceCubin(fatbin).empty()) fatbin.ptx = std::move(fatbin.newerPtx);
   return fatbin;
-}
-
-std::vector<uint8_t> deviceCubin(const Fatbin &fatbin) {
-  const auto target = configuredPtxVersion();
-  if (fatbin.selectedCubinEmpty || !target || fatbin.selectedCubinTarget > *target) return {};
-  return fatbin.cubin;
 }
 
 // PTX the selected code mode may execute; null when only the selected cubin applies.

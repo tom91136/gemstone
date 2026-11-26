@@ -243,6 +243,28 @@ class MinMaxSuite extends Suite {
     }
 
   for {
+    sm                             <- Vec(90, 100, 103)
+    (modifier, selector, expected) <- Vec(
+      (".S16x2", "PT", 0xff9cfff8),
+      (".S16x2", "!PT", 0x00640006),
+      (".U16x2", "PT", 0x001b0003),
+      (".U16x2", "!PT", 0xff9cfff8),
+      (".S16x2.RELU", "PT", 0),
+      (".S16x2.RELU", "!PT", 0x00640006),
+      (".S32.RELU", "PT", 0),
+      (".S32.RELU", "!PT", 0x0064fff8)
+    )
+  }
+    test(s"sm$sm VIMNMX3$modifier selector=$selector orders each lane of its three inputs") {
+      check(
+        sm,
+        s"MOV R4, 0x0064fff8; UMOV UR6, 0x001b0003; MOV R5, 0xff9c0006; VIMNMX3$modifier R5, R4, UR6, R5, $selector; " +
+          "LDC.64 R2, c[0x0][0x160]; STG.E [R2.64], R5; EXIT",
+        Vec(expected)
+      )
+    }
+
+  for {
     propagate <- Flags
     minimum   <- Flags
   }

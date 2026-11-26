@@ -334,6 +334,47 @@ TEST_CASE("CUDA linked-binary wrappers keep an executable cubin over metadata st
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
+TEST_CASE("CUDA PTX routes run the device cubin when a fatbin carries only newer PTX", "[cuda][code-mode]") {
+  gemstone_test::RpcFixture fixture;
+  const auto endpoint = fixture.endpoint();
+  const gemstone_test::Environment rpcEndpoint(gemstone::environment::RpcEndpoint, endpoint.c_str());
+  const gemstone_test::Environment rpcClient(gemstone::environment::RpcClientId, "42");
+  const gemstone_test::Environment targetArch(gemstone::environment::TargetArch, "compute_89");
+  const gemstone_test::Environment codeMode(gemstone::environment::CudaCodeMode, "ptx");
+  REQUIRE(cuInit(0) == CUDA_SUCCESS);
+  CUcontext context = nullptr;
+  REQUIRE(cuCtxCreate_v2(&context, 0, 0) == CUDA_SUCCESS);
+
+  constexpr char newerPtx[] = ".version 9.3\n.target sm_120\n.address_size 64\n.visible .entry newer() { ret; }\n";
+  const auto cubin = executableCubin();
+  const auto fatbinOf = [&](int cubinTarget, bool compatiblePtx) {
+    std::vector<uint8_t> fatbin(16);
+    store32(fatbin, 0, 0xba55ed50);
+    store16(fatbin, 6, 16);
+    if (compatiblePtx) appendFatbinEntry(fatbin, 1, 89, reinterpret_cast<const uint8_t *>(Ptx), sizeof(Ptx) - 1);
+    appendFatbinEntry(fatbin, 1, 120, reinterpret_cast<const uint8_t *>(newerPtx), sizeof(newerPtx) - 1);
+    appendFatbinEntry(fatbin, 2, cubinTarget, cubin.data(), cubin.size());
+    store64(fatbin, 8, fatbin.size() - 16);
+    return fatbin;
+  };
+  const auto loaded = [&](const std::vector<uint8_t> &fatbin) {
+    CUmodule module = nullptr;
+    REQUIRE(cuModuleLoadData(&module, fatbin.data()) == CUDA_SUCCESS);
+    auto image = fixture.lastProgramImage();
+    REQUIRE(cuModuleUnload(module) == CUDA_SUCCESS);
+    return image;
+  };
+  const auto text = [](std::string_view ptx) { return std::vector<uint8_t>(ptx.begin(), ptx.end()); };
+
+  CHECK(loaded(fatbinOf(89, false)) == cubin);
+  CHECK(loaded(fatbinOf(86, false)) == cubin);
+  CHECK(loaded(fatbinOf(89, true)) == text(Ptx));
+  CUmodule rejected = nullptr;
+  CHECK(cuModuleLoadData(&rejected, fatbinOf(75, false).data()) == CUDA_ERROR_INVALID_PTX);
+  CHECK(cuModuleLoadData(&rejected, fatbinOf(90, false).data()) == CUDA_ERROR_INVALID_PTX);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("CUDA strict code modes reject wrong kinds and select matching fatbin images", "[cuda][code-mode]") {
   gemstone_test::RpcFixture fixture;
   const auto endpoint = fixture.endpoint();

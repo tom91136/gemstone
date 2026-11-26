@@ -523,6 +523,17 @@ class FloatSuite extends Suite {
     pair("R6.F32x2", "URZ.F32x2", Vec(0x3fa00000, 0x41280000))
   }
 
+  for (sm <- Vec(100, 103))
+    test(s"sm$sm packed float32 NP negates the high element after the swizzle, which a leading minus then flips") {
+      pair("R6.F32x2.NP", "R8.F32x2", Vec(0x40880000, 0xc1680000), sm = sm)
+      pair("-R6.F32x2.NP", "R8.F32x2", Vec(0x3fe00000, 0x40d00000), sm = sm)
+      pair("R6.F32x2", "R8.F32x2.NP", Vec(0x40880000, 0x41680000), sm = sm)
+      pair("-R6.F32x2.LO_HI.NP", "R8.F32x2", Vec(0xc0f00000, 0xc0300000), sm = sm)
+      pair("R6.F32x2.NP", "R8.F32x2", Vec(0x40700000, 0x42280000), opcode = "FMUL2", sm = sm)
+      pair("-R6.F32x2.LO_HI.NP", "R9.F32, R8.F32x2", Vec(0x42340000, 0xc1100000), opcode = "FFMA2", sm = sm)
+      pair("R6.F32x2", "R9.F32, R8.F32x2.NP", Vec(0xc0000000, 0xc2180000), opcode = "FFMA2", sm = sm)
+    }
+
   test("FADD2 rejects misaligned and out-of-range pairs") {
     Vec(
       "FADD2 R7, R6.F32x2, R8.F32x2",

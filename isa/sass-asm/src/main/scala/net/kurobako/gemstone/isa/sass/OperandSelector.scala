@@ -26,6 +26,7 @@ object OperandSelector {
     F32x2,
     HI_LO,
     LO_HI,
+    NP,
     B0,
     B1,
     B2,
@@ -75,6 +76,7 @@ enum OperandSelector(val spellingValue: NonEmpty[String]) derives CanEqual {
   case F32x2  extends OperandSelector("F32x2")
   case HI_LO  extends OperandSelector("HI_LO")
   case LO_HI  extends OperandSelector("LO_HI")
+  case NP     extends OperandSelector("NP")
   case B0     extends OperandSelector("B0")
   case B1     extends OperandSelector("B1")
   case B2     extends OperandSelector("B2")

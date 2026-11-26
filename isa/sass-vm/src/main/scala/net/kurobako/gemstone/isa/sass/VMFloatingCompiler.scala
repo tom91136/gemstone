@@ -752,15 +752,23 @@ private object VMFloatingCompiler {
 
   private def floatPairOperand(operand: Operand)(using context: VMCompilationContext): Value = {
     import context.*
+    val highSign = 0x8000000000000000L
     operand match {
       case Operand.Unary(inner, negative, false, absolute) =>
         val signs  = 0x8000000080000000L
         val mask   = Value.Immediate(if (absolute) ~signs else -1L)
-        val result = binary(IntegerOperation.BitwiseAnd, floatPairOperand(inner), mask, 64)
-        if (negative) emit(IntegerBinary(IntegerOperation.BitwiseXor, result.slot, result, Value.Immediate(signs), 64))
+        val value  = floatPairOperand(OperandQueries.without(inner, OperandSelector.NP))
+        val result = binary(IntegerOperation.BitwiseAnd, value, mask, 64)
+        val flips  = (if (negative) signs else 0L) ^
+          (if (OperandQueries.has(inner, OperandSelector.NP)) highSign else 0L)
+        if (flips != 0)
+          emit(IntegerBinary(IntegerOperation.BitwiseXor, result.slot, result, Value.Immediate(flips), 64))
         result
       case Operand.Unary(_, _, _, _) => unsupported("packed float32 does not support bitwise source inversion")
-      case _                         =>
+      case _ if OperandQueries.has(operand, OperandSelector.NP) =>
+        val value = floatPairOperand(OperandQueries.without(operand, OperandSelector.NP))
+        binary(IntegerOperation.BitwiseXor, value, Value.Immediate(highSign), 64)
+      case _ =>
         val selected = OperandQueries.qualifiers(operand)
         val base     = OperandQueries.base(OperandQueries.without(operand, OperandSelector.reuse))
         val scalar   = selected == Vec(OperandSelector.F32)
