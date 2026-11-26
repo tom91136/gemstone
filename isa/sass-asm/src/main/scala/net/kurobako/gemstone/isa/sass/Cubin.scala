@@ -6,6 +6,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.elf.*
+import net.kurobako.gemstone.isa.catalogue.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.profile.Architecture
 import net.kurobako.gemstone.vm.*
@@ -507,25 +508,73 @@ object Cubin {
   // Other EIATTR lists of instruction offsets, which only the code's author can carry across an edit.
   private val AuthoredOffsets = Set(0x25, 0x27, 0x28, 0x2d, 0x31, 0x34, 0x39, 0x3a)
   private val Ctaids          = Set(SpecialRegister.SR_CTAID_X, SpecialRegister.SR_CTAID_Y, SpecialRegister.SR_CTAID_Z)
-  private val Fp64Opcodes     = Set("DADD", "DMUL", "DFMA", "DMNMX", "DSET", "DSETP", "DCHK")
-  private val Fp64PairFields  = Set("_Rd", "_Ra", "_Rb", "_Rc")
+  private def registerBudget(kernel: Kernel, code: CodeSection): Either[NonEmpty[String], Unit] = {
+    import ConditionExpression.*
+    import net.kurobako.gemstone.collection.Vec.toVec
 
-  private def fp64Budget(kernel: Kernel, code: CodeSection): Either[NonEmpty[String], Unit] = {
-    val budget = (kernel.registerCount.raw - 4) / 2 * 2
-    val bad    = code.instructions.flatMap { instruction =>
-      if (!Fp64Opcodes(instruction.mnemonic.raw)) Vec.empty[Int]
-      else instruction.machine.fold(Vec.empty[Int]) { machine =>
-        Vec.from(machine.fields.collect {
-          case (name, value) if Fp64PairFields.exists(name.endsWith) => value.toInt
-        }).filter(base => base % 2 != 0 || base > budget).distinct
+    def references(expression: ConditionExpression): Set[String] = expression match {
+      case Field(name, _)         => Set(name)
+      case Unary(_, value)        => references(value)
+      case Binary(_, left, right) => references(left) ++ references(right)
+      case Call(_, arguments)     =>
+        arguments.foldLeft(Set.empty[String])((names, argument) => names ++ references(argument))
+      case Conditional(condition, whenTrue, whenFalse) =>
+        references(condition) ++ references(whenTrue) ++ references(whenFalse)
+      case _ => Set.empty
+    }
+
+    def modulus(expression: ConditionExpression): Option[Int] = expression match {
+      case Binary(BinaryOperator.Remainder, _, Number(value)) if value > 0 && value <= 128 => Some(value.toInt)
+      case Unary(_, value)                                                                 => modulus(value)
+      case Binary(_, left, right)                      => modulus(left).orElse(modulus(right))
+      case Call(_, arguments)                          => arguments.flatMap(modulus).headOption
+      case Conditional(condition, whenTrue, whenFalse) =>
+        modulus(condition).orElse(modulus(whenTrue)).orElse(modulus(whenFalse))
+      case _ => None
+    }
+
+    def units(
+        database: NVDisasm.Database,
+        form: NVDisasm.Form,
+        binding: String,
+        bindings: Map[String, BigInt]
+    ): Int = {
+      val widths = form.conditions.filter(condition =>
+        condition.message.contains("align") && references(condition.expression).contains(binding)
+      ).flatMap { condition =>
+        condition.expression match {
+          case Binary(BinaryOperator.Implies, premise, consequent) =>
+            if (Legality.evaluate(database, premise, bindings).toOption.forall(_ != 0)) modulus(consequent).toVec
+            else Vec.empty[Int]
+          case expression => modulus(expression).toVec
+        }
+      }
+      widths.maxOption.getOrElse(1)
+    }
+
+    val limit    = kernel.registerCount.raw - 3
+    val exceeded = code.instructions.flatMap { instruction =>
+      instruction.machine.fold(Vec.empty[String]) { machine =>
+        machine.target.database.byForm.get(machine.form).fold(Vec.empty[String]) { form =>
+          val bindings = Legality.completeBindings(form, machine.bindings)
+          form.declared.distinct.flatMap { field =>
+            for {
+              domain <- SassDomains.field(machine.target.database, form, field.binding)
+              bank   <- domain.bank
+              if bank == "R"
+              value      <- bindings.get(field.binding)
+              (_, index) <- domain.register(value)
+              span = units(machine.target.database, form, field.binding, bindings)
+              if index + span - 1 > limit
+            } yield s"R${index + span - 1}"
+          }.distinct
+        }
       }
     }.distinct
-    bad.headOption.fold[Either[NonEmpty[String], Unit]](Right(()))(base =>
-      Left(
-        s"FP64 register pair R$base/R${base + 1} exceeds the ${kernel.registerCount.raw}-register budget of ${kernel.name}": NonEmpty[
-          String
-        ]
-      )
+    exceeded.headOption.fold[Either[NonEmpty[String], Unit]](Right(()))(register =>
+      Left(s"register $register exceeds the ${kernel.registerCount.raw}-register budget of ${kernel.name}": NonEmpty[
+        String
+      ])
     )
   }
 
@@ -581,7 +630,7 @@ object Cubin {
       target <- module.kernels.find(_.name == kernel).toRight(s"kernel $kernel is not in the cubin": NonEmpty[String])
       code   <-
         Target.of(module.sm).flatMap(CodeSection.decode(Vec.toArray(text), _)).left.map(_.unsafe[NonEmpty[String]])
-      _      <- fp64Budget(target, code)
+      _      <- registerBudget(target, code)
       parsed <- Image.parse(image)
       info   <- parsed.section(s".nv.info.$kernel").traverse(section => records(parsed.contents(section)))
       _      <- info.getOrElse(Vec.empty[Record]).find(record => AuthoredOffsets(record.attribute)).toLeft(()).left.map(
