@@ -26,8 +26,11 @@ private object VMConstantBank {
   /** The driver's cluster table SR_CgaSize selects; the VM keeps one, at the table's own offsets. */
   val ClusterTable: Long = 0L
 
-  // Hopper and later read the constant-bank window from different c0 fields.
-  private def constantWindowC0(sm: Int): Boolean = sm >= 70 && sm < 90
+  /** The c0 field ptxas reads the generic address of constant bank 3 from: [0x50] before Hopper, [0xd0] on Hopper and
+    * [0x120] from Blackwell.
+    */
+  private def constantWindowC0(sm: Int): Int =
+    if (sm >= 100) 0x120 else if (sm >= 90) 0xd0 else 0x50
 
   /** The base of a thread's local window, which generic local addresses reach at the local offsets the stack pointer
     * counts down from the stack origin, so they end at 4 GiB. A legacy window spans the 16 MiB its top byte tags. The
@@ -201,11 +204,11 @@ private object VMConstantBank {
     else if (c0 && sm >= 70 && offset == (if (sm >= 100) 0x2fc else 0x24) && bits == 32) constant(0L)
     // cvta.const adds the generic address of constant bank 3 to an offset within it.
     else if (
-      c0 && constantWindowC0(sm) && offset == 0x50 && PartialFunction.cond(bits.raw) { case 32 | 64 => true } &&
-      constantWindow.isDefined
+      c0 && sm >= 70 && offset == constantWindowC0(sm) &&
+      PartialFunction.cond(bits.raw) { case 32 | 64 => true } && constantWindow.isDefined
     )
       constant(if (bits == 64) constantWindow.get else constantWindow.get & 0xffffffffL, bits)
-    else if (c0 && constantWindowC0(sm) && offset == 0x54 && bits == 32 && constantWindow.isDefined)
+    else if (c0 && sm >= 70 && sm < 90 && offset == 0x54 && bits == 32 && constantWindow.isDefined)
       constant(constantWindow.get >>> 32)
     // The generic address of the parameter block, from which ptxas addresses __grid_constant__ tensor maps.
     else if (apertureBase(from = 90, older = 0x198, newer = 0x348, offset))

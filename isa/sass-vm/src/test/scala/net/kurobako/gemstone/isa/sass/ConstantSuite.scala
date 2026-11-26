@@ -447,6 +447,41 @@ class ConstantSuite extends Suite {
       }
     }
 
+  // ptxas reads the generic address of constant bank 3 from c0[0xd0] on Hopper and c0[0x120] from Blackwell.
+  for (target <- Target.all if target.sm.raw >= 90) {
+    val field = if (target.sm.raw >= 100) "0x120" else "0xd0"
+    test(s"sm_${target.sm} c[0x0][$field] holds the generic address of constant bank 3") {
+      val module = Harness.module(
+        target.sm,
+        Vec(Entry("window", 0x160, Vec(8), registers = 8)),
+        constants = Vec(".nv.constant3" -> LittleEndian.toVec(77L, 8))
+      )
+      val bank      = module.sections.find(_.name == ".nv.constant3").get
+      val functions = Vec(Listing.program(
+        s"LDC.64 R4, c[0x0][$field]; LD.E R6, [R4.64]; " +
+          "LDC.64 R8, c[0x0][0x160]; STG.E [R8.64], R6; EXIT",
+        "window"
+      ).value)
+      session { (service, fixtures) =>
+        val program = service.load(ProgramEncoding.CUDACubin, fixtures.image(Image(module, functions)))
+          .fold(e => fail(e.message), identity)
+        val storage = service.registerAllocation(8).toOption.get
+        val output  = service.registerAllocation(4).toOption.get
+        assert(service.write(storage, 0L, LittleEndian.toVec(77L, 8)).isRight)
+        assert(service.bindGlobal(program, s"__sass_const${bank.index}", storage, 0L).isRight)
+        val task = KernelTask.validated(
+          "window": NonEmpty[String],
+          LaunchGeometry.Dimensions.One,
+          LaunchGeometry.Dimensions.One,
+          Vec(KernelTask.Argument.Memory(output, 0L))
+        ).toOption.get
+        val completion = service.launch(program, task).fold(e => fail(e.message), identity)
+        assertEquals(service.completion(completion), Right(CompletionStatus.Succeeded))
+        assertEquals(service.read(AllocationRange(output, 0L, 4)), Right(LittleEndian.toVec(77L, 4)))
+      }
+    }
+  }
+
   for {
     destinationFirst <- Flags
     dynamic          <- Flags
