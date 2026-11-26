@@ -55,7 +55,7 @@ are extension forms with no VM implementation: 38 image and descriptor forms (15
 and blocking-pipe forms (5 rows). The NV tensor layout and view forms are not parked; the only no-rendering stubs in
 `isa/nvidia` are `tensorText` and `valueText`, whose results reach only fault details that the renderer does not emit.
 Rendering the parked forms needs VM semantics for sparse residency and bindless handles, and a work graph or data graph
-pipeline; see `/var/tmp/gs/t191/report.md` for the per-form audit.
+pipeline; the parked forms are listed in `explorer/src/test/resources/coverage/policy.tsv`.
 
 ## 11. Cooperative-groups syscalls beyond sm_89 and PTX mode
 
