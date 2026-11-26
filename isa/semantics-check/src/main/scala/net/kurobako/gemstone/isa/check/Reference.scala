@@ -9,8 +9,8 @@ import scala.util.Random
 /** How an ISA executes one instruction, and the machine state its definitions' contexts read and write: a harness `H`
   * whose givens are those contexts. A case carries the lookup `L` of its instance.
   */
-// the reference exposes input sampling to differential suites
-@SuppressWarnings(Array("bonsai:test-only-member"))
+// the reference exposes input sampling to differential suites; allocation stays per space in overrides
+@SuppressWarnings(Array("bonsai:test-only-member", "bonsai:constant-argument"))
 trait Reference[H, L <: Lookup] {
 
   /** A fresh machine for one run, the same for every `seed`, executing lane `lane` of its wave, or [[lane]] where none
@@ -39,8 +39,6 @@ trait Reference[H, L <: Lookup] {
   def loads(@unused harness: H): Map[Space, Set[(Long, Byte)]] = Map.empty
 
   /** The most bytes a workgroup may allocate of `space`, where a run takes its allocation from [[allocate]]. */
-  // the default is per space; an ISA overrides it for the spaces it can allocate
-  @SuppressWarnings(Array("bonsai:constant-argument"))
   def allocation(@unused space: Space): Option[Long] = None
 
   /** Sets the bytes `harness` allocates of `space`. */

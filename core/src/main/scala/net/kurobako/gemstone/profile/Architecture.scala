@@ -3,8 +3,8 @@ package net.kurobako.gemstone.profile
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.string.*
 
-// each row pins a distinct chip with its own limits and citation
-@SuppressWarnings(Array("bonsai:near-duplicate-code"))
+// each row pins a distinct chip with its own limits and citation; the shared column is a published measurement
+@SuppressWarnings(Array("bonsai:near-duplicate-code", "bonsai:constant-argument"))
 object Architecture {
 
   /** How a partition's scheduler picks among its ready waves. */
@@ -279,15 +279,11 @@ object Architecture {
     dram
   )
 
-  // each row is a published measurement; the shared column stays explicit beside the others
-  @SuppressWarnings(Array("bonsai:constant-argument"))
   private def luoLatency(measured: String, shared: Double, l1: Double, l2: Double, dram: Double) = {
     def cited(value: Double) = published(s"$luo, Table IV", measured)(value)
     Latency(cited(shared), Some(cited(l1)), Some(cited(l2)), cited(dram))
   }
 
-  // the row keeps every latency beside the basis it is estimated from
-  @SuppressWarnings(Array("bonsai:constant-argument"))
   private def estimatedLatency(basis: String, shared: Double, l1: Double, l2: Double, dram: Double) = {
     val source = Source.Estimate(basis)
     Latency(Sourced(shared, source), Some(Sourced(l1, source)), Some(Sourced(l2, source)), Sourced(dram, source))

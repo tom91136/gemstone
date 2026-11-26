@@ -19,6 +19,11 @@ object NvidiaLatency {
   private val sixStalls129 =
     Harvest(ptxas129, Map(Fadd32 -> 6, Fmul32 -> 6, Ffma32 -> 6, Iadd32 -> 6, Lop32 -> 6))
 
+  private val i2fStalls133 = Harvest(
+    ptxas133,
+    Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4, I2f32 -> 5)
+  )
+
   private val harvests: Map[Int, Harvest] = Map(
     50 -> sixStalls129,
     52 -> sixStalls129,
@@ -32,23 +37,11 @@ object NvidiaLatency {
       ptxas129,
       Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4, Shl32 -> 4)
     ),
-    80 -> Harvest(ptxas133, Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4)),
-    86 -> Harvest(
-      ptxas133,
-      Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4, I2f32 -> 5)
-    ),
-    87 -> Harvest(
-      ptxas133,
-      Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4, I2f32 -> 5)
-    ),
-    88 -> Harvest(
-      ptxas133,
-      Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4, I2f32 -> 5)
-    ),
-    89 -> Harvest(
-      ptxas133,
-      Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4, I2f32 -> 5)
-    ),
+    80  -> Harvest(ptxas133, Map(Fadd32 -> 4, Fmul32 -> 4, Ffma32 -> 4, Iadd32 -> 4, Imul32 -> 4, Lop32 -> 4)),
+    86  -> i2fStalls133,
+    87  -> i2fStalls133,
+    88  -> i2fStalls133,
+    89  -> i2fStalls133,
     90  -> Harvest(ptxas133, Map(Shl32 -> 4, Fma64 -> 8, I2f32 -> 5)),
     100 -> Harvest(
       ptxas133,

@@ -79,31 +79,30 @@ object ControlWordHarvestRunner {
     if (decoded.isEmpty) skipped("cubins not decoded") += 1
     decoded.filter(_.sm.raw == sm).fold(Vec.empty[Scheduled]) { module =>
       val program = new LoadedProgram(module, Map.empty, Workgroups.Sequential, _ => None)
-      module.kernels.flatMap { kernel =>
+      val found   = Vec.newBuilder[Scheduled]
+      module.kernels.foreach { kernel =>
         val outcome = Try(program.staticCode(kernel.name)).toEither.left.map(_.getClass.getSimpleName)
           .flatMap(_.left.map(_.message.replace(kernel.name.raw, "<kernel>").takeWhile(_ != '\'').take(Reason)))
         val lowered = outcome.toOption
         skipped(if (lowered.isEmpty) "kernels not lowered" else "kernels") += 1
         outcome.left.foreach(reason => skipped(s"not lowered: $reason") += 1)
-        lowered.fold(Vec.empty[Scheduled]) {
-          (graph, uses, instructions) =>
-            val keptPaths = Vec.newBuilder[Scheduled]
-            ControlWords.paths(graph, uses, instructions).foreach { path =>
-              val schedule = instructions.slice(path.first, path.first + path.steps.size).flatMap(_.scheduling)
-              val steps    = path.steps.map(step =>
-                step.copy(
-                  form = intern(step.form),
-                  reads = step.reads.map(intern),
-                  kinds = step.kinds.map(intern),
-                  writes = step.writes.map(intern)
-                )
+        lowered.foreach { (graph, uses, instructions) =>
+          ControlWords.paths(graph, uses, instructions).foreach { path =>
+            val schedule = instructions.slice(path.first, path.first + path.steps.size).flatMap(_.scheduling)
+            val steps    = path.steps.map(step =>
+              step.copy(
+                form = intern(step.form),
+                reads = step.reads.map(intern),
+                kinds = step.kinds.map(intern),
+                writes = step.writes.map(intern)
               )
-              if (schedule.size != steps.size) skipped("paths with no schedule") += 1
-              else keptPaths += Scheduled(source, kernel.name.raw, ControlWords.Path(path.first, steps), schedule)
-            }
-            keptPaths.result()
+            )
+            if (schedule.size != steps.size) skipped("paths with no schedule") += 1
+            else found += Scheduled(source, kernel.name.raw, ControlWords.Path(path.first, steps), schedule)
+          }
         }
       }
+      found.result()
     }
   }
 
