@@ -6354,6 +6354,7 @@ CUresult cuLaunchHostFunc_v2(CUstream stream, CUhostFn callback, void *userData,
 
 CUresult cuStreamAddCallback(CUstream stream, CUstreamCallback callback, void *userData, unsigned flags) {
   if (flags != 0 || !contextIsLive(activeContext()) || !callback) return CUDA_ERROR_INVALID_VALUE;
+  if (captures.capturing(stream)) return CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED;
   return enqueueCommand(stream, Kind::Host, [=] {
     callback(stream, CUDA_SUCCESS, userData);
     return CUDA_SUCCESS;

@@ -834,6 +834,32 @@ TEST_CASE("graph debug print writes a DOT description", "[cuda][graph][debug]") 
   REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
+TEST_CASE("stream callbacks are rejected during capture while host functions are recorded", "[cuda][graph][capture][host]") {
+  auto *const context = createContext();
+  CUstream stream = nullptr;
+  REQUIRE(cuStreamCreate(&stream, 0) == CUDA_SUCCESS);
+  std::atomic<int> calls{0};
+
+  REQUIRE(cuStreamBeginCapture_v2(stream, CU_STREAM_CAPTURE_MODE_GLOBAL) == CUDA_SUCCESS);
+  CHECK(cuLaunchHostFunc(stream, countCall, &calls) == CUDA_SUCCESS);
+  CHECK(cuStreamAddCallback(
+            stream, [](CUstream, CUresult, void *data) { ++*static_cast<std::atomic<int> *>(data); }, &calls, 0)
+        == CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED);
+  CUgraph graph = nullptr;
+  REQUIRE(cuStreamEndCapture(stream, &graph) == CUDA_SUCCESS);
+
+  CUgraphExec exec = nullptr;
+  REQUIRE(cuGraphInstantiate(&exec, graph, nullptr, nullptr, 0) == CUDA_SUCCESS);
+  REQUIRE(cuGraphLaunch(exec, stream) == CUDA_SUCCESS);
+  REQUIRE(cuStreamSynchronize(stream) == CUDA_SUCCESS);
+  CHECK(calls.load() == 1);
+
+  REQUIRE(cuGraphExecDestroy(exec) == CUDA_SUCCESS);
+  REQUIRE(cuGraphDestroy(graph) == CUDA_SUCCESS);
+  REQUIRE(cuStreamDestroy_v2(stream) == CUDA_SUCCESS);
+  REQUIRE(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("event synchronization invalidates a capture", "[cuda][graph][capture][event]") {
   auto *const context = createContext();
   CUstream stream = nullptr;
