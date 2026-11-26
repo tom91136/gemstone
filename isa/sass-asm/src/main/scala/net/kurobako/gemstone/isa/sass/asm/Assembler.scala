@@ -12,15 +12,15 @@ import net.kurobako.gemstone.isa.sass.CodeWords.BundleControl as Control
 import net.kurobako.gemstone.isa.sass.asm.Program.Statement.*
 
 /** Assembles generated instruction cases with the target's recovered encoding tables. */
+private def formsOf(instruction: Instruction, target: Target) = {
+  val names = instruction.definition.forms.toSet
+  target.database.forms.filter(form =>
+    !form.alternate && names(form.name) && form.opcodes.exists(_.name.takeWhile(_ != '.') == instruction.mnemonic.raw)
+  )
+}
+
 object Assembler {
   private type EncodedInstruction = (bytes: Vec[Byte], operation: Instruction)
-
-  private def formsOf(instruction: Instruction, target: Target) = {
-    val names = instruction.definition.forms.toSet
-    target.database.forms.filter(form =>
-      !form.alternate && names(form.name) && form.opcodes.exists(_.name.takeWhile(_ != '.') == instruction.mnemonic.raw)
-    )
-  }
 
   def assemble(source: String, target: Target, address: Int >= 0 = 0): Either[String, Array[Byte]] = source match {
     case s"$assembly// encoding: $annotationText" => for {

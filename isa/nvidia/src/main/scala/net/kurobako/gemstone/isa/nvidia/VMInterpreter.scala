@@ -439,7 +439,7 @@ private[isa] object VMInterpreter {
   /** Runs every workgroup of a seeded launch on this thread, a sweep giving each unfinished group one slice in an order
     * the launch schedule picks, so one group spinning on memory cannot starve the group it waits for.
     */
-  private def tooManyOnOneThread(count: Long, kind: String): Fault.InvalidRequest =
+  private def tooManyOnOneThread(count: Long, kind: String): Fault =
     Fault.InvalidRequest(s"$count $kind cannot run on one thread")
 
   private def seeded(

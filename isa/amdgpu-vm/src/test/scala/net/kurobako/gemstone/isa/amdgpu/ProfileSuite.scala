@@ -353,7 +353,7 @@ class ProfileSuite extends Suite {
     assert(issued.nonEmpty)
     assert(issued.forall { address =>
       val index = flow.offsets.indexOf(address)
-      index >= 0 && flow.graph.blocks.exists(block => block.first <= index && index <= block.last)
+      index >= 0 && flow.controlFlow.blocks.exists(block => block.first <= index && index <= block.last)
     })
   }
 

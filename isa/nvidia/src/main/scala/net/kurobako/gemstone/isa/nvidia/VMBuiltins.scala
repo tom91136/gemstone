@@ -124,7 +124,7 @@ private object VMBuiltins {
       Fault.Unsupported("device-side malloc needs the context's heap, which the launch lacks")
     )
 
-  private def bufferRange(name: String, buffer: Long): Fault.Backend =
+  private def bufferRange(name: String, buffer: Long): Fault =
     Fault.Backend(s"$name parameter buffer 0x${java.lang.Long.toUnsignedString(buffer, 16)} is out of range")
 
   private def positive(value: Long): Either[Fault, Int > 0] =
