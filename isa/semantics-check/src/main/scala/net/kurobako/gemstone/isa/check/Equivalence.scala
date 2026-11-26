@@ -35,7 +35,7 @@ object Equivalence {
   enum Difference {
     case Value(location: String, expected: Long, obtained: Long)
     case Memory(expected: Any, obtained: Any)
-    case Refusal(left: Option[String], right: Option[String])
+    case Refusal(reason: Either[String, String])
   }
 
   private enum Outcome derives CanEqual {
@@ -149,9 +149,9 @@ object Equivalence {
     (run(left, leftHarness, initial, types, executor), run(right, rightHarness, initial, types, executor)) match {
       case (Left(_), Left(_))       => Outcome.Skipped
       case (Left(reason), Right(_)) =>
-        Outcome.Differed(Counterexample(Difference.Refusal(Some(reason), None), sampled))
+        Outcome.Differed(Counterexample(Difference.Refusal(Left(reason)), sampled))
       case (Right(_), Left(reason)) =>
-        Outcome.Differed(Counterexample(Difference.Refusal(None, Some(reason)), sampled))
+        Outcome.Differed(Counterexample(Difference.Refusal(Right(reason)), sampled))
       case (Right(expected), Right(obtained)) =>
         val value = liveOut.locations.collectFirst {
           case location if !Edges.same(types(location))(expected(location), obtained(location)) =>

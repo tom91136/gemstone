@@ -124,8 +124,8 @@ object ControlWords {
   }
 
   private def lower(register: String): Option[String] = {
-    val bank = register.takeWhile(!_.isDigit)
-    register.drop(bank.length).toIntOption.filter(_ > 0).map(index => s"$bank${index - 1}")
+    val prefix = bank(register)
+    register.drop(prefix.length).toIntOption.filter(_ > 0).map(index => s"$prefix${index - 1}")
   }
 
   /** The registers `instruction` reads in time, each with its use. A guarded write also counts in `use` as a read of

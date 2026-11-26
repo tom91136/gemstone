@@ -58,7 +58,7 @@ object BlockAnalysis {
       label: String
   ): Either[String, Region] =
     prepared(stream, architecture).flatMap { (profile, lookup) =>
-      val spans = stream.graphs.flatMap(graph => spansOf(graph.graph).map(span => (graph, span)))
+      val spans = stream.graphs.flatMap(graph => spansOf(graph.controlFlow).map(span => (graph, span)))
       spans.find((graph, span) => labelOf(graph, span) == label) match {
         case Some((graph, span)) => Right(regionOf(profile, lookup, graph, span, placement))
         case None                =>
@@ -88,7 +88,7 @@ object BlockAnalysis {
   }
 
   private def labelOf(graph: ProfileStream.Graph, span: Span): String =
-    s"${graph.kernel}/${span.kind.name}@${hex(graph.offsets(graph.graph.blocks(span.header).first))}"
+    s"${graph.kernel}/${span.kind.name}@${hex(graph.offsets(graph.controlFlow.blocks(span.header).first))}"
 
   private def regionsOf(
       profile: Profile,
@@ -96,7 +96,7 @@ object BlockAnalysis {
       graph: ProfileStream.Graph,
       placement: Option[PipelineSimulator.Placement]
   ): Vec[Region] =
-    spansOf(graph.graph).map(span => regionOf(profile, lookup, graph, span, placement))
+    spansOf(graph.controlFlow).map(span => regionOf(profile, lookup, graph, span, placement))
 
   private def regionOf(
       profile: Profile,
@@ -105,7 +105,7 @@ object BlockAnalysis {
       span: Span,
       placement: Option[PipelineSimulator.Placement]
   ): Region = {
-    val cfg   = graph.graph
+    val cfg   = graph.controlFlow
     val slots = span.blocks.flatMap(block => cfg.blocks(block).first to cfg.blocks(block).last).map { index =>
       val address = graph.offsets(index)
       val end     = if (index + 1 < graph.offsets.size) graph.offsets(index + 1) else address + 1

@@ -34,7 +34,7 @@ object RewriteSearch {
   case class Rewrite(
       window: Window,
       original: Vec[String],
-      rewrite: Vec[String],
+      candidate: Vec[String],
       before: Measure,
       after: Measure,
       source: Architecture.Source,

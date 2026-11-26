@@ -5,6 +5,7 @@ import java.math.RoundingMode
 import net.kurobako.gemstone.*
 import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.profile.BlockAnalysis
 import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.Event.*
 import scala.annotation.tailrec
@@ -149,7 +150,7 @@ object PrintRenderer {
       else floating(flagsAndSize, conversion, IEEE754.toDouble(bits(lane), width))
     case PrintArgument.Pointer(address) =>
       if (lane != 0 || conversion != 'p') Left(s"device printf conversion %$conversion is unsupported")
-      else Right(s"0x${java.lang.Long.toHexString(address)}")
+      else Right(BlockAnalysis.hex(address))
     case PrintArgument.Text(value) =>
       if (lane != 0 || conversion != 's') Left(s"device printf conversion %$conversion is unsupported")
       else formatted(flagsAndSize, 's', value)

@@ -27,7 +27,7 @@ object ProfileStream {
   ) derives CanEqual
 
   /** The control flow of a launched kernel, with the address of each of its instructions. */
-  case class Graph(kernel: String, graph: ControlFlowGraph, offsets: Vec[Long])
+  case class Graph(kernel: String, controlFlow: ControlFlowGraph, offsets: Vec[Long])
 
   /** One issue: `unit` of `workgroup` ran `instruction` for `lanes`, indices within the workgroup, and `begins` as
     * [[ArchitecturalState.begins]].
@@ -165,9 +165,9 @@ object ProfileStream {
 
   private def writeGraph(out: DataOutputStream, value: Graph): Unit = {
     out.writeUTF(value.kernel)
-    out.writeInt(value.graph.entry)
-    out.writeInt(value.graph.blocks.size)
-    value.graph.blocks.foreach { block =>
+    out.writeInt(value.controlFlow.entry)
+    out.writeInt(value.controlFlow.blocks.size)
+    value.controlFlow.blocks.foreach { block =>
       out.writeInt(block.first)
       out.writeInt(block.last)
       out.writeBoolean(block.open)

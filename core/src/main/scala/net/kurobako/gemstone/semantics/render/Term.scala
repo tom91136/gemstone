@@ -4,6 +4,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.collection.Vec.*
 import net.kurobako.gemstone.constraint.*
+import net.kurobako.gemstone.profile.BlockAnalysis
 import scala.annotation.targetName
 import scala.annotation.threadUnsafe
 import scala.collection.mutable
@@ -20,7 +21,7 @@ object Term {
     if (value >= 0 && value < 4096 && !(value >= 0xff && (value & (value + 1)) == 0L) || value > -4096 && value < 0)
       value.toString
     else if (value < 0) s"-0x${java.lang.Long.toHexString(-value)}"
-    else s"0x${java.lang.Long.toHexString(value)}"
+    else BlockAnalysis.hex(value)
 
   /** An extension of a literal, evaluated. */
   def fold(term: Term): Term = term match {

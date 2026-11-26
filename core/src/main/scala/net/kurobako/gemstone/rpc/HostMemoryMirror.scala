@@ -786,12 +786,11 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       allocation: => Option[HostMemoryRange],
       since: Long = AddressSpace.Now
   )(update: Long => Long): Option[Long] = {
-    val begin                                   = address.raw
-    val first                                   = number(begin)
-    val buffer                                  = Array.ofDim[Byte](size)
-    var previous                                = 0L
-    def run(mask: Long, windowed: Boolean): Int = locked(mask) {
-      val code = attempt(begin, size, buffer, allocation, windowed, since)
+    val begin                     = address.raw
+    val first                     = number(begin)
+    val buffer                    = Array.ofDim[Byte](size)
+    var previous                  = 0L
+    def published(code: Int): Int = {
       if (code == Hit) {
         val width = size.widen[Int in 0 ~ 8]
         previous = LittleEndian.decode(buffer, 0, width)
@@ -800,8 +799,14 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       }
       code
     }
-    var code = run(1L << shardIndex(first), windowed = false)
-    if (code == Fresh) code = run(EveryShard, windowed = true)
+    def runLocal(mask: Long): Int = locked(mask) {
+      published(attempt(begin, size, buffer, allocation, windowed = false, since))
+    }
+    def runEvery: Int = locked(EveryShard) {
+      published(attempt(begin, size, buffer, allocation, windowed = true, since))
+    }
+    var code = runLocal(1L << shardIndex(first))
+    if (code == Fresh) code = runEvery
     if (code == Hit) Some(previous) else None
   }
 

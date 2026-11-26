@@ -282,13 +282,13 @@ private object VMCompiler {
             case None           => (Vec.empty[VMAssembler.Statement], guarded)
             case Some(inverted) =>
               val zero = VMRegisters.temporaryPredicate(0)
-              val read = Execute(ReadConditionPredicate(zero, VMConditionCodes.Flag.Zero), None)
+              val read = Execute(ReadConditionPredicate(zero, VMConditionCodes.Flag.Zero))
               guarded match {
                 case None    => (Vec(read), Some(ExecutionPredicate(zero, negated = inverted)))
                 case Some(_) =>
                   val flag         = VMRegisters.temporaryPredicate(1)
                   val invertedFlag =
-                    if (inverted) Vec(Execute(PredicateUnary(flag, zero), None))
+                    if (inverted) Vec(Execute(PredicateUnary(flag, zero)))
                     else Vec.empty[VMAssembler.Statement]
                   val combined = VMRegisters.temporaryPredicate(2)
                   (
@@ -298,8 +298,7 @@ private object VMCompiler {
                         combined,
                         VMRegisters.Predicate.Guard.slot,
                         if (inverted) flag else zero
-                      ),
-                      None
+                      )
                     ),
                     Some(ExecutionPredicate(combined, negated = false))
                   )

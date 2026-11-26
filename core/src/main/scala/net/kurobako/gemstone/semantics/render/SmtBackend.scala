@@ -749,7 +749,7 @@ object SmtBackend extends Backend {
     private def roundingArgument(arguments: Vec[Term], index: Int): Either[String, String] =
       arguments.lift(index).toRight(s"the primitive has no argument $index").flatMap {
         case Term.Constant(code) =>
-          code.substring(code.lastIndexOf('.') + 1) match {
+          spaceName(code) match {
             case "RN" | "RNI" => Right("RNE")
             case "RM" | "RMI" => Right("RTN")
             case "RP" | "RPI" => Right("RTP")
@@ -835,7 +835,7 @@ object SmtBackend extends Backend {
   private def nvidiaNaN(format: FpFormat): Long = format.width match {
     case 16 => 0x7fffL
     case 32 => 0x7fffffffL
-    case _  => format.signBit | format.infinity | format.quietBit
+    case _  => amdNaN(format)
   }
 
   private def assertion(differences: List[String]): String = differences match {

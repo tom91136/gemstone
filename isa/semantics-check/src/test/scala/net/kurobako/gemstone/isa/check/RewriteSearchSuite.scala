@@ -92,7 +92,7 @@ class RewriteSearchSuite extends Suite {
     val text    = assembly(WindowFixtures.compiled, "ctl_f4_dead")
     val report  = searchOf(WindowFixtures.compiled, window, RewriteSearch.Config.default, "ctl_f4_dead")
     val kept    = Vec.from(window.first to window.last).map(text(_)).filterNot(_.startsWith("v_mov_b32"))
-    val rewrite = report.rewrites.find(_.rewrite == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
+    val rewrite = report.rewrites.find(_.candidate == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
     assertEquals(rewrite.after.cycles, validated("ctl_f4_tail").cyclesPerIteration)
     assert(rewrite.after.cycles < rewrite.before.cycles, rewrite)
     assertEquals(rewrite.source, Architecture.Source.weakest(rewrite.before.source, rewrite.after.source))
@@ -137,7 +137,7 @@ class RewriteSearchSuite extends Suite {
     val launch   = AMDGPUBlockCost.Launch.Recorded(recorded(image), oneWave.placement)
     val report   = RewriteSearch.amdgpu(image, function, target, window, launch).fold(fail(_), identity)
     val kept     = Vec.from(window.first to window.last).map(text(_)).filterNot(_.startsWith("v_mov_b32"))
-    val rewrite  = report.rewrites.find(_.rewrite == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
+    val rewrite  = report.rewrites.find(_.candidate == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
     val relaunch = BlockAnalysis.of(recorded(WindowFixtures.streamOf("")), Architecture.gfx1036, oneWave.placement)
       .fold(fail(_), _.regions.filter(_.kind == BlockAnalysis.Kind.Loop).map(_.status))
     relaunch match {
@@ -183,7 +183,7 @@ class RewriteSearchSuite extends Suite {
     val report         = RewriteSearch.amdgpu(recomputed, function, target, window, recording(recomputed, function))
       .fold(fail(_), identity)
     val kept  = code.filterNot(_.startsWith("v_mov_b32 v7"))
-    val found = report.rewrites.find(_.rewrite == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
+    val found = report.rewrites.find(_.candidate == kept).getOrElse(fail(s"no rewrite leaves $kept: $report"))
     assert(found.after.cycles < found.before.cycles, found)
     assert(!report.uncosted.exists(_.reason.contains("reads v7")), report.uncosted)
   }
@@ -265,13 +265,13 @@ class RewriteSearchSuite extends Suite {
       assert(rewrite.evidence.instructions.nonEmpty, rewrite)
     }
     val removed = Vec(text(0), text(2))
-    assert(report.rewrites.exists(_.rewrite == removed), s"no rewrite deletes ${text(1)}: ${report.rewrites}")
+    assert(report.rewrites.exists(_.candidate == removed), s"no rewrite deletes ${text(1)}: ${report.rewrites}")
   }
 
   test("a window that leaves no write live out is deleted as a proven rewrite") {
     installed()
     val report   = searchOf(unobserved, unobservedWindow)
-    val deletion = report.rewrites.find(_.rewrite.isEmpty).getOrElse(fail(s"no whole-window deletion: $report"))
+    val deletion = report.rewrites.find(_.candidate.isEmpty).getOrElse(fail(s"no whole-window deletion: $report"))
     assertEquals(deletion.reason, "no write is live out", deletion)
     assert(deletion.after.cycles < deletion.before.cycles, deletion)
     assert(deletion.evidence.instructions.nonEmpty, deletion)
@@ -296,7 +296,7 @@ class RewriteSearchSuite extends Suite {
   test("the same seed and budget give the same report") {
     installed()
     def rows(report: RewriteSearch.Report): Vec[(Vec[String], Vec[String], Double, String)] =
-      report.rewrites.map(rewrite => (rewrite.original, rewrite.rewrite, rewrite.after.cycles, rewrite.source.kind))
+      report.rewrites.map(rewrite => (rewrite.original, rewrite.candidate, rewrite.after.cycles, rewrite.source.kind))
     val first  = searchOf(dead, deadWindow, sentence)
     val second = searchOf(dead, deadWindow, sentence)
     assertEquals(first.evaluated, second.evaluated)

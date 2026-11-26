@@ -482,7 +482,7 @@ private[isa] object VMInterpreter {
       dynamicSharedBytes: Int >= 0,
       allLanes: VMLaneMask,
       log: PrintLog,
-      cooperative: Boolean = false
+      cooperative: Boolean
   ): Either[Fault, Unit] = {
     val launchDevice =
       if (cooperative) device.memory.allocate(GridWorkspaceBytes).map(block => device.copy(gridWorkspace = block.raw))

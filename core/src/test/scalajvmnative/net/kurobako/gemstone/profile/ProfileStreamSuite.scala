@@ -109,7 +109,9 @@ class ProfileStreamSuite extends Suite {
     recorder.stream.write(DataOutputStream(bytes))
     val read = ProfileStream.read(DataInputStream(ByteArrayInputStream(bytes.toByteArray)))
     assertEquals(
-      read.map(_.graphs.map(g => (g.kernel, g.graph.blocks, g.graph.entry, g.graph.loops, g.offsets))),
+      read.map(_.graphs.map(g =>
+        (g.kernel, g.controlFlow.blocks, g.controlFlow.entry, g.controlFlow.loops, g.offsets)
+      )),
       Right(Vec(("k", graph.blocks, graph.entry, graph.loops, offsets)))
     )
   }

@@ -89,8 +89,8 @@ private object RegisterUses {
     private def source(value: InstructionSource, count: Int = 1): Vec[Span] = value match {
       case InstructionSource.Scalar(index)         => scalar(index, count)
       case InstructionSource.VectorRegister(index) => vector(index, count)
-      case InstructionSource.HighHalf(half)        => source(half, 1)
-      case InstructionSource.Selected(part, _, _)  => source(part, 1)
+      case InstructionSource.HighHalf(half)        => source(half)
+      case InstructionSource.Selected(part, _, _)  => source(part)
       case InstructionSource.Constant(_) | InstructionSource.Floating(_) | InstructionSource.Condition(_) |
           InstructionSource.Literal(_) | InstructionSource.DPP => Unused
     }

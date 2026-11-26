@@ -41,6 +41,6 @@ case class DecodedInstruction(
     InstructionDefinitions.decode(mnemonic.raw, modifiers, operands, guard)
       .fold(
         error => throw IllegalArgumentException(error),
-        value => DecodedInstruction(address, value, None, None, scheduling)
+        value => rewrite(value)
       )
 }

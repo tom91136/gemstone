@@ -313,7 +313,7 @@ object SASSModel extends Model {
       name: Option[String],
       mnemonic: String,
       formName: String,
-      pairs: Boolean = false
+      pairs: Boolean
   ): Either[String, (instances: Vec[Instance], alternates: Vec[Instance], dropped: Vec[String])] = for {
     target <- target(name)
     database = target.database
