@@ -393,8 +393,7 @@ private[isa] object VMInterpreter {
       log      = PrintLog()
       _ <- shape match {
         case Some(dimensions) if dimensions != Dimensions.One =>
-          if (cooperative) Left(Fault.Unsupported("a cooperative launch cannot also name a cluster shape"))
-          else if (device.schedule.seeded)
+          if (cooperative || device.schedule.seeded)
             seededClusters(
               kernel,
               geometry,
@@ -403,7 +402,8 @@ private[isa] object VMInterpreter {
               device,
               dynamicSharedBytes,
               allLanes,
-              log
+              log,
+              cooperative
             )
           else clusters(kernel, geometry, dimensions, parameterBlock, device, dynamicSharedBytes, log)
         case _ if cooperative            => resident(kernel, geometry, parameterBlock, device, dynamicSharedBytes, log)
@@ -470,7 +470,9 @@ private[isa] object VMInterpreter {
       result
     }
 
-  /** Runs every cluster's workgroups on this thread, retaining cluster addressing and sweeping all members together. */
+  /** Runs every cluster's workgroups on this thread, retaining cluster addressing and sweeping all members together. A
+    * cooperative grid shares one driver workspace and grid barrier across all of its clusters.
+    */
   private def seededClusters(
       kernel: Kernel,
       geometry: LaunchGeometry,
@@ -479,63 +481,76 @@ private[isa] object VMInterpreter {
       device: VMDevice,
       dynamicSharedBytes: Int >= 0,
       allLanes: VMLaneMask,
-      log: PrintLog
+      log: PrintLog,
+      cooperative: Boolean = false
   ): Either[Fault, Unit] = {
-    val laneCount = geometry.groupVolume.unsafe[Int in 1 ~ 1024]
-    val count     = Dimensions(
-      (geometry.groupCount.x.raw / shape.x).unsafe[Int > 0],
-      (geometry.groupCount.y.raw / shape.y).unsafe[Int > 0],
-      (geometry.groupCount.z.raw / shape.z).unsafe[Int > 0]
-    )
-    val size = shape.x.raw * shape.y.raw * shape.z.raw
-    LaunchGeometry.forLaunch(geometry.groupSize, count).left.map(Fault.InvalidRequest(_)).flatMap { grid =>
-      grid.groupTotal.refine[Long in 1L ~ 2147483647L].left.map(_ =>
-        Fault.InvalidRequest(s"${grid.groupTotal} clusters cannot run on one thread")
-      ).flatMap { total =>
-        val units = Vec.tabulate(total.toInt) { index =>
-          val origin = grid.groupCoordinates(index.toLong.unsafe[Long >= 0])
-          val blocks = Vec.tabulate(size)(_ => Block(laneCount))
-          val sync   = ClusterSync()
-          val groups = Vec.tabulate(size) { rank =>
-            Coordinates(
-              (origin.x.raw * shape.x.raw + rank                 % shape.x.raw).unsafe[Int >= 0],
-              (origin.y.raw * shape.y.raw + (rank / shape.x.raw) % shape.y.raw).unsafe[Int >= 0],
-              (origin.z.raw * shape.z.raw + rank / (shape.x.raw * shape.y.raw)).unsafe[Int >= 0]
-            )
-          }
-          val shared: Array[VMWorkgroup | Null] = Array.from(blocks.map(_.workgroup))
-          blocks.zipWithIndex.foreach { (block, rank) =>
-            block.workgroup.cluster = shared
-            block.workgroup.clusterRank = rank
-            kernel.pairAllocationBarrier.foreach { offset =>
-              MBarrier.create(1L).foreach { barrier =>
-                if (rank % 2 == 0) { val _ = barrier.arrive(count = 1L, expectedBytes = 0L) }
-                block.workgroup.mbarriers(VMAddressSpace.SharedBase + offset) = barrier
+    val launchDevice =
+      if (cooperative) device.memory.allocate(GridWorkspaceBytes).map(block => device.copy(gridWorkspace = block.raw))
+      else Right(device)
+    launchDevice.flatMap { launchDevice =>
+      val gridSync  = ClusterSync()
+      val laneCount = geometry.groupVolume.unsafe[Int in 1 ~ 1024]
+      val count     = Dimensions(
+        (geometry.groupCount.x.raw / shape.x).unsafe[Int > 0],
+        (geometry.groupCount.y.raw / shape.y).unsafe[Int > 0],
+        (geometry.groupCount.z.raw / shape.z).unsafe[Int > 0]
+      )
+      val size = shape.x.raw * shape.y.raw * shape.z.raw
+      LaunchGeometry.forLaunch(geometry.groupSize, count).left.map(Fault.InvalidRequest(_)).flatMap { grid =>
+        grid.groupTotal.refine[Long in 1L ~ 2147483647L].left.map(_ =>
+          Fault.InvalidRequest(s"${grid.groupTotal} clusters cannot run on one thread")
+        ).flatMap { total =>
+          val units = Vec.tabulate(total.toInt) { index =>
+            val origin = grid.groupCoordinates(index.toLong.unsafe[Long >= 0])
+            val blocks = Vec.tabulate(size)(_ => Block(laneCount))
+            val sync   = ClusterSync()
+            val groups = Vec.tabulate(size) { rank =>
+              Coordinates(
+                (origin.x.raw * shape.x.raw + rank                 % shape.x.raw).unsafe[Int >= 0],
+                (origin.y.raw * shape.y.raw + (rank / shape.x.raw) % shape.y.raw).unsafe[Int >= 0],
+                (origin.z.raw * shape.z.raw + rank / (shape.x.raw * shape.y.raw)).unsafe[Int >= 0]
+              )
+            }
+            val shared: Array[VMWorkgroup | Null] = Array.from(blocks.map(_.workgroup))
+            blocks.zipWithIndex.foreach { (block, rank) =>
+              block.workgroup.cluster = shared
+              block.workgroup.clusterRank = rank
+              kernel.pairAllocationBarrier.foreach { offset =>
+                MBarrier.create(1L).foreach { barrier =>
+                  if (rank % 2 == 0) { val _ = barrier.arrive(count = 1L, expectedBytes = 0L) }
+                  block.workgroup.mbarriers(VMAddressSpace.SharedBase + offset) = barrier
+                }
               }
             }
-          }
-          val members = groups.zip(blocks).map((group, block) =>
-            Execution(
-              kernel,
-              geometry,
-              group,
-              liveLanes(geometry, group, allLanes),
-              parameterBlock,
-              device,
-              dynamicSharedBytes,
-              block,
-              Some(shape),
-              sync
+            val members = groups.zip(blocks).map((group, block) =>
+              Execution(
+                kernel,
+                geometry,
+                group,
+                liveLanes(geometry, group, allLanes),
+                parameterBlock,
+                launchDevice,
+                dynamicSharedBytes,
+                block,
+                Some(shape),
+                sync,
+                gridSync = gridSync
+              )
             )
-          )
-          sync.members = members.map(_.clusterPhases)
-          (blocks, members)
+            sync.members = members.map(_.clusterPhases)
+            (blocks, members)
+          }
+          val members = units.flatMap(_._2)
+          val result  =
+            interleave(
+              kernel,
+              members,
+              "seeded cluster workgroups wait on one another",
+              launchDevice.schedule.forLaunch
+            )
+          units.zipWithIndex.foreach((unit, index) => log.add(index.toLong, unit._1.flatMap(_.workgroup.prints)))
+          result
         }
-        val members = units.flatMap(_._2)
-        val result  =
-          interleave(kernel, members, "seeded cluster workgroups wait on one another", device.schedule.forLaunch)
-        units.zipWithIndex.foreach((unit, index) => log.add(index.toLong, unit._1.flatMap(_.workgroup.prints)))
-        result
       }
     }
   }

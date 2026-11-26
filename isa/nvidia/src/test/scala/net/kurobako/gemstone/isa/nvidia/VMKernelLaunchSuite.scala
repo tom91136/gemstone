@@ -118,6 +118,21 @@ class VMKernelLaunchSuite extends Suite {
     })
   }
 
+  test("a cooperative launch may also name a cluster shape") {
+    val geometry = LaunchGeometry.forLaunch(LaunchGeometry.Dimensions.One, LaunchGeometry.Dimensions(2, 1, 1))
+      .fold(message => fail(message.raw), identity)
+    val program = kernel(Vec.empty, Vec(Instruction.Return))
+    val result  = VMInterpreter.execute(
+      program,
+      geometry,
+      Map.empty,
+      RegionMemory(),
+      cluster = Some(LaunchGeometry.Dimensions(2, 1, 1)),
+      cooperative = true
+    )
+    assertEquals(result, Right(()))
+  }
+
   test("shared launch retains argument count, scalar width, and memory width validation") {
     val scalarProgram = kernel(
       Vec(KernelParameter("value", 0, 4)),
