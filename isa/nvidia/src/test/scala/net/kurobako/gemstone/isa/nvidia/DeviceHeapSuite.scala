@@ -96,13 +96,18 @@ class DeviceHeapSuite extends Suite {
     assertEquals(allocate(heap, 1).raw, first.raw + 256L)
   }
 
+  test("the heap passes on the read stamp of its backing") {
+    val backing = new ForwardingMemory(RegionMemory()) { override def readStamp: Long = 7L }
+    assertEquals(DeviceHeap(backing).readStamp, 7L)
+  }
+
   test("wide reads return snapshots and rejected writes leave the block unchanged") {
     val heap  = DeviceHeap(RegionMemory())
     val block = allocate(heap, 16)
     val bytes = Vec.from((1 to 16).map(_.toByte))
     assertEquals(heap.write(block, bytes), Right(()))
     val snapshot = heap.read(block, 16)
-    val deferred = heap.readDeferred(block, 16)
+    val deferred = heap.readDeferred(block, 16, AddressSpace.Now)
     assertEquals(snapshot, Right(bytes))
     assert(heap.write(block.offset(1), Vec.fill(16)(0.toByte)).isLeft)
     assertEquals(heap.read(block, 16), Right(bytes))

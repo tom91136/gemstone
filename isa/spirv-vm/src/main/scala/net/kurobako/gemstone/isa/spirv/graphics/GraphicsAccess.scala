@@ -71,15 +71,17 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
   override def readDeferred(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int >= 0
+      size: Int >= 0,
+      since: Long
   ): AddressSpace.ReadResult[Vec[Byte]] =
-    if (index(region) < 0) backing.readDeferred(region, offset, size) else read(region, offset, size)
+    if (index(region) < 0) backing.readDeferred(region, offset, size, since) else read(region, offset, size)
   override def readValueDeferred(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int in 1 ~ 8
+      size: Int in 1 ~ 8,
+      since: Long
   ): AddressSpace.ReadResult[Long] =
-    if (index(region) < 0) backing.readValueDeferred(region, offset, size) else readValue(region, offset, size)
+    if (index(region) < 0) backing.readValueDeferred(region, offset, size, since) else readValue(region, offset, size)
 
   override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
     if (index(region) < 0) backing.read(region, offset, size)
@@ -131,8 +133,9 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
   private def isScratch(address: GuestAddress): Boolean = address.raw >= ScratchBase && address.raw < ScratchLimit
   override def read(address: GuestAddress, size: Int >= 0): Either[Fault, Vec[Byte]] =
     if (isScratch(address)) super.read(address, size) else backing.read(address, size)
-  override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-    if (isScratch(address)) super.readDeferred(address, size) else backing.readDeferred(address, size)
+  override def readDeferred(address: GuestAddress, size: Int >= 0, since: Long)
+      : AddressSpace.ReadResult[Vec[Byte]] =
+    if (isScratch(address)) super.readDeferred(address, size, since) else backing.readDeferred(address, size, since)
   override def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
     if (isScratch(address)) super.readValue(address, size) else backing.readValue(address, size)
   override def readValueInto(address: GuestAddress, size: Int in 1 ~ 8, into: LongRef): Fault | Null =
@@ -164,6 +167,7 @@ private class GraphicsAccess(val backing: AddressSpace, val control: TaskControl
     backing.prepareReads(ranges.filter((address, _) => !isScratch(address)))
   override def defersHostReads: Boolean               = backing.defersHostReads
   override def flushHostReads(): Either[Fault, Unit]  = backing.flushHostReads()
+  override def readStamp: Long                        = backing.readStamp
   override def flushHostWrites(): Either[Fault, Unit] = backing.flushHostWrites()
   override def invalidateHostReads(): Unit            = backing.invalidateHostReads()
   override def fenceHostMemory(): Either[Fault, Unit] = backing.fenceHostMemory()

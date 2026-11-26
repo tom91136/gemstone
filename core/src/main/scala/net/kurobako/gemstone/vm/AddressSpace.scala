@@ -17,6 +17,9 @@ object AddressSpace {
 
   val Ready: Either[Fault, Unit] = Right(())
 
+  /** The stamp of a read that has not waited for its bytes yet. */
+  val Now: Long = Long.MaxValue
+
   trait ReadRanges {
     def length: Int
     def address(index: Int): GuestAddress
@@ -95,21 +98,30 @@ object AddressSpace {
 trait AddressSpace derives CanEqual {
   import AddressSpace.*
 
+  final def awaitRead[A](read: Long => ReadResult[A]): Either[Fault, A] = retried(read, Now)
+
   @tailrec
-  final def awaitRead[A](read: => ReadResult[A]): Either[Fault, A] = read match {
-    case Left(_: Pending.type) => flushHostReads() match {
+  private def retried[A](read: Long => ReadResult[A], since: Long): Either[Fault, A] = read(since) match {
+    case Left(_: Pending.type) =>
+      val stamp = if (since == Now) readStamp else since
+      flushHostReads() match {
         case Left(fault) => Left(fault)
-        case Right(())   => awaitRead(read)
+        case Right(())   => retried(read, stamp)
       }
     case Left(fault: Fault) => Left(fault)
     case Right(value)       => Right(value)
   }
 
-  def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0): ReadResult[Vec[Byte]] =
-    read(region, offset, size)
+  /** Taken when a deferred read first returns Pending. Its retries pass it as `since`, so that they may still use bytes
+    * fetched for them which a later acquire has withdrawn from newer reads.
+    */
+  def readStamp: Long = Now
 
-  def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): ReadResult[Long] =
-    readValue(region, offset, size)
+  def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0, @unused since: Long)
+      : ReadResult[Vec[Byte]] = read(region, offset, size)
+
+  def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, @unused since: Long)
+      : ReadResult[Long] = readValue(region, offset, size)
 
   def readValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] =
     read(region, offset, size.widen[Int >= 0]).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
@@ -192,8 +204,8 @@ trait AddressSpace derives CanEqual {
     resolve(address, size)(read(_, _, size))
 
   /** Stage an address read, returning Pending until the backing owner completes it. */
-  def readDeferred(address: GuestAddress, size: Int >= 0): ReadResult[Vec[Byte]] =
-    resolve(address, size)(readDeferred(_, _, size))
+  def readDeferred(address: GuestAddress, size: Int >= 0, since: Long): ReadResult[Vec[Byte]] =
+    resolve(address, size)(readDeferred(_, _, size, since))
 
   /** Resolve and write in one operation. */
   def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =

@@ -17,14 +17,16 @@ private class ObservedAddressSpace(backing: AddressSpace, observer: LaunchObserv
   private def absolute(kind: AccessKind, address: GuestAddress, size: Int >= 0): Unit =
     observer.memory(Access(kind, Location.Absolute(address), size))
 
-  override def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0): ReadResult[Vec[Byte]] = {
+  override def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0, since: Long)
+      : ReadResult[Vec[Byte]] = {
     within(AccessKind.Read, region, offset, size)
-    backing.readDeferred(region, offset, size)
+    backing.readDeferred(region, offset, size, since)
   }
 
-  override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): ReadResult[Long] = {
+  override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, since: Long)
+      : ReadResult[Long] = {
     within(AccessKind.Read, region, offset, size.widen[Int >= 0])
-    backing.readValueDeferred(region, offset, size)
+    backing.readValueDeferred(region, offset, size, since)
   }
 
   override def readValue(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8): Either[Fault, Long] = {
@@ -44,6 +46,7 @@ private class ObservedAddressSpace(backing: AddressSpace, observer: LaunchObserv
   override def invalidateHostReads(): Unit                      = backing.invalidateHostReads()
   override def defersHostReads: Boolean                         = backing.defersHostReads
   override def flushHostReads(): Either[Fault, Unit]            = backing.flushHostReads()
+  override def readStamp: Long                                  = backing.readStamp
 
   override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] = {
     within(AccessKind.Read, region, offset, size)
@@ -85,9 +88,9 @@ private class ObservedAddressSpace(backing: AddressSpace, observer: LaunchObserv
     backing.read(address, size)
   }
 
-  override def readDeferred(address: GuestAddress, size: Int >= 0): ReadResult[Vec[Byte]] = {
+  override def readDeferred(address: GuestAddress, size: Int >= 0, since: Long): ReadResult[Vec[Byte]] = {
     absolute(AccessKind.Read, address, size)
-    backing.readDeferred(address, size)
+    backing.readDeferred(address, size, since)
   }
 
   override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] = {

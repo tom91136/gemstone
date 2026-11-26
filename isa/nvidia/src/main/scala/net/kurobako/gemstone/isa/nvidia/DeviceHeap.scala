@@ -229,11 +229,11 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
       update: Long => Long
   ): Either[Fault, Long] = backing.atomicModifyValue(region, offset, size)(update)
 
-  override def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0)
-      : AddressSpace.ReadResult[Vec[Byte]] = backing.readDeferred(region, offset, size)
+  override def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0, since: Long)
+      : AddressSpace.ReadResult[Vec[Byte]] = backing.readDeferred(region, offset, size, since)
 
-  override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)
-      : AddressSpace.ReadResult[Long] = backing.readValueDeferred(region, offset, size)
+  override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, since: Long)
+      : AddressSpace.ReadResult[Long] = backing.readValueDeferred(region, offset, size, since)
 
   override def hasNativePointers(region: AllocationId): Boolean = backing.hasNativePointers(region)
   override def fenceHostMemory(): Either[Fault, Unit]           = backing.fenceHostMemory()
@@ -241,6 +241,7 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
   override def invalidateHostReads(): Unit                      = backing.invalidateHostReads()
   override def defersHostReads: Boolean                         = backing.defersHostReads
   override def flushHostReads(): Either[Fault, Unit]            = backing.flushHostReads()
+  override def readStamp: Long                                  = backing.readStamp
 
   override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] =
     external(ranges)(backing.prepareReads(_))
@@ -253,13 +254,14 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
       Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size))
     )(backing.read(address, size))
 
-  override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
+  override def readDeferred(address: GuestAddress, size: Int >= 0, since: Long)
+      : AddressSpace.ReadResult[Vec[Byte]] =
     route(address, size, mutating = false)((bytes, offset) =>
       Option(Vec.unsafeWrapArray(java.util.Arrays.copyOfRange(bytes, offset, offset + size)))
     )(Right(None)) match {
       case Left(fault)        => Left(fault)
       case Right(Some(bytes)) => Right(bytes)
-      case Right(None)        => backing.readDeferred(address, size)
+      case Right(None)        => backing.readDeferred(address, size, since)
     }
 
   override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =

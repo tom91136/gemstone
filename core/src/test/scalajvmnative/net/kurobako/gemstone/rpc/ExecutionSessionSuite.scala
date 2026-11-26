@@ -686,7 +686,7 @@ class ExecutionSessionSuite extends Suite {
         val staged = CountDownLatch(1)
         workers.parallelFor(2L) { lane =>
           if (lane == 0) {
-            assertEquals(memory.readDeferred(GuestAddress(0x1000L), 4), Left(AddressSpace.Pending))
+            assertEquals(memory.readDeferred(GuestAddress(0x1000L), 4, AddressSpace.Now), Left(AddressSpace.Pending))
             staged.countDown()
             memory.flushHostReads()
           } else {
@@ -739,7 +739,10 @@ class ExecutionSessionSuite extends Suite {
         try
           if (sync) context.memory.fenceHostMemory()
           else {
-            assertEquals(context.memory.readDeferred(GuestAddress(0x1000L), 4), Left(AddressSpace.Pending))
+            assertEquals(
+              context.memory.readDeferred(GuestAddress(0x1000L), 4, AddressSpace.Now),
+              Left(AddressSpace.Pending)
+            )
             context.memory.flushHostReads()
           }
         finally finished.countDown()
@@ -962,7 +965,7 @@ class ExecutionSessionSuite extends Suite {
     val firstRead = CountDownLatch(1)
     val release   = CountDownLatch(1)
     val backend   = TestBackend { (_, memory, handler) =>
-      memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 1)).flatMap { _ =>
+      memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 1, _)).flatMap { _ =>
         firstRead.countDown()
         if (!release.await(5, TimeUnit.SECONDS)) Left(Fault.Cancelled)
         else
@@ -1042,10 +1045,10 @@ class ExecutionSessionSuite extends Suite {
         case Some(KernelTask.Argument.Memory(region, offset, _)) =>
           val host = GuestAddress(0x1000L)
           for {
-            first  <- memory.awaitRead(memory.readDeferred(host, 1))
+            first  <- memory.awaitRead(memory.readDeferred(host, 1, _))
             cached <- memory.read(host, 1)
             _      <- coherentLoad(memory, memory.address(region, offset).toOption.get, 4)
-            second <- memory.awaitRead(memory.readDeferred(host, 1))
+            second <- memory.awaitRead(memory.readDeferred(host, 1, _))
             _      <- handler(Event.Print(s"${first.head} ${cached.head} ${second.head}", Vec.empty))
           } yield ()
         case _ => Left(Fault.InvalidRequest("memory argument is required"))
@@ -1085,7 +1088,7 @@ class ExecutionSessionSuite extends Suite {
       val backend = TestBackend { (_, memory, _) =>
         workers.parallelFor(2L) { lane =>
           if (lane == 0) {
-            assertEquals(memory.readDeferred(GuestAddress(0x1000L), 1), Left(AddressSpace.Pending))
+            assertEquals(memory.readDeferred(GuestAddress(0x1000L), 1, AddressSpace.Now), Left(AddressSpace.Pending))
             staged.countDown()
             memory.flushHostReads()
           } else if (!staged.await(5, TimeUnit.SECONDS)) Left(Fault.Cancelled)
@@ -1153,7 +1156,7 @@ class ExecutionSessionSuite extends Suite {
 
   test("a poll waits for the outstanding read batch, and a rejected reply releases it") {
     val backend = TestBackend { (_, memory, _) =>
-      memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 4)).map(_ => ())
+      memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 4, _)).map(_ => ())
     }
     exchanging(1, backend) { (service, completion) =>
       val first  = next(service, completion)
@@ -1173,7 +1176,7 @@ class ExecutionSessionSuite extends Suite {
     val staged    = CountDownLatch(1)
     val address   = GuestAddress(0x1000L)
     val backend   = TestBackend { (_, memory, _) =>
-      assertEquals(memory.readDeferred(address, 4), Left(AddressSpace.Pending))
+      assertEquals(memory.readDeferred(address, 4, AddressSpace.Now), Left(AddressSpace.Pending))
       staged.countDown()
       val writer = Thread(() =>
         if (published.await(5, TimeUnit.SECONDS)) assertEquals(memory.write(address, Vec.fill(4)(5.toByte)), Right(()))
@@ -1198,13 +1201,13 @@ class ExecutionSessionSuite extends Suite {
     val backend   = TestBackend { (_, memory, _) =>
       val second = Thread(() =>
         if (published.await(5, TimeUnit.SECONDS)) {
-          assertEquals(memory.readDeferred(GuestAddress(0x200000L), 4), Left(AddressSpace.Pending))
+          assertEquals(memory.readDeferred(GuestAddress(0x200000L), 4, AddressSpace.Now), Left(AddressSpace.Pending))
           staged.countDown()
           val _ = memory.flushHostReads()
         }
       )
       second.start()
-      assertEquals(memory.readDeferred(GuestAddress(0x1000L), 4), Left(AddressSpace.Pending))
+      assertEquals(memory.readDeferred(GuestAddress(0x1000L), 4, AddressSpace.Now), Left(AddressSpace.Pending))
       val first = memory.flushHostReads()
       resumed.countDown()
       second.join(15000)
@@ -1222,6 +1225,48 @@ class ExecutionSessionSuite extends Suite {
     }
   }
 
+  test("a read completes with one reply while another lane keeps acquiring") {
+    val done    = AtomicBoolean()
+    val backend = TestBackend { (_, memory, _) =>
+      val spinner = Thread(() => while (!done.get) memory.invalidateHostReads())
+      spinner.start()
+      try
+        memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 4, _)).map(bytes =>
+          assertEquals(bytes, Vec.fill(4)(1.toByte))
+        )
+      finally {
+        done.set(true)
+        spinner.join(15000)
+      }
+    }
+    exchanging(1, backend) { (service, completion) =>
+      val batch = next(service, completion)
+      assertEquals(service.supplyHostMemory(completion, reply(batch, 1)), Right(()))
+      val after = next(service, completion)
+      assertEquals(after.reads, Vec.empty[HostMemoryRange], "the acquiring lane made the read fetch again")
+      assert(after.completed)
+      assertEquals(service.awaitCompletion(completion), Right(()))
+    }
+  }
+
+  test("a pending read does not take a value older than a native atomic on its word") {
+    val address = GuestAddress(0x1000L)
+    val backend = TestBackend { (_, memory, _) =>
+      assertEquals(memory.readDeferred(address, 4, AddressSpace.Now), Left(AddressSpace.Pending))
+      val since = memory.readStamp
+      for {
+        _ <- memory.flushHostReads()
+        _ <- memory.atomicModifyValue(address, 4)(_ + 1)
+        _ = assertEquals(memory.readDeferred(address, 4, since), Left(AddressSpace.Pending))
+        _ <- memory.awaitRead(memory.readDeferred(address, 4, _))
+      } yield ()
+    }
+    exchanging(1, backend) { (service, completion) =>
+      drain(service, completion)
+      assertEquals(service.awaitCompletion(completion), Right(()))
+    }
+  }
+
   test("a release waits until the client has applied the stores a poll handed out") {
     val handed   = CountDownLatch(1)
     val released = CountDownLatch(1)
@@ -1231,7 +1276,7 @@ class ExecutionSessionSuite extends Suite {
         if (handed.await(5, TimeUnit.SECONDS) && memory.flushHostWrites().isRight) released.countDown()
       )
       releasing.start()
-      val read = memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 4))
+      val read = memory.awaitRead(memory.readDeferred(GuestAddress(0x1000L), 4, _))
       releasing.join(15000)
       read.map(_ => ())
     }

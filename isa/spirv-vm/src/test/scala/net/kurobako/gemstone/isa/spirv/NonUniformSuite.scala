@@ -281,12 +281,13 @@ class NonUniformSuite extends Suite {
       Right(())
     }
     override def read(id: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-      awaitRead(readDeferred(id, offset, size))
-    override def readValueDeferred(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)
+      awaitRead(readDeferred(id, offset, size, _))
+    override def readValueDeferred(id: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, since: Long)
         : AddressSpace.ReadResult[Long] =
-      readDeferred(id, offset, size.widen[Int >= 0])
+      readDeferred(id, offset, size.widen[Int >= 0], since)
         .map(bytes => LittleEndian.decode(bytes, 0, size.widen[Int in 0 ~ 8]))
-    override def readDeferred(id: AllocationId, offset: Long >= 0, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
+    override def readDeferred(id: AllocationId, offset: Long >= 0, size: Int >= 0, since: Long)
+        : AddressSpace.ReadResult[Vec[Byte]] =
       if (offset.raw % 8L == 0L || ready.contains(offset)) memory.read(id, offset, size)
       else {
         val _ = pending.add(offset)

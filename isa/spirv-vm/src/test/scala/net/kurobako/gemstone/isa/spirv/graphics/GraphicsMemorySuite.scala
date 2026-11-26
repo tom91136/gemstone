@@ -43,35 +43,40 @@ class GraphicsMemorySuite extends Suite {
   test("graphics memory preserves deferred reads and absolute host-memory operations") {
     val remote = GuestAddress(0x20000L)
     class RemoteBacking extends Backing {
+      override def readStamp: Long = 7L
       override def readDeferred(
           region: AllocationId,
           offset: Long >= 0,
-          size: Int >= 0
+          size: Int >= 0,
+          since: Long
       ): AddressSpace.ReadResult[Vec[Byte]] =
         Left(AddressSpace.Pending)
       override def readValueDeferred(
           region: AllocationId,
           offset: Long >= 0,
-          size: Int in 1 ~ 8
+          size: Int in 1 ~ 8,
+          since: Long
       ): AddressSpace.ReadResult[Long] =
         Left(AddressSpace.Pending)
       override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] =
         if (address == remote) Right(AddressSpace.Location.Absolute(address)) else super.locate(address, size)
-      override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-        if (address == remote) Right(Vec.fill(size)(42.toByte)) else super.readDeferred(address, size)
+      override def readDeferred(address: GuestAddress, size: Int >= 0, since: Long)
+          : AddressSpace.ReadResult[Vec[Byte]] =
+        if (address == remote) Right(Vec.fill(size)(42.toByte)) else super.readDeferred(address, size, since)
       override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
         if (address == remote) write(allocation, 0L, bytes) else super.write(address, bytes)
     }
     val backing = RemoteBacking()
     val access  = GraphicsAccess(backing, TaskControl())
-    assertEquals(access.readDeferred(allocation, 0L, 1), Left(AddressSpace.Pending))
-    assertEquals(access.readValueDeferred(allocation, 0L, 1), Left(AddressSpace.Pending))
-    assertEquals(access.readDeferred(remote, 2), Right(Vec[Byte](42, 42)))
+    assertEquals(access.readStamp, 7L)
+    assertEquals(access.readDeferred(allocation, 0L, 1, AddressSpace.Now), Left(AddressSpace.Pending))
+    assertEquals(access.readValueDeferred(allocation, 0L, 1, AddressSpace.Now), Left(AddressSpace.Pending))
+    assertEquals(access.readDeferred(remote, 2, AddressSpace.Now), Right(Vec[Byte](42, 42)))
     assertEquals(access.write(remote, Vec[Byte](11, 12)), Right(()))
     assertEquals(backing.bytes(allocation).take(2), Vec[Byte](11, 12))
     val (scratch, _) = access.allocate(Array[Byte](7))
-    assertEquals(access.readDeferred(scratch, 0L, 1), Right(Vec[Byte](7)))
-    assertEquals(access.readValueDeferred(scratch, 0L, 1), Right(7L))
+    assertEquals(access.readDeferred(scratch, 0L, 1, AddressSpace.Now), Right(Vec[Byte](7)))
+    assertEquals(access.readValueDeferred(scratch, 0L, 1, AddressSpace.Now), Right(7L))
   }
 
   test("fixed-function image work observes cancellation and the submission budget") {

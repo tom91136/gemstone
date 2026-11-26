@@ -152,4 +152,9 @@ class DeviceSuite extends Suite {
     assertEquals(registry.formats, Set(format, ProgramFormat("other")))
     intercept[IllegalArgumentException](BackendRegistry(Vec(EchoBackend(format), EchoBackend(format))))
   }
+
+  test("an observed memory passes on the read stamp of its backing") {
+    val backing = new ForwardingMemory(ArrayMemory()) { override def readStamp: Long = 7L }
+    assertEquals(ObservedAddressSpace(backing, (_, _) => Right(())).readStamp, 7L)
+  }
 }

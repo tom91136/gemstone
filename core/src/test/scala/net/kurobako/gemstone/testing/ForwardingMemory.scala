@@ -15,6 +15,7 @@ class ForwardingMemory(delegate: AddressSpace) extends AddressSpace {
   override def invalidateHostReads(): Unit                                        = delegate.invalidateHostReads()
   override def defersHostReads: Boolean                                           = delegate.defersHostReads
   override def flushHostReads(): Either[Fault, Unit]                              = delegate.flushHostReads()
+  override def readStamp: Long                                                    = delegate.readStamp
   override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] =
     delegate.prepareReads(ranges)
   override def prepareSystemReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] =

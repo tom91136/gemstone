@@ -263,13 +263,15 @@ private object VMInvocation {
     }
 
     /** The invocation waits for memory it cannot read yet. A retried read finds it waiting already, and does not park
-      * it again.
+      * it again. The instruction keeps the stamp of its first wait.
       */
-    def awaitMemory(): Unit =
+    def awaitMemory(stamp: Long): Unit = {
+      if (readsSince == AddressSpace.Now) readsSince = stamp
       if (!memoryPending) {
         status = Status.WaitingMemory
         transition(MachineEvent.Kind.Blocked(MachineUnit.Reason.Memory))
       }
+    }
 
     /** The memory the invocation waited for has arrived, so it runs on. */
     def memoryReady(): Unit =
@@ -314,6 +316,9 @@ private object VMInvocation {
 
     /** Instructions the invocation has issued, its subgroup clock. */
     var issued = 0L
+
+    // the stamp of the reads the pending instruction is waiting for
+    var readsSince: Long = AddressSpace.Now
 
     // An OpPhi group stages its incoming values here so the group's copies take effect together.
     private var stagedBits   = Array.ofDim[Long](4)

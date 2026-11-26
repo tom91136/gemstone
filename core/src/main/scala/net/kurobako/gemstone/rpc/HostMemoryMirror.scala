@@ -9,6 +9,7 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.rpc.ExecutionRPC.*
+import net.kurobako.gemstone.vm.AddressSpace
 import scala.collection.mutable
 
 /** Sparse host bytes shared by aliases within one dispatch. Pages are spread over 64 shards, each behind its own lock,
@@ -18,6 +19,10 @@ import scala.collection.mutable
   * continues a sequential scan requests a window that doubles per step, up to the batch budget, so a scan costs a round
   * trip per window instead of per page. The client may reply with less than was requested (it stops at memory it cannot
   * read): bytes a read was not waiting on are forgotten, and bytes it was waiting on become unreadable.
+  *
+  * Acquires are numbered. One drops clean answers, bytes or unreadable marks, from the reads that begin after it. A
+  * read stamped with the number current when it first missed may still use them, so that no rate of acquires keeps it
+  * from its bytes. A reply that an acquire overtook answers only the reads begun before its batch was issued.
   */
 private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges: Int > 0 = 1024) {
   private val pageSize = 4096
@@ -98,6 +103,15 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
         if (bits.isEmpty) { val _ = pages.subtractOne(number) }
       }
     }
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+    def include(other: Addresses): Unit = other.pages.foreach { (number, added) =>
+      pages.getOrNull(number) match {
+        case null =>
+          ordered = null
+          pages.update(number, java.util.BitSet.valueOf(added.toLongArray))
+        case bits => bits.or(added)
+      }
+    }
     @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
     def addMatching(address: Long, size: Int, into: Addresses): Unit = spans(address, size) {
       (number, offset, length, _) =>
@@ -146,9 +160,12 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   private val dirtyCensus      = Census()
   private val unreadableCensus = Census()
   private val issuedCensus     = Census()
-  // shards holding pages or unreadable bytes, so that an acquire visits only those
+  // shards holding pages, unreadable bytes or issued reads, so that an acquire visits only those
   private val populatedShards = AtomicLong()
   private val invalidations   = AtomicLong()
+  // the acquire number when the outstanding batch was issued, guarded by every shard lock
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private var issuedAt = 0L
 
   private val shardCount    = 64
   private val EveryShard    = -1L
@@ -158,18 +175,74 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   private inline val Fresh  = 1
   private inline val Missed = 2
 
+  /** Answers of one page that reads stamped below their limit may still use. */
+  private class Withdrawn {
+    val bytes: Array[Byte] = Array.ofDim[Byte](pageSize)
+    // the answers that say the client cannot read the byte
+    val unreadable: java.util.BitSet = java.util.BitSet(pageSize)
+    // disjoint sets of bytes by limit
+    private val limits = mutable.LongMap.empty[java.util.BitSet]
+
+    def isEmpty: Boolean = limits.isEmpty
+
+    def usable(since: Long): java.util.BitSet = {
+      val found = java.util.BitSet(pageSize)
+      limits.foreachEntry((limit, bits) => if (limit > since) found.or(bits))
+      found
+    }
+
+    /** Takes those of `offered` that no answer with as late a limit holds. A later limit means the mirror held the
+      * answer later, and on a tie the one held came from a current byte, so the one kept is never the older.
+      */
+    def claim(limit: Long, offered: java.util.BitSet): java.util.BitSet = {
+      val claimed = java.util.BitSet.valueOf(offered.toLongArray)
+      limits.foreachEntry((held, bits) => if (held >= limit) claimed.andNot(bits))
+      if (!claimed.isEmpty) {
+        limits.foreachEntry((held, bits) => if (held < limit) bits.andNot(claimed))
+        unreadable.andNot(claimed)
+        limits.getOrElseUpdate(limit, java.util.BitSet(pageSize)).or(claimed)
+        prune()
+      }
+      claimed
+    }
+
+    def forget(from: Int, until: Int): Unit = {
+      limits.foreachValue(_.clear(from, until))
+      prune()
+    }
+
+    private def prune(): Unit = { val _ = limits.filterInPlace((_, bits) => !bits.isEmpty) }
+  }
+
+  private def rangeBits(from: Int, until: Int): java.util.BitSet = {
+    val result = java.util.BitSet(pageSize)
+    result.set(from, until)
+    result
+  }
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private inline def runs(set: java.util.BitSet)(inline f: (Int, Int) => Unit): Unit = {
+    var from = set.nextSetBit(0)
+    while (from >= 0) {
+      val until = set.nextClearBit(from)
+      f(from, until)
+      from = set.nextSetBit(until)
+    }
+  }
+
   /** The page-addressed state of one slice of the address space. Callers hold the slot's lock. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   private class Shard(val slot: Int) {
-    val pages: mutable.LongMap[Page] = mutable.LongMap.empty[Page]
-    val missing: Addresses           = Addresses()
+    val withdrawn: mutable.LongMap[Withdrawn] = mutable.LongMap.empty[Withdrawn]
+    val pages: mutable.LongMap[Page]          = mutable.LongMap.empty[Page]
+    val missing: Addresses                    = Addresses()
     // requested bytes that the client could not read
     val unreadable: Addresses = Addresses()
     val issued: Addresses     = Addresses()
     // the part of missing that a read is waiting on, as opposed to the rest of its page
     val demanded: Addresses = Addresses()
     val changed: Addresses  = Addresses()
-    // in-flight read bytes whose reply was fetched before a system invalidation and so must not be accepted
+    // in-flight read bytes that an acquire has overtaken
     val stale: Addresses = Addresses()
 
     private val watches = Array(
@@ -184,7 +257,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     def settle(): Unit = {
       var at = 0
       while (at < watches.length) { watches(at).settle(); at += 1 }
-      val now = pages.nonEmpty || unreadable.nonEmpty
+      val now = pages.nonEmpty || unreadable.nonEmpty || issued.nonEmpty
       if (now != populated) {
         populated = now
         val bit = 1L << slot
@@ -203,6 +276,35 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
 
     def copy(number: Long, offset: Int, length: Int, into: Array[Byte], at: Int): Unit =
       Array.copy(pages(number).bytes, offset, into, at, length)
+
+    /** [[present]] and [[copy]] for a read stamped `since`, which may also use answers withdrawn after it began. */
+    def earlier(number: Long, offset: Int, length: Int, since: Long, into: Array[Byte], at: Int): Boolean =
+      withdrawn.get(number).exists { kept =>
+        val page   = pages.get(number)
+        val usable = kept.usable(since)
+        usable.andNot(kept.unreadable)
+        page.foreach(current => usable.or(current.valid))
+        val found = usable.nextClearBit(offset) >= offset + length
+        if (found && into.nonEmpty) {
+          Array.copy(kept.bytes, offset, into, at, length)
+          page.foreach(current =>
+            runs(current.valid.get(offset, offset + length))((from, until) =>
+              Array.copy(current.bytes, offset + from, into, at + from, until - from)
+            )
+          )
+        }
+        found
+      }
+
+    def unreadableTo(number: Long, offset: Int, length: Int, since: Long): Boolean =
+      unreadable.containsAny((number << 12) + offset.toLong, length) || since != AddressSpace.Now &&
+        withdrawn.get(number).exists { kept =>
+          val lost = kept.usable(since)
+          lost.and(kept.unreadable)
+          pages.get(number).foreach(current => lost.andNot(current.valid))
+          lost.and(rangeBits(offset, offset + length))
+          !lost.isEmpty
+        }
 
     def unrequested(number: Long, offset: Int, length: Int): Boolean = {
       val valid     = pages.get(number).map(_.valid)
@@ -276,40 +378,36 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
         retire(address)
       }
 
-    private def storeIfAbsent(address: Long, value: Byte): Unit = {
-      val page  = pages.getOrElseUpdate(number(address), Page())
-      val index = offset(address)
-      if (!page.valid.get(index)) { page.bytes(index) = value; page.valid.set(index) }
+    private def store(wanted: java.util.BitSet, into: Array[Byte], offset: Int, values: Vec[Byte], consumed: Int)
+        : Unit = runs(wanted) { (from, until) =>
+      var index = from
+      while (index < until) { into(index) = values(consumed + index - offset); index += 1 }
     }
 
-    private def storeAbsent(number: Long, offset: Int, length: Int, values: Vec[Byte], consumed: Int): Unit = {
-      val page = pages.getOrElseUpdate(number, Page())
-      val end  = offset + length
-      var from = page.valid.nextClearBit(offset)
-      while (from < end) {
-        val until = math.min(page.valid.nextSetBit(from) match { case -1 => end; case next => next }, end)
-        var index = from
-        while (index < until) { page.bytes(index) = values(consumed + index - offset); index += 1 }
-        page.valid.set(from, until)
-        from = page.valid.nextClearBit(until)
-      }
-    }
-
-    def accept(number: Long, offset: Int, length: Int, values: Vec[Byte], consumed: Int, outdated: Boolean): Unit = {
-      val base = (number << 12) + offset.toLong
-      if (outdated) {
-        var at = 0
-        while (at < length) {
-          val address = base + at.toLong
-          if (!stale.contains(address)) { storeIfAbsent(address, values(consumed + at)); retire(address) }
-          at += 1
+    // `limit` bounds the reads that may use the bytes an acquire overtook
+    @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
+    def accept(number: Long, offset: Int, length: Int, values: Vec[Byte], consumed: Int, limit: Long): Unit = {
+      val base      = (number << 12) + offset.toLong
+      val wanted    = rangeBits(offset, offset + length)
+      val overtaken = stale.pages.getOrNull(number)
+      if (overtaken != null) {
+        val late = rangeBits(offset, offset + length)
+        late.and(overtaken)
+        if (!late.isEmpty) {
+          val kept = withdrawn.getOrElseUpdate(number, Withdrawn())
+          store(kept.claim(limit, late), kept.bytes, offset, values, consumed)
+          wanted.andNot(late)
         }
-      } else {
-        storeAbsent(number, offset, length, values, consumed)
-        retire(base, length)
       }
+      pages.get(number).foreach(page => wanted.andNot(page.valid))
+      if (!wanted.isEmpty) {
+        val page = pages.getOrElseUpdate(number, Page())
+        store(wanted, page.bytes, offset, values, consumed)
+        page.valid.or(wanted)
+      }
+      retire(base, length)
       issued.remove(base, length)
-      if (outdated) stale.remove(base, length)
+      stale.remove(base, length)
     }
 
     @SuppressWarnings(Array("scalafix:DisableSyntax.null"))
@@ -326,15 +424,24 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     }
 
     // requested bytes that no reply carried: the client stopped short of memory it cannot read
-    def forgetUnanswered(): Unit = {
+    def forgetUnanswered(limit: Long): Unit = {
       issued.pages.foreach { (number, unanswered) =>
         demanded.pages.get(number).foreach { waiting =>
           val lost = java.util.BitSet.valueOf(unanswered.toLongArray)
           lost.and(waiting)
           if (!lost.isEmpty) {
-            unreadable.pages.getOrElseUpdate(number, java.util.BitSet(pageSize)).or(lost)
             waiting.andNot(lost)
             if (waiting.isEmpty) { val _ = demanded.pages.subtractOne(number) }
+            stale.pages.get(number).foreach { overtaken =>
+              val late = java.util.BitSet.valueOf(lost.toLongArray)
+              late.and(overtaken)
+              if (!late.isEmpty) {
+                val kept = withdrawn.getOrElseUpdate(number, Withdrawn())
+                kept.unreadable.or(kept.claim(limit, late))
+                lost.andNot(late)
+              }
+            }
+            if (!lost.isEmpty) unreadable.pages.getOrElseUpdate(number, java.util.BitSet(pageSize)).or(lost)
           }
         }
         missing.pages.get(number).foreach { requested =>
@@ -350,30 +457,58 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       stale.pages.clear()
     }
 
-    private def retainDirty(number: Long, page: Page, from: Int, until: Int): Unit =
-      changed.pages.get(number) match {
-        case None                                          => page.valid.clear(from, until)
-        case Some(dirty) if from == 0 && until == pageSize => page.valid.and(dirty)
-        case Some(dirty)                                   =>
-          var index = page.valid.nextSetBit(from)
-          while (index >= 0 && index < until) {
-            if (!dirty.get(index)) page.valid.clear(index)
-            index = page.valid.nextSetBit(index + 1)
-          }
-      }
-
-    def invalidate(number: Long, offset: Int, length: Int): Unit = {
-      val address = (number << 12) + offset.toLong
-      unreadable.remove(address, length)
-      issued.addMatching(address, length, stale)
-      pages.get(number).foreach(retainDirty(number, _, offset, offset + length))
+    private def clean(number: Long, page: Page, from: Int, until: Int): java.util.BitSet = {
+      val found = rangeBits(from, until)
+      found.and(page.valid)
+      changed.pages.get(number).foreach(found.andNot)
+      found
     }
 
-    def invalidateAll(): Unit = {
-      unreadable.pages.clear()
+    // moves the clean answers in [from, until) out of reach of the reads stamped `acquire` or later
+    private def withdraw(number: Long, from: Int, until: Int, acquire: Long): Unit = {
+      // dirty bytes are valid, so equal counts leave nothing to withdraw
+      pages.get(number)
+        .filter(page => page.valid.cardinality > changed.pages.get(number).fold(0)(_.cardinality))
+        .foreach { page =>
+          val dropped = clean(number, page, from, until)
+          if (!dropped.isEmpty) {
+            val kept = withdrawn.getOrElseUpdate(number, Withdrawn())
+            runs(kept.claim(acquire, dropped))((start, end) =>
+              Array.copy(page.bytes, start, kept.bytes, start, end - start)
+            )
+            page.valid.andNot(dropped)
+          }
+        }
+      unreadable.pages.get(number).foreach { marked =>
+        val dropped = rangeBits(from, until)
+        dropped.and(marked)
+        if (!dropped.isEmpty) {
+          val kept = withdrawn.getOrElseUpdate(number, Withdrawn())
+          kept.unreadable.or(kept.claim(acquire, dropped))
+          unreadable.remove((number << 12) + from.toLong, until - from)
+        }
+      }
+    }
+
+    def invalidate(number: Long, offset: Int, length: Int, acquire: Long): Unit = {
+      issued.addMatching((number << 12) + offset.toLong, length, stale)
+      withdraw(number, offset, offset + length, acquire)
+    }
+
+    def invalidateAll(acquire: Long): Unit = {
+      stale.include(issued)
+      unreadable.pages.keys.toArray.foreach(withdraw(_, 0, pageSize, acquire))
       pages.filterInPlace { (number, page) =>
-        retainDirty(number, page, 0, pageSize)
+        withdraw(number, 0, pageSize, acquire)
         !page.valid.isEmpty
+      }
+    }
+
+    def discard(number: Long, offset: Int, length: Int): Unit = {
+      pages.get(number).foreach(page => page.valid.andNot(clean(number, page, offset, offset + length)))
+      withdrawn.get(number).foreach { kept =>
+        kept.forget(offset, offset + length)
+        if (kept.isEmpty) { val _ = withdrawn.subtractOne(number) }
       }
     }
   }
@@ -445,13 +580,15 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     }
     try body
     finally {
+      // descending, so that the first lock is released only once every shard has settled
       var held = mask
       while (held != 0L) {
-        val slot  = slots(java.lang.Long.numberOfTrailingZeros(held))
+        val last  = 63 - java.lang.Long.numberOfLeadingZeros(held)
+        val slot  = slots(last)
         val shard = slot.existing
         if (shard != null) shard.settle()
         slot.lock.unlock()
-        held &= held - 1L
+        held &= ~(1L << last)
       }
     }
   }
@@ -550,16 +687,19 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       size: Int,
       result: Array[Byte],
       allocation: => Option[HostMemoryRange],
-      windowed: Boolean
+      windowed: Boolean,
+      since: Long
   ): Int = {
     var absent = false
     var fresh  = false
     spans(begin, size) { (number, offset, length, consumed) =>
       val shard = shardAt(number)
-      if (!shard.present(number, offset, length)) {
+      if (shard.present(number, offset, length)) {
+        if (!absent && result.nonEmpty) shard.copy(number, offset, length, result, consumed)
+      } else if (since == AddressSpace.Now || !shard.earlier(number, offset, length, since, result, consumed)) {
         absent = true
         fresh = fresh || shard.unrequested(number, offset, length)
-      } else if (!absent && result.nonEmpty) shard.copy(number, offset, length, result, consumed)
+      }
     }
     if (!absent) Hit
     else if (fresh && !windowed) Fresh
@@ -578,14 +718,20 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def read(address: GuestAddress, size: Int >= 0, allocation: => Option[HostMemoryRange]): Option[Vec[Byte]] =
+  def read(
+      address: GuestAddress,
+      size: Int >= 0,
+      allocation: => Option[HostMemoryRange],
+      since: Long = AddressSpace.Now
+  ): Option[Vec[Byte]] =
     if (size == 0) Some(Vec.empty[Byte])
     else {
       val begin  = address.raw
       val first  = number(begin)
       val result = Array.ofDim[Byte](size)
-      var code   = locked(touching(first, number(begin + size - 1)))(attempt(begin, size, result, allocation, false))
-      if (code == Fresh) code = locked(EveryShard)(attempt(begin, size, result, allocation, true))
+      var code   =
+        locked(touching(first, number(begin + size - 1)))(attempt(begin, size, result, allocation, false, since))
+      if (code == Fresh) code = locked(EveryShard)(attempt(begin, size, result, allocation, true, since))
       if (code == Hit) Some(Vec.unsafeWrapArray(result)) else None
     }
 
@@ -613,7 +759,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       while (at < count) {
         if (sizes(at) > 0) {
           val begin = addresses(at)
-          attempt(begin, sizes(at), NoBytes, allocation(begin), windowed = false) match {
+          attempt(begin, sizes(at), NoBytes, allocation(begin), windowed = false, AddressSpace.Now) match {
             case Hit   => ()
             case Fresh => missed = true; fresh = at :: fresh
             case _     => missed = true
@@ -625,7 +771,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     if (fresh.nonEmpty)
       locked(EveryShard)(fresh.foreach { index =>
         val begin = addresses(index)
-        val _     = attempt(begin, sizes(index), NoBytes, allocation(begin), windowed = true)
+        val _     = attempt(begin, sizes(index), NoBytes, allocation(begin), windowed = true, AddressSpace.Now)
       })
     missed
   }
@@ -634,15 +780,18 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     * the previous value. The word is fetched like a read when absent, and left dirty with an atomic width.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def modify(address: GuestAddress, size: Int in (1, 2, 4, 8), allocation: => Option[HostMemoryRange])(
-      update: Long => Long
-  ): Option[Long] = {
+  def modify(
+      address: GuestAddress,
+      size: Int in (1, 2, 4, 8),
+      allocation: => Option[HostMemoryRange],
+      since: Long = AddressSpace.Now
+  )(update: Long => Long): Option[Long] = {
     val begin                                   = address.raw
     val first                                   = number(begin)
     val buffer                                  = Array.ofDim[Byte](size)
     var previous                                = 0L
     def run(mask: Long, windowed: Boolean): Int = locked(mask) {
-      val code = attempt(begin, size, buffer, allocation, windowed)
+      val code = attempt(begin, size, buffer, allocation, windowed, since)
       if (code == Hit) {
         val width = size.widen[Int in 0 ~ 8]
         previous = LittleEndian.decode(buffer, 0, width)
@@ -843,13 +992,13 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def isUnreadable(address: GuestAddress, size: Int >= 0): Boolean =
-    unreadableCensus.occupied && size > 0 && {
+  def isUnreadable(address: GuestAddress, size: Int >= 0, since: Long = AddressSpace.Now): Boolean =
+    (since != AddressSpace.Now || unreadableCensus.occupied) && size > 0 && {
       val begin = address.raw
       locked(touching(number(begin), number(begin + size - 1))) {
         var any = false
         spans(begin, size)((number, offset, length, _) =>
-          any = any || shardAt(number).unreadable.containsAny((number << 12) + offset.toLong, length)
+          any = any || shardAt(number).unreadableTo(number, offset, length, since)
         )
         any
       }
@@ -872,6 +1021,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       locked(EveryShard) {
         // only the latest request can still be answered, so earlier unsent ones must not count as in flight
         populated.foreach(_.abandon())
+        issuedAt = invalidations.get
         val result = readRanges(Cursor(populated.map(_.missing)))
         result.foreach(range =>
           spans(range.address.raw, range.size)((number, offset, length, _) =>
@@ -894,14 +1044,12 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
       populated.foreach(_.abandon())
       Left("host memory reply includes bytes that were not requested")
     } else {
-      val outdated = Array.ofDim[Boolean](shardCount)
-      populated.foreach(shard => outdated(shard.slot) = shard.stale.nonEmpty)
       values.foreach { value =>
         spans(value.address.raw, value.bytes.size)((number, offset, length, consumed) =>
-          shardAt(number).accept(number, offset, length, value.bytes, consumed, outdated(shardIndex(number)))
+          shardAt(number).accept(number, offset, length, value.bytes, consumed, issuedAt + 1)
         )
       }
-      populated.foreach(_.forgetUnanswered())
+      populated.foreach(_.forgetUnanswered(issuedAt + 1))
       Right(())
     }
   }
@@ -926,24 +1074,33 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     if (!dirtyCensus.occupied) Vec.empty[HostMemoryBytes]
     else locked(touching(selected))(take(Array(selectedDirty(selected))))
 
-  /** Discards host reads within `selected` for a system-scope load, retaining unpublished writes. Reads of those bytes
-    * already in flight were issued before this call, so their replies are refused and the bytes fetched again.
+  /** An acquire of `selected`, for a system-scope load: later reads of those bytes see only what is fetched after this
+    * call. Unpublished writes stay.
     */
-  def invalidateClean(selected: Vec[HostMemoryRange]): Unit = {
-    val _ = invalidations.incrementAndGet()
-    locked(touching(selected)) {
-      selected.foreach { range =>
-        spans(range.address.raw, range.size)((number, offset, length, _) =>
-          shardAt(number).invalidate(number, offset, length)
-        )
-      }
+  def invalidateClean(selected: Vec[HostMemoryRange]): Unit = locked(touching(selected)) {
+    val acquire = invalidations.incrementAndGet()
+    selected.foreach { range =>
+      spans(range.address.raw, range.size)((number, offset, length, _) =>
+        shardAt(number).invalidate(number, offset, length, acquire)
+      )
     }
   }
 
-  /** Acquire discards stale host reads, retaining unpublished writes from other lanes. */
-  def invalidateClean(): Unit = {
-    val _    = invalidations.incrementAndGet()
-    val mask = populatedShards.get
-    locked(mask)(inShards(mask)(_.invalidateAll()))
+  /** Drops every answer for the clean bytes of `ranges`, including those withdrawn for earlier reads. */
+  def discard(ranges: Vec[HostMemoryRange]): Unit = locked(touching(ranges)) {
+    ranges.foreach { range =>
+      spans(range.address.raw, range.size)((number, offset, length, _) =>
+        shardAt(number).discard(number, offset, length)
+      )
+    }
   }
+
+  /** An acquire of every address: later reads see only what is fetched after this call. Unpublished writes stay. */
+  def invalidateClean(): Unit =
+    // batches are issued and answered under every lock, so holding the first orders this acquire's number against them
+    locked(1L) {
+      val acquire = invalidations.incrementAndGet()
+      val others  = populatedShards.get & ~1L
+      locked(others)(inShards(others | 1L)(_.invalidateAll(acquire)))
+    }
 }

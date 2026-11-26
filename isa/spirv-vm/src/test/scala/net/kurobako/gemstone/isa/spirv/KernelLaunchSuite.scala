@@ -107,11 +107,12 @@ class KernelLaunchSuite extends Suite {
           Right(())
         }
         override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-          awaitRead(readDeferred(region, offset, size))
+          awaitRead(readDeferred(region, offset, size, _))
         override def readDeferred(
             region: AllocationId,
             offset: Long >= 0,
-            size: Int >= 0
+            size: Int >= 0,
+            since: Long
         ): AddressSpace.ReadResult[Vec[Byte]] =
           if (offset.raw % 8L == 0L || ready.contains(offset)) backing.read(region, offset, size)
           else {
@@ -121,9 +122,10 @@ class KernelLaunchSuite extends Suite {
         override def readValueDeferred(
             region: AllocationId,
             offset: Long >= 0,
-            size: Int in 1 ~ 8
+            size: Int in 1 ~ 8,
+            since: Long
         ): AddressSpace.ReadResult[Long] =
-          readDeferred(region, offset, size.widen[Int >= 0]).map(bytes =>
+          readDeferred(region, offset, size.widen[Int >= 0], since).map(bytes =>
             LittleEndian.decode(bytes, 0, size.widen[Int in 0 ~ 8])
           )
       }
@@ -131,6 +133,56 @@ class KernelLaunchSuite extends Suite {
       assertEquals(execute(program, launch(region), MixedMemory()), Right(()))
       assertEquals(words(backing, region, offset = 0, count = 10), filled((0L until 8L).map(stored + _)))
     }
+  }
+
+  test("a retried read passes the stamp of its first miss, and the next read starts afresh") {
+    val Twice = """%first = OpLoad %uint %slot
+                  |%second = OpLoad %uint %slot
+                  |%sum = OpIAdd %uint %first %second
+                  |OpStore %slot %sum""".stripMargin
+    val backing = RegionMemory()
+    val region  = backing.allocate(40L)
+    writeWords(backing, region, 4, (0L until 8L)*)
+    // another lane acquires before every retry, so only a read that keeps its stamp is ever answered
+    @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+    class AcquiredMemory extends ForwardingMemory(backing) {
+      private val waiting                                = mutable.Map.empty[Long, Long]
+      private var acquires                               = 0L
+      override def defersHostReads: Boolean              = true
+      override def readStamp: Long                       = acquires
+      override def flushHostReads(): Either[Fault, Unit] = {
+        acquires += 1
+        if (acquires > 100) Left(Fault.Memory("a retried read lost its stamp")) else Right(())
+      }
+      override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
+        awaitRead(readDeferred(region, offset, size, _))
+      override def readDeferred(
+          region: AllocationId,
+          offset: Long >= 0,
+          size: Int >= 0,
+          since: Long
+      ): AddressSpace.ReadResult[Vec[Byte]] =
+        waiting.get(offset) match {
+          case None if since != AddressSpace.Now => Left(Fault.Memory("a new read carried an old stamp"))
+          case Some(stamp) if since == stamp     =>
+            val _ = waiting.remove(offset)
+            backing.read(region, offset, size)
+          case found =>
+            if (found.isEmpty) waiting(offset) = acquires
+            Left(AddressSpace.Pending)
+        }
+      override def readValueDeferred(
+          region: AllocationId,
+          offset: Long >= 0,
+          size: Int in 1 ~ 8,
+          since: Long
+      ): AddressSpace.ReadResult[Long] =
+        readDeferred(region, offset, size.widen[Int >= 0], since).map(bytes =>
+          LittleEndian.decode(bytes, 0, size.widen[Int in 0 ~ 8])
+        )
+    }
+    assertEquals(execute(load(fill(update = Twice)).value, launch(region), AcquiredMemory()), Right(()))
+    assertEquals(words(backing, region, offset = 0, count = 10), filled((0L until 8L).map(_ * 2)))
   }
 
   test("WorkgroupSize reads the launch local size") {

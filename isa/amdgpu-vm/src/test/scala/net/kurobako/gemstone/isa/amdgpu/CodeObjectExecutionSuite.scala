@@ -414,11 +414,12 @@ class CodeObjectExecutionSuite extends Suite {
       private val pending                                = AtomicBoolean(!rawPointers)
       override def flushHostReads(): Either[Fault, Unit] = { pending.set(false); Right(()) }
       override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-        awaitRead(readDeferred(region, offset, size))
+        awaitRead(readDeferred(region, offset, size, _))
       override def readDeferred(
           region: AllocationId,
           offset: Long >= 0,
-          size: Int >= 0
+          size: Int >= 0,
+          since: Long
       ): AddressSpace.ReadResult[Vec[Byte]] =
         if (pending.get()) Left(AddressSpace.Pending) else memory.read(region, offset, size)
       override def prepareReads(ranges: AddressSpace.ReadRanges): Either[Fault, Unit] = {

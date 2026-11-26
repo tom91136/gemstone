@@ -239,6 +239,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
   override def invalidateHostReads(): Unit            = host.invalidate(record)
   override def defersHostReads: Boolean               = host.transfers
   override def flushHostReads(): Either[Fault, Unit]  = host.flushReads(record)
+  override def readStamp: Long                        = record.hostMemory.generation
 
   // Explicit registrations may share a view while using several non-overlapping
   // backing allocations. Split only at known boundaries; unknown gaps remain exact.
@@ -265,16 +266,17 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     }
   }
 
-  private def readSegments(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] = {
+  private def readSegments(address: GuestAddress, size: Int >= 0, since: Long)
+      : AddressSpace.ReadResult[Vec[Byte]] = {
     val parts = segments(address, size)
     if (parts.size == 1) {
       val (begin, length) = parts.head
-      backed(begin, length)(storage.read(_, _, length))(host.read(record, begin, length))
+      backed(begin, length)(storage.read(_, _, length))(host.read(record, begin, length, since))
     } else {
       val bytes = Vec.newBuilder[Byte]
       parts.foldLeft[AddressSpace.ReadResult[Unit]](Right(())) { case (result, (begin, length)) =>
         result.flatMap(_ =>
-          backed(begin, length)(storage.read(_, _, length))(host.read(record, begin, length)).map { chunk =>
+          backed(begin, length)(storage.read(_, _, length))(host.read(record, begin, length, since)).map { chunk =>
             val _ = bytes ++= chunk
           }
         )
@@ -295,9 +297,9 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
   // Device atomics serialise against every lane using this address space. Host
   // CPU participation still requires a separate coherence/atomic protocol.
   private def atomicAddress(address: GuestAddress, size: Int in 1 ~ 8)(update: Long => Long): Either[Fault, Long] =
-    awaitRead {
+    awaitRead { since =>
       storage.lock.withLock {
-        readSegments(address, size.widen[Int >= 0]).flatMap { bytes =>
+        readSegments(address, size.widen[Int >= 0], since).flatMap { bytes =>
           val previous = LittleEndian.decode(bytes, 0, size.widen[Int in 0 ~ 8])
           writeSegments(address, LittleEndian.toVec(update(previous), size.widen[Int in 0 ~ 8])).map(_ => previous)
         }
@@ -313,17 +315,18 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     hostBacked(region) || crossesRegion(region, offset, size)
 
   override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
-    onDevice(region, offset, size)(storage.read(_, offset, size))(awaitRead(readDeferred(region, offset, size)))(
+    onDevice(region, offset, size)(storage.read(_, offset, size))(awaitRead(readDeferred(region, offset, size, _)))(
       fault => Left(fault)
     )
 
   override def readDeferred(
       region: AllocationId,
       offset: Long >= 0,
-      size: Int >= 0
+      size: Int >= 0,
+      since: Long
   ): AddressSpace.ReadResult[Vec[Byte]] =
     onDevice(region, offset, size)(storage.read(_, offset, size)) {
-      if (redirected(region, offset, size)) storage.address(region, offset).flatMap(readSegments(_, size))
+      if (redirected(region, offset, size)) storage.address(region, offset).flatMap(readSegments(_, size, since))
       else storage.read(AllocationRange(region, offset, size))
     }(fault => Left(fault))
 
@@ -339,11 +342,12 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
       )
     )(identity)
 
-  override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)
+  override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, since: Long)
       : AddressSpace.ReadResult[Long] =
     onDevice(region, offset, size)(entry => AddressSpace.scalar(storage.readValueInto(entry, offset, size, _))) {
       if (redirected(region, offset, size))
-        readDeferred(region, offset, size.widen[Int >= 0]).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
+        readDeferred(region, offset, size.widen[Int >= 0], since)
+          .map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
       else storage.readValue(AllocationScalar(region, offset, size))
     }(fault => Left(fault))
 
@@ -424,11 +428,11 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
         else Left(Fault.Memory(s"address ${address.show} is not bound"))
     }
 
-  override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-    readSegments(address, size)
+  override def readDeferred(address: GuestAddress, size: Int >= 0, since: Long)
+      : AddressSpace.ReadResult[Vec[Byte]] = readSegments(address, size, since)
 
   override def read(address: GuestAddress, size: Int >= 0): Either[Fault, Vec[Byte]] =
-    backed(address, size)(storage.read(_, _, size))(awaitRead(readSegments(address, size)))
+    backed(address, size)(storage.read(_, _, size))(awaitRead(readSegments(address, size, _)))
 
   override def readValue(address: GuestAddress, size: Int in 1 ~ 8): Either[Fault, Long] =
     AddressSpace.scalar(readValueInto(address, size, _))
@@ -442,7 +446,11 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     else
       AddressSpace.store(
         into,
-        awaitRead(readSegments(address, size.widen[Int >= 0])).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
+        awaitRead(readSegments(
+          address,
+          size.widen[Int >= 0],
+          _
+        )).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
       )
   }
 
@@ -479,7 +487,7 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     atomicModify(address, size, update) {
       size.refine[Int in (1, 2, 4, 8)] match {
         case Right(width) if segments(address, width).size == 1 =>
-          awaitRead(host.modify(record, address, width)(update))
+          awaitRead(host.modify(record, address, width, _)(update))
         case _ => host.atomic(record, address, size)(update)
       }
     }

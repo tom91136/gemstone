@@ -30,9 +30,10 @@ class HostReadScanSuite extends Suite {
         val addresses = Vector.tabulate(lanes)(lane => base + offset + (step.toLong * lanes + lane) * 4)
         @annotation.tailrec
         def drain(pending: Vector[Long]): Either[Fault, Unit] = {
-          val outcomes = pending.map(address => address -> memory.readDeferred(GuestAddress(address), 4))
-          val failed   = outcomes.collectFirst { case (_, Left(fault: Fault)) => fault }
-          val wrong    = outcomes.collectFirst {
+          val outcomes =
+            pending.map(address => address -> memory.readDeferred(GuestAddress(address), 4, AddressSpace.Now))
+          val failed = outcomes.collectFirst { case (_, Left(fault: Fault)) => fault }
+          val wrong  = outcomes.collectFirst {
             case (address, Right(bytes)) if bytes != Vec.tabulate(4)(index => pattern(address + index)) => address
           }
           val retry = outcomes.collect { case (address, Left(_: AddressSpace.Pending.type)) => address }

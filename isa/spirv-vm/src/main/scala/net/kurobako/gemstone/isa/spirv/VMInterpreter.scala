@@ -538,7 +538,7 @@ private object VMInterpreter {
           execution.fragmentQuad = fragment && groupSize.x == 4 && groupSize.y == 1 && groupSize.z == 1
           execution.subgroupReconvergence = program.usesNonUniformCollectives && !fragment
           execution.helperInvocation = helperVariable.flatMap(stageValues.get) match {
-            case Some(VMValue.Address(_, pointer)) => memory.awaitRead(groupState.readScalar(pointer, 1)) match {
+            case Some(VMValue.Address(_, pointer)) => memory.awaitRead(_ => groupState.readScalar(pointer, 1)) match {
                 case Left(error)  => return Left(error)
                 case Right(value) => value != 0
               }
@@ -704,6 +704,7 @@ private object VMInterpreter {
     memory.observer = execution.timeline.observer.orNull
     memory.lane = execution.ordinal
     memory.invocation = execution.storage
+    memory.since = execution.readsSince
     execution.preempted = false
     var executed                      = 0
     var slices                        = 0
@@ -720,10 +721,14 @@ private object VMInterpreter {
       execution.issued += 1L
       result match {
         case Left(_: AddressSpace.Pending.type) =>
-          execution.awaitMemory()
+          execution.awaitMemory(memory.readStamp)
           return charge()
         case Left(error: Fault) => return charge().flatMap(_ => Left(error))
-        case Right(_)           => ()
+        case Right(_)           =>
+          if (memory.since != AddressSpace.Now) {
+            execution.readsSince = AddressSpace.Now
+            memory.since = AddressSpace.Now
+          }
       }
       if (execution.yielded) return charge()
       if (executed == ChargeInterval) charge() match {

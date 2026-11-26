@@ -74,13 +74,14 @@ class TimelineSuite extends Suite {
     override def readDeferred(
         region: AllocationId,
         offset: Long >= 0,
-        size: Int >= 0
+        size: Int >= 0,
+        since: Long
     ): AddressSpace.ReadResult[Vec[Byte]] =
-      if (pending) Left(AddressSpace.Pending) else memory.readDeferred(region, offset, size)
+      if (pending) Left(AddressSpace.Pending) else memory.readDeferred(region, offset, size, since)
 
-    override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8)
+    override def readValueDeferred(region: AllocationId, offset: Long >= 0, size: Int in 1 ~ 8, since: Long)
         : AddressSpace.ReadResult[Long] =
-      if (pending) Left(AddressSpace.Pending) else memory.readValueDeferred(region, offset, size)
+      if (pending) Left(AddressSpace.Pending) else memory.readValueDeferred(region, offset, size, since)
 
     override def flushHostReads(): Either[Fault, Unit] = {
       pending = false

@@ -256,6 +256,10 @@ private class HostCoherence(
     while (!closed() && completion.isPending && exchange.observed.isEmpty) changed.await()
     completion.endHostSync()
     if (publish.isEmpty && !relaxed) completion.hostMemory.invalidateClean()
+    // a read begun before a native operation must not apply an update to the value it replaced
+    val replaced = Vec.from(atomic) ++ atomicStores
+    if (replaced.nonEmpty)
+      completion.hostMemory.discard(replaced.map(op => HostMemoryRange(op.address, op.size)))
     // A poller can consume the acknowledgement wakeup before this worker does.
     // Removing the exchange makes other workers' pending reads eligible again.
     changed.signalAll()
@@ -293,17 +297,20 @@ private class HostCoherence(
   def invalidate(completion: Completion, ranges: Vec[HostMemoryRange]): Unit =
     completion.hostMemory.invalidateClean(ranges)
 
-  private def unreadable(completion: Completion, address: GuestAddress, size: Int >= 0, kind: String): Option[Fault] =
+  private def unreadable(completion: Completion, address: GuestAddress, size: Int >= 0, kind: String, since: Long)
+      : Option[Fault] =
     if (unavailable(address, size))
       Some(Fault.Memory(s"host memory $kind at ${address.show} ($size bytes) is unavailable or overflows"))
-    else if (completion.hostMemory.isUnreadable(address, size))
+    else if (completion.hostMemory.isUnreadable(address, size, since))
       Some(Fault.Memory(s"host memory $kind at ${address.show} ($size bytes) is not readable in the client"))
     else None
 
-  def read(completion: Completion, address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
-    unreadable(completion, address, size, "read") match {
+  def read(completion: Completion, address: GuestAddress, size: Int >= 0, since: Long)
+      : AddressSpace.ReadResult[Vec[Byte]] =
+    unreadable(completion, address, size, "read", since) match {
       case Some(fault) => Left(fault)
-      case None        => completion.hostMemory.read(address, size, allocationAt(address)).toRight(AddressSpace.Pending)
+      case None        =>
+        completion.hostMemory.read(address, size, allocationAt(address), since).toRight(AddressSpace.Pending)
     }
 
   /** Demands the host bytes of `count` reads, returning whether any still has to arrive. */
@@ -314,7 +321,7 @@ private class HostCoherence(
     while (at < count && fault.isEmpty) {
       val address = GuestAddress(addresses(at))
       val size    = sizes(at).unsafe[Int >= 0]
-      fault = unreadable(completion, address, size, "read")
+      fault = unreadable(completion, address, size, "read", AddressSpace.Now)
       at += 1
     }
     fault.toLeft(()).map(_ => completion.hostMemory.stage(addresses, sizes, count, allocationAtRaw))
@@ -326,11 +333,11 @@ private class HostCoherence(
     * include the host or other dispatches. It is a host atomic while another dispatch uses atomics on host memory.
     */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def modify(completion: Completion, address: GuestAddress, size: Int in (1, 2, 4, 8))(
+  def modify(completion: Completion, address: GuestAddress, size: Int in (1, 2, 4, 8), since: Long)(
       update: Long => Long
   ): AddressSpace.ReadResult[Long] =
     if (address.raw % size != 0) Left(Fault.Memory("atomics require aligned storage"))
-    else unreadable(completion, address, size.widen[Int >= 0], "atomic") match {
+    else unreadable(completion, address, size.widen[Int >= 0], "atomic", since) match {
       case Some(fault) => Left(fault)
       case None        =>
         engage(completion)
@@ -343,7 +350,7 @@ private class HostCoherence(
           var previous = Option.empty[Long]
           try
             draining(completion) {
-              previous = completion.hostMemory.modify(address, size, allocationAt(address))(update)
+              previous = completion.hostMemory.modify(address, size, allocationAt(address), since)(update)
             }
           finally mirroring.decrement()
           previous.toRight(AddressSpace.Pending)

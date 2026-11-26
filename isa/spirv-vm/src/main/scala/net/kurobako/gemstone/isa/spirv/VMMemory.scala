@@ -171,10 +171,13 @@ private object VMMemory {
       shared: Storage,
       descriptors: mutable.HashMap[(Long, Int), Long]
   ) {
-    private val memory                                = shared.memory
-    def handler: Event => Either[Fault, Unit]         = shared.handler
-    def deviceQueue: DeviceQueue                      = shared.deviceQueue
-    def flushHostReads(): Either[Fault, Unit]         = memory.flushHostReads()
+    private val memory                        = shared.memory
+    def handler: Event => Either[Fault, Unit] = shared.handler
+    def deviceQueue: DeviceQueue              = shared.deviceQueue
+    def flushHostReads(): Either[Fault, Unit] = memory.flushHostReads()
+    def readStamp: Long                       = memory.readStamp
+    // the stamp of the executing invocation's pending read
+    var since: Long                                   = AddressSpace.Now
     def fence(): Either[Fault, Unit]                  = memory.fenceHostMemory()
     var helperInvocation: Boolean                     = false
     var observer: LaunchObserver | Null               = null
@@ -280,8 +283,9 @@ private object VMMemory {
             guest(pointer.address, size, "read through") match {
               case Left(fault)                                     => Left(fault)
               case Right(AddressSpace.Location.Within(id, offset)) =>
-                memory.readDeferred(id, offset, size).map(_.toArray)
-              case Right(AddressSpace.Location.Absolute(address)) => memory.readDeferred(address, size).map(_.toArray)
+                memory.readDeferred(id, offset, size, since).map(_.toArray)
+              case Right(AddressSpace.Location.Absolute(address)) =>
+                memory.readDeferred(address, size, since).map(_.toArray)
             }
         }
       )
@@ -319,10 +323,14 @@ private object VMMemory {
           case Right(AddressSpace.Location.Within(id, offset)) =>
             (if (size == 8) relocation(id, offset) else None) match {
               case Some(target) => addressOf(target)
-              case None         => memory.readValueDeferred(id, offset, size)
+              case None         => memory.readValueDeferred(id, offset, size, since)
             }
           case Right(AddressSpace.Location.Absolute(target)) =>
-            memory.readDeferred(target, size.widen[Int >= 0]).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
+            memory.readDeferred(
+              target,
+              size.widen[Int >= 0],
+              since
+            ).map(LittleEndian.decode(_, 0, size.widen[Int in 0 ~ 8]))
         }
     }
 

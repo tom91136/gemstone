@@ -23,7 +23,10 @@ class VMMemorySuite extends Suite {
     assertEquals(memory.writeScalar(at(4094L), 0x12345678L, 4), Right(()))
     assertEquals(backing.bytes(region).slice(4094, 4098), LittleEndian.toVec(0x12345678L, 4))
     assertEquals(backing.write(region, 0L, Vec.fill(8200)(9.toByte)), Right(()))
-    assertEquals(backing.awaitRead(memory.readScalar(at(4094L), 4)), Right(0x09090909L))
+    assertEquals(
+      backing.awaitRead { since => memory.since = since; memory.readScalar(at(4094L), 4) },
+      Right(0x09090909L)
+    )
     assertEquals(memory.atomicReadScalar(at(8L), 4), Right(0x09090909L))
   }
 

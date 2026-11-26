@@ -104,7 +104,8 @@ class SPIRVHarness(seed: Long) extends AddressSpace with SPIRVMemory {
       case AddressSpace.Location.Within(region, offset) => read(region, offset, size)
       case AddressSpace.Location.Absolute(_)            => Right(memory.read(address.raw, size))
     }
-  override def readDeferred(address: GuestAddress, size: Int >= 0): AddressSpace.ReadResult[Vec[Byte]] =
+  override def readDeferred(address: GuestAddress, size: Int >= 0, since: Long)
+      : AddressSpace.ReadResult[Vec[Byte]] =
     read(address, size)
   override def write(address: GuestAddress, bytes: Vec[Byte]): Either[Fault, Unit] =
     locate(address, bytes.nonNegativeSize).flatMap {
