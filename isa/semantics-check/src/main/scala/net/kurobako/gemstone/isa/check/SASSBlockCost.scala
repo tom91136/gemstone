@@ -116,6 +116,17 @@ final class SASSBlockCost private (
       index => Right(static.timing(index).memory)
     )
 
+  private def refused(index: Int): String =
+    s"${text(original.instructions(index))} is relative to the program counter, so the kernel is not laid out again"
+
+  private lazy val anchors: Either[String, Vec[SASSAnchors.Anchor]] =
+    SASSAnchors.of(target, original.instructions, original.graph).left.map(refused)
+
+  private def anchored(window: Window): Either[String, Vec[SASSAnchors.Anchor]] = anchors.flatMap(found =>
+    found.find(anchor => window.first < anchor.target && anchor.target <= window.last)
+      .map(anchor => refused(anchor.at)).toLeft(found)
+  )
+
   /** The kernel with `window` replaced, laid out again by the assembler. */
   private def relaid(window: Window, replacement: Vec[DecodedInstruction]): Either[String, Vec[DecodedInstruction]] = {
     val code = original.instructions
@@ -131,24 +142,45 @@ final class SASSBlockCost private (
       )
     def operation(instruction: DecodedInstruction, preserved: Option[DecodedInstruction]): Program.Statement =
       Program.Statement.Operation(instruction.operation, preserved)
-    val fresh   = replacement.map(instruction => operation(instruction, kept(instruction)))
-    val program = Program(
+    // the assembler moves a branch with the instruction preserved at its target, so only the first replacement may
+    // claim the window's start, which does not move
+    val start = code(window.first).address.raw
+    val fresh = replacement.zipWithIndex.map((instruction, index) =>
+      operation(
+        instruction,
+        kept(instruction).map(_.copy(address = (start + index).unsafe[Int >= 0]))
+      )
+    )
+    val moved              = replacement.size - (window.last - window.first + 1)
+    def placed(index: Int) = if (index > window.last) index + moved else index
+    val program            = Program(
       Some(target),
       code.slice(0, window.first).map(instruction => operation(instruction, Some(instruction))) ++ fresh ++
         code.drop(window.last + 1).map(instruction => operation(instruction, Some(instruction)))
     )
     for {
-      moved   <- assembler.relaid(program).left.map(_.toString)
-      bytes   <- assembler.encode(moved).left.map(_.toString)
+      checked <- if (moved == 0) Right(Vec.empty[SASSAnchors.Anchor]) else anchored(window)
+      laid    <- assembler.relaid(program).left.map(_.toString)
+      bytes   <- assembler.encode(laid).left.map(_.toString)
       decoded <- disassembler.decode(bytes).left.map(_.toString)
       found = decoded.statements.collect { case Program.Statement.Operation(_, Some(instruction), _) => instruction }
       _ <- Either.cond(
-        found.size == code.size - (window.last - window.first + 1) + replacement.size,
+        found.size == code.size + moved,
         (),
         "the rewritten kernel does not keep its instruction count"
       )
+      _ <- checked.filterNot(anchor => window.first <= anchor.at && anchor.at <= window.last)
+        .find(anchor =>
+          found(placed(anchor.at)).operands.lastOption.flatMap(SASSAnchors.address) !=
+            found.lift(placed(anchor.target)).map(reached => BigInt(reached.address.raw))
+        ).map(anchor => refused(anchor.at)).toLeft(())
     } yield found
   }
+
+  private[check] def laidOut(
+      window: Window,
+      replacement: Vec[DecodedInstruction]
+  ): Either[String, Vec[DecodedInstruction]] = relaid(window, replacement)
 
   /** `instructions` with the control words of every path regenerated, and the static view that gives. */
   private def scheduled(instructions: Vec[DecodedInstruction]): Either[String, Static] = {
@@ -232,16 +264,12 @@ final class SASSBlockCost private (
     val anchor =
       if (replacement.nonEmpty) Some(window.first)
       else outside.headOption.map(index => if (index > window.last) index + moved else index)
-    anchor.fold(
-      cost(window, source.instructions.slice(window.first, window.last + 1)).map(whole =>
-        AMDGPUBlockCost.Cost(0.0, whole.source, moved * 16)
-      )
-    ) { at =>
-      for {
-        code  <- relaid(window, replacement)
-        laid  <- scheduled(code)
-        found <- costed(laid, at, moved * 16, window, replacement.size)
-      } yield found
-    }
+    relaid(window, replacement).flatMap(code =>
+      anchor.fold(
+        cost(window, source.instructions.slice(window.first, window.last + 1)).map(whole =>
+          AMDGPUBlockCost.Cost(0.0, whole.source, moved * 16)
+        )
+      )(at => scheduled(code).flatMap(costed(_, at, moved * 16, window, replacement.size)))
+    )
   }
 }

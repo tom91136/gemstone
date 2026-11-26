@@ -51,7 +51,6 @@ object AMDGPUBlockCost {
   private val Lane         = raw"v(\d+)".r
   private val memoryTraits = Set("smrd", "vmem", "store", "waits-valu")
   private val exec         = ImplicitState.units(ImplicitState.Exec, 64).toSet
-  private val relative     = Set("s_getpc_b64", "s_call_b64", "s_subvector_loop_begin", "s_subvector_loop_end")
 
   def of(image: Vec[Byte], function: String, targetName: String, launch: Launch): Either[String, AMDGPUBlockCost] =
     for {
@@ -88,12 +87,11 @@ object AMDGPUBlockCost {
       case _                                         => Left(s"not a single instruction: $text")
     })
 
-  private def branch(instruction: Instruction): Boolean = {
-    val mnemonic = instruction.opcode.raw
-    mnemonic == "s_branch" || mnemonic.startsWith("s_cbranch_")
+  private case class Move(origin: Int, size: Int, start: Int, boundary: Int, shift: Int, base: Int) {
+    def apply(address: Long): Long =
+      if (address < origin || address >= origin + size) address
+      else base + (if (address >= boundary) address + shift else address)
   }
-
-  private def pcRelative(instruction: Instruction): Boolean = relative(instruction.opcode.raw) || branch(instruction)
 
   private def vectors(uses: Vec[RegisterUse]): Int =
     uses.flatMap(use => (use.reads ++ use.writes).flatMap(name => Liveness.units(name, use.unitsOf(name))))
@@ -124,36 +122,83 @@ final class AMDGPUBlockCost private (
   private def span(index: Int): Vec[Byte] =
     kernel.slice(start(index), original.offsets.lift(index + 1).fold(kernel.size)(_ - original.offsets(0)))
 
-  private def refused(index: Int): Either[String, Vec[Byte]] =
-    Left(s"${original.text(index)} is relative to the program counter, so the kernel is not laid out again")
+  private def refused(index: Int): String =
+    s"${original.text(index)} is relative to the program counter, so the kernel is not laid out again"
 
-  private def retargeted(index: Int, instruction: Instruction, boundary: Int, shift: Int): Either[String, Vec[Byte]] =
-    instruction.operands match {
-      case Vec(Operand.IntegerLiteral(value, _)) =>
-        def moved(offset: Int) = if (offset >= boundary) offset + shift else offset
-        val from               = original.offsets(index)
-        val to                 = from + 4 + 4 * value.toShort
-        val words              = (moved(to) - moved(from) - 4) / 4
-        Instruction.decode(instruction.definition, Vec(Operand.IntegerLiteral(BigInt(words), 10)), instruction.mods)
-          .map(Printer.render(_)).left.map(reason => s"${original.text(index)}: $reason")
-          .flatMap(text => bytes(Vec(text)))
-      case _ => Left(s"${original.text(index)} has no literal target")
-    }
-
-  private def relocated(index: Int, boundary: Int, shift: Int): Either[String, Vec[Byte]] =
-    if (shift == 0) Right(span(index))
-    else
-      instruction(original.text(index)) match {
-        case Right(value) if branch(value)     => retargeted(index, value, boundary, shift)
-        case Right(value) if pcRelative(value) => refused(index)
-        case Right(_)                          => Right(span(index))
-        case Left(_)                           =>
-          Binary.decodeStatementAt(kernel, start(index).unsafe[Int >= 0], TargetMode(target)) match {
-            case Right(DecodedStatement(Program.Statement.Instruction(value), _)) =>
-              if (pcRelative(value)) refused(index) else Right(span(index))
-            case _ => Left(s"${original.text(index)} does not decode, so the kernel is not laid out again")
-          }
+  private lazy val decoded: Vec[Option[Instruction]] = Vec.tabulate(original.text.size)(index =>
+    instruction(original.text(index)).toOption.orElse(
+      Binary.decodeStatementAt(kernel, start(index).unsafe[Int >= 0], TargetMode(target)).toOption.collect {
+        case DecodedStatement(Program.Statement.Instruction(value), _) => value
       }
+    )
+  )
+
+  private lazy val anchors: Either[String, Vec[AMDGPUAnchors.Anchor]] =
+    AMDGPUAnchors.of(target, decoded, original.offsets, kernel.size, original.uses, original.graph).left.map(refused)
+
+  private def reassembled(index: Int, operands: Vec[Operand]): Either[String, Vec[Byte]] =
+    decoded(index).toRight(refused(index)).flatMap(value =>
+      Instruction.decode(value.definition, operands, value.mods).left.map(_ => refused(index))
+        .flatMap(changed => bytes(Vec(Printer.render(changed))))
+        .filterOrElse(_.size == span(index).size, refused(index))
+    )
+
+  private def readdressed(index: Int, literal: Int): Either[String, Vec[Byte]] =
+    if (span(index).size == 8)
+      Right(span(index).take(4) ++ Vec.tabulate(4)(byte => (literal >>> (8 * byte)).toByte))
+    else
+      decoded(index).toRight(refused(index))
+        .flatMap(value => reassembled(index, value.operands.init :+ Operand.IntegerLiteral(BigInt(literal), 10)))
+
+  private def reanchored(window: Window, move: Move): Either[String, Map[Int, Vec[Byte]]] = anchors.flatMap { found =>
+    def held(index: Int)                      = window.first <= index && index <= window.last
+    def split(address: Long)                  = address > move.start && address < move.boundary
+    def from(index: Int)                      = original.offsets(index).toLong
+    def members(anchor: AMDGPUAnchors.Anchor) = anchor match {
+      case AMDGPUAnchors.Anchor.Label(at, _)              => Vec(at)
+      case AMDGPUAnchors.Anchor.Address(at, low, high, _) => Vec(at, low, high)
+    }
+    val blocked = found.find(anchor => members(anchor).exists(held) || split(anchor.target))
+    blocked.map(anchor => refused(anchor.at)).toLeft(()).flatMap(_ =>
+      BlockRegion.each(found) { anchor =>
+        val at       = anchor.at
+        val before   = anchor.target - from(at) - 4
+        val distance = move(anchor.target) - move(from(at)) - 4
+        if (distance == before) Right(Vec.empty[(Int, Vec[Byte])])
+        else
+          anchor match {
+            case AMDGPUAnchors.Anchor.Label(_, _) =>
+              val words = distance / 4
+              Either.cond(distance % 4 == 0 && words.toShort.toLong == words, words, refused(at)).flatMap(words =>
+                decoded(at).toRight(refused(at)).flatMap(value =>
+                  reassembled(at, value.operands.init :+ Operand.IntegerLiteral(BigInt(words), 10))
+                )
+              ).map(code => Vec(at -> code))
+            case AMDGPUAnchors.Anchor.Address(_, low, high, _) =>
+              // the high addition leaves its carry in SCC, which a displacement of the same sign keeps
+              Either.cond((distance < 0) == (before < 0), (), refused(at)).flatMap(_ =>
+                for {
+                  lower <- readdressed(low, distance.toInt)
+                  upper <- readdressed(high, (distance >> 32).toInt)
+                } yield Vec(low -> lower, high -> upper)
+              )
+          }
+      }.map(_.flatten.toMap)
+    )
+  }
+
+  private def placement(size: Int): Either[String, Int] = {
+    def at(code: CodeObject) = code.executableSections.left.map(_.message.raw).flatMap(sections =>
+      sections.flatMap(_.symbols).find(_.name.raw == function.raw).map(_.offset.raw)
+        .toRight(s"no code symbol for $function")
+    )
+    for {
+      code    <- CodeObject.decode(image).left.map(_.message.raw)
+      before  <- at(code)
+      changed <- code.replaceKernel(function, Vec.fill(size)(0.toByte)).left.map(_.message.raw)
+      after   <- at(changed)
+    } yield after - before
+  }
 
   private def rewritten(window: Window, replacement: Vec[String]): Either[String, (Static, Int)] = for {
     boundary <- end(window.last)
@@ -166,10 +211,19 @@ final class AMDGPUBlockCost private (
       (),
       s"the window ${window.first}..${window.last} does not reassemble to its own size"
     )
-    pieces <- BlockRegion.each(Vec.from(original.text.indices))(index =>
-      if (index == window.first) Right(after)
-      else if (window.first < index && index <= window.last) Right(Vec.empty[Byte])
-      else relocated(index, boundary, shift)
+    changed <-
+      if (shift == 0) Right(Map.empty[Int, Vec[Byte]])
+      else
+        placement(kernel.size + shift).flatMap(base =>
+          reanchored(
+            window,
+            Move(original.offsets(0), kernel.size, original.offsets(window.first), boundary, shift, base)
+          )
+        )
+    pieces = Vec.tabulate(original.text.size)(index =>
+      if (index == window.first) after
+      else if (window.first < index && index <= window.last) Vec.empty[Byte]
+      else changed.getOrElse(index, span(index))
     )
     replaced <- CodeObject.decode(image).flatMap(_.replaceKernel(function, pieces.flatten)).left.map(_.message.raw)
     laid     <- static(replaced.image, function.raw)
@@ -182,6 +236,9 @@ final class AMDGPUBlockCost private (
     kept = laid.offsets.patch(window.first, Vec.empty[Int], replacement.size)
     _ <- Either.cond(kept == expected, (), "the rewritten kernel does not keep the layout its instruction sizes give")
   } yield (laid, shift)
+
+  private[check] def laidOut(window: Window, replacement: Vec[String]): Either[String, (Vec[Int], Vec[String])] =
+    rewritten(window, replacement).map((laid, _) => (laid.offsets, laid.text))
 
   private def code(static: Static): RecordedIssues.Code =
     RecordedIssues.Code(static.text, static.offsets, static.uses, index => reaches(static.text(index)))

@@ -54,6 +54,124 @@ class SASSBlockCostSuite extends Suite {
     }
   }
 
+  private def laidOver(source: String, last: Option[String] = None): Vec[Byte] = {
+    val target = Target.parse(targetName).fold(fail(_), identity)
+    val parsed = Parser.parseProgram(source).fold(error => fail(error.toString), identity)
+    // a word as ptxas encodes it, which the assembler keeps
+    val appended = last.map { word =>
+      val bytes   = Hex.parse(word).fold(fail(_), identity).toArray
+      val address = (parsed.statements.size * 16).unsafe[Int >= 0]
+      val decoded = InstructionDecoder.decode(address, bytes, target).fold(fail(_), identity)
+      Program.Statement.Operation(decoded.operation, Some(decoded))
+    }
+    val code = new Assembler(target).encode(parsed.copy(statements = parsed.statements ++ appended))
+      .fold(error => fail(error.toString), identity)
+    Cubin.replaceKernel(cubin("intchain.sm_89.cubin"), kernel.unsafe[NonEmpty[String]], code)
+      .fold(error => fail(error.raw), identity)
+  }
+
+  private def costOf(image: Vec[Byte]): SASSBlockCost =
+    SASSBlockCost.of(image, kernel, targetName, launch).fold(fail(_), identity)
+
+  private def shrunk(image: Vec[Byte], first: Int, last: Int) =
+    costOf(image).cost(Window(0, first, last, Set.empty, Set.empty), decoded(image).slice(first + 1, last + 1))
+
+  private def assertAnchored(result: Either[String, AMDGPUBlockCost.Cost]): Unit =
+    assert(result.left.exists(_.contains("relative to the program counter")), result)
+
+  test("a return refuses a size-changing rewrite") {
+    val image = laidOver(
+      """IADD3 R2, R2, 0x1, RZ ;
+        |IADD3 R4, R2, 0x2, RZ ;
+        |IADD3 R16, RZ, 0x40, RZ ;
+        |CALL.REL.NOINC 0x50 ;
+        |EXIT ;
+        |IADD3 R6, R2, 0x3, RZ ;
+        |IADD3 R8, R2, 0x4, RZ ;
+        |""".stripMargin,
+      // RET.REL.NODEC R16 to the start of its function
+      Some("5079001060dcffffffffc30300ec0f00")
+    )
+    assertAnchored(shrunk(image, 0, 1))
+  }
+
+  test("an indirect branch refuses a size-changing rewrite") {
+    val image = laidOver(
+      """IADD3 R2, R2, 0x1, RZ ;
+        |IADD3 R4, R2, 0x2, RZ ;
+        |BRX R4 ;
+        |EXIT ;
+        |""".stripMargin
+    )
+    assertAnchored(shrunk(image, 0, 1))
+  }
+
+  test("a read of the program counter refuses a size-changing rewrite") {
+    val image = laidOver(
+      """IADD3 R2, R2, 0x1, RZ ;
+        |IADD3 R4, R2, 0x2, RZ ;
+        |LEPC R6 ;
+        |EXIT ;
+        |""".stripMargin
+    )
+    assertAnchored(shrunk(image, 0, 1))
+  }
+
+  test("a deletion that empties its block is refused with the rewrites that move code") {
+    val image = laidOver(
+      """@P0 BRA 0x30 ;
+        |IADD3 R2, R2, 0x1, RZ ;
+        |IADD3 R4, R2, 0x2, RZ ;
+        |LEPC R6 ;
+        |EXIT ;
+        |""".stripMargin
+    )
+    assertAnchored(costOf(image).cost(Window(1, 1, 2, Set.empty, Set.empty), Vec.empty[DecodedInstruction]))
+  }
+
+  test("a target strictly inside a window refuses the window") {
+    val image = laidOver(
+      """BSSY B0, 0x30 ;
+        |IADD3 R2, R2, 0x1, RZ ;
+        |BSYNC B0 ;
+        |IADD3 R4, R2, 0x2, RZ ;
+        |IADD3 R6, R2, 0x3, RZ ;
+        |EXIT ;
+        |""".stripMargin
+    )
+    assertAnchored(shrunk(image, 2, 3))
+  }
+
+  private val branched =
+    """IADD3 R2, R2, 0x1, RZ ;
+      |IADD3 R4, R2, 0x2, RZ ;
+      |IADD3 R6, R2, 0x3, RZ ;
+      |IADD3 R8, R2, 0x4, RZ ;
+      |@P0 BRA 0x20 ;
+      |EXIT ;
+      |""".stripMargin
+
+  private def branchTarget(code: Vec[DecodedInstruction]): Option[BigInt] =
+    code.find(_.mnemonic.raw == "BRA").flatMap(_.operands.lastOption).collect {
+      case Operand.Integer(value) => value
+      case Operand.Bits(value, _) => value
+    }
+
+  test("a branch to the start of a window keeps reaching the start when the rewrite reorders it") {
+    val image = laidOver(branched)
+    val body  = decoded(image)
+    val laid  =
+      costOf(image).laidOut(Window(1, 2, 3, Set.empty, Set.empty), Vec(body(3), body(2))).fold(fail(_), identity)
+    assertEquals(branchTarget(laid), Some(BigInt(0x20)))
+  }
+
+  test("a branch target moves with the code a shorter window leaves before it") {
+    val image = laidOver(branched)
+    val body  = decoded(image)
+    val laid  = costOf(image).laidOut(Window(0, 0, 1, Set.empty, Set.empty), Vec(body(1))).fold(fail(_), identity)
+    assertEquals(branchTarget(laid), Some(BigInt(0x10)))
+  }
+
   test("a region that reaches memory is not costed under a stated launch") {
     val image  = cubin("intchain.sm_89.cubin")
     val window =
