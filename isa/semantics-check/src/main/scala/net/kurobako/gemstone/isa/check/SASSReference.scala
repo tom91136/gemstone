@@ -102,17 +102,19 @@ object SASSReference extends Reference[NvidiaHarness, Lookup.Sass] {
       random: Random
   ): Vec[Long] = {
     val addresses = addressing(target, instance, lookup)
-    parameters.zip(sampled).map {
+    val values    = Vec.newBuilder[Long]
+    parameters.zip(sampled).foreach {
       case ((name, Type.Ranged(_, intervals)), value)
           if lookup.constants.exists(_.binding == name) && random.nextInt(8) != 0 =>
         val stride = lookup.written.stride(name)
         val floor  = value - Math.floorMod(value, stride)
-        Vec(floor, floor + stride).find(aligned => intervals.exists((low, high) => aligned >= low && aligned <= high))
-          .getOrElse(value)
+        values += Vec(floor, floor + stride)
+          .find(aligned => intervals.exists((low, high) => aligned >= low && aligned <= high)).getOrElse(value)
       case ((name, _), _) if addresses(name) && random.nextInt(8) != 0 =>
-        random.nextInt(NvidiaHarness.SharedBytes / 16).toLong * 16
-      case (_, value) => value
+        values += random.nextInt(NvidiaHarness.SharedBytes / 16).toLong * 16
+      case (_, value) => values += value
     }
+    values.result()
   }
 
   def execute(

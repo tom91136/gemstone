@@ -37,6 +37,8 @@ trait Reference[H, L <: Lookup] {
   def loads(@unused harness: H): Map[Space, Set[(Long, Byte)]] = Map.empty
 
   /** The most bytes a workgroup may allocate of `space`, where a run takes its allocation from [[allocate]]. */
+  // the default is per space; an ISA overrides it for the spaces it can allocate
+  @SuppressWarnings(Array("bonsai:constant-argument"))
   def allocation(@unused space: Space): Option[Long] = None
 
   /** Sets the bytes `harness` allocates of `space`. */

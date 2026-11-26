@@ -300,6 +300,7 @@ object ControlWords {
   private def yields(stall: Int, idle: Int): Boolean = !Ungrouped.contains(stall) || stall >= 3 && stall > idle
 
   /** The scheduling of each instruction of `path`, or the instruction whose requirement no stall can meet. */
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
   def regenerate(table: Table, path: Path): Either[String, Vec[Scheduling]] = {
     val steps  = path.steps
     val walk   = Walk()
@@ -307,7 +308,9 @@ object ControlWords {
     val masks  = Array.fill(steps.size)(0)
     val writes = Array.fill(steps.size)(-1)
     val reads  = Array.fill(steps.size)(-1)
-    val failed = steps.indices.find { index =>
+    var failed = -1
+    var index  = 0
+    while (failed < 0 && index < steps.size) {
       val step  = steps(index)
       val idle  = if (index == 0) 1 else table.idleStall(idleKey(steps(index - 1)), step.form)
       val waits = walk.mask(step)
@@ -326,9 +329,10 @@ object ControlWords {
       writes(index) = write
       reads(index) = read
       walk.commit(step, time, scheduling(0, yields = false, write, read, waits))
-      index > 0 && time - issued(index - 1) > MaxStall
+      if (index > 0 && time - issued(index - 1) > MaxStall) failed = index
+      index += 1
     }
-    failed.fold {
+    Option.when(failed >= 0)(failed).fold {
       Right(Vec.from(steps.indices.map { index =>
         val idle =
           table.idleStall(idleKey(steps(index)), if (index + 1 < steps.size) steps(index + 1).form else Departure)
@@ -382,12 +386,14 @@ object ControlWords {
     val ours    = times(schedule)
     val theirs  = times(reference)
     val writers = mutable.Map.empty[String, Int]
-    Vec.from(steps.indices.flatMap { index =>
-      val found = steps(index).reads.flatMap(writers.get).distinct
+    val found   = Vec.newBuilder[(Int, Int)]
+    steps.indices.foreach { index =>
+      val shorter = steps(index).reads.flatMap(writers.get).distinct
         .filter(producer => ours(index) - ours(producer) < theirs(index) - theirs(producer))
       steps(index).writes.foreach(writers(_) = index)
-      found.map(producer => (path.first + producer, path.first + index))
-    })
+      shorter.foreach(producer => found += ((path.first + producer, path.first + index)))
+    }
+    found.result()
   }
 
   /** Accumulates the table from paths ptxas scheduled. `classes` runs over every path before `distances`, and

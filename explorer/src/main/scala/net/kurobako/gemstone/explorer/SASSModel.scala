@@ -302,9 +302,8 @@ object SASSModel extends Model {
   def instances(
       name: Option[String],
       mnemonic: String,
-      formName: String,
-      pairs: Boolean = false
-  ): Either[String, Vec[Instance]] = report(name, mnemonic, formName, pairs).map(_.instances)
+      formName: String
+  ): Either[String, Vec[Instance]] = report(name, mnemonic, formName, pairs = false).map(_.instances)
 
   /** The [[instances]], the further rows written with a predicate that has a default, which stand in for an instance of
     * the same opcode that does not lower, and the reason of each row the encoding refused.

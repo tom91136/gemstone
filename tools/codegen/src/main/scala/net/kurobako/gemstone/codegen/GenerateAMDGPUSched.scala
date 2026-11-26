@@ -103,12 +103,13 @@ object GenerateAMDGPUSched {
   }
 
   private def indexTables(processors: Vector[Processor]): (Vector[Table], Map[String, Int]) = {
-    val keys  = mutable.LinkedHashMap.empty[Table, Int]
-    val index = processors.sortBy(_.name).map { processor =>
+    val keys    = mutable.LinkedHashMap.empty[Table, Int]
+    val indexed = Vector.newBuilder[(String, Int)]
+    processors.sortBy(_.name).foreach { processor =>
       val table = Table(processor.model, scheduled(processor.outcomes), scheduled(processor.ldsOutcomes))
-      processor.name -> keys.getOrElseUpdate(table, keys.size)
-    }.toMap
-    (keys.toVector.sortBy(_._2).map(_._1), index)
+      indexed += (processor.name -> keys.getOrElseUpdate(table, keys.size))
+    }
+    (keys.toVector.sortBy(_._2).map(_._1), indexed.result().toMap)
   }
 
   private def scheduled(outcomes: Map[String, Either[String, Entry]]): Vector[(String, Entry)] =

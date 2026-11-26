@@ -87,7 +87,8 @@ object ControlWordHarvestRunner {
         outcome.left.foreach(reason => skipped(s"not lowered: $reason") += 1)
         lowered.fold(Vec.empty[Scheduled]) {
           (graph, uses, instructions) =>
-            ControlWords.paths(graph, uses, instructions).flatMap { path =>
+            val keptPaths = Vec.newBuilder[Scheduled]
+            ControlWords.paths(graph, uses, instructions).foreach { path =>
               val schedule = instructions.slice(path.first, path.first + path.steps.size).flatMap(_.scheduling)
               val steps    = path.steps.map(step =>
                 step.copy(
@@ -98,10 +99,9 @@ object ControlWordHarvestRunner {
                 )
               )
               if (schedule.size != steps.size) skipped("paths with no schedule") += 1
-              Option.when(schedule.size == steps.size)(
-                Scheduled(source, kernel.name.raw, ControlWords.Path(path.first, steps), schedule)
-              )
+              else keptPaths += Scheduled(source, kernel.name.raw, ControlWords.Path(path.first, steps), schedule)
             }
+            keptPaths.result()
         }
       }
     }
@@ -177,21 +177,22 @@ object ControlWordHarvestRunner {
 
   def main(arguments: Array[String]): Unit = {
     if (arguments.length < 4) throw IllegalArgumentException(usage)
-    val sm       = arguments(0).toInt
-    val toolkit  = arguments(1)
-    val output   = Path.of(arguments(2))
-    val interned = mutable.Map.empty[String, String]
-    val skipped  = mutable.Map.empty[String, Int].withDefaultValue(0)
-    val units    = arguments.drop(3).toVector.flatMap(input => files(Path.of(input))).flatMap { file =>
+    val sm          = arguments(0).toInt
+    val toolkit     = arguments(1)
+    val output      = Path.of(arguments(2))
+    val interned    = mutable.Map.empty[String, String]
+    val skipped     = mutable.Map.empty[String, Int].withDefaultValue(0)
+    val unitBuilder = Vector.newBuilder[Scheduled]
+    arguments.drop(3).toVector.flatMap(input => files(Path.of(input))).foreach { file =>
       val name = file.getFileName.toString
-      images(Files.readAllBytes(file), sm).zipWithIndex.flatMap {
+      images(Files.readAllBytes(file), sm).zipWithIndex.foreach {
         case (Some(image), index) =>
-          scheduled(s"$name#$index", image, sm, text => interned.getOrElseUpdate(text, text), skipped)
+          unitBuilder ++= scheduled(s"$name#$index", image, sm, text => interned.getOrElseUpdate(text, text), skipped)
         case (None, _) =>
           skipped("compressed fatbin entries") += 1
-          Vec.empty[Scheduled]
       }
     }
+    val units        = unitBuilder.result()
     val (held, kept) = units.partition(unit => ControlWords.heldOut(unit.source.takeWhile(_ != '#')))
     val harvest      = ControlWords.Harvest()
     kept.foreach(unit => harvest.classes(unit.path, unit.schedule))

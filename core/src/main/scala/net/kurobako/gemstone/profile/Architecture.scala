@@ -247,11 +247,11 @@ object Architecture {
       loadStore: Sourced[Double] = Sourced(4.0, assumedL1)
   ): Throughput = Throughput(issues, fma, alu, mufu, fp64, tensor, loadStore, Sourced(1.0, sharedRate))
 
-  private def schedulers(cc: String, count: Int, dispatch: Int): Sourced[Double] = Sourced(
-    (count * dispatch).toDouble,
+  private def schedulers(cc: String, count: Int): Sourced[Double] = Sourced(
+    count.toDouble,
     Source.Documented(
-      s"CUDA C++ Programming Guide 13, compute capability $cc: $count warp schedulers, each dispatching $dispatch " +
-        "instruction(s) per cycle"
+      s"CUDA C++ Programming Guide 13, compute capability $cc: $count warp schedulers, each dispatching one " +
+        "instruction per cycle"
     )
   )
 
@@ -277,11 +277,15 @@ object Architecture {
     dram
   )
 
+  // each row is a published measurement; the shared column stays explicit beside the others
+  @SuppressWarnings(Array("bonsai:constant-argument"))
   private def luoLatency(measured: String, shared: Double, l1: Double, l2: Double, dram: Double) = {
     def cited(value: Double) = published(s"$luo, Table IV", measured)(value)
     Latency(cited(shared), Some(cited(l1)), Some(cited(l2)), cited(dram))
   }
 
+  // the row keeps every latency beside the basis it is estimated from
+  @SuppressWarnings(Array("bonsai:constant-argument"))
   private def estimatedLatency(basis: String, shared: Double, l1: Double, l2: Double, dram: Double) = {
     val source = Source.Estimate(basis)
     Latency(Sourced(shared, source), Some(Sourced(l1, source)), Some(Sourced(l2, source)), Sourced(dram, source))
@@ -368,7 +372,7 @@ object Architecture {
       granule = 256
     ),
     rates(
-      schedulers("5.2", count = 4, dispatch = 1),
+      schedulers("5.2", count = 4),
       fma = table3("5.0, 5.2 and 5.3")(128),
       alu = table3("5.0, 5.2 and 5.3")(128),
       mufu = table3("5.0, 5.2 and 5.3")(32),
@@ -409,7 +413,7 @@ object Architecture {
       granule = 256
     ),
     rates(
-      schedulers("6.0", count = 2, dispatch = 1),
+      schedulers("6.0", count = 2),
       fma = table3("6.0")(64),
       alu = table3("6.0")(64),
       mufu = table3("6.0")(16),
@@ -436,7 +440,7 @@ object Architecture {
       granule = 256
     ),
     rates(
-      schedulers("6.1", count = 4, dispatch = 1),
+      schedulers("6.1", count = 4),
       fma = table3("6.1 and 6.2")(128),
       alu = table3("6.1 and 6.2")(128),
       mufu = table3("6.1 and 6.2")(32),
@@ -484,7 +488,7 @@ object Architecture {
       granule = 256
     ),
     rates(
-      schedulers("7.0", count = 4, dispatch = 1),
+      schedulers("7.0", count = 4),
       fma = table3("7.x")(64),
       alu = table3("7.x to 9.0")(64),
       mufu = guided("7.0")(16),
@@ -521,7 +525,7 @@ object Architecture {
       granule = 256
     ),
     rates(
-      schedulers("7.5", count = 4, dispatch = 1),
+      schedulers("7.5", count = 4),
       fma = table3("7.x")(64),
       alu = guided("7.5")(64),
       mufu = guided("7.5")(16),
@@ -553,7 +557,7 @@ object Architecture {
       granule = 128
     ),
     rates(
-      schedulers("8.0", count = 4, dispatch = 1),
+      schedulers("8.0", count = 4),
       fma = table3("8.0")(64),
       alu = guided("8.0")(64),
       mufu = table3("8.0 to 9.0")(16),
@@ -733,7 +737,7 @@ object Architecture {
     .derived("sm_88", "sm_88 has no published specification; the neighbouring Ampere-class Tegra part is assumed")
 
   private val hopperRates = rates(
-    schedulers("9.0", count = 4, dispatch = 1),
+    schedulers("9.0", count = 4),
     fma = table3("8.6 to 9.0")(128),
     alu = guided("9.0")(64),
     mufu = table3("8.0 to 9.0")(16),
@@ -772,7 +776,7 @@ object Architecture {
     base.copy(
       limits = limits("10.0", 64, 32, 65536, 65536, 4, kib(228), kib(227), 1024, 128),
       throughput = rates(
-        schedulers("10.0", 4, 1),
+        schedulers("10.0", 4),
         fma = table5("9.0 and 10.0")(128),
         alu = guided("10.0")(64),
         mufu = table5("7.5 to 12.1")(16),
@@ -841,7 +845,7 @@ object Architecture {
       granule = 128
     ),
     rates(
-      schedulers("12.0", count = 4, dispatch = 1),
+      schedulers("12.0", count = 4),
       fma = table5("8.6 to 12.1")(128),
       alu = guided("12.0")(64),
       mufu = table5("7.5 to 12.1")(16),
@@ -1049,7 +1053,7 @@ object Architecture {
   val gfx704: Architecture = gfx7("gfx704", banks = 32, ratio = 16, basis = consumerGcn)
   val gfx705: Architecture = gfx7("gfx705", banks = 16, ratio = 16, basis = consumerGcn)
 
-  private def gfx8(name: String, banks: Int, ratio: Int): Architecture = {
+  private def gfx8(name: String, banks: Int): Architecture = {
     val base = gfx906.derived(name, "GFX8 keeps the GCN CU of four SIMD16s with 64 KiB of LDS")
     base.copy(
       limits = base.limits.copy(
@@ -1057,7 +1061,7 @@ object Architecture {
         workgroupShared = Sourced(65536, volcanicLds)
       ),
       global = base.global.copy(lineBytes = Sourced(64, gcn3Lines)),
-      throughput = gfx906.throughput.copy(fp64 = fp64Ratio(ratio, consumerGcn)),
+      throughput = gfx906.throughput.copy(fp64 = fp64Ratio(16, consumerGcn)),
       shared = Banks(
         Sourced(banks, llvm(s"FeatureLDSBankCount$banks of the ISA version of $name")),
         Sourced(4, gcn3Lds)
@@ -1065,14 +1069,14 @@ object Architecture {
     )
   }
 
-  val gfx801: Architecture = gfx8("gfx801", banks = 32, ratio = 16)
-  val gfx802: Architecture = gfx8("gfx802", banks = 32, ratio = 16)
-  val gfx803: Architecture = gfx8("gfx803", banks = 32, ratio = 16)
+  val gfx801: Architecture = gfx8("gfx801", banks = 32)
+  val gfx802: Architecture = gfx8("gfx802", banks = 32)
+  val gfx803: Architecture = gfx8("gfx803", banks = 32)
   val gfx805: Architecture = gfx802.derived(
     "gfx805",
     "LLVM gives gfx805 the feature set of gfx802 (GCNProcessors.td 143); the CU is assumed to match, not checked"
   )
-  val gfx810: Architecture = gfx8("gfx810", banks = 16, ratio = 16)
+  val gfx810: Architecture = gfx8("gfx810", banks = 16)
 
   private def gfx9(name: String): Architecture =
     gfx906.derived(name, "Vega parts share the GFX9 CU; FP64 runs at 1/16 of FP32 outside gfx906").copy(

@@ -142,11 +142,11 @@ private object Lowering {
       if (!declared(name)) invalid(s"unknown parameter $name")
       else Right(parameters.getOrElseUpdate(name, VMIR.Parameter(slot(parameters))))
 
-    def register(operand: Operand, describe: String = "register"): Either[Error, Register] = operand match {
+    def register(operand: Operand): Either[Error, Register] = operand match {
       case Operand.Register(name, None) =>
         special(name).map(_ => registers.getOrElseUpdate(name, Register(slot(registers))))
       case Operand.Symbol(name) => Right(registers.getOrElseUpdate(name, Register(slot(registers))))
-      case other                => invalid(s"expected $describe, found $other")
+      case other                => invalid(s"expected register, found $other")
     }
 
     def predicateNames: Vec[NonEmpty[String]] = Vec.from(predicates.toVector.sortBy(_._2.raw).map(_._1))

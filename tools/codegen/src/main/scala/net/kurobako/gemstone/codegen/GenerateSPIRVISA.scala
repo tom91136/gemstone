@@ -160,7 +160,7 @@ object GenerateSPIRVISA {
     val entries = arrayField(root, "instructions").map {
       case obj: ujson.Obj =>
         Entry(
-          opcode = opcodeField(obj, "opcode"),
+          opcode = opcodeField(obj),
           name = stringField(obj, "opname"),
           operands = optionalObjectArray(obj, "operands").map { operand =>
             Operand(
@@ -518,10 +518,10 @@ object GenerateSPIRVISA {
     case ujson.Num(value) if value.isValidInt => value.toInt
     case _                                    => throw IllegalArgumentException(s"JSON field $name is not an int")
   }
-  private def opcodeField(obj: ujson.Obj, name: String): Int = {
-    val value = numberField(obj, name)
+  private def opcodeField(obj: ujson.Obj): Int = {
+    val value = numberField(obj, "opcode")
     if (value >= 0 && value <= 65535) value
-    else throw IllegalArgumentException(s"JSON field $name must be between 0 and 65535: $value")
+    else throw IllegalArgumentException(s"JSON field opcode must be between 0 and 65535: $value")
   }
 
   private def versionField(obj: ujson.Obj, name: String): Int in 0 ~ 255 =
@@ -550,7 +550,7 @@ object GenerateSPIRVISA {
       val entries = arrayField(root, "instructions").map {
         case obj: ujson.Obj =>
           val opname: String = stringField(obj, "opname")
-          val opcode: Int    = opcodeField(obj, "opcode")
+          val opcode: Int    = opcodeField(obj)
           (
             opname,
             opcode,

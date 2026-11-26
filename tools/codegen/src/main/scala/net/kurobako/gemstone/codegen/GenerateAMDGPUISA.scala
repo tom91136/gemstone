@@ -1657,9 +1657,9 @@ for name in sorted(module.instructions):
         if (selected.isEmpty) s"  def $method: Boolean = false"
         else s"  def $method: Boolean = this match { case $selected => true; case _ => false }"
       }
-      def sourceModifier(method: String, prefix: String, suffix: String): String = {
+      def sourceModifier(method: String, suffix: String): String = {
         val associations = names.view.filter(SourceName.matches(_)).flatMap { source =>
-          val modifier = prefix + source.stripPrefix("VSRC") + suffix
+          val modifier = "SRC" + source.stripPrefix("VSRC") + suffix
           Option.when(known(modifier))(s"case `$source` => Some(`$modifier`)")
         }.mkString("; ")
         s"  def $method: Option[EncodingField] = this match { $associations; case _ => None }"
@@ -1709,9 +1709,9 @@ for name in sorted(module.instructions):
         "  def assemblyName: NonEmpty[String] = this match { " +
           names.map(value => s"case `$value` => ${Emission.literal(value.toLowerCaseRoot)}").mkString("; ") + " }",
         predicate("isVectorSource")(_.startsWith("VSRC")),
-        sourceModifier("absoluteModifier", "SRC", "_ABS"),
-        sourceModifier("negativeModifier", "SRC", "_NEG"),
-        sourceModifier("extensionModifier", "SRC", "_SEXT"),
+        sourceModifier("absoluteModifier", "_ABS"),
+        sourceModifier("negativeModifier", "_NEG"),
+        sourceModifier("extensionModifier", "_SEXT"),
         predicate("isVectorDestination")(_.startsWith("VDST")),
         predicate("isDataOperand")(PartialFunction.cond(_) { case "DATA" | "DATA0" | "DATA1" | "VDATA" | "VDST" =>
           true

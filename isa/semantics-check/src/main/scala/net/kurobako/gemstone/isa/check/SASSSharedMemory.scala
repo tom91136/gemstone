@@ -65,7 +65,9 @@ private[check] final class SASSSharedMemory(
 
   private val located: Vec[(step: PredicatedInstruction, access: Option[Access])] = {
     val found = accesses.iterator
-    steps.map(step => (step, SASSSharedMemory.touched(step.instruction).map(_ => found.next())))
+    val out   = Vec.newBuilder[(step: PredicatedInstruction, access: Option[Access])]
+    steps.foreach(step => out += ((step, SASSSharedMemory.touched(step.instruction).map(_ => found.next()))))
+    out.result()
   }
 
   /** `steps`, each shared access preceded by a record of its address and followed by a record that it executed, and the

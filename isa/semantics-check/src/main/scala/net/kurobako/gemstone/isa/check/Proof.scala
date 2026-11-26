@@ -8,6 +8,7 @@ import net.kurobako.gemstone.isa.check.Equivalence.Verdict
 import net.kurobako.gemstone.semantics.Space
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.semantics.render.Verdict as Solved
+import scala.annotation.tailrec
 import scala.collection.mutable
 import scala.concurrent.duration.*
 
@@ -147,7 +148,11 @@ object Proof {
     val body     = Vec.newBuilder[Definition.Statement]
     val required = Vec.newBuilder[Term]
 
-    def fresh(base: String): String = Iterator.continually(s"${base}_${indices.next()}").find(used.add).get
+    @tailrec
+    def fresh(base: String): String = {
+      val candidate = s"${base}_${indices.next()}"
+      if (used.add(candidate)) candidate else fresh(base)
+    }
 
     def read(location: String): Term = latest.getOrElse(location, { inputs += location; Term.Variable(location) })
 
@@ -180,18 +185,21 @@ object Proof {
       required ++= definition.requirements.map(term => rewrite(LaneMasks.plain(term), scope, fresh(_)))
       contexts ++= definition.contexts.filterNot(_.tpe == LaneMasks.contextType)
         .map(context => (context.name, context.tpe))
-      val written = definition.results.flatMap { result =>
+      val written = Vec.newBuilder[(String, Term)]
+      definition.results.foreach { result =>
         val binding = fresh(result.name)
         body += Definition.Statement(
           Definition.Target.Binding(binding),
           typed(rewrite(LaneMasks.plain(result.value), scope, fresh(_)), result.tpe)
         )
         step.results(result.name) match {
-          case Vec(single) => Vec(single -> held(Term.Variable(binding), result.tpe, types(single)))
-          case several => several.zipWithIndex.map((location, index) => location -> unit(Term.Variable(binding), index))
+          case Vec(single) => written += (single -> held(Term.Variable(binding), result.tpe, types(single)))
+          case several     => several.zipWithIndex.foreach((location, index) =>
+              written += (location -> unit(Term.Variable(binding), index))
+            )
         }
       }
-      latest ++= written
+      latest ++= written.result()
     }
 
     val results = liveOut.locations.map(location => (location, types(location), read(location)))

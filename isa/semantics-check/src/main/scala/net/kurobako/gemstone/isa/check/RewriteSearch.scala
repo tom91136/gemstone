@@ -46,7 +46,7 @@ object RewriteSearch {
     /** `shift` is how many bytes the code after the window moves; the cycles do not include what that does to it. */
     def line: String =
       f"${after.cycles}%.2f from ${before.cycles}%.2f cycles (${source.kind}), shifts $shift bytes: " +
-        s"${rewrite.mkString("; ")} for ${original.mkString("; ")} ($reason)"
+        s"${candidate.mkString("; ")} for ${original.mkString("; ")} ($reason)"
   }
 
   case class Report(

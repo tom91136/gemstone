@@ -187,12 +187,14 @@ final class SASSBlockCost private (
     val function = Map(name -> Vec(DecodedFunction(name.raw, instructions)))
     load(module, name, function).flatMap { laid =>
       val schedule = mutable.HashMap.empty[Int, Scheduling]
-      val failure  = ControlWords.paths(laid.graph, laid.uses, laid.instructions).iterator.map { path =>
-        ControlWords.regenerate(table, path).map(words =>
-          words.zipWithIndex.foreach((word, index) => schedule(path.first + index) = word)
-        )
-      }.collectFirst { case Left(reason) => reason }
-      failure.toLeft(()).flatMap { _ =>
+      val failures = Vec.newBuilder[String]
+      ControlWords.paths(laid.graph, laid.uses, laid.instructions).foreach { path =>
+        ControlWords.regenerate(table, path) match {
+          case Left(reason) => failures += reason
+          case Right(words) => words.zipWithIndex.foreach((word, index) => schedule(path.first + index) = word)
+        }
+      }
+      failures.result().headOption.toLeft(()).flatMap { _ =>
         val regenerated = laid.instructions.zipWithIndex.map((instruction, index) =>
           instruction.copy(scheduling = schedule.get(index).orElse(instruction.scheduling))
         )

@@ -37,10 +37,10 @@ object PTXSample {
       (input, output) => Vec(KernelTask.Argument.Memory(input, 0L), KernelTask.Argument.Memory(output, 0L))
     )
 
-  /** Every `add` of the immediate `from`, now adding `to`. */
-  private def replaceConstant(program: Program, from: String, to: NonEmpty[String]): Program =
+  /** Every `add` of the immediate 3, now adding `to`. */
+  private def replaceConstant(program: Program, to: NonEmpty[String]): Program =
     program.mapInstructions {
-      case add @ Instruction(Form.Add(dest, srcA, Operand.Immediate(raw)), _, _) if raw.raw == from =>
+      case add @ Instruction(Form.Add(dest, srcA, Operand.Immediate(raw)), _, _) if raw.raw == "3" =>
         add.copy(form = Form.Add(dest, srcA, Operand.Immediate(to)))
       case other => other
     }
@@ -55,14 +55,14 @@ object PTXSample {
   def run(): Either[String, Outcome] = for {
     program     <- Parser.parse(source).left.map(_.message.raw)
     original    <- run(program)
-    edited      <- run(replaceConstant(program, "3", "5"))
+    edited      <- run(replaceConstant(program, "5"))
     (add, dest) <- program.statements.collectFirst { case Statement.Entry(body = Some(body)) =>
       body.collectFirst {
         case Statement.Instruction(add @ Instruction(Form.Add(dest, _, Operand.Immediate(_)), _, _)) => (add, dest)
       }
     }.flatten.toRight("the kernel has no add")
     extended <- run(insertAfterAdd(
-      replaceConstant(program, "3", "5"),
+      replaceConstant(program, "5"),
       add.copy(form = Form.Add(dest, dest, Operand.Immediate("1")))
     ))
   } yield Outcome(original, asm.Printer.render(program), edited, extended)

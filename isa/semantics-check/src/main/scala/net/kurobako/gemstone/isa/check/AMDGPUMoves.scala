@@ -113,8 +113,11 @@ final class AMDGPUMoves private (
     def go(chunks: Iterator[Vec[Vec[Instruction]]], kept: Vec[Candidate]): Vec[Candidate] =
       if (kept.size >= limit || !chunks.hasNext) kept.take(limit)
       else {
-        val fresh =
-          chunks.next().flatMap(each(_)(settled(_))).filter(sequence => seen.add(sequence.map(Printer.render(_))))
+        val novel = Vec.newBuilder[Vec[Instruction]]
+        chunks.next().flatMap(each(_)(settled(_))).foreach { sequence =>
+          if (seen.add(sequence.map(Printer.render(_)))) novel += sequence
+        }
+        val fresh = novel.result()
         val named = fresh.filter(_.forall(AMDGPUForms.covered(target, _)))
         // a form is rendered only for the candidates that are sound, and no more of them than are kept
         val legal = named.zip(effects(named)).iterator.collect {
@@ -271,17 +274,23 @@ object AMDGPUMoves {
   private def end(mode: TargetMode): Vec[Byte] =
     Binary.encode(Instruction.decode("s_endpgm", Vec.empty).toOption.get, mode).toOption.get
 
-  private def constants(table: DomainTable, random: Random): Vec[Operand] = table.slots.toVec.flatMap {
-    case Slot.Integer(value)  => Vec(Operand.IntegerLiteral(BigInt(value), 10))
-    case Slot.Floating(value) => Vec(Operand.DecimalLiteral(value.toString))
-    case Slot.Literal(4)      => Vec.fill(3)(Operand.IntegerLiteral(BigInt(random.nextInt().toLong & 0xffffffffL), 16))
-    case Slot.Immediate(_)    =>
-      table.immediate.toVec.flatMap { run =>
-        val span = run.max - run.min + 1
-        Vec(run.min, run.max) ++ Vec.fill(2)(run.min + BigInt(span.bitLength + 8, random).mod(span))
-      }.distinct.map(Operand.IntegerLiteral(_, 10))
-    case _ => Vec.empty[Operand]
-  }.distinct
+  private def constants(table: DomainTable, random: Random): Vec[Operand] = {
+    val found = Vec.newBuilder[Operand]
+    table.slots.toVec.foreach {
+      case Slot.Integer(value)  => found += Operand.IntegerLiteral(BigInt(value), 10)
+      case Slot.Floating(value) => found += Operand.DecimalLiteral(value.toString)
+      case Slot.Literal(4)      =>
+        found ++= Vec.fill(3)(Operand.IntegerLiteral(BigInt(random.nextInt().toLong & 0xffffffffL), 16))
+      case Slot.Immediate(_) =>
+        table.immediate.toVec.foreach { run =>
+          val span = run.max - run.min + 1
+          found ++= (Vec(run.min, run.max) ++ Vec.fill(2)(run.min + BigInt(span.bitLength + 8, random).mod(span)))
+            .distinct.map(Operand.IntegerLiteral(_, 10))
+        }
+      case _ => ()
+    }
+    found.result().distinct
+  }
 
   /** The kernel `function` of `image` seen from `window` on `target`, one of [[AMDGPUGenerator.targets]]. */
   def of(image: Vec[Byte], function: String, target: String, window: Window): Either[String, AMDGPUMoves] = for {

@@ -206,6 +206,8 @@ class AMDGPUSchedModel(dump: AMDGPUSchedRecords.Dump, catalogue: Vector[String])
         }
   }
 
+  // forall short-circuits: a loop would evaluate gates after the first refusal
+  @SuppressWarnings(Array("bonsai:effectful-transform"))
   private def available(name: String, enabled: Set[String], cache: mutable.HashMap[String, Boolean]): Boolean =
     record(name)("Predicates").arr.forall { predicate =>
       val gate = definition(predicate)

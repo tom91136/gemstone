@@ -110,7 +110,11 @@ final class SASSMoves private (
     def go(chunks: Iterator[Vec[Vec[DecodedInstruction]]], kept: Vec[Candidate]): Vec[Candidate] =
       if (kept.size >= limit || !chunks.hasNext) kept.take(limit)
       else {
-        val fresh = chunks.next().map(placed).filter(sequence => text(sequence).exists(seen.add))
+        val novel = Vec.newBuilder[Vec[DecodedInstruction]]
+        chunks.next().map(placed).foreach { sequence =>
+          if (text(sequence).exists(seen.add)) novel += sequence
+        }
+        val fresh = novel.result()
         val named = fresh.filter(sequence =>
           SASSWindows.admitted(targetName, sequence).forall(verdict => verdict) &&
             roundTrips(sequence.map(_.operation))
@@ -171,12 +175,13 @@ final class SASSMoves private (
     val source = base(random.nextInt(base.size))
     val pool = (defined(at) ++ writable).iterator.flatMap(_.stripPrefix("R").toIntOption).filter(_ < RZ).toVec.distinct
     Option.when(pool.nonEmpty) {
-      val operands = source.operands.map {
+      val operands = Vec.newBuilder[Operand]
+      source.operands.foreach {
         case Operand.Register(RegisterBank.R, _) =>
-          Operand.Register(RegisterBank.R, pool(random.nextInt(pool.size)).unsafe[Int in 0 ~ 255])
-        case operand => operand
+          operands += Operand.Register(RegisterBank.R, pool(random.nextInt(pool.size)).unsafe[Int in 0 ~ 255])
+        case operand => operands += operand
       }
-      reoperated(source, source.mnemonic.raw, operands).map(value => base.patch(at, Vec(value), 0))
+      reoperated(source, source.mnemonic.raw, operands.result()).map(value => base.patch(at, Vec(value), 0))
     }.flatten
   }.take(attempts).flatten)
 

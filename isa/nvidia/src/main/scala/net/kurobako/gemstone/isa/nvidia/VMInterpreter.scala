@@ -696,7 +696,7 @@ private[isa] object VMInterpreter {
           members.foreach { member =>
             if (failure.isEmpty && !member.finished) {
               val runnable = member.runnable
-              member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
+              member.slice().left.foreach(fault => failure = Some(member.fault(fault)))
               progressed ||= runnable || member.runnable
             }
           }
@@ -712,7 +712,7 @@ private[isa] object VMInterpreter {
           while (step < count && failure.isEmpty) {
             val member   = members(ordering(step))
             val runnable = member.runnable
-            member.slice(ClusterSlice).left.foreach(fault => failure = Some(member.fault(fault)))
+            member.slice().left.foreach(fault => failure = Some(member.fault(fault)))
             progressed ||= runnable || member.runnable
             step += 1
           }
@@ -1687,11 +1687,11 @@ private[isa] object VMInterpreter {
 
     def begin(): Unit = start()
 
-    /** Runs at most `budget` steps after releasing cluster barrier phases other members completed. */
-    def slice(budget: Int): Either[Fault, Unit] = boundary {
+    /** Runs at most a cluster slice of steps after releasing barrier phases other members completed. */
+    def slice(): Either[Fault, Unit] = boundary {
       releasePhases()
       var steps = 0
-      while (steps < budget && live.nonEmpty && runnable) {
+      while (steps < ClusterSlice && live.nonEmpty && runnable) {
         next()
         steps += 1
       }
