@@ -19,7 +19,7 @@ import scala.reflect.ClassTag
 import scala.util.Random
 
 // rewrite reports are the product the suites assert on
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// prove is reached only from tests; amdgpu takes AMDGPUBlockCost.Launch while sass takes SASSBlockCost.Launch, so one record would need a union of two cost models
 @SuppressWarnings(Array("bonsai:test-only-member", "bonsai:data-clump"))
 object RewriteSearch {
 

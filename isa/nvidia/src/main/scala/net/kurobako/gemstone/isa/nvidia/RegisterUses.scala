@@ -9,7 +9,7 @@ import net.kurobako.gemstone.collection.*
   * guard and writes its destinations only where the guard holds, so a guarded write is a read as well. A reference
   * names each slot once, in the order the lowering names them.
   */
-// the two branches keep distinct register semantics
+// one row is SetPredicateCombined and reads a predicate operand; the other is IntegerBinary and reads none
 @SuppressWarnings(Array("bonsai:duplicate-code"))
 object RegisterUses {
 

@@ -8,7 +8,7 @@ import net.kurobako.gemstone.vm.RegisterUse
 import scala.reflect.ClassTag
 import scala.util.Random
 
-// move suites inspect the candidates this object builds
+// candidates are built by AMDGPUMoves and SASSMoves, but kind and uses are read only by the move suites that assert move provenance
 @SuppressWarnings(Array("bonsai:test-only-member"))
 private[check] object Moves {
   enum Kind derives CanEqual {

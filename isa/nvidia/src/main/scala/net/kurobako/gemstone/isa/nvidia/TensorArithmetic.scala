@@ -10,7 +10,7 @@ import scala.annotation.targetName
   * integers, and floating-point sums accumulate in blocks whose terms align to a shared exponent as
   * [[VMIR.Matrix.Accumulation.Blocked]] describes.
   */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// round and roundHalf are called by TensorSemantics with the same accumulator but render binary32 and binary16 respectively; a shared record would hide the width carried by the method name
 @SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] object TensorArithmetic {
 

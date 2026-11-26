@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.*
   * each matrix element as that extension's matrixCoordToTensorElement and matrixCoordToTensorElementWithView define.
   * State is 32-bit, so addressing wraps as the extension's uint32_t arithmetic does.
   */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// replace takes the destination index at and update does not; a shared record would make the index mandatory where no caller supplies one
 @SuppressWarnings(Array("bonsai:data-clump"))
 private object TensorAddressingOps {
   import Operand.*

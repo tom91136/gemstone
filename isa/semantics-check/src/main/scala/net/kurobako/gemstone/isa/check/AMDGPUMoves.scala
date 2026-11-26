@@ -244,7 +244,7 @@ final class AMDGPUMoves private (
     }
 }
 
-// the two modules keep ISA-specific data; a shared helper would couple them
+// AMDGPU ends a candidate with s_endpgm and SASS with its own terminator; the shared split drives different instruction sets
 @SuppressWarnings(Array("bonsai:duplicate-code"))
 object AMDGPUMoves {
   import Moves.unitsOf

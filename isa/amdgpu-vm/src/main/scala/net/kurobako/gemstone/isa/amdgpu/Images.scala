@@ -5,7 +5,7 @@ import net.kurobako.gemstone.semantics.prelude.*
 /** The linear images a lane of a rendered AMDGPU definition addresses through eight-dword resource descriptors, `t0` to
   * `t7`, as `isa` lays them out. A descriptor execution cannot read faults.
   */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// information reads one level and one component; texel reads five coordinates plus dimension and mip, so a shared descriptor record would carry fields one method never uses
 @SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] trait Images {
 

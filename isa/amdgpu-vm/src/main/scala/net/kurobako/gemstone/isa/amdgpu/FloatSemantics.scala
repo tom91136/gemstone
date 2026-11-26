@@ -10,7 +10,7 @@ import net.kurobako.gemstone.semantics.prelude.*
 /** AMDGPU floating-point semantics on register bits. IEEE arithmetic, rounding and conversions are named primitives;
   * saturation, sign manipulation, classification and exponent extraction decompose into the algebra.
   */
-// the two branches keep distinct register semantics
+// one site is the flushed FMA ternary with a destination accumulator, the other the plain multiply-add without one
 @SuppressWarnings(Array("bonsai:duplicate-code"))
 private object FloatSemantics {
 

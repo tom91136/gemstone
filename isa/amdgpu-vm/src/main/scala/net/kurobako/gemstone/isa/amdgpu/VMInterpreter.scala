@@ -23,7 +23,7 @@ import scala.annotation.tailrec
 import scala.collection.immutable.ArraySeq
 import scala.runtime.LongRef
 
-// the two branches keep distinct register semantics
+// one path reads a scalar operand, the other a source selector with a different register-width check
 @SuppressWarnings(Array("bonsai:duplicate-code"))
 private object VMInterpreter {
   import VMDispatchMemory.*

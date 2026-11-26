@@ -16,8 +16,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.util.boundary
 import scala.util.boundary.break
 
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
-// the two branches keep distinct register semantics
+// seeded is called with allLanes but no shape, clusters with a shape but no allLanes, and seededClusters with both plus cooperative; the three callers pass different combinations
 @SuppressWarnings(Array("bonsai:data-clump", "bonsai:duplicate-code"))
 private[isa] object VMInterpreter {
 

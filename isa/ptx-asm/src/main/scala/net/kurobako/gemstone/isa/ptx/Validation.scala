@@ -8,7 +8,7 @@ import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.*
 import scala.annotation.tailrec
 
-// the two modules keep ISA-specific data; a shared helper would couple them
+// Validation expands <count> register names to check operand declarations, while VMCompiler parses directive operands; the same syntax serves different operand domains
 @SuppressWarnings(Array("bonsai:duplicate-code"))
 object Validation {
   enum Issue {

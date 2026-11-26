@@ -11,7 +11,7 @@ import net.kurobako.gemstone.vm.LaunchGeometry
 import scala.util.Using
 
 /** The launches a cost is read from. */
-// tests bind arguments to check recorded launches
+// bind parses test-supplied argument text; production launches reach ProgramRun.runWithArguments with arguments already parsed
 @SuppressWarnings(Array("bonsai:test-only-member"))
 object LaunchRecording {
 

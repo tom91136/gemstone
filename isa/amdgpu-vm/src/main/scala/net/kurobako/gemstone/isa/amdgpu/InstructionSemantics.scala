@@ -8,7 +8,7 @@ import net.kurobako.gemstone.semantics.render.*
 /** The staged semantics one AMDGPU instruction lowers to on a target, rendered through the dispatch execution uses as a
   * definition of what it does to one lane.
   */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// describe serves the explorer's text forms and machine its rendered encodings; both take the same instruction fields but return different definitions, so one record would tie two rendering passes to a new type
 @SuppressWarnings(Array("bonsai:data-clump"))
 object InstructionSemantics {
 

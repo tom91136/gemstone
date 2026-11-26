@@ -24,8 +24,7 @@ import scala.util.control.NonFatal
 /** Typed SPIR-V kernel execution. Guest memory is accessed through the address space; unbound program globals,
   * Workgroup and private storage use dispatch-, group- and invocation-owned apertures.
   */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
-// the two branches keep distinct register semantics
+// runRound takes an explicit order and mutates executions in place; runWorkgroup passes none; the two rounds share state but not the order parameter
 @SuppressWarnings(Array("bonsai:data-clump", "bonsai:duplicate-code"))
 private object VMInterpreter {
   import Operand.*

@@ -7,8 +7,6 @@ import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.semantics.*
 import net.kurobako.gemstone.semantics.render.*
 
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
-@SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] object MachineRendering {
 
   /** The machine semantics of `instruction` rendered over `machine`, or none for an instruction they do not cover. */
@@ -112,9 +110,9 @@ private[isa] object MachineRendering {
       case Instruction.Tensor(Operation.StoreMatrix(tile, sources, address, space)) =>
         Some(renderStoreMatrix(tile, sources, address, space, machine))
       case Instruction.Tensor(Operation.Load(fragment, destinations, address, stride, columnMajor, space)) =>
-        Some(renderLoadFragment(fragment, destinations, address, stride, columnMajor, space, machine))
+        Some(renderLoadFragment(destinations, FragmentAccess(fragment, address, stride, columnMajor, space, machine)))
       case Instruction.Tensor(Operation.Store(fragment, sources, address, stride, columnMajor, space)) =>
-        Some(renderStoreFragment(fragment, sources, address, stride, columnMajor, space, machine))
+        Some(renderStoreFragment(sources, FragmentAccess(fragment, address, stride, columnMajor, space, machine)))
       case _ => None
     }
 
@@ -234,23 +232,32 @@ private[isa] object MachineRendering {
       machine: NvidiaMachineRender
   ): Term.Steps = storeMatrix(Render, machine)(tile, sources, address, space)
 
-  private def renderLoadFragment(
+  private case class FragmentAccess(
       fragment: Fragment,
-      destinations: Vec[Register],
       address: Value,
       stride: Value,
       columnMajor: Boolean,
       space: MemorySpace,
       machine: NvidiaMachineRender
-  ): Term.Steps = loadFragment(Render, machine)(fragment, destinations, address, stride, columnMajor, space)
+  )
 
-  private def renderStoreFragment(
-      fragment: Fragment,
-      sources: Vec[Value],
-      address: Value,
-      stride: Value,
-      columnMajor: Boolean,
-      space: MemorySpace,
-      machine: NvidiaMachineRender
-  ): Term.Steps = storeFragment(Render, machine)(fragment, sources, address, stride, columnMajor, space)
+  private def renderLoadFragment(destinations: Vec[Register], access: FragmentAccess): Term.Steps =
+    loadFragment(Render, access.machine)(
+      access.fragment,
+      destinations,
+      access.address,
+      access.stride,
+      access.columnMajor,
+      access.space
+    )
+
+  private def renderStoreFragment(sources: Vec[Value], access: FragmentAccess): Term.Steps =
+    storeFragment(Render, access.machine)(
+      access.fragment,
+      sources,
+      access.address,
+      access.stride,
+      access.columnMajor,
+      access.space
+    )
 }

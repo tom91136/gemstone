@@ -17,8 +17,6 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
 /** Runs a loaded program on the real VM and records the timeline of the launch, so the explorer shows the machine that
   * runs the program rather than a model of one.
   */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
-@SuppressWarnings(Array("bonsai:data-clump"))
 object ProgramRun {
 
   /** The least an allocation argument gets: enough for the examples' output buffers and the strides their kernels use.
@@ -145,7 +143,7 @@ object ProgramRun {
       val groups         = volume(count)
       val size: Long > 0 = math.max(MinimumAllocation, lanes * groups * 4L).unsafe[Long > 0]
       val arguments      = defaultArguments(loaded.image.language, metadata, memory, size)
-      launch(loaded, kernel, group, count, memory, arguments)
+      runWithArguments(loaded, kernel, group, count, memory, arguments)
     }
 
   /** Runs `kernel` over `count` workgroups of `group` lanes against `memory`, with `arguments` as the kernel's
@@ -160,9 +158,24 @@ object ProgramRun {
       memory: ArrayMemory,
       arguments: Vec[KernelTask.Argument]
   ): Either[String, Run] =
-    loaded.program.kernel(kernel).left.map(_.description.raw).map(_ =>
-      launch(loaded, kernel, group, count, memory, arguments)
-    )
+    loaded.program.kernel(kernel).left.map(_.description.raw).map { _ =>
+      val allocations = arguments.collect { case KernelTask.Argument.Memory(region, _, _) => region }.distinct
+      val recording   = Recording()
+      val profiler    = ProfileRecorder()
+      val result      = for {
+        task   <- KernelTask.validated(kernel, group, count, arguments).left.map(_.raw)
+        events <- Device(BackendRegistry(Vec(loaded.backend)), memory)
+          .launch(loaded.program, task, Some(LaunchObserver.both(recording, profiler)))
+      } yield events
+      Run(
+        recording.trace,
+        memory,
+        allocations,
+        result.swap.toOption.collect { case fault: Fault => fault },
+        recording.complete,
+        profiler.stream
+      )
+    }
 
   /** The arguments [[run]] gives a kernel of `language` with `metadata`: memory for every allocation and for a SASS
     * eight-byte scalar, which a cubin cannot distinguish from a pointer, and zero bytes for every other scalar.
@@ -184,33 +197,6 @@ object ProgramRun {
       KernelTask.Argument.Memory(memory.allocate(size), 0L, Some(size))
     case KernelMetadata.Parameter(width = width, kind = KernelMetadata.ParameterKind.Scalar) =>
       KernelTask.Argument.Scalar(Vec.fill(width.raw)(0.toByte).unsafe[NonEmpty[Vec[Byte]]])
-  }
-
-  /** Runs one launch against caller-owned memory, recording its issues. */
-  private def launch(
-      loaded: Loaded,
-      kernel: NonEmpty[String],
-      group: Dimensions,
-      count: Dimensions,
-      memory: ArrayMemory,
-      arguments: Vec[KernelTask.Argument]
-  ): Run = {
-    val allocations = arguments.collect { case KernelTask.Argument.Memory(region, _, _) => region }.distinct
-    val recording   = Recording()
-    val profiler    = ProfileRecorder()
-    val result      = for {
-      task   <- KernelTask.validated(kernel, group, count, arguments).left.map(_.raw)
-      events <- Device(BackendRegistry(Vec(loaded.backend)), memory)
-        .launch(loaded.program, task, Some(LaunchObserver.both(recording, profiler)))
-    } yield events
-    Run(
-      recording.trace,
-      memory,
-      allocations,
-      result.swap.toOption.collect { case fault: Fault => fault },
-      recording.complete,
-      profiler.stream
-    )
   }
 
   private def volume(dimensions: Dimensions): Long =

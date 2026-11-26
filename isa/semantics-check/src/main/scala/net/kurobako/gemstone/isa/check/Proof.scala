@@ -15,7 +15,7 @@ import scala.concurrent.duration.*
 /** Equivalence proofs: the differential filter, then one definition per sequence for a solver, over the lane cases
   * whose rendered semantics are checked against the VMs.
   */
-// proof results are reported to callers and asserted by suites
+// Result is the verdict carried by RewriteSearch.prove; its case fields and Cover/Report are asserted only by ProofSuite and FormProofSuite
 @SuppressWarnings(Array("bonsai:test-only-member"))
 object Proof {
 

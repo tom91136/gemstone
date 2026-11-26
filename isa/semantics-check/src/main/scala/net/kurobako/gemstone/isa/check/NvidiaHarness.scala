@@ -10,7 +10,7 @@ import net.kurobako.gemstone.semantics.prelude.*
 import net.kurobako.gemstone.semantics.render.*
 import net.kurobako.gemstone.vm.*
 
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// run takes lanes and memory while execute takes settings and results; the eight callers across five harnesses pass different subsets of that state
 @SuppressWarnings(Array("bonsai:data-clump"))
 object NvidiaHarness {
   private val Kernel: NonEmpty[String] = "reference".unsafe[NonEmpty[String]]

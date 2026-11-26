@@ -14,8 +14,6 @@ import net.kurobako.gemstone.vm.LaunchGeometry.*
   * multiply-add, three-input extrema, the predicate form of `lop3`, warp matching and floating reductions, mbarrier
   * layout and report queries, and the cache policies, fences and breakpoints that change nothing the VM models.
   */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
-@SuppressWarnings(Array("bonsai:data-clump"))
 private object VMSequenceCompiler {
   private val Axes = Vec(Axis.X, Axis.Y, Axis.Z)
 
@@ -94,9 +92,9 @@ private object VMSequenceCompiler {
         Some(pairFma(destination, left, right, addend, modifiers))
       case Form.Setp(Operand.WithPredicate(low, high), left, right, other)
           if modifiers.lastOption.exists(_.isPackedHalf) =>
-        Some(packedComparison(low, high, left, right, other, modifiers))
+        Some(packedComparison(Comparison(low, high, left, right, other, modifiers)))
       case Form.Setp(Operand.WithPredicate(low, high), left, right, other) =>
-        Some(pairComparison(low, high, left, right, other, modifiers))
+        Some(pairComparison(Comparison(low, high, left, right, other, modifiers)))
       case Form.Set(destination, left, right, Some(other))
           if modifiers.lastOption.exists(_.isPackedHalf) =>
         Some(packedSet(destination, left, right, other, modifiers))
@@ -397,53 +395,54 @@ private object VMSequenceCompiler {
     case None => VMIR.Instruction.SetPredicate(destination, relation, format, left, right, flush)
   }
 
-  /** `setp` of a pair of halves: the low halves' result in `p` and the high halves' in `q`. */
-  private def packedComparison(
+  private case class Comparison(
       low: Operand,
       high: Operand,
       left: Operand,
       right: Operand,
       other: Option[Operand],
       modifiers: Vec[Modifier]
-  )(using scope: Scope): Lowered = for {
-    (relation, combined)  <- combinedRelation(other, modifiers)
-    (splitA, aLow, aHigh) <- halves(left, "setp a")
-    (splitB, bLow, bHigh) <- halves(right, "setp b")
-    p                     <- scope.predicate(low)
-    q                     <- scope.predicate(high)
-  } yield {
-    val flush  = modifiers.contains(Modifier.Ftz)
-    val format = halfFormat(modifiers)
-    Vec(
-      splitA,
-      splitB,
-      compare(p, relation, format, aLow, bLow, flush, combined),
-      compare(q, relation, format, aHigh, bHigh, flush, combined)
-    )
+  )
+
+  /** `setp` of a pair of halves: the low halves' result in `p` and the high halves' in `q`. */
+  private def packedComparison(c: Comparison)(using scope: Scope): Lowered = {
+    val Comparison(low, high, left, right, other, modifiers) = c
+    for {
+      (relation, combined)  <- combinedRelation(other, modifiers)
+      (splitA, aLow, aHigh) <- halves(left, "setp a")
+      (splitB, bLow, bHigh) <- halves(right, "setp b")
+      p                     <- scope.predicate(low)
+      q                     <- scope.predicate(high)
+    } yield {
+      val flush  = modifiers.contains(Modifier.Ftz)
+      val format = halfFormat(modifiers)
+      Vec(
+        splitA,
+        splitB,
+        compare(p, relation, format, aLow, bLow, flush, combined),
+        compare(q, relation, format, aHigh, bHigh, flush, combined)
+      )
+    }
   }
 
   /** `setp` of a predicate pair: `p` takes the comparison and `q` its complement. */
-  private def pairComparison(
-      low: Operand,
-      high: Operand,
-      left: Operand,
-      right: Operand,
-      other: Option[Operand],
-      modifiers: Vec[Modifier]
-  )(using scope: Scope): Lowered = for {
-    (relation, combined) <- combinedRelation(other, modifiers)
-    operandType          <- modifiers.view.flatMap(VMInstructionCompiler.format(_)).headOption
-      .toRight(Error.Unsupported("setp", "a predicate pair needs a numeric comparison type"))
-    a <- scope.value(left)
-    b <- scope.value(right)
-    p <- scope.predicate(low)
-    q <- scope.predicate(high)
-  } yield {
-    val flush = modifiers.contains(Modifier.Ftz)
-    Vec(
-      compare(p, relation, operandType, a, b, flush, combined),
-      compare(q, VMInstructionCompiler.complement(relation), operandType, a, b, flush, combined)
-    )
+  private def pairComparison(c: Comparison)(using scope: Scope): Lowered = {
+    val Comparison(low, high, left, right, other, modifiers) = c
+    for {
+      (relation, combined) <- combinedRelation(other, modifiers)
+      operandType          <- modifiers.view.flatMap(VMInstructionCompiler.format(_)).headOption
+        .toRight(Error.Unsupported("setp", "a predicate pair needs a numeric comparison type"))
+      a <- scope.value(left)
+      b <- scope.value(right)
+      p <- scope.predicate(low)
+      q <- scope.predicate(high)
+    } yield {
+      val flush = modifiers.contains(Modifier.Ftz)
+      Vec(
+        compare(p, relation, operandType, a, b, flush, combined),
+        compare(q, VMInstructionCompiler.complement(relation), operandType, a, b, flush, combined)
+      )
+    }
   }
 
   /** `set` with a Boolean operator on a pair of halves: each result half holds the type's true value where its combined

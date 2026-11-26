@@ -37,7 +37,7 @@ case class Form(
   }
 }
 
-// tests build steps through this factory
+// the three-argument apply builds a form with an empty lane set and is used only by FormSuite; the ISA renderers call the four-argument Form constructor
 @SuppressWarnings(Array("bonsai:test-only-member"))
 object Form {
   val UnitBits = 32

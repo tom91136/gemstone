@@ -11,7 +11,7 @@ import scala.reflect.ClassTag
 import scala.util.Random
 
 // verdicts are observation surfaces of the differential harness
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// Operand and Step are the differential harness vocabulary; compare takes liveOut/types/sampled while replay takes inputs, so a record would carry fields one of them never reads
 @SuppressWarnings(Array("bonsai:test-only-member", "bonsai:data-clump"))
 object Equivalence {
 

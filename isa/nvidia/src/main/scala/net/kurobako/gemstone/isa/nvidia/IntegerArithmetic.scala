@@ -7,7 +7,7 @@ import net.kurobako.gemstone.semantics.prelude.*
 import scala.annotation.targetName
 
 /** NVIDIA integer operations that combine many fields of their operands, as functions of the operands' bits. */
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
+// simd takes lanes and accumulate, video takes select and merge, videoMultiplyAdd takes negateProduct and plusOne; IntegerSemantics names those different controls at its three calls
 @SuppressWarnings(Array("bonsai:data-clump"))
 private[isa] object IntegerArithmetic {
 

@@ -25,8 +25,7 @@ import net.kurobako.gemstone.vm.Schedule
   * every instruction outside the window then issues, and reaches memory, as recorded.
   */
 // tests read laid-out rows to check the static view
-// the shared parameters are independent inputs of each API; one record would couple callers that pass different combinations
-// the two modules keep ISA-specific data; a shared helper would couple them
+// laidOut is read by the layout suite; of takes a kernel image while SASSBlockCost.of takes decoded instructions, and RewriteSearch adds window and config. A shared record or helper would force fields absent at most calls and couple the two cost models
 @SuppressWarnings(Array("bonsai:test-only-member", "bonsai:data-clump", "bonsai:duplicate-code"))
 object AMDGPUBlockCost {
 

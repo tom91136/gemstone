@@ -5,7 +5,7 @@ import net.kurobako.gemstone.string.*
 import net.kurobako.gemstone.vm.LaunchGeometry.*
 import scala.util.Random as ScalaRandom
 
-// the two modules keep ISA-specific data; a shared helper would couple them
+// shuffle works in place with count = -1 for the whole array, while the AMDGPU and SPIR-V loops shuffle tabulated index arrays with an explicit count
 @SuppressWarnings(Array("bonsai:duplicate-code"))
 object ConcurrencySchedule {
 

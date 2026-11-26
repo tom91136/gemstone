@@ -17,7 +17,7 @@ import scala.util.Try
   * ([[AMDGPUGenerator.checked]]), and the cases behind it are those of that mnemonic and encoding there, of which the
   * generator keeps one per definition up to names and numbers.
   */
-// the two modules keep ISA-specific data; a shared helper would couple them
+// AMDGPU forms are admitted by wave size from TargetDefaults, SASS forms by sm version and RewriteSearch forms by search config
 @SuppressWarnings(Array("bonsai:duplicate-code"))
 object AMDGPUForms {
   private val Width    = "_(e32|e64)$".r
