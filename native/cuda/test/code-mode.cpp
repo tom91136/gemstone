@@ -24,6 +24,7 @@
 #include "../../generated/rpc/gemstone_execution_rpc.hpp"
 #include "../../rpc/test/rpc_fixture.hpp"
 #include <environment_keys.hpp>
+
 extern "C" CUresult cuCtxCreate_v2(CUcontext *context, unsigned flags, CUdevice device);
 extern "C" cudaError_t __cudaLaunchKernel(cudaKernel_t kernel, dim3 grid, dim3 block, void **arguments, size_t sharedMemory,
                                           cudaStream_t stream);

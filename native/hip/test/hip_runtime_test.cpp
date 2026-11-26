@@ -1582,6 +1582,7 @@ TEST_CASE("HIP context creation selects the device and tracks the current contex
   REQUIRE((hipCtxPopCurrent(&current) == hipSuccess));
   CHECK((current == first));
 }
+
 TEST_CASE("HIP memory pools account for stream-ordered allocations", "[hip]") {
   gemstone_test::RpcFixture const fixture;
   const gemstone_test::RpcEnvironment environment(fixture);
