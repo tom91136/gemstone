@@ -52,28 +52,15 @@ private object VMCompiler {
       opSelection: Int,
       srcA: InstructionSource,
       srcB: InstructionSource
-  ): Either[NonEmpty[String], Instruction] =
-    for {
-      comparison  <- vectorComparison(opcode).toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
-      destination <- machine.scalar(EncodingField.VDST)
-    } yield vop3Compare(opcode, comparison, destination, srcA, srcB, modifiers, target, halfMask, opSelection)
-
-  private def vop3Compare(
-      opcode: Opcode,
-      comparison: VectorComparison,
-      destination: ScalarRegisterIndex,
-      srcA: InstructionSource,
-      srcB: InstructionSource,
-      modifiers: SourceModifiers,
-      target: Target,
-      halfMask: Int,
-      opSelection: Int
-  ): Instruction = {
+  ): Either[NonEmpty[String], Instruction] = {
     def half(source: InstructionSource, bit: Int): InstructionSource =
       if ((opSelection & halfMask & (1 << bit)) != 0 && halfSelectionDefined(opcode, target))
         InstructionSource.HighHalf(source)
       else source
-    Instruction.VCompare(
+    for {
+      comparison  <- vectorComparison(opcode).toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
+      destination <- machine.scalar(EncodingField.VDST)
+    } yield Instruction.VCompare(
       comparison,
       comparisonDestination(comparison, destination, target),
       half(srcA, 0),
