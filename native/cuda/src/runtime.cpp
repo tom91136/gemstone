@@ -299,10 +299,10 @@ std::optional<std::string> ptxTargetError(std::string_view ptx) {
   const auto capability = gemstone::device_identity::capability();
   if (capability && version && *version <= (capability->first * 10) + capability->second) return std::nullopt;
   if (!capability && known) return std::nullopt;
+  if (known) return std::string("ptxas fatal   : SM version specified by .target is higher than default SM version assumed\n");
   const size_t line = 1 + static_cast<size_t>(std::count(ptx.begin(), ptx.begin() + static_cast<ptrdiff_t>(at), '\n'));
-  const auto prefix = "ptxas application ptx input, line " + std::to_string(line) + "; fatal   : ";
-  if (known) return prefix + "SM version specified by .target is higher than default SM version assumed\n";
-  return prefix + "Unsupported .target '" + std::string(name) + "'\nptxas fatal   : Ptx assembly aborted due to errors\n";
+  return "ptxas application ptx input, line " + std::to_string(line) + "; fatal   : Unsupported .target '" + std::string(name)
+         + "'\nptxas fatal   : Ptx assembly aborted due to errors\n";
 }
 
 void writeJitErrorLog(CUjit_option *options, void **values, unsigned count, const std::string &message) {
