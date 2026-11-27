@@ -295,10 +295,14 @@ std::optional<std::string> ptxTargetError(std::string_view ptx) {
   const auto end = ptx.find_first_of(" \t\r\n,", begin);
   const auto name = ptx.substr(begin, end == std::string_view::npos ? end : end - begin);
   const auto version = parsePtxTarget(name);
-  if (gemstone::targetLimits(name) || (version && *version <= maximumTargetVersion())) return std::nullopt;
+  const bool known = gemstone::targetLimits(name) || (version && *version <= maximumTargetVersion());
+  const auto capability = gemstone::device_identity::capability();
+  if (capability && version && *version <= (capability->first * 10) + capability->second) return std::nullopt;
+  if (!capability && known) return std::nullopt;
   const size_t line = 1 + static_cast<size_t>(std::count(ptx.begin(), ptx.begin() + static_cast<ptrdiff_t>(at), '\n'));
-  return "ptxas application ptx input, line " + std::to_string(line) + "; fatal   : Unsupported .target '" + std::string(name)
-         + "'\nptxas fatal   : Ptx assembly aborted due to errors\n";
+  const auto prefix = "ptxas application ptx input, line " + std::to_string(line) + "; fatal   : ";
+  if (known) return prefix + "SM version specified by .target is higher than default SM version assumed\n";
+  return prefix + "Unsupported .target '" + std::string(name) + "'\nptxas fatal   : Ptx assembly aborted due to errors\n";
 }
 
 void writeJitErrorLog(CUjit_option *options, void **values, unsigned count, const std::string &message) {
@@ -1776,7 +1780,7 @@ CUresult initialiseModule(Module &entry, const void *image, bool allowMetadataOn
   const auto *imageText = static_cast<const char *>(image);
   auto size = binarySize ? *binarySize : static_cast<size_t>(std::find(imageText, imageText + MaximumPayload, '\0') - imageText);
   if (size == MaximumPayload || size > std::numeric_limits<uint32_t>::max()) return CUDA_ERROR_INVALID_VALUE;
-  if (encoding == ProgramEncoding::PTXText) {
+  if (encoding == ProgramEncoding::PTXText && !sassCodeRequired()) {
     if (const auto error = ptxTargetError({imageText, size})) {
       if (gemstone::traceEnabled("cuda")) std::fprintf(stderr, "Gemstone CUDA module load failed: %s\n", error->c_str());
       return CUDA_ERROR_INVALID_PTX;
@@ -5801,13 +5805,15 @@ CUresult cuLinkAddData_v2(CUlinkState state, CUjitInputType type, void *data, si
     const auto *end = static_cast<const char *>(std::memchr(source, '\0', size));
     const size_t sourceSize = end ? static_cast<size_t>(end - source) : size;
     if (sourceSize == 0) return CUDA_ERROR_INVALID_VALUE;
-    if (const auto error = ptxTargetError({source, sourceSize})) {
-      if (link->errorLog && link->errorLogCapacity != 0) {
-        const size_t bytes = std::min(link->errorLogCapacity - 1, error->size());
-        std::memcpy(link->errorLog, error->data(), bytes);
-        link->errorLog[bytes] = '\0';
+    if (!sassCodeRequired()) {
+      if (const auto error = ptxTargetError({source, sourceSize})) {
+        if (link->errorLog && link->errorLogCapacity != 0) {
+          const size_t bytes = std::min(link->errorLogCapacity - 1, error->size());
+          std::memcpy(link->errorLog, error->data(), bytes);
+          link->errorLog[bytes] = '\0';
+        }
+        return CUDA_ERROR_INVALID_PTX;
       }
-      return CUDA_ERROR_INVALID_PTX;
     }
     if (!linkAppend(link, source, sourceSize)) return CUDA_ERROR_UNKNOWN;
     if (sassCodeRequired()) link->modules.emplace_back(source, sourceSize);

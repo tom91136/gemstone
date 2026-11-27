@@ -39,7 +39,7 @@ class CUDACrossWorkgroupSuite extends Suite {
           native.serverEnvironment(
             server.endpoint,
             server.client,
-            Map(env.TestCudaLibraryFile -> runtime.toString, env.TargetArch -> "sm_80", env.SystemPagingOn -> "1")
+            Map(env.TestCudaLibraryFile -> runtime.toString, env.TargetArch -> "sm_90", env.SystemPagingOn -> "1")
           ),
           90.seconds
         )
