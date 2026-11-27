@@ -25,6 +25,7 @@ constexpr char InvalidPtx[] = ".version 3.1\n.target sm_999\n.address_size 64";
 constexpr char SupportedPtx[] = ".version 8.0\n.target sm_89\n.address_size 64\n.visible .entry probe() { ret; }\n";
 constexpr char HigherPtx[] = ".version 8.0\n.target sm_90\n.address_size 64";
 constexpr char NewestPtx[] = ".version 8.0\n.target sm_121\n.address_size 64";
+constexpr char HigherTargetLog[] = "ptxas fatal   : SM version specified by .target is higher than default SM version assumed\n";
 
 void initialise() {
   REQUIRE(cuInit(0) == CUDA_SUCCESS);
@@ -103,8 +104,7 @@ TEST_CASE("cuda core: known targets above the device are refused", "[cuda][core-
     CUmodule module = nullptr;
     CHECK(cuModuleLoadDataEx(&module, source, 2, options, values) == CUDA_ERROR_INVALID_PTX);
     const std::string log(buffer.data());
-    CHECK(log.contains("higher than default SM version"));
-    CHECK(log.contains("line 2"));
+    CHECK(log == HigherTargetLog);
   }
 }
 
@@ -156,5 +156,5 @@ TEST_CASE("cuda core: the linker refuses a target above the device", "[cuda][cor
   CUlinkState link = nullptr;
   REQUIRE(cuLinkCreate_v2(2, options, values, &link) == CUDA_SUCCESS);
   CHECK(cuLinkAddData_v2(link, CU_JIT_INPUT_PTX, ptx.data(), ptx.size(), "dummy", 0, nullptr, nullptr) == CUDA_ERROR_INVALID_PTX);
-  CHECK(std::string(buffer.data()).contains("higher than default SM version"));
+  CHECK(std::string(buffer.data()) == HigherTargetLog);
 }
