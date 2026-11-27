@@ -43,6 +43,45 @@ private object VMCompiler {
   ): ScalarRegisterIndex =
     nullRegister(target.isa).filter(_ => comparison.updateExec).getOrElse(destination)
 
+  private def vop3CompareDecoded(
+      opcode: Opcode,
+      machine: InstructionDecoder.Decoded,
+      target: Target,
+      modifiers: SourceModifiers,
+      halfMask: Int,
+      opSelection: Int,
+      srcA: InstructionSource,
+      srcB: InstructionSource
+  ): Either[NonEmpty[String], Instruction] =
+    for {
+      comparison  <- vectorComparison(opcode).toRight[NonEmpty[String]](s"$opcode VOP3 execution is not implemented")
+      destination <- machine.scalar(EncodingField.VDST)
+    } yield vop3Compare(opcode, comparison, destination, srcA, srcB, modifiers, target, halfMask, opSelection)
+
+  private def vop3Compare(
+      opcode: Opcode,
+      comparison: VectorComparison,
+      destination: ScalarRegisterIndex,
+      srcA: InstructionSource,
+      srcB: InstructionSource,
+      modifiers: SourceModifiers,
+      target: Target,
+      halfMask: Int,
+      opSelection: Int
+  ): Instruction = {
+    def half(source: InstructionSource, bit: Int): InstructionSource =
+      if ((opSelection & halfMask & (1 << bit)) != 0 && halfSelectionDefined(opcode, target))
+        InstructionSource.HighHalf(source)
+      else source
+    Instruction.VCompare(
+      comparison,
+      comparisonDestination(comparison, destination, target),
+      half(srcA, 0),
+      half(srcB, 1),
+      modifiers
+    )
+  }
+
   private def scalarUnaryOperation(opcode: Opcode): Option[ScalarUnaryOperation] = opcode match {
     case STruncF32                 => Some(ScalarUnaryOperation.TruncateF32)
     case SCvtU32F32                => Some(ScalarUnaryOperation.U32FromF32)
@@ -3531,17 +3570,7 @@ private object VMCompiler {
             else vectorBinaryOperation(other).map(Instruction.VBinary(_, destination, srcA, srcB, clamp))
               .toRight[NonEmpty[String]](s"$other VOP3 execution is not implemented")
           case other =>
-            for {
-              comparison <-
-                vectorComparison(other).toRight[NonEmpty[String]](s"$other VOP3 execution is not implemented")
-              destination <- machine.scalar(EncodingField.VDST)
-            } yield Instruction.VCompare(
-              comparison,
-              comparisonDestination(comparison, destination, target),
-              srcA,
-              srcB,
-              modifiers
-            )
+            vop3CompareDecoded(other, machine, target, modifiers, halfMask, opSelection, srcA, srcB)
         }
       }
       clamp   = machine.isSet(EncodingField.CLAMP)
