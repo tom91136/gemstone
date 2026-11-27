@@ -297,20 +297,22 @@ private class HostCoherence(
   def invalidate(completion: Completion, ranges: Vec[HostMemoryRange]): Unit =
     completion.hostMemory.invalidateClean(ranges)
 
-  private def unreadable(completion: Completion, address: GuestAddress, size: Int >= 0, kind: String, since: Long)
-      : Option[Fault] =
-    if (unavailable(address, size))
-      Some(Fault.Memory(s"host memory $kind at ${address.show} ($size bytes) is unavailable or overflows"))
-    else if (completion.hostMemory.isUnreadable(address, size, since))
-      Some(Fault.Memory(s"host memory $kind at ${address.show} ($size bytes) is not readable in the client"))
+  private def unreadable(completion: Completion, stamped: StampedRead, kind: String): Option[Fault] =
+    if (unavailable(stamped.address, stamped.size))
+      Some(Fault.Memory(
+        s"host memory $kind at ${stamped.address.show} (${stamped.size} bytes) is unavailable or overflows"
+      ))
+    else if (completion.hostMemory.isUnreadable(stamped))
+      Some(Fault.Memory(
+        s"host memory $kind at ${stamped.address.show} (${stamped.size} bytes) is not readable in the client"
+      ))
     else None
 
-  def read(completion: Completion, address: GuestAddress, size: Int >= 0, since: Long)
-      : AddressSpace.ReadResult[Vec[Byte]] =
-    unreadable(completion, address, size, "read", since) match {
+  def read(completion: Completion, stamped: StampedRead): AddressSpace.ReadResult[Vec[Byte]] =
+    unreadable(completion, stamped, "read") match {
       case Some(fault) => Left(fault)
       case None        =>
-        completion.hostMemory.read(address, size, allocationAt(address), since).toRight(AddressSpace.Pending)
+        completion.hostMemory.read(stamped, allocationAt(stamped.address)).toRight(AddressSpace.Pending)
     }
 
   /** Demands the host bytes of `count` reads, returning whether any still has to arrive. */
@@ -321,7 +323,7 @@ private class HostCoherence(
     while (at < count && fault.isEmpty) {
       val address = GuestAddress(addresses(at))
       val size    = sizes(at).unsafe[Int >= 0]
-      fault = unreadable(completion, address, size, "read", AddressSpace.Now)
+      fault = unreadable(completion, StampedRead(address, size), "read")
       at += 1
     }
     fault.toLeft(()).map(_ => completion.hostMemory.stage(addresses, sizes, count, allocationAtRaw))
@@ -337,7 +339,7 @@ private class HostCoherence(
       update: Long => Long
   ): AddressSpace.ReadResult[Long] =
     if (address.raw % size != 0) Left(Fault.Memory("atomics require aligned storage"))
-    else unreadable(completion, address, size.widen[Int >= 0], "atomic", since) match {
+    else unreadable(completion, StampedRead(address, size.widen[Int >= 0], since), "atomic") match {
       case Some(fault) => Left(fault)
       case None        =>
         engage(completion)

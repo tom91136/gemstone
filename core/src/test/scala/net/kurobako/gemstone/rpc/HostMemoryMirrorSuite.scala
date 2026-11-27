@@ -25,28 +25,28 @@ class HostMemoryMirrorSuite extends Suite {
     val first  = HostMemoryMirror()
     val second = HostMemoryMirror()
     first.write(at(0x1000), Vec[Byte](9))
-    assertEquals(second.read(at(0x1000), 1, None), None)
+    assertEquals(second.read(StampedRead(at(0x1000), 1), None), None)
     assert(!first.hasPending)
     assert(!second.hasDirty)
     val reply = Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1)))
     assert(second.supply(reply).isRight)
     assert(first.supply(reply).isLeft)
-    assertEquals(first.read(at(0x1000), 1, None), Some(Vec[Byte](9)))
-    assertEquals(second.read(at(0x1000), 1, None), Some(Vec[Byte](1)))
+    assertEquals(first.read(StampedRead(at(0x1000), 1), None), Some(Vec[Byte](9)))
+    assertEquals(second.read(StampedRead(at(0x1000), 1), None), Some(Vec[Byte](1)))
   }
 
   test("a miss requests its page, so lanes in one page share a range and distant pages stay apart") {
     val mirror = HostMemoryMirror()
-    for (offset <- 0 until 32) assertEquals(mirror.read(at(0x1000L + offset * 4), 4, None), None)
+    for (offset <- 0 until 32) assertEquals(mirror.read(StampedRead(at(0x1000L + offset * 4), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x1000L)))
-    for (address <- List(0x20000L, 0x20010L, 0x90000L, 0x20000L)) mirror.read(at(address), 4, None)
+    for (address <- List(0x20000L, 0x20010L, 0x90000L, 0x20000L)) mirror.read(StampedRead(at(address), 4), None)
     assertEquals(mirror.requests(), Vec(page(0x1000L), page(0x20000L), page(0x90000L)))
   }
 
   test("sequential misses double the window up to the batch budget") {
     val mirror  = HostMemoryMirror(maxBatchBytes = 32768)
     val windows = (0 until 6).foldLeft((0x10000L, Vector.empty[Long])) { case ((next, sizes), _) =>
-      assertEquals(mirror.read(at(next), 4, None), None)
+      assertEquals(mirror.read(StampedRead(at(next), 4), None), None)
       val requested = mirror.requests()
       assertEquals(requested.head.address.raw, next)
       assert(mirror.supply(reply(requested)).isRight)
@@ -57,38 +57,38 @@ class HostMemoryMirrorSuite extends Suite {
 
   test("a miss that skips a few pages of a scan still continues it") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x10000L), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x10000L), 4), None), None)
     assert(mirror.supply(reply(mirror.requests())).isRight)
-    assertEquals(mirror.read(at(0x12010L), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x12010L), 4), None), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x11000L), 2 * 4096)))
   }
 
   test("a retried miss does not widen the window again") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x10000L), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x10000L), 4), None), None)
     assert(mirror.supply(reply(mirror.requests())).isRight)
-    for (_ <- 0 until 4) assertEquals(mirror.read(at(0x11000L), 4, None), None)
+    for (_ <- 0 until 4) assertEquals(mirror.read(StampedRead(at(0x11000L), 4), None), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x11000L), 2 * 4096)))
   }
 
   test("a read waits for its own bytes, not for the rest of their page") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1010), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1010), 4), None), None)
     assert(mirror.hasPending)
     assert(mirror.supply(Vec(HostMemoryBytes(at(0x1010), Vec[Byte](1, 2, 3, 4)))).isRight)
     assert(!mirror.hasPending)
-    assertEquals(mirror.read(at(0x1010), 4, None), Some(Vec[Byte](1, 2, 3, 4)))
-    assertEquals(mirror.read(at(0x1014), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1010), 4), None), Some(Vec[Byte](1, 2, 3, 4)))
+    assertEquals(mirror.read(StampedRead(at(0x1014), 4), None), None)
     assertEquals(mirror.requests().map(_.size.raw).sum, 4096 - 4)
   }
 
   test("a read in a registered allocation that ends mid-page requests nothing past its end") {
     val allocation = HostMemoryRange(at(0x2000L), 1000)
     val mirror     = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x2000L + 996), 4, Some(allocation)), None)
+    assertEquals(mirror.read(StampedRead(at(0x2000L + 996), 4), Some(allocation)), None)
     assertEquals(mirror.requests(), Vec(allocation))
     val unregistered = HostMemoryMirror()
-    assertEquals(unregistered.read(at(0x2000L + 996), 4, None), None)
+    assertEquals(unregistered.read(StampedRead(at(0x2000L + 996), 4), None), None)
     assertEquals(unregistered.requests(), Vec(page(0x2000L)))
   }
 
@@ -97,97 +97,100 @@ class HostMemoryMirrorSuite extends Suite {
     val limit      = allocation.address.raw + allocation.size.toLong
     val mirror     = HostMemoryMirror()
     for (index <- 0 until 4) {
-      val _         = mirror.read(at(0x10000L + index * 4096L), 4, Some(allocation))
+      val _         = mirror.read(StampedRead(at(0x10000L + index * 4096L), 4), Some(allocation))
       val requested = mirror.requests()
       assert(requested.forall(range => range.address.raw + range.size.toLong <= limit), s"$requested")
       assert(mirror.supply(reply(requested)).isRight)
     }
-    assertEquals(mirror.read(at(0x10000L + 3 * 4096L + 96), 4, Some(allocation)), Some(Vec.fill(4)(1.toByte)))
+    assertEquals(
+      mirror.read(StampedRead(at(0x10000L + 3 * 4096L + 96), 4), Some(allocation)),
+      Some(Vec.fill(4)(1.toByte))
+    )
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
   }
 
   test("a short reply forgets the bytes no read was waiting on") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1010), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1010), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x1000L)))
     assert(mirror.supply(Vec(HostMemoryBytes(at(0x1000), Vec.fill(0x20)(7.toByte)))).isRight)
     assert(!mirror.hasPending)
-    assert(!mirror.isUnreadable(at(0x1010), 4))
-    assertEquals(mirror.read(at(0x1010), 4, None), Some(Vec.fill(4)(7.toByte)))
+    assert(!mirror.isUnreadable(StampedRead(at(0x1010), 4)))
+    assertEquals(mirror.read(StampedRead(at(0x1010), 4), None), Some(Vec.fill(4)(7.toByte)))
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
-    assertEquals(mirror.read(at(0x1100), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1100), 4), None), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x1020L), 4096 - 0x20)))
   }
 
   test("a short reply that stops before a waiting read makes its bytes unreadable until the next acquire") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1ff8), 16, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1ff8), 16), None), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x1000L), 2 * 4096)))
     assert(mirror.supply(Vec(HostMemoryBytes(at(0x1000), Vec.fill(0x1000 + 4)(1.toByte)))).isRight)
     assert(!mirror.hasPending)
-    assert(mirror.isUnreadable(at(0x1ff8), 16))
-    assert(mirror.isUnreadable(at(0x2004), 4))
-    assert(!mirror.isUnreadable(at(0x1ff8), 4))
+    assert(mirror.isUnreadable(StampedRead(at(0x1ff8), 16)))
+    assert(mirror.isUnreadable(StampedRead(at(0x2004), 4)))
+    assert(!mirror.isUnreadable(StampedRead(at(0x1ff8), 4)))
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
     mirror.write(at(0x2004), Vec.fill(4)(2.toByte))
-    assert(!mirror.isUnreadable(at(0x2004), 4))
+    assert(!mirror.isUnreadable(StampedRead(at(0x2004), 4)))
     mirror.invalidateClean()
-    assert(!mirror.isUnreadable(at(0x1ff8), 16))
+    assert(!mirror.isUnreadable(StampedRead(at(0x1ff8), 16)))
   }
 
   test("replies that skip an unreadable hole still serve the bytes after it") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x10000L), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x10000L), 4), None), None)
     assert(mirror.supply(reply(mirror.requests())).isRight)
-    assertEquals(mirror.read(at(0x12000L), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x12000L), 4), None), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x11000L), 2 * 4096)))
     assert(mirror.supply(Vec(HostMemoryBytes(at(0x12000L), Vec.fill(4096)(5.toByte)))).isRight)
     assert(!mirror.hasPending)
-    assertEquals(mirror.read(at(0x12000L), 4, None), Some(Vec.fill(4)(5.toByte)))
-    assert(!mirror.isUnreadable(at(0x12000L), 4))
+    assertEquals(mirror.read(StampedRead(at(0x12000L), 4), None), Some(Vec.fill(4)(5.toByte)))
+    assert(!mirror.isUnreadable(StampedRead(at(0x12000L), 4)))
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
   }
 
   test("a request that was never sent does not make later reads of its bytes unreadable") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1020), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1020), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x1000L)))
     mirror.write(at(0x1020), Vec.fill(4)(2.toByte))
     val sent = mirror.requests()
     assertEquals(sent, Vec(HostMemoryRange(at(0x1000L), 0x20), HostMemoryRange(at(0x1024L), 4096 - 0x24)))
     assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(at(0x1020), Vec.fill(4)(2.toByte))))
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x1020), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1020), 4), None), None)
     assert(mirror.supply(reply(sent)).isRight)
-    assert(!mirror.isUnreadable(at(0x1020), 4))
+    assert(!mirror.isUnreadable(StampedRead(at(0x1020), 4)))
     assert(mirror.hasPending)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x1020L), 4)))
     assert(mirror.supply(reply(Vec(HostMemoryRange(at(0x1020L), 4)), 3)).isRight)
-    assertEquals(mirror.read(at(0x1020), 4, None), Some(Vec.fill(4)(3.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x1020), 4), None), Some(Vec.fill(4)(3.toByte)))
   }
 
   test("an empty reply makes everything a read was waiting on unreadable") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1010), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1010), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x1000L)))
     assert(mirror.supply(Vec(HostMemoryBytes(at(0x1000), Vec.empty))).isRight)
     assert(!mirror.hasPending)
-    assert(mirror.isUnreadable(at(0x1010), 4))
-    assert(!mirror.isUnreadable(at(0x1014), 4))
+    assert(mirror.isUnreadable(StampedRead(at(0x1010), 4)))
+    assert(!mirror.isUnreadable(StampedRead(at(0x1014), 4)))
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
   }
 
   test("linked discovery fetches only newly visited pages and shares aliases") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1000), 4), None), None)
     assert(mirror.supply(reply(Vec(page(0x1000L)), 3)).isRight)
-    assertEquals(mirror.read(at(0x1001), 2, None), Some(Vec[Byte](3, 3)))
-    assertEquals(mirror.read(at(0x1ffe), 2, None), Some(Vec[Byte](3, 3)))
-    assertEquals(mirror.read(at(0x8000), 2, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1001), 2), None), Some(Vec[Byte](3, 3)))
+    assertEquals(mirror.read(StampedRead(at(0x1ffe), 2), None), Some(Vec[Byte](3, 3)))
+    assertEquals(mirror.read(StampedRead(at(0x8000), 2), None), None)
     assertEquals(mirror.requests(), Vec(page(0x8000L)))
     assert(mirror.supply(reply(Vec(page(0x8000L)), 5)).isRight)
     mirror.write(at(0x8001), Vec[Byte](9))
-    assertEquals(mirror.read(at(0x8000), 2, None), Some(Vec[Byte](5, 9)))
+    assertEquals(mirror.read(StampedRead(at(0x8000), 2), None), Some(Vec[Byte](5, 9)))
     assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(0x8001L), Vec[Byte](9))))
   }
 
@@ -195,24 +198,24 @@ class HostMemoryMirrorSuite extends Suite {
     val mirror = HostMemoryMirror()
     mirror.write(at(0x1000), Vec[Byte](7, 8))
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
-    assertEquals(mirror.read(at(0x1000), 2, None), Some(Vec[Byte](7, 8)))
-    assertEquals(mirror.read(at(0x2000), 1, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1000), 2), None), Some(Vec[Byte](7, 8)))
+    assertEquals(mirror.read(StampedRead(at(0x2000), 1), None), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x5000L), Vec[Byte](1, 2)))).isLeft)
-    assertEquals(mirror.read(at(0x2000), 1, None), None)
-    assertEquals(HostMemoryMirror().read(at(0x1000), 2, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x2000), 1), None), None)
+    assertEquals(HostMemoryMirror().read(StampedRead(at(0x1000), 2), None), None)
   }
   test("an in-flight upload cannot overwrite a later device write") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1000), 2, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1000), 2), None), None)
     assertEquals(mirror.requests().size, 1)
     mirror.write(at(0x1001), Vec[Byte](9))
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))).isRight)
-    assertEquals(mirror.read(at(0x1000), 2, None), Some(Vec[Byte](1, 9)))
+    assertEquals(mirror.read(StampedRead(at(0x1000), 2), None), Some(Vec[Byte](1, 9)))
   }
 
   test("transfers bound both bytes and sparse range count and drain all dirty bytes") {
     val mirror = HostMemoryMirror(maxBatchBytes = 6000, maxBatchRanges = 2)
-    for (address <- List(0x10000L, 0x30000L, 0x50000L)) mirror.read(at(address), 4, None)
+    for (address <- List(0x10000L, 0x30000L, 0x50000L)) mirror.read(StampedRead(at(address), 4), None)
     val first = mirror.requests()
     assertEquals(first.size, 2)
     assertEquals(first.map(_.size.raw).sum, 6000)
@@ -231,22 +234,22 @@ class HostMemoryMirrorSuite extends Suite {
 
   test("fulfilled requests are retired and cannot authorise later unsolicited replies") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1000), 4), None), None)
     assertEquals(mirror.requests().size, 1)
     val reply = Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2, 3, 4)))
     assert(mirror.supply(reply).isRight)
     assert(mirror.supply(reply).isLeft)
-    assertEquals(mirror.read(at(0x1000), 4, None), Some(Vec[Byte](1, 2, 3, 4)))
+    assertEquals(mirror.read(StampedRead(at(0x1000), 4), None), Some(Vec[Byte](1, 2, 3, 4)))
   }
 
   test("acquire invalidates clean bytes but preserves unpublished device writes") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x1000), 2, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1000), 2), None), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x1000L), Vec[Byte](1, 2)))).isRight)
     mirror.write(at(0x1001), Vec[Byte](9))
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x1000), 1, None), None)
-    assertEquals(mirror.read(at(0x1001), 1, None), Some(Vec[Byte](9)))
+    assertEquals(mirror.read(StampedRead(at(0x1000), 1), None), None)
+    assertEquals(mirror.read(StampedRead(at(0x1001), 1), None), Some(Vec[Byte](9)))
   }
 
   test("system publication drains only its target and leaves unrelated dirty bytes queued") {
@@ -306,27 +309,27 @@ class HostMemoryMirrorSuite extends Suite {
       }
     }
     assert(!mirror.hasDirty)
-    assertEquals(mirror.read(at(base - 1), 1, None), None)
-    assertEquals(mirror.read(at(base + 384L * block.size), 1, None), None)
+    assertEquals(mirror.read(StampedRead(at(base - 1), 1), None), None)
+    assertEquals(mirror.read(StampedRead(at(base + 384L * block.size), 1), None), None)
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(base), 1, None), None)
+    assertEquals(mirror.read(StampedRead(at(base), 1), None), None)
   }
 
   test("page boundaries preserve in-flight writes from other lanes") {
     val mirror = HostMemoryMirror()
     val base   = 0x1ffeL
-    assertEquals(mirror.read(at(base), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(base), 4), None), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x1000L), 8192)))
     mirror.write(at(base + 2), Vec[Byte](9))
     assert(mirror.supply(reply(Vec(HostMemoryRange(at(0x1000L), 8192)))).isRight)
-    assertEquals(mirror.read(at(base), 4, None), Some(Vec[Byte](1, 1, 9, 1)))
+    assertEquals(mirror.read(StampedRead(at(base), 4), None), Some(Vec[Byte](1, 1, 9, 1)))
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(base + 2), 1, None), Some(Vec[Byte](9)))
-    assertEquals(mirror.read(at(base + 1), 1, None), None)
-    assertEquals(mirror.read(at(base + 3), 1, None), None)
+    assertEquals(mirror.read(StampedRead(at(base + 2), 1), None), Some(Vec[Byte](9)))
+    assertEquals(mirror.read(StampedRead(at(base + 1), 1), None), None)
+    assertEquals(mirror.read(StampedRead(at(base + 3), 1), None), None)
     assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(base + 2), Vec[Byte](9))))
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(base + 2), 1, None), None)
+    assertEquals(mirror.read(StampedRead(at(base + 2), 1), None), None)
   }
 
   test("dense scalar writes preserve their atomic width across publication pages") {
@@ -386,154 +389,154 @@ class HostMemoryMirrorSuite extends Suite {
 
   test("an atomic observation preserves bytes dirtied while its host request was pending") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x4000L), Vec[Byte](1, 2, 3, 4)))).isRight)
     mirror.write(at(0x4001), Vec[Byte](9))
     mirror.observeAtomic(at(0x4000), Vec[Byte](5, 6, 7, 8), mirror.generation)
-    assertEquals(mirror.read(at(0x4000), 4, None), Some(Vec[Byte](5, 9, 7, 8)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), Some(Vec[Byte](5, 9, 7, 8)))
     assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(0x4001L), Vec[Byte](9))))
   }
 
   test("a system invalidation refuses the reply of a read issued before it") {
     val mirror = HostMemoryMirror()
     val word   = HostMemoryRange(GuestAddress(0x4000L), 4)
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x4000L)))
     mirror.invalidateClean(Vec(word))
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assert(mirror.supply(reply(Vec(page(0x4000L)))).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assert(mirror.hasPending)
     assertEquals(mirror.requests(), Vec(word))
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x4000L), Vec[Byte](2, 2, 2, 2)))).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None), Some(Vec[Byte](2, 2, 2, 2)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), Some(Vec[Byte](2, 2, 2, 2)))
     assert(!mirror.hasPending)
   }
 
   test("a system invalidation refuses only the in-flight bytes it covers") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 8, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 8), None), None)
     assertEquals(mirror.requests(), Vec(page(0x4000L)))
     mirror.invalidateClean(Vec(HostMemoryRange(GuestAddress(0x4004L), 4)))
     assert(mirror.supply(reply(Vec(page(0x4000L)))).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None), Some(Vec[Byte](1, 1, 1, 1)))
-    assertEquals(mirror.read(at(0x4004), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), Some(Vec[Byte](1, 1, 1, 1)))
+    assertEquals(mirror.read(StampedRead(at(0x4004), 4), None), None)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(GuestAddress(0x4004L), 4)))
   }
 
   test("an acquire refuses the reply of a read issued before it") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x4000L)))
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assert(mirror.supply(reply(Vec(page(0x4000L)))).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x4000L)))
     assert(mirror.supply(reply(Vec(page(0x4000L)), 2)).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None), Some(Vec.fill(4)(2.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), Some(Vec.fill(4)(2.toByte)))
   }
 
   test("a read begun before an acquire takes the batch issued before it, and a later read does not") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     val since = mirror.generation
     assertEquals(mirror.requests(), Vec(page(0x4000L)))
     mirror.invalidateClean()
     assert(mirror.supply(reply(Vec(page(0x4000L)))).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None, since), Some(Vec.fill(4)(1.toByte)))
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
-    assertEquals(mirror.read(at(0x4000), 4, None, mirror.generation), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, since), None), Some(Vec.fill(4)(1.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, mirror.generation), None), None)
   }
 
   test("a lane that keeps acquiring cannot starve a read begun before its acquires") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     val since = mirror.generation
     val sent  = mirror.requests()
     for (_ <- 0 until 3) mirror.invalidateClean()
     assert(mirror.supply(reply(sent)).isRight)
     for (_ <- 0 until 3) mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x4000), 4, None, since), Some(Vec.fill(4)(1.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, since), None), Some(Vec.fill(4)(1.toByte)))
     assert(!mirror.hasPending)
     assertEquals(mirror.requests(), Vec.empty[HostMemoryRange])
   }
 
   test("an acquire leaves delivered bytes to the reads that waited for them") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     val since = mirror.generation
     assert(mirror.supply(reply(mirror.requests())).isRight)
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x4000), 4, None, since), Some(Vec.fill(4)(1.toByte)))
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, since), None), Some(Vec.fill(4)(1.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
   }
 
   test("a system invalidation leaves the bytes it covers to reads begun before it") {
     val mirror = HostMemoryMirror()
     val upper  = Vec(HostMemoryRange(at(0x4004L), 4))
-    assertEquals(mirror.read(at(0x4000), 8, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 8), None), None)
     val since = mirror.generation
     val sent  = mirror.requests()
     mirror.invalidateClean(upper)
     assert(mirror.supply(reply(sent)).isRight)
     mirror.invalidateClean(upper)
-    assertEquals(mirror.read(at(0x4000), 8, None, since), Some(Vec.fill(8)(1.toByte)))
-    assertEquals(mirror.read(at(0x4000), 4, None), Some(Vec.fill(4)(1.toByte)))
-    assertEquals(mirror.read(at(0x4004), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 8, since), None), Some(Vec.fill(8)(1.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), Some(Vec.fill(4)(1.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4004), 4), None), None)
   }
 
   test("a read begun after an acquire refuses a batch issued before it, whatever follows") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     val first = mirror.generation
     val sent  = mirror.requests()
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x4004), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4004), 4), None), None)
     val second = mirror.generation
     mirror.invalidateClean()
     assert(mirror.supply(reply(sent)).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None, first), Some(Vec.fill(4)(1.toByte)))
-    assertEquals(mirror.read(at(0x4004), 4, None, second), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, first), None), Some(Vec.fill(4)(1.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4004), 4, second), None), None)
     assert(mirror.hasPending)
   }
 
   test("a read begun before two acquires takes the newest bytes the mirror held for it") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     val since = mirror.generation
     assert(mirror.supply(reply(mirror.requests())).isRight)
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assert(mirror.supply(reply(mirror.requests(), 2)).isRight)
     mirror.invalidateClean()
-    assertEquals(mirror.read(at(0x4000), 4, None, since), Some(Vec.fill(4)(2.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, since), None), Some(Vec.fill(4)(2.toByte)))
   }
 
   test("an overtaken reply does not replace a newer value that an acquire withdrew") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     val since = mirror.generation
     val sent  = mirror.requests()
     mirror.write(at(0x4000), Vec.fill(4)(9.toByte))
     val _ = mirror.takeDirty()
     mirror.invalidateClean()
     assert(mirror.supply(reply(sent)).isRight)
-    assertEquals(mirror.read(at(0x4000), 4, None, since), Some(Vec.fill(4)(9.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, since), None), Some(Vec.fill(4)(9.toByte)))
   }
 
   test("a read begun before an acquire learns that its bytes are unreadable, and a later read asks again") {
     for (overtaken <- List(true, false)) {
       val mirror = HostMemoryMirror()
-      assertEquals(mirror.read(at(0x1010), 4, None), None)
+      assertEquals(mirror.read(StampedRead(at(0x1010), 4), None), None)
       val since = mirror.generation
       assertEquals(mirror.requests(), Vec(page(0x1000L)))
       if (overtaken) mirror.invalidateClean()
       assert(mirror.supply(Vec(HostMemoryBytes(at(0x1000), Vec.empty))).isRight)
       mirror.invalidateClean()
-      assert(mirror.isUnreadable(at(0x1010), 4, since), s"overtaken=$overtaken")
-      assert(!mirror.isUnreadable(at(0x1010), 4), s"overtaken=$overtaken")
-      assertEquals(mirror.read(at(0x1010), 4, None), None)
+      assert(mirror.isUnreadable(StampedRead(at(0x1010), 4, since)), s"overtaken=$overtaken")
+      assert(!mirror.isUnreadable(StampedRead(at(0x1010), 4)), s"overtaken=$overtaken")
+      assertEquals(mirror.read(StampedRead(at(0x1010), 4), None), None)
       assertEquals(mirror.requests(), Vec(page(0x1000L)))
     }
   }
@@ -547,26 +550,26 @@ class HostMemoryMirrorSuite extends Suite {
     assert(mirror.supply(reply(sent)).isRight)
     mirror.invalidateClean()
     assertEquals(mirror.modify(at(0x5000), 4, None, since)(_ + 1), Some(0x01010101L))
-    assertEquals(mirror.read(at(0x5000), 4, None), Some(Vec[Byte](2, 1, 1, 1)))
+    assertEquals(mirror.read(StampedRead(at(0x5000), 4), None), Some(Vec[Byte](2, 1, 1, 1)))
     assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(at(0x5000), Vec[Byte](2, 1, 1, 1), 4)))
   }
 
   test("a native operation leaves no clean bytes of its word to any read") {
     val mirror = HostMemoryMirror()
     val word   = Vec(HostMemoryRange(at(0x4000L), 4))
-    assertEquals(mirror.read(at(0x4000), 8, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 8), None), None)
     val since = mirror.generation
     assert(mirror.supply(reply(mirror.requests())).isRight)
     mirror.invalidateClean()
     mirror.discard(word)
-    assertEquals(mirror.read(at(0x4000), 4, None, since), None)
-    assertEquals(mirror.read(at(0x4004), 4, None, since), Some(Vec.fill(4)(1.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4, since), None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4004), 4, since), None), Some(Vec.fill(4)(1.toByte)))
     assert(mirror.supply(reply(mirror.requests(), 2)).isRight)
     mirror.discard(word)
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     mirror.write(at(0x4000), Vec.fill(4)(7.toByte))
     mirror.discard(word)
-    assertEquals(mirror.read(at(0x4000), 4, None), Some(Vec.fill(4)(7.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), Some(Vec.fill(4)(7.toByte)))
   }
 
   test("random acquires withdraw bytes from later reads only, and never from an answered read") {
@@ -607,11 +610,11 @@ class HostMemoryMirrorSuite extends Suite {
         random.nextInt(7) match {
           case 0 =>
             val since = mirror.generation
-            mirror.read(address(offset), size.unsafe[Int >= 0], None) match {
+            mirror.read(StampedRead(address(offset), size.unsafe[Int >= 0]), None) match {
               case Some(found) => check(found, offset, since)
               case None        =>
                 val current = mutable.Set.from(
-                  (offset until offset + size).filter(at => mirror.read(address(at), 1, None).isDefined)
+                  (offset until offset + size).filter(at => mirror.read(StampedRead(address(at), 1), None).isDefined)
                 )
                 waiting = Waiting(offset, size, since, current) :: waiting
             }
@@ -653,7 +656,7 @@ class HostMemoryMirrorSuite extends Suite {
             }
           case _ =>
             waiting.foreach { read =>
-              mirror.read(address(read.offset), read.size.unsafe[Int >= 0], None, read.since) match {
+              mirror.read(StampedRead(address(read.offset), read.size.unsafe[Int >= 0], read.since), None) match {
                 case Some(found) =>
                   check(found, read.offset, read.since)
                   waiting = waiting.filterNot(_ eq read)
@@ -668,7 +671,7 @@ class HostMemoryMirrorSuite extends Suite {
 
   test("a rejected reply consumes its batch and keeps the demand") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     assertEquals(mirror.requests(), Vec(page(0x4000L)))
     assert(mirror.awaitingReply)
     assert(mirror.supply(reply(Vec(page(0x9000L)))).isLeft)
@@ -679,14 +682,14 @@ class HostMemoryMirrorSuite extends Suite {
 
   test("a system invalidation keeps unpublished writes and clean bytes elsewhere") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x4000), 8, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 8), None), None)
     assert(mirror.supply(Vec(HostMemoryBytes(GuestAddress(0x4000L), Vec[Byte](1, 2, 3, 4, 5, 6, 7, 8)))).isRight)
     mirror.write(at(0x4001), Vec[Byte](9))
     mirror.invalidateClean(Vec(HostMemoryRange(GuestAddress(0x4000L), 4)))
-    assertEquals(mirror.read(at(0x4001), 1, None), Some(Vec[Byte](9)))
-    assertEquals(mirror.read(at(0x4000), 1, None), None)
-    assertEquals(mirror.read(at(0x4002), 2, None), None)
-    assertEquals(mirror.read(at(0x4004), 4, None), Some(Vec[Byte](5, 6, 7, 8)))
+    assertEquals(mirror.read(StampedRead(at(0x4001), 1), None), Some(Vec[Byte](9)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 1), None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4002), 2), None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4004), 4), None), Some(Vec[Byte](5, 6, 7, 8)))
     assertEquals(mirror.takeDirty(), Vec(HostMemoryBytes(GuestAddress(0x4001L), Vec[Byte](9))))
   }
 
@@ -695,9 +698,9 @@ class HostMemoryMirrorSuite extends Suite {
     val since  = mirror.generation
     mirror.invalidateClean(Vec(HostMemoryRange(GuestAddress(0x4000L), 4)))
     mirror.observeAtomic(at(0x4000), Vec[Byte](5, 6, 7, 8), since)
-    assertEquals(mirror.read(at(0x4000), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), None)
     mirror.observeAtomic(at(0x4000), Vec[Byte](5, 6, 7, 8), mirror.generation)
-    assertEquals(mirror.read(at(0x4000), 4, None), Some(Vec[Byte](5, 6, 7, 8)))
+    assertEquals(mirror.read(StampedRead(at(0x4000), 4), None), Some(Vec[Byte](5, 6, 7, 8)))
   }
 
   test("dirty batches match a byte-wise reference for random stores of every width") {
@@ -788,7 +791,7 @@ class HostMemoryMirrorSuite extends Suite {
     val mirror = HostMemoryMirror()
     mirror.write(at(0x3fffeL), Vec[Byte](1, 2))
     mirror.write(at(0x40000L), Vec[Byte](3, 4))
-    assertEquals(mirror.read(at(0x3fffeL), 4, None), Some(Vec[Byte](1, 2, 3, 4)))
+    assertEquals(mirror.read(StampedRead(at(0x3fffeL), 4), None), Some(Vec[Byte](1, 2, 3, 4)))
     assertEquals(
       mirror.takeDirty().map(batch => (batch.address.raw, batch.bytes.toVector)).toVector,
       Vector((0x3fffeL, Vector[Byte](1, 2, 3, 4)))
@@ -797,7 +800,7 @@ class HostMemoryMirrorSuite extends Suite {
 
   test("a miss spanning a shard boundary requests both pages in one range and wakes once they arrive") {
     val mirror = HostMemoryMirror()
-    assertEquals(mirror.read(at(0x3fffeL), 4, None), None)
+    assertEquals(mirror.read(StampedRead(at(0x3fffeL), 4), None), None)
     assert(mirror.hasPending)
     assertEquals(mirror.requests(), Vec(HostMemoryRange(at(0x3f000L), 2 * 4096)))
     assert(
@@ -807,7 +810,7 @@ class HostMemoryMirrorSuite extends Suite {
       ))).isRight
     )
     assert(!mirror.hasPending)
-    assertEquals(mirror.read(at(0x3fffeL), 4, None), Some(Vec[Byte](5, 5, 6, 6)))
+    assertEquals(mirror.read(StampedRead(at(0x3fffeL), 4), None), Some(Vec[Byte](5, 5, 6, 6)))
   }
 
   test("dirty bytes merge across shards in address order") {
@@ -825,8 +828,9 @@ class HostMemoryMirrorSuite extends Suite {
     val before = mirror.generation
     mirror.invalidateClean()
     assertEquals(mirror.generation, before + 1)
-    for (index <- 0 until 130) assertEquals(mirror.read(at(index * 4096L), 1, None), Some(Vec[Byte](index.toByte)))
-    assertEquals(mirror.read(at(0L + 1), 1, None), None)
+    for (index <- 0 until 130)
+      assertEquals(mirror.read(StampedRead(at(index * 4096L), 1), None), Some(Vec[Byte](index.toByte)))
+    assertEquals(mirror.read(StampedRead(at(0L + 1), 1), None), None)
   }
 
   test("modify updates a present word and leaves it dirty with its width") {
@@ -834,7 +838,7 @@ class HostMemoryMirrorSuite extends Suite {
     mirror.write(at(0x1000L), Vec[Byte](5, 0, 0, 0))
     val _ = mirror.takeDirty()
     assertEquals(mirror.modify(at(0x1000L), 4, None)(previous => previous + 7), Some(5L))
-    assertEquals(mirror.read(at(0x1000L), 4, None), Some(Vec[Byte](12, 0, 0, 0)))
+    assertEquals(mirror.read(StampedRead(at(0x1000L), 4), None), Some(Vec[Byte](12, 0, 0, 0)))
     val taken = mirror.takeDirty()
     assertEquals(
       taken.map(batch => (batch.address.raw, batch.bytes.toVector, batch.atomicWidth.raw)).toVector,
@@ -853,7 +857,7 @@ class HostMemoryMirrorSuite extends Suite {
     ))).isRight)
     assert(!mirror.hasPending)
     assertEquals(mirror.modify(at(0x5008L), 8, None)(_ + 1), Some(41L))
-    assertEquals(mirror.read(at(0x5008L), 8, None), Some(Vec[Byte](42, 0, 0, 0, 0, 0, 0, 0)))
+    assertEquals(mirror.read(StampedRead(at(0x5008L), 8), None), Some(Vec[Byte](42, 0, 0, 0, 0, 0, 0, 0)))
   }
 
   test("modify of a word an acquire dropped fetches it again") {

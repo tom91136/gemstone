@@ -718,20 +718,18 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def read(
-      address: GuestAddress,
-      size: Int >= 0,
-      allocation: => Option[HostMemoryRange],
-      since: Long = AddressSpace.Now
-  ): Option[Vec[Byte]] =
-    if (size == 0) Some(Vec.empty[Byte])
+  def read(stamped: StampedRead, allocation: => Option[HostMemoryRange]): Option[Vec[Byte]] =
+    if (stamped.size == 0) Some(Vec.empty[Byte])
     else {
-      val begin  = address.raw
+      val begin  = stamped.address.raw
       val first  = number(begin)
-      val result = Array.ofDim[Byte](size)
+      val result = Array.ofDim[Byte](stamped.size)
       var code   =
-        locked(touching(first, number(begin + size - 1)))(attempt(begin, size, result, allocation, false, since))
-      if (code == Fresh) code = locked(EveryShard)(attempt(begin, size, result, allocation, true, since))
+        locked(touching(first, number(begin + stamped.size - 1)))(
+          attempt(begin, stamped.size, result, allocation, false, stamped.since)
+        )
+      if (code == Fresh)
+        code = locked(EveryShard)(attempt(begin, stamped.size, result, allocation, true, stamped.since))
       if (code == Hit) Some(Vec.unsafeWrapArray(result)) else None
     }
 
@@ -997,13 +995,13 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
   }
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
-  def isUnreadable(address: GuestAddress, size: Int >= 0, since: Long = AddressSpace.Now): Boolean =
-    (since != AddressSpace.Now || unreadableCensus.occupied) && size > 0 && {
-      val begin = address.raw
-      locked(touching(number(begin), number(begin + size - 1))) {
+  def isUnreadable(stamped: StampedRead): Boolean = (stamped.since != AddressSpace.Now || unreadableCensus.occupied) &&
+    stamped.size > 0 && {
+      val begin = stamped.address.raw
+      locked(touching(number(begin), number(begin + stamped.size - 1))) {
         var any = false
-        spans(begin, size)((number, offset, length, _) =>
-          any = any || shardAt(number).unreadableTo(number, offset, length, since)
+        spans(begin, stamped.size)((number, offset, length, _) =>
+          any = any || shardAt(number).unreadableTo(number, offset, length, stamped.since)
         )
         any
       }

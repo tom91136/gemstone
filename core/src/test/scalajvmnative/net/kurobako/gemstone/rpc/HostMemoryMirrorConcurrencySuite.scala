@@ -52,10 +52,10 @@ class HostMemoryMirrorConcurrencySuite extends Suite {
     }
     holder.start()
     val entered = inside.await(10, TimeUnit.SECONDS)
-    val other   = worker(failure)(others.set(mirror.read(at(otherShard), 8, None)))
+    val other   = worker(failure)(others.set(mirror.read(StampedRead(at(otherShard), 8), None)))
     other.start()
     val otherDone = finished(other, 10000)
-    val same      = worker(failure)(siblings.set(mirror.read(at(sibling), 8, None)))
+    val same      = worker(failure)(siblings.set(mirror.read(StampedRead(at(sibling), 8), None)))
     same.start()
     val sameDone = finished(same, 300)
     release.countDown()
@@ -85,7 +85,7 @@ class HostMemoryMirrorConcurrencySuite extends Suite {
           val base   = first * 4096L + 4094
           val before = invalidations.get()
           mirror.write(at(base), Vec.fill(4)((lane + 1).toByte))
-          val missed = mirror.read(at(base), 4, None).isEmpty
+          val missed = mirror.read(StampedRead(at(base), 4), None).isEmpty
           if (missed && before % 2 == 0 && invalidations.get() == before)
             throw IllegalStateException(s"lost write at $base")
           if (lane == 0 && round % 50 == 0) {
