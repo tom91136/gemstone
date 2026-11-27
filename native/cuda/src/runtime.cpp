@@ -68,6 +68,7 @@
 #include <gemstone/memory.hpp>
 #include <gemstone/trace.hpp>
 #include <gemstone/zstd.hpp>
+#include <gemstone_cuda_error_texts.hpp>
 
 #include "client.hpp"
 #include "completion.hpp"
@@ -2147,89 +2148,29 @@ CUresult copyString(char *destination, int length, std::string_view source) {
 }
 
 struct ErrorText {
-  CUresult status;
+  int status;
   const char *driverName;
   const char *runtimeName;
-  const char *message;
+  const char *driverMessage;
+  const char *runtimeMessage;
 };
 
-constexpr std::array ErrorTexts{
-    ErrorText{.status = CUDA_SUCCESS, .driverName = "CUDA_SUCCESS", .runtimeName = "cudaSuccess", .message = "no error"},
-    ErrorText{.status = CUDA_ERROR_INVALID_VALUE,
-              .driverName = "CUDA_ERROR_INVALID_VALUE",
-              .runtimeName = "cudaErrorInvalidValue",
-              .message = "invalid argument"},
-    ErrorText{.status = CUDA_ERROR_INVALID_DEVICE,
-              .driverName = "CUDA_ERROR_INVALID_DEVICE",
-              .runtimeName = "cudaErrorInvalidDevice",
-              .message = "invalid device"},
-    ErrorText{.status = CUDA_ERROR_NOT_INITIALIZED,
-              .driverName = "CUDA_ERROR_NOT_INITIALIZED",
-              .runtimeName = "cudaErrorInitializationError",
-              .message = "initialization error"},
-    ErrorText{.status = CUDA_ERROR_NOT_FOUND,
-              .driverName = "CUDA_ERROR_NOT_FOUND",
-              .runtimeName = "cudaErrorSymbolNotFound",
-              .message = "named symbol not found"},
-    ErrorText{.status = CUDA_ERROR_NOT_SUPPORTED,
-              .driverName = "CUDA_ERROR_NOT_SUPPORTED",
-              .runtimeName = "cudaErrorNotSupported",
-              .message = "operation not supported"},
-    ErrorText{
-        .status = CUDA_ERROR_UNKNOWN, .driverName = "CUDA_ERROR_UNKNOWN", .runtimeName = "cudaErrorUnknown", .message = "unknown error"},
-    ErrorText{.status = InvalidConfiguration,
-              .driverName = nullptr,
-              .runtimeName = "cudaErrorInvalidConfiguration",
-              .message = "invalid configuration argument"},
-    ErrorText{.status = CUDA_ERROR_INVALID_IMAGE,
-              .driverName = "CUDA_ERROR_INVALID_IMAGE",
-              .runtimeName = "cudaErrorInvalidKernelImage",
-              .message = "device kernel image is invalid"},
-    ErrorText{.status = CUDA_ERROR_NO_BINARY_FOR_GPU,
-              .driverName = "CUDA_ERROR_NO_BINARY_FOR_GPU",
-              .runtimeName = "cudaErrorNoKernelImageForDevice",
-              .message = "no kernel image is available for execution on the device"},
-    ErrorText{.status = CUDA_ERROR_INVALID_PTX,
-              .driverName = "CUDA_ERROR_INVALID_PTX",
-              .runtimeName = "cudaErrorInvalidPtx",
-              .message = "a PTX JIT compilation failed"},
-    ErrorText{.status = CUDA_ERROR_JIT_COMPILER_NOT_FOUND,
-              .driverName = "CUDA_ERROR_JIT_COMPILER_NOT_FOUND",
-              .runtimeName = "cudaErrorJitCompilerNotFound",
-              .message = "PTX JIT compiler library not found"},
-    ErrorText{.status = CUDA_ERROR_UNSUPPORTED_PTX_VERSION,
-              .driverName = "CUDA_ERROR_UNSUPPORTED_PTX_VERSION",
-              .runtimeName = "cudaErrorUnsupportedPtxVersion",
-              .message = "the provided PTX was compiled with an unsupported toolchain"},
-    ErrorText{.status = CUDA_ERROR_ILLEGAL_ADDRESS,
-              .driverName = "CUDA_ERROR_ILLEGAL_ADDRESS",
-              .runtimeName = "cudaErrorIllegalAddress",
-              .message = "an illegal memory access was encountered"},
-    ErrorText{.status = CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES,
-              .driverName = "CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES",
-              .runtimeName = "cudaErrorLaunchOutOfResources",
-              .message = "too many resources requested for launch"},
-    ErrorText{.status = CUDA_ERROR_LAUNCH_TIMEOUT,
-              .driverName = "CUDA_ERROR_LAUNCH_TIMEOUT",
-              .runtimeName = "cudaErrorLaunchTimeout",
-              .message = "the launch timed out and was terminated"},
-    ErrorText{.status = CUDA_ERROR_ASSERT,
-              .driverName = "CUDA_ERROR_ASSERT",
-              .runtimeName = "cudaErrorAssert",
-              .message = "device-side assert triggered"},
-    ErrorText{.status = CUDA_ERROR_ILLEGAL_INSTRUCTION,
-              .driverName = "CUDA_ERROR_ILLEGAL_INSTRUCTION",
-              .runtimeName = "cudaErrorIllegalInstruction",
-              .message = "an illegal instruction was encountered"},
-    ErrorText{.status = CUDA_ERROR_MISALIGNED_ADDRESS,
-              .driverName = "CUDA_ERROR_MISALIGNED_ADDRESS",
-              .runtimeName = "cudaErrorMisalignedAddress",
-              .message = "misaligned address"},
-    ErrorText{.status = CUDA_ERROR_LAUNCH_FAILED,
-              .driverName = "CUDA_ERROR_LAUNCH_FAILED",
-              .runtimeName = "cudaErrorLaunchFailure",
-              .message = "unspecified launch failure"},
-};
+constexpr ErrorText makeErrorText(const CudaErrorText &record) {
+  return ErrorText{.status = record.value,
+                   .driverName = record.driverName,
+                   .runtimeName = record.runtimeName,
+                   .driverMessage = record.driverMessage,
+                   .runtimeMessage = record.runtimeMessage};
+}
+
+constexpr auto makeErrorTexts() {
+  std::array<ErrorText, ErrorTextRows.size()> texts{};
+  for (size_t index = 0; index < ErrorTextRows.size(); ++index)
+    texts[index] = makeErrorText(ErrorTextRows[index]);
+  return texts;
+}
+
+constexpr auto ErrorTexts = makeErrorTexts();
 
 const ErrorText *errorText(int status) {
   const auto found = ErrorTexts | find_cref([status](const auto &text) { return text.status == status; });
@@ -6978,7 +6919,7 @@ CUresult cuEventSynchronize(CUevent event) {
   return ticket ? queueStatus(commands().wait(*ticket)) : CUDA_ERROR_INVALID_HANDLE;
 }
 
-CUresult cuGetErrorString(CUresult status, const char **message) { return describeError(status, message, &ErrorText::message); }
+CUresult cuGetErrorString(CUresult status, const char **message) { return describeError(status, message, &ErrorText::driverMessage); }
 
 CUresult cuGetErrorName(CUresult status, const char **name) { return describeError(status, name, &ErrorText::driverName); }
 
@@ -7451,12 +7392,12 @@ cudaError_t cudaMemset2DAsync(void *device, size_t pitch, int value, size_t widt
 
 const char *cudaGetErrorString(cudaError_t status) {
   const auto *text = errorText(status);
-  return text ? text->message : "Gemstone CUDA error";
+  return text ? text->runtimeMessage : "unrecognized error code";
 }
 
 const char *cudaGetErrorName(cudaError_t status) {
   const auto *text = errorText(status);
-  return text ? text->runtimeName : "cudaErrorUnknown";
+  return text ? text->runtimeName : "unrecognized error code";
 }
 
 cudaError_t cudaPeekAtLastError() {

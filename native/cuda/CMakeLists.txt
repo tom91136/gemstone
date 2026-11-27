@@ -4,11 +4,26 @@ if(NOT CUDA_INCLUDE_DIR OR NOT EXISTS "${CUDA_INCLUDE_DIR}/cuda.h")
 endif()
 include(ValidateCUDAHeader.cmake)
 
+set(CUDA_ERROR_GOLDEN "${CMAKE_CURRENT_SOURCE_DIR}/test/error-texts.tsv")
+set(CUDA_ERROR_HEADER "${CMAKE_CURRENT_BINARY_DIR}/gemstone_cuda_error_texts.hpp")
+add_custom_command(
+  OUTPUT "${CUDA_ERROR_HEADER}"
+  COMMAND ${CMAKE_COMMAND}
+    "-DHEADER=${CUDA_INCLUDE_DIR}/cuda.h"
+    "-DGOLDEN=${CUDA_ERROR_GOLDEN}"
+    "-DOUTPUT=${CUDA_ERROR_HEADER}"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/GenerateErrorTexts.cmake"
+  DEPENDS "${CUDA_INCLUDE_DIR}/cuda.h" "${CUDA_ERROR_GOLDEN}" "${CMAKE_CURRENT_SOURCE_DIR}/GenerateErrorTexts.cmake"
+  COMMENT "Generating CUDA error texts from the driver probe"
+  VERBATIM)
+add_custom_target(gemstone_cuda_error_texts DEPENDS "${CUDA_ERROR_HEADER}")
+
 add_library(gemstone_cuda SHARED
   src/runtime.cpp
   ../generated/cuda/gemstone_cuda_unsupported.cpp)
 set_target_properties(gemstone_cuda PROPERTIES OUTPUT_NAME cuda SOVERSION 1)
-target_include_directories(gemstone_cuda SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}")
+add_dependencies(gemstone_cuda gemstone_cuda_error_texts)
+target_include_directories(gemstone_cuda SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
 target_include_directories(gemstone_cuda PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../generated/texture")
 gemstone_project_target(gemstone_cuda)
 target_link_libraries(gemstone_cuda PRIVATE
@@ -64,6 +79,13 @@ if(BUILD_TESTING)
   gemstone_test_target(cuda_code_mode_test)
   # The facade connects to the execution service once per process, so each case and its fixture run in their own.
   gemstone_discover_tests(cuda_code_mode_test TEST_PREFIX "cuda/code-mode/")
+  add_executable(cuda_error_texts_test test/error-texts.cpp)
+  target_include_directories(cuda_error_texts_test SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}")
+  target_link_libraries(cuda_error_texts_test PRIVATE gemstone_cuda)
+  gemstone_test_target(cuda_error_texts_test)
+  add_test(NAME cuda/error-texts COMMAND cuda_error_texts_test)
+  gemstone_set_tests_properties(cuda/error-texts PROPERTIES
+    ENVIRONMENT_MODIFICATION "LD_LIBRARY_PATH=path_list_prepend:$<TARGET_FILE_DIR:gemstone_cuda>")
   add_executable(cuda_tensor_map_test test/tensor-map.cpp)
   target_include_directories(cuda_tensor_map_test SYSTEM PRIVATE "${CUDA_INCLUDE_DIR}")
   target_link_libraries(cuda_tensor_map_test PRIVATE gemstone_cuda)
