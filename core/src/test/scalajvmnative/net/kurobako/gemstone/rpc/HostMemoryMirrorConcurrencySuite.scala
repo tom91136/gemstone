@@ -70,6 +70,45 @@ class HostMemoryMirrorConcurrencySuite extends Suite {
     assertEquals(siblings.get(), Some(Vec.fill(8)(3.toByte)))
   }
 
+  test("an atomic observation cannot pass a global acquire holding the first shard") {
+    val mirror   = HostMemoryMirror()
+    val entered  = CountDownLatch(1)
+    val release  = CountDownLatch(1)
+    val observed = CountDownLatch(1)
+    val failure  = AtomicReference(Option.empty[String])
+    val acquire  = AtomicReference(Option.empty[String])
+    val owner    = at(0x1000L)
+    mirror.write(owner, Vec.fill(8)(1.toByte))
+    val before = mirror.generation
+    val holder = worker(failure) {
+      val _ = mirror.modify(owner, 8, None) { previous =>
+        entered.countDown()
+        if (!release.await(15, TimeUnit.SECONDS)) throw IllegalStateException("holder was not released")
+        previous
+      }
+    }
+    holder.start()
+    assert(entered.await(10, TimeUnit.SECONDS), "holder did not enter")
+    val acquirer = worker(acquire)(mirror.invalidateClean())
+    acquirer.start()
+    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+    while (mirror.generation == before && System.nanoTime() < deadline) Thread.`yield`()
+    assert(mirror.generation > before, "the acquire did not assign its number")
+    val observer = worker(failure) {
+      mirror.observeAtomic(at(0x5000L), Vec[Byte](5, 6, 7, 8), mirror.generation)
+      observed.countDown()
+    }
+    observer.start()
+    val early = observed.await(200, TimeUnit.MILLISECONDS)
+    release.countDown()
+    assert(finished(holder, 10000), "holder did not finish")
+    assert(finished(acquirer, 10000), "acquire did not finish")
+    assert(finished(observer, 10000), "observation did not finish")
+    assert(!early, "an observation passed a global acquire holding the first shard")
+    assertEquals(failure.get(), None)
+    assertEquals(acquire.get(), None)
+  }
+
   test("lanes writing across shard boundaries in opposite orders neither deadlock nor lose bytes") {
     val mirror        = HostMemoryMirror()
     val failure       = AtomicReference(Option.empty[String])

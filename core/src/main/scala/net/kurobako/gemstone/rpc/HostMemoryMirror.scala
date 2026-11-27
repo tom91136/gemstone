@@ -830,7 +830,7 @@ private class HostMemoryMirror(maxBatchBytes: Int >= 8 = 1048576, maxBatchRanges
     */
   def observeAtomic(address: GuestAddress, values: Vec[Byte], since: Long): Unit =
     if (values.nonEmpty)
-      locked(touching(number(address.raw), number(address.raw + values.size - 1))) {
+      locked(1L | touching(number(address.raw), number(address.raw + values.size - 1))) {
         if (since == invalidations.get)
           values.zipWithIndex.foreach { case (value, position) =>
             val target = address.raw + position.toLong
