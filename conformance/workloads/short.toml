@@ -7,9 +7,7 @@ specs = ['~"cts/opencl/basic/imagedim_*"~"range_api"~[full-matrix]~[regression]~
 exclude_programs = [
   "opencl_cts_buffers",
   "opencl_cts_cl_copy_images",
-  "opencl_cts_cl_fill_images",
   "opencl_cts_cl_get_info",
-  "opencl_cts_cl_read_write_images",
   "opencl_cts_image_streams",
   "opencl_cts_kernel_image_methods",
   "opencl_cts_samplerless_reads",

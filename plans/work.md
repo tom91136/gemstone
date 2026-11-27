@@ -41,7 +41,13 @@ Before, each launch opened a connection (thread start, ~92 KB Hello), about 70 t
 
 ## 4. Image programs back in `short`
 
-Once a full CI run reports the times, move `opencl_cts_cl_copy_images`, `opencl_cts_cl_fill_images` and `opencl_cts_cl_read_write_images` out of `exclude_programs` if they fit the short budget. Locally, the CI-timed copy cases run in about 22 s each (they timed out at 2400 s before). `opencl_cts_image_streams` stays excluded until a CI run times it with item 3 in place.
+Done for the programs that fit. CI run `45857162844` (`d562e432`, 2026-11-26, `xlong`, `opencl` route, four case shards) reports these emulated per-case times in the `report-opencl-{0,1,2,3}` JUnit files:
+
+- `opencl_cts_cl_copy_images`: 1D 2.707, 1Dbuffer 3.045, 1DbufferTo1D 2.710, 1DTo1Dbuffer 3.086, 2D 49.184, 3D 34.994, 1Darray 75.546, 2Darray 71.396, 2Dto2Darray 286.459, 3Dto2Darray 267.772, 2Darrayto3D 277.050, 2Darrayto2D 341.370, 2Dto3D 609.954 s. Worst 609.954 s, total 2299.368 s over 14 cases.
+- `opencl_cts_cl_fill_images`: 1D 3.112, 1Dbuffer 1.374, 1Darray 17.834, 2D 19.728, 2Darray 367.867, 3D 179.612 s. Worst 367.867 s, total 589.527 s over 6 cases.
+- `opencl_cts_cl_read_write_images`: 1D 0.859, 1Dbuffer 0.468, 1Darray 1.750, 2D 2.126, 2Darray 66.406, 3D 32.690 s. Worst 66.406 s, total 104.299 s over 6 cases.
+
+The short budget is the emulated OpenCL CTS per-case deadline of 600 s, set by `CONFORMANCE_OPENCL_CTS_TIMEOUT_SECONDS` in `tools/conformance/src/main/scala/net/kurobako/gemstone/tools/conformance/CLI.scala:305` and documented in `conformance/README.md:212`; `scaledTimeout` raises it on hosts with fewer than 32 cores, so the four-core CI runner gave these cases 2400 s. Against the 600 s budget, copy images stays excluded (`2Dto3D` at 609.954 s), while fill images and read/write images are back in `short`. `opencl_cts_image_streams` stays excluded until a CI run times it with item 3 in place.
 
 ## 5. PTX register-declaration typing
 

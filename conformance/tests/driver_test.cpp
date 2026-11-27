@@ -406,6 +406,18 @@ TEST_CASE("bounded workloads exclude CUDA regressions that walk billions of indi
   }
 }
 
+TEST_CASE("short runs only the image programs inside the case budget", "[driver][workload-budget]") {
+  RunOptions options;
+  options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
+  options.workload = "short";
+  const auto workload = loadWorkload(options);
+  const auto selected = [&](const std::string &program) { return conformance::driver::programSelected(workload, program); };
+  CHECK_FALSE(selected("opencl_cts_cl_copy_images"));
+  CHECK(selected("opencl_cts_cl_fill_images"));
+  CHECK(selected("opencl_cts_cl_read_write_images"));
+  CHECK_FALSE(selected("opencl_cts_image_streams"));
+}
+
 TEST_CASE("xlong includes the same bounded CTS selections as standalone workloads", "[driver][workload-budget]") {
   RunOptions options;
   options.workloads = fs::path(CONFORMANCE_PROFILE_DIRECTORY).parent_path() / "workloads";
