@@ -60,6 +60,24 @@ class AMDGPUTrue16Suite extends Suite {
     assertEquals(select(0x38005000L, 0x3c004500L), 0x1111L)
   }
 
+  test("v_lshrrev_b16 v1.l, 10, v1.h keeps the high half on gfx1100") {
+    // AMDGPU.jl's Float16 sind reduction: v_lshrrev_b16 v1.l, 10, v1.h op_sel:[0,1,0]
+    val code = octets(0x01, 0x10, 0x39, 0xd7, 0x8a, 0x02, 0x02, 0x02)
+    val ops  = Vec(
+      Instruction.VMove(1.unsafe[VectorRegisterIndex], InstructionSource.VectorRegister(2.unsafe[VectorRegisterIndex]))
+    ) ++ program(target, code) ++ Vec(
+      Instruction.VMove(5.unsafe[VectorRegisterIndex], InstructionSource.VectorRegister(1.unsafe[VectorRegisterIndex]))
+    )
+    val result = laneWords(
+      target,
+      Vec(Vec(0x61a0c01eL)),
+      ops,
+      Vec(5.unsafe[VectorRegisterIndex]),
+      offset = 12.unsafe[VectorRegisterIndex]
+    ).head.head
+    assertEquals(result, 0x61a00018L)
+  }
+
   test("v_add_f16_dpp v5.h, v2.h, v3.l quad_perm:[1,0,3,2] routes the high half") {
     val results = laneResults(
       target,

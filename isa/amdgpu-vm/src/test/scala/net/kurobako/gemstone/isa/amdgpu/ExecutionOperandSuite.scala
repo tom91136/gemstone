@@ -1412,8 +1412,8 @@ class ExecutionOperandSuite extends Suite {
     }
   }
 
-  test("16-bit logical right shift excludes the upper source half") {
-    // Fixed LLVM encoding: v_lshrrev_b16 v2, 8, v3.
+  test("16-bit logical right shift excludes the upper source half and keeps the destination's") {
+    // Fixed LLVM encoding: v_lshrrev_b16 v2, 8, v3. GFX10+ preserves the destination's high half.
     for (target <- Seq(Target("gfx1100"), Target("gfx1200"))) {
       val shift =
         decoded(target, 0x02, 0x00, 0x39, 0xd7, 0x88, 0x06, 0x02, 0x00)
@@ -1425,7 +1425,7 @@ class ExecutionOperandSuite extends Suite {
             shift
           )
         ),
-        0x80
+        0x11220080
       )
     }
   }

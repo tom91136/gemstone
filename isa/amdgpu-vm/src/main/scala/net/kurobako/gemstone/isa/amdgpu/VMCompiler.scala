@@ -947,9 +947,6 @@ private object VMCompiler {
     VCvtPknormU16F16_2
   )
 
-  // The 16-bit shifts write a dword result and leave the unused half clear, unlike other half-result instructions.
-  private val ZeroOtherHalfOpcodes: Set[Opcode] = Set(VLshlrevB16, VLshrrevB16)
-
   /** GFX10 onwards keeps the high half of a 16-bit result's destination; earlier generations zero it. */
   private def preservesHighHalf(target: Target): Boolean =
     target.isa.isRDNA || target.isa == ISA.GFX11_7 || target.isa == ISA.CDNA5
@@ -1057,15 +1054,13 @@ private object VMCompiler {
       destination: VectorRegisterIndex,
       high: Boolean,
       target: Target
-  ): Instruction = {
-    val preserves = preservesHighHalf(target) && !ZeroOtherHalfOpcodes(opcode)
+  ): Instruction =
     if (
       halfResultDefined(opcode, target) && !writesSource(encoding) &&
-      (encodingHalves(encoding) & 8) != 0 && (high || preserves)
+      (encodingHalves(encoding) & 8) != 0 && (high || preservesHighHalf(target))
     )
       Instruction.VHalfResult(operation, destination, high)
     else operation
-  }
 
   // Opcodes whose IR applies the VOP3 clamp bit itself.
   private lazy val ClampingVOP3Opcodes: Set[Opcode] = Set(
