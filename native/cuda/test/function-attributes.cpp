@@ -158,6 +158,26 @@ TEST_CASE("CUDA function attributes forward the shared size from kernel metadata
   CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
 }
 
+TEST_CASE("CUDA max dynamic shared attribute defaults to the block limit less static shared", "[cuda][function-attributes]") {
+  const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
+  auto *const context = createContext();
+  fixture.kernelResources({
+      .registerCount = std::nullopt,
+      .sharedSizeBytes = 400,
+      .constSizeBytes = std::nullopt,
+      .localSizeBytes = std::nullopt,
+  });
+  CHECK(functionAttribute(loadKernel(SharedReferenced, "k_shared400"), CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES) == 48752);
+  fixture.kernelResources({
+      .registerCount = std::nullopt,
+      .sharedSizeBytes = 0,
+      .constSizeBytes = std::nullopt,
+      .localSizeBytes = std::nullopt,
+  });
+  CHECK(functionAttribute(loadKernel(SharedUnreferenced, "v_shared_unused"), CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES) == 49152);
+  CHECK(cuCtxDestroy_v2(context) == CUDA_SUCCESS);
+}
+
 TEST_CASE("CUDA function attributes forward the const size from kernel metadata", "[cuda][function-attributes]") {
   const gemstone_test::Environment target(gemstone::environment::TargetArch, "sm_89");
   auto *const context = createContext();

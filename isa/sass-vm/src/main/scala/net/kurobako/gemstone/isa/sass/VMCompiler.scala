@@ -119,8 +119,7 @@ private object VMCompiler {
         functionTable = functionTable(module),
         cluster = Option.when(kernel.requiredCluster != LaunchGeometry.Dimensions.One)(kernel.requiredCluster),
         registersPerLane = Some(kernel.registerCount),
-        staticSharedBytes = module.sections.find(_.name == s".nv.shared.${kernel.name}")
-          .fold(0L.unsafe[Long >= 0])(_.size.widen[Long >= 0]),
+        staticSharedBytes = kernel.sharedSizeBytes.raw.toLong.unsafe[Long >= 0],
         // ptxas's CTA-pair tensor memory allocation hands its address over through an mbarrier in the tcgen05
         // partition of reserved shared memory, at offset 0x48
         pairAllocationBarrier = Option.when(functions.exists(_.instructions.exists(instruction =>

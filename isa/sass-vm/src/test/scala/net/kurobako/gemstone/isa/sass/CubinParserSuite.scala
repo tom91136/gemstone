@@ -7,6 +7,7 @@ import net.kurobako.gemstone.binary.*
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.isa.sass.fixtures.*
+import net.kurobako.gemstone.profile.*
 import net.kurobako.gemstone.testing.*
 import net.kurobako.gemstone.testing.either.*
 import net.kurobako.gemstone.vm.*
@@ -81,6 +82,21 @@ class CubinParserSuite extends Suite {
     val capped = Cubin.decode(Vec.unsafeWrapArray(bytes.hex(ReservedSharedFixtures.sm100WithCap))).value
     assertEquals(capped.sm.raw, 100)
     assertEquals(capped.kernels.head.sharedSizeBytes.raw, 400)
+  }
+
+  test("a reserved-smem cubin reports its static size to occupancy, which adds the reserve once") {
+    val image     = Vec.unsafeWrapArray(bytes.hex(ReservedSharedFixtures.sm90WithReserve))
+    val module    = Cubin.decode(image).value
+    val name      = module.kernels.head.name
+    val program   = LoadedProgram(module, Map.empty, Workgroups.Sequential, _ => None)
+    val resources = program.staticResources(name, 256.unsafe[Int > 0], 0L.unsafe[Long >= 0]).value
+    assertEquals(resources.sharedBytes.raw, 400L)
+    val limits    = Architecture.sm90.limits
+    val allocated = (400L + limits.reservedShared.value).alignUp(limits.sharedGranule.value.toLong)
+    assertEquals(
+      Occupancy.of(limits, resources).bounds(Occupancy.Limiter.Shared),
+      (limits.shared.value / allocated).toInt
+    )
   }
 
   test("CUDA ELF ABI 7 reads the architecture from the low flags byte") {

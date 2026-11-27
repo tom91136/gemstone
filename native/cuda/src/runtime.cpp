@@ -5834,7 +5834,12 @@ CUresult cuFuncGetAttribute(int *value, CUfunction_attribute attribute, CUfuncti
       *value = *version;
       return CUDA_SUCCESS;
     }
-    case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: *value = device_limits::MaxSharedMemoryPerBlock; return CUDA_SUCCESS;
+    case CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES: {
+      int shared = 0;
+      if (const auto status = functionField(function, &Function::sharedSizeBytes, &shared); status != CUDA_SUCCESS) return status;
+      *value = std::max(0, device_limits::MaxSharedMemoryPerBlock - shared);
+      return CUDA_SUCCESS;
+    }
     case CU_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES: return functionField(function, &Function::sharedSizeBytes, value);
     case CU_FUNC_ATTRIBUTE_CONST_SIZE_BYTES: return functionField(function, &Function::constSizeBytes, value);
     case CU_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES: return functionField(function, &Function::localSizeBytes, value);
