@@ -14,6 +14,9 @@ private[check] object SASSAnchors {
   private lazy val relative: Set[String] =
     Target.all.flatMap(_.database.forms.filter(_.relative).flatMap(_.opcodes.map(_.name))).toSet
 
+  // these relative forms carry the target in the field; their register holds an offset or a destination
+  private val reencoded = Set("RET", "LEPC", "ULEPC")
+
   @tailrec private def supplies(operand: Operand): Boolean = operand match {
     case Operand.Unary(value, _, _, _)                                        => supplies(value)
     case Operand.Integer(_) | Operand.Bits(_, _) | Operand.Predicate(_, _, _) => false
@@ -35,10 +38,11 @@ private[check] object SASSAnchors {
       .map((block, _) => block.last).toSet
     instructions.zipWithIndex.foldLeft[Either[Int, Vec[Anchor]]](Right(Vec.empty[Anchor])) {
       case (result, (instruction, index)) => result.flatMap { found =>
-          val direct = leaving(index) ||
-            instruction.machine.exists(machine => target.database.byForm(machine.form).relative)
+          val relativeForm = instruction.machine.exists(machine => target.database.byForm(machine.form).relative)
+          val direct       = leaving(index) || relativeForm
+          val tolerated    = relativeForm && reencoded(instruction.mnemonic.raw)
           if (!direct && !relative(instruction.mnemonic.raw)) Right(found)
-          else if (instruction.operands.exists(supplies)) Left(index)
+          else if (!tolerated && instruction.operands.exists(supplies)) Left(index)
           else if (!direct) Right(found)
           else
             instruction.operands.lastOption.flatMap(address).flatMap(addresses.get)

@@ -3,6 +3,7 @@ package net.kurobako.gemstone.isa.check
 import net.kurobako.gemstone.collection.*
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.explorer.*
+import net.kurobako.gemstone.flow.ControlFlowGraph
 import net.kurobako.gemstone.flow.Window
 import net.kurobako.gemstone.isa.sass.*
 import net.kurobako.gemstone.isa.sass.asm.*
@@ -70,6 +71,15 @@ class SASSBlockCostSuite extends Suite {
       .fold(error => fail(error.raw), identity)
   }
 
+  private def encoded(form: String, opcode: String, text: String, at: Int): String = {
+    val selected     = Target.parse(targetName).fold(fail(_), identity)
+    val selectedForm = selected.database.byForm.get(form).getOrElse(fail(s"no $form form"))
+    val bindings = FormatParser.parse(selected.database, selectedForm, at, text).fold(error => fail(error), identity)
+    val bytes    = Encoder.encode(NVDisasm.Encoding(selected.database, selectedForm), opcode, bindings)
+      .fold(error => fail(error), identity)
+    bytes.map(byte => "%02x".format(byte & 255)).mkString
+  }
+
   private def costOf(image: Vec[Byte]): SASSBlockCost =
     SASSBlockCost.of(image, kernel, targetName, launch).fold(fail(_), identity)
 
@@ -79,20 +89,60 @@ class SASSBlockCostSuite extends Suite {
   private def assertAnchored(result: Either[String, AMDGPUBlockCost.Cost]): Unit =
     assert(result.left.exists(_.contains("relative to the program counter")), result)
 
-  test("a return refuses a size-changing rewrite") {
+  test("a return to a call-return address keeps reaching it across a shift") {
+    val word  = encoded("ret__REL", "RET", "RET.REL.NODEC,R4 0x40", 6 * 16)
     val image = laidOver(
       """IADD3 R2, R2, 0x1, RZ ;
-        |IADD3 R3, R2, 0x2, RZ ;
-        |IADD3 R4, RZ, 0x40, RZ ;
+        |IADD3 R4, R2, 0x2, RZ ;
+        |IADD3 R0, RZ, 0x40, RZ ;
         |CALL.REL.NOINC 0x50 ;
         |EXIT ;
-        |IADD3 R0, R2, 0x3, RZ ;
-        |IADD3 R1, R2, 0x4, RZ ;
+        |IADD3 R1, R2, 0x3, RZ ;
         |""".stripMargin,
-      // RET.REL.NODEC R4 to the start of its function
-      Some("5079000460dcffffffffc30300ec0f00")
+      Some(word)
     )
-    assertAnchored(shrunk(image, 0, 1))
+    assert(shrunk(image, 0, 1).isRight, shrunk(image, 0, 1))
+  }
+
+  test("a program-counter read that names an instruction keeps that target as an anchor") {
+    val selected = Target.parse("sm_90").fold(fail(_), identity)
+    val form     = selected.database.byForm.get("lepc__R_I_R").getOrElse(fail("no lepc__R_I_R form"))
+    val text     = FormatParser.render(
+      form,
+      "LEPC",
+      field =>
+        field.binding match {
+          case "Rd"     => Some("R4")
+          case "sImm58" => Some("0x10")
+          case _        => None
+        }
+    ).fold(error => fail(error), identity)
+    val bindings = FormatParser.parse(selected.database, form, 0x20, text).fold(error => fail(error), identity)
+    val bytes    = Encoder.encode(NVDisasm.Encoding(selected.database, form), "LEPC", bindings)
+      .fold(error => fail(error), identity)
+    val read = InstructionDecoder.decode(0x20.unsafe[Int >= 0], bytes, selected).fold(error => fail(error), identity)
+    val code = Vec(
+      DecodedInstruction(0x10.unsafe[Int >= 0], Parser.parse("NOP").fold(fail(_), identity), None, None, None),
+      read
+    )
+    val graph = ControlFlowGraph(Vec(Some(Vec(1)), Some(Vec.empty)), 0)
+    assertEquals(SASSAnchors.of(selected, code, graph), Right(Vec(SASSAnchors.Anchor(1, 0))))
+  }
+
+  test("a return through a register is not an anchor") {
+    val selected = Target.parse(targetName).fold(fail(_), identity)
+    val code     = Vec(
+      DecodedInstruction(0x00.unsafe[Int >= 0], Parser.parse("NOP").fold(fail(_), identity), None, None, None),
+      DecodedInstruction(
+        0x10.unsafe[Int >= 0],
+        Parser.parse("RET.ABS R4, 0x20").fold(fail(_), identity),
+        None,
+        None,
+        None
+      )
+    )
+    val graph = ControlFlowGraph(Vec(Some(Vec(1)), None), 0)
+    assertEquals(SASSAnchors.of(selected, code, graph), Left(1))
   }
 
   test("an indirect branch refuses a size-changing rewrite") {
