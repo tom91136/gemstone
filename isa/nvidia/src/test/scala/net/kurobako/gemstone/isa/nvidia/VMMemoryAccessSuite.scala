@@ -149,6 +149,33 @@ class VMMemoryAccessSuite extends Suite {
     assertEquals(memory.getInt(AllocationId(2), 0), 0x2222)
   }
 
+  test("generic window access skips allocation lookup until the window holds one") {
+    class CountingMemory extends ArrayMemory {
+      val lookups: mutable.ArrayBuffer[Long] = mutable.ArrayBuffer.empty
+      override def locate(address: GuestAddress, size: Int >= 0): Either[Fault, AddressSpace.Location] = {
+        lookups += address.raw
+        super.locate(address, size)
+      }
+    }
+    val memory = CountingMemory()
+    memory.allocate(allocation, 64, GuestAddress(ArrayMemory.Base))
+    val shared = Vec(
+      Instruction.Store(Value.Immediate(sharedBase + 8L), Value.Immediate(0x3333), 32, MemoryAccess.Generic(false)),
+      Instruction.Return
+    )
+    assertEquals(execute(shared, memory), Right(()))
+    assertEquals(memory.lookups.length, 0)
+
+    memory.allocate(AllocationId(2), 64, GuestAddress(sharedBase))
+    val global = Vec(
+      Instruction.Store(Value.Immediate(sharedBase + 8L), Value.Immediate(0x4444), 32, MemoryAccess.Generic(false)),
+      Instruction.Return
+    )
+    assertEquals(execute(global, memory), Right(()))
+    assertEquals(memory.getInt(AllocationId(2), 8), 0x4444)
+    assert(memory.lookups.nonEmpty)
+  }
+
   test("generic atomics on a registered allocation below 4 GiB reach global memory") {
     val memory = ArrayMemory()
     memory.allocate(allocation, 64, GuestAddress(sharedBase))

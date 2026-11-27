@@ -22,6 +22,10 @@ class BenchmarkMemory(sizes: Int*) extends AddressSpace {
   private val allocations = sizes.map(Array.ofDim[Byte](_)).toArray
   private val lock        = ReentrantLock()
 
+  override val nvidiaWindows: Int = allocations.indices.foldLeft(0)((mask, index) =>
+    mask | AddressSpace.nvidiaWindowMask(Base + index.toLong * Stride, allocations(index).length.toLong)
+  )
+
   val ids: Vec[AllocationId] =
     Vec.indices(allocations.length.unsafe[Int >= 0]).map(index =>
       AllocationId((1L: Long > 0) + index.widen[Long >= 0])

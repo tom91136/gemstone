@@ -17,6 +17,7 @@ object PlatformBenchmarks {
 
   val cases: Vector[Entry] = Vector(
     Entry("ptx-vector-add", Some(Platform.Nvidia), PTXVectorAddBenchmark.benchmark),
+    Entry("ptx-generic-shared", Some(Platform.Nvidia), PTXGenericSharedBenchmark.benchmark),
     Entry("ptx-integer-alu", Some(Platform.Nvidia), PTXIntegerALUBenchmark.benchmark),
     Entry("ptx-calls", Some(Platform.Nvidia), PTXCallBenchmark.benchmark),
     Entry("ptx-tensor", Some(Platform.Nvidia), PTXTensorBenchmark.benchmark),

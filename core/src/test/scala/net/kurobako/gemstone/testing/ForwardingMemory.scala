@@ -9,6 +9,7 @@ import net.kurobako.gemstone.vm.*
   * so they resolve through this wrapper and a region-level override intercepts them too.
   */
 class ForwardingMemory(delegate: AddressSpace) extends AddressSpace {
+  override def nvidiaWindows: Int                                                 = delegate.nvidiaWindows
   override def hasNativePointers(region: AllocationId): Boolean                   = delegate.hasNativePointers(region)
   override def fenceHostMemory(): Either[Fault, Unit]                             = delegate.fenceHostMemory()
   override def flushHostWrites(): Either[Fault, Unit]                             = delegate.flushHostWrites()

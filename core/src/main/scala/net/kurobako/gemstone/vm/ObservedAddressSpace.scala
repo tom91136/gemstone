@@ -40,6 +40,7 @@ private class ObservedAddressSpace(backing: AddressSpace, observer: LaunchObserv
     backing.readValueInto(region, offset, size, into)
   }
 
+  override def nvidiaWindows: Int                               = backing.nvidiaWindows
   override def hasNativePointers(region: AllocationId): Boolean = backing.hasNativePointers(region)
   override def fenceHostMemory(): Either[Fault, Unit]           = backing.fenceHostMemory()
   override def flushHostWrites(): Either[Fault, Unit]           = backing.flushHostWrites()

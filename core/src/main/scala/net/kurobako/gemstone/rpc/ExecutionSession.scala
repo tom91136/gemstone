@@ -533,6 +533,7 @@ class ExecutionSession(
   }
 
   private object BindingMemory extends AddressSpace {
+    override def nvidiaWindows: Int = state.get().addresses.nvidiaWindows
     override def read(region: AllocationId, offset: Long >= 0, size: Int >= 0): Either[Fault, Vec[Byte]] =
       ExecutionSession.this.read(AllocationRange(region, offset, size)).left.map(memoryFault(_))
     override def write(region: AllocationId, offset: Long >= 0, bytes: Vec[Byte]): Either[Fault, Unit] =

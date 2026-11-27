@@ -13,15 +13,22 @@ import scala.collection.mutable
 /** One lane's memory accesses, routed to the storage their address space selects. */
 private object VMMemoryAccess {
 
+  private def windowBit(address: Long): Int =
+    if (address >= VMAddressSpace.SharedWindowBase) AddressSpace.NvidiaSharedWindow
+    else AddressSpace.NvidiaLowWindow
+
   /** A registered allocation at a numeric address in a shared or local window is global memory: host-visible
     * allocations can land below 4 GiB, so the window alone does not name on-chip storage.
     */
   private[isa] inline def registeredBelowWindows(context: VMContext, address: Long, size: Int >= 0): Boolean =
-    (VMAddressSpace.isShared(address, size) || VMAddressSpace.isLocal(address)) &&
-      (context.device.memory.locate(GuestAddress(address), size) match {
+    (VMAddressSpace.isShared(address, size) || VMAddressSpace.isLocal(address)) && {
+      val memory = context.device.memory
+      (memory.nvidiaWindows & windowBit(address)) != 0 &&
+      (memory.locate(GuestAddress(address), size) match {
         case Right(AddressSpace.Location.Within(_, _)) => true
         case _                                         => false
       })
+    }
 
   /** Routes one access to the parameter buffers, the workgroup's shared or thread-local storage, or device memory.
     * Generic addresses select a window by aperture; explicit global accesses still see parameter buffers. Explicit

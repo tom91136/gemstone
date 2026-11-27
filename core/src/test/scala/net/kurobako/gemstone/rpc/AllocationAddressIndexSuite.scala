@@ -3,6 +3,7 @@ package net.kurobako.gemstone.rpc
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
 import net.kurobako.gemstone.testing.*
+import net.kurobako.gemstone.vm.AddressSpace
 import scala.util.Random
 
 class AllocationAddressIndexSuite extends Suite {
@@ -66,6 +67,18 @@ class AllocationAddressIndexSuite extends Suite {
       address <- addresses
       size    <- CoarseSizes
     } assertEquals(find(index, address, size), scan(allocations, address, size), s"$address / $size")
+  }
+
+  test("window mask follows allocations into and out of the apertures") {
+    val low   = AllocationId(1) -> stored(0x1000L, 64, aliased = true)
+    val high  = AllocationId(2) -> stored(AddressLayout.AllocationBase, 64, aliased = false)
+    val sass  = AllocationId(3) -> stored(AddressLayout.NvidiaSharedWindowBase, 64, aliased = true)
+    val index = indexed(Map(low, high))
+    assertEquals(index.nvidiaWindows, AddressSpace.NvidiaLowWindow)
+    val withSass = index.updated(sass._1, sass._2)
+    assertEquals(withSass.nvidiaWindows, AddressSpace.NvidiaLowWindow | AddressSpace.NvidiaSharedWindow)
+    assertEquals(withSass.removed(low._1).nvidiaWindows, AddressSpace.NvidiaSharedWindow)
+    assertEquals(withSass.removed(sass._1).nvidiaWindows, AddressSpace.NvidiaLowWindow)
   }
 
   test("incremental updates and removals match a scan of the final allocations") {

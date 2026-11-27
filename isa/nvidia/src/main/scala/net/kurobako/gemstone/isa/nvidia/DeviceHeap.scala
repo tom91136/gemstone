@@ -200,6 +200,8 @@ private[gemstone] class DeviceHeap(backing: AddressSpace, base: GuestAddress = G
       LittleEndian.write(value, bytes, offset, size.widen[Int in 0 ~ 8])
     )(delegated)
 
+  override def nvidiaWindows: Int = backing.nvidiaWindows
+
   override def address(region: AllocationId, offset: Long >= 0): Either[Fault, GuestAddress] =
     backing.address(region, offset)
 

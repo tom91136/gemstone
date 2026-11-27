@@ -89,6 +89,8 @@ private class CompletionMemory(storage: CompletionMemory.Storage, host: HostCohe
     extends AddressSpace {
   import CompletionMemory.*
 
+  override def nvidiaWindows: Int = storage.index.nvidiaWindows
+
   // the last span of one entry (or of none) an access fell in, so a scan resolves without searching
   @volatile private var cached: (AllocationAddressIndex, AllocationAddressIndex.Run) | Null = null
 

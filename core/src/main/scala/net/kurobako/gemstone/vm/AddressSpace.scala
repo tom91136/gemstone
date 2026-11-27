@@ -20,6 +20,20 @@ object AddressSpace {
   /** The stamp of a read that has not waited for its bytes yet. */
   val Now: Long = Long.MaxValue
 
+  /** NVIDIA apertures a registered allocation can alias: below 4 GiB, and the SASS shared window. */
+  inline val NvidiaLowWindow    = 1
+  inline val NvidiaSharedWindow = 2
+
+  /** The NVIDIA windows a range of `extent` bytes from `base` overlaps. Unsigned, since the shared window is high. */
+  def nvidiaWindowMask(base: Long, extent: Long): Int = {
+    def overlaps(low: Long, high: Long): Boolean =
+      java.lang.Long.compareUnsigned(base, high) < 0 && java.lang.Long.compareUnsigned(low, base + extent) < 0
+    (if (overlaps(1L, 0x100000000L)) NvidiaLowWindow else 0) |
+      (if (overlaps(AddressLayout.NvidiaSharedWindowBase, AddressLayout.NvidiaSharedWindowLimit))
+         NvidiaSharedWindow
+       else 0)
+  }
+
   trait ReadRanges {
     def length: Int
     def address(index: Int): GuestAddress
@@ -116,6 +130,11 @@ trait AddressSpace derives CanEqual {
     * fetched for them which a later acquire has withdrawn from newer reads.
     */
   def readStamp: Long = Now
+
+  /** NVIDIA windows a registered allocation can name. Tables derive this when they change; memories without one keep
+    * every bit set so a generic window access still consults the table.
+    */
+  def nvidiaWindows: Int = NvidiaLowWindow | NvidiaSharedWindow
 
   def readDeferred(region: AllocationId, offset: Long >= 0, size: Int >= 0, @unused since: Long)
       : ReadResult[Vec[Byte]] = read(region, offset, size)

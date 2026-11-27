@@ -24,15 +24,28 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
   private class Region(val bytes: Array[Byte], val base: Long)
   private val lock    = ReentrantLock()
   private val regions = mutable.LinkedHashMap.empty[AllocationId, Region]
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  @volatile private var windows = 0
   initial.foreach((id, size) => allocate(id, size))
 
   protected def exclusive[A](body: => A): A = lock.withLock(body)
 
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def deriveWindows(): Unit = {
+    var mask = 0
+    regions.foreach((_, region) => mask |= AddressSpace.nvidiaWindowMask(region.base, region.bytes.length.toLong))
+    windows = mask
+  }
+
+  override def nvidiaWindows: Int = windows
+
   def allocate(id: AllocationId, size: Int): Unit =
     exclusive(allocate(id, size, GuestAddress(ArrayMemory.Base + regions.size * ArrayMemory.Stride)))
 
-  def allocate(id: AllocationId, size: Int, base: GuestAddress): Unit =
-    exclusive(regions.update(id, Region(Array.ofDim[Byte](size), base.raw)))
+  def allocate(id: AllocationId, size: Int, base: GuestAddress): Unit = exclusive {
+    regions.update(id, Region(Array.ofDim[Byte](size), base.raw))
+    deriveWindows()
+  }
 
   def allocate(size: Long > 0): AllocationId = exclusive {
     val id = regions.keys.foldLeft(AllocationId(1L))((next, used) => if (used.raw >= next.raw) used.next else next)
@@ -48,10 +61,13 @@ class ArrayMemory(initial: (AllocationId, Int)*) extends AddressSpace {
   def restore(snapshot: ArrayMemory.Snapshot): Unit = exclusive {
     regions.clear()
     snapshot.regions.foreach((id, base, bytes) => regions.update(id, Region(bytes.toArray, base.raw)))
+    deriveWindows()
   }
 
-  def rebase(id: AllocationId, base: GuestAddress): Unit =
-    exclusive(regions.update(id, Region(regions(id).bytes, base.raw)))
+  def rebase(id: AllocationId, base: GuestAddress): Unit = exclusive {
+    regions.update(id, Region(regions(id).bytes, base.raw))
+    deriveWindows()
+  }
 
   /** Live backing bytes; mutate only while no dispatch runs. */
   @SuppressWarnings(Array("scalafix:MutableExposure.exposed-mutable"))

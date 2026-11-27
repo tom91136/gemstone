@@ -2,6 +2,7 @@ package net.kurobako.gemstone.rpc
 
 import net.kurobako.gemstone.constraint.*
 import net.kurobako.gemstone.memory.*
+import net.kurobako.gemstone.vm.AddressSpace
 import scala.collection.immutable
 import scala.collection.mutable
 
@@ -23,7 +24,15 @@ private object AllocationAddressIndex {
 
   @SuppressWarnings(Array("scalafix:BannedSyntax.explicit-new"))
   val Empty: AllocationAddressIndex =
-    new AllocationAddressIndex(Vector.empty, Vector.empty, Vector.empty, 0)
+    new AllocationAddressIndex(Vector.empty, Vector.empty, Vector.empty, 0, 0)
+
+  @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
+  private def windowMask(aliases: Entries, synthetic: Entries): Int = {
+    var mask = 0
+    aliases.foreach(entry => mask |= AddressSpace.nvidiaWindowMask(entry.base.raw, entry.size.raw))
+    synthetic.foreach(entry => mask |= AddressSpace.nvidiaWindowMask(entry.base.raw, entry.size.raw))
+    mask
+  }
 
   /** The number of bases at or below `address`, in unsigned order. */
   @SuppressWarnings(Array("scalafix:DisableSyntax.var"))
@@ -65,22 +74,27 @@ private class AllocationAddressIndex private (
     private val aliases: AllocationAddressIndex.Entries,
     private val synthetic: AllocationAddressIndex.Entries,
     private val byId: immutable.Vector[AllocationAddressIndex.Entry | Null],
-    private val hostBackedCount: Int
+    private val hostBackedCount: Int,
+    private val windows: Int
 ) {
   import AllocationAddressIndex.*
 
   def hasHostBacked: Boolean = hostBackedCount > 0
+  def nvidiaWindows: Int     = windows
 
   @SuppressWarnings(Array("scalafix:DisableSyntax.null", "scalafix:BannedSyntax.explicit-new"))
   def updated(id: AllocationId, allocation: StoredAllocation): AllocationAddressIndex = {
-    val previous = removed(id)
-    val entry    = Entry(id, allocation)
-    val position = (id.raw - 1L).toInt
+    val previous  = removed(id)
+    val entry     = Entry(id, allocation)
+    val position  = (id.raw - 1L).toInt
+    val aliases   = if (allocation.aliased) inserted(previous.aliases, entry) else previous.aliases
+    val synthetic = if (allocation.aliased) previous.synthetic else inserted(previous.synthetic, entry)
     new AllocationAddressIndex(
-      if (allocation.aliased) inserted(previous.aliases, entry) else previous.aliases,
-      if (allocation.aliased) previous.synthetic else inserted(previous.synthetic, entry),
+      aliases,
+      synthetic,
       previous.byId.padTo(position + 1, null).updated(position, entry),
-      previous.hostBackedCount + (if (allocation.hostBacked) 1 else 0)
+      previous.hostBackedCount + (if (allocation.hostBacked) 1 else 0),
+      windowMask(aliases, synthetic)
     )
   }
 
@@ -88,13 +102,17 @@ private class AllocationAddressIndex private (
   def removed(id: AllocationId): AllocationAddressIndex = {
     val existing = entry(id)
     if (existing eq null) this
-    else
+    else {
+      val keptAliases   = without(aliases, existing)
+      val keptSynthetic = without(synthetic, existing)
       new AllocationAddressIndex(
-        without(aliases, existing),
-        without(synthetic, existing),
+        keptAliases,
+        keptSynthetic,
         byId.updated((id.raw - 1L).toInt, null),
-        hostBackedCount - (if (existing.allocation.hostBacked) 1 else 0)
+        hostBackedCount - (if (existing.allocation.hostBacked) 1 else 0),
+        windowMask(keptAliases, keptSynthetic)
       )
+    }
   }
 
   def allocations: Iterable[StoredAllocation] = byId.view.collect { case entry: Entry => entry.allocation }
