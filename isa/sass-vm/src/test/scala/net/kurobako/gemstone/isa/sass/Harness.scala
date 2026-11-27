@@ -149,6 +149,7 @@ object Harness extends munit.Assertions {
         size,
         parameters,
         registerCount = entry.registers.unsafe[Int >= 0],
+        sharedSizeBytes = entry.shared,
         requiredCluster = LaunchGeometry.Dimensions(entry.cluster, 1, 1)
       )
     }
