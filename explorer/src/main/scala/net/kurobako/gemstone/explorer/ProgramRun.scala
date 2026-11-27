@@ -143,7 +143,7 @@ object ProgramRun {
       val groups         = volume(count)
       val size: Long > 0 = math.max(MinimumAllocation, lanes * groups * 4L).unsafe[Long > 0]
       val arguments      = defaultArguments(loaded.image.language, metadata, memory, size)
-      runWithArguments(loaded, kernel, group, count, memory, arguments)
+      launch(Launch(loaded, kernel, group, count, memory, arguments))
     }
 
   /** Runs `kernel` over `count` workgroups of `group` lanes against `memory`, with `arguments` as the kernel's
@@ -158,24 +158,45 @@ object ProgramRun {
       memory: ArrayMemory,
       arguments: Vec[KernelTask.Argument]
   ): Either[String, Run] =
-    loaded.program.kernel(kernel).left.map(_.description.raw).map { _ =>
-      val allocations = arguments.collect { case KernelTask.Argument.Memory(region, _, _) => region }.distinct
-      val recording   = Recording()
-      val profiler    = ProfileRecorder()
-      val result      = for {
-        task   <- KernelTask.validated(kernel, group, count, arguments).left.map(_.raw)
-        events <- Device(BackendRegistry(Vec(loaded.backend)), memory)
-          .launch(loaded.program, task, Some(LaunchObserver.both(recording, profiler)))
-      } yield events
-      Run(
-        recording.trace,
-        memory,
-        allocations,
-        result.swap.toOption.collect { case fault: Fault => fault },
-        recording.complete,
-        profiler.stream
-      )
-    }
+    loaded.program.kernel(kernel).left.map(_.description.raw).map(_ =>
+      launch(Launch(loaded, kernel, group, count, memory, arguments))
+    )
+
+  /** One launch's inputs, held together so `run` and `runWithArguments` share the same execution path. */
+  private case class Launch(
+      loaded: Loaded,
+      kernel: NonEmpty[String],
+      group: Dimensions,
+      count: Dimensions,
+      memory: ArrayMemory,
+      arguments: Vec[KernelTask.Argument]
+  )
+
+  /** Runs one launch against caller-owned memory, recording its issues. */
+  private def launch(request: Launch): Run = {
+    val loaded      = request.loaded
+    val kernel      = request.kernel
+    val group       = request.group
+    val count       = request.count
+    val memory      = request.memory
+    val arguments   = request.arguments
+    val allocations = arguments.collect { case KernelTask.Argument.Memory(region, _, _) => region }.distinct
+    val recording   = Recording()
+    val profiler    = ProfileRecorder()
+    val result      = for {
+      task   <- KernelTask.validated(kernel, group, count, arguments).left.map(_.raw)
+      events <- Device(BackendRegistry(Vec(loaded.backend)), memory)
+        .launch(loaded.program, task, Some(LaunchObserver.both(recording, profiler)))
+    } yield events
+    Run(
+      recording.trace,
+      memory,
+      allocations,
+      result.swap.toOption.collect { case fault: Fault => fault },
+      recording.complete,
+      profiler.stream
+    )
+  }
 
   /** The arguments [[run]] gives a kernel of `language` with `metadata`: memory for every allocation and for a SASS
     * eight-byte scalar, which a cubin cannot distinguish from a pointer, and zero bytes for every other scalar.
